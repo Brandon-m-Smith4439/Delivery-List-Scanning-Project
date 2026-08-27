@@ -9787,3 +9787,56 @@
 .print-header-date-control-v203 .custom-select-trigger::after {
   margin-left: auto;
 }
+
+
+/* ========================================================================== */
+/* v0.443 exact printed-page preview                                           */
+/* ========================================================================== */
+/* The popup prints on Letter paper with a .4in @page margin. Mirror that
+   physical page and printable area on screen so preview and paper share the
+   same geometry instead of relying on a visually similar approximation. */
+.print-preview-page-shell-v443 {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 8.5in;
+  height: 11in;
+  padding: .4in;
+  overflow: hidden;
+  border: 1px solid #aab5c2;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(20, 43, 69, .20);
+}
+.print-preview-page-shell-v443.is-landscape {
+  width: 11in;
+  height: 8.5in;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: 10.2in !important;
+  min-height: 10.2in !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  overflow: hidden !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.print-preview-page-shell-v443.is-landscape > .delivery-print-sheet-v203.is-preview {
+  height: 7.7in !important;
+  min-height: 7.7in !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview .sheet-footer {
+  left: 0 !important;
+  bottom: 0 !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview.remake {
+  padding: .1in !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview.remake .sheet-footer {
+  left: .1in !important;
+  bottom: .04in !important;
+}

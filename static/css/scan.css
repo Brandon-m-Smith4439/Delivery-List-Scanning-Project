@@ -4806,3 +4806,620 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   font-style: normal;
   font-weight: 750;
 }
+
+/* ========================================================================== */
+/* v0.441 Priority ribbons, moved-date trace rows, and rack-label continuity  */
+/* ========================================================================== */
+.scan-page .delivery-table .priority-line-ribbon-row-v441 > td {
+  padding: 3px 7px 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.priority-line-ribbon-v441 {
+  --priority-ribbon: #c7374f;
+  --priority-soft: #fff1f3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--priority-ribbon) 28%, #dce5ee);
+  border-left: 4px solid var(--priority-ribbon);
+  border-radius: 8px 8px 3px 3px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--priority-ribbon) 9%, #fff) 0%, #fff 78%);
+  color: #27384a;
+  font-size: 11.5px;
+  line-height: 1.15;
+}
+.priority-line-ribbon-v441.is-remake {
+  --priority-ribbon: #303846;
+  --priority-soft: #f2f4f7;
+}
+.priority-line-ribbon-v441.is-missing_glass_rush {
+  --priority-ribbon: #c74f3e;
+  --priority-soft: #fff2ed;
+}
+.priority-line-ribbon-v441 > strong {
+  flex: 0 0 auto;
+  color: var(--priority-ribbon);
+  font-size: 11.5px;
+  font-weight: 950;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+.priority-line-ribbon-flag-v441 {
+  position: relative;
+  width: 12px;
+  height: 14px;
+  flex: 0 0 12px;
+  border-left: 2px solid var(--priority-ribbon);
+}
+.priority-line-ribbon-flag-v441::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 8px;
+  height: 6px;
+  border-radius: 1px 2px 2px 1px;
+  background: var(--priority-ribbon);
+}
+.priority-line-ribbon-reason-v441 {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.priority-line-ribbon-reason-v441 small {
+  color: #728196;
+  font-size: 9.5px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.priority-line-ribbon-reason-v441 b {
+  min-width: 0;
+  overflow: hidden;
+  color: #33465a;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.priority-line-ribbon-move-v441 {
+  margin-left: auto;
+  color: #687a8e;
+  font-size: 10.5px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+.priority-line-ribbon-v441.is-target {
+  border-left-style: double;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--priority-ribbon) 8%, #fff) 0%, #f9fcff 100%);
+}
+
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 > td {
+  color: #8995a3 !important;
+  background: #f3f5f7 !important;
+  border-color: #e2e7ec !important;
+  filter: grayscale(.82);
+  opacity: .72;
+}
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 .route-tag,
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 .row-marker,
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 .process-pill,
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 .location-badge,
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 .location-rack-cell-v349 {
+  filter: grayscale(1) !important;
+  opacity: .78 !important;
+}
+.scan-page .delivery-table tr.is-priority-date-moved-source-v441 {
+  cursor: default !important;
+  box-shadow: inset 4px 0 0 #aeb8c3 !important;
+}
+.scan-page .delivery-table tr.priority-date-moved-target-row-v441 {
+  box-shadow: inset 4px 0 0 #c74f3e, inset 0 1px 0 rgba(255,255,255,.82);
+}
+
+/* Fully contain RM presentation inside the Flags cell. This removes the tiny
+   black overflow artifact seen immediately to the right of the marker. */
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker {
+  overflow: clip !important;
+  isolation: isolate !important;
+  margin-right: 0 !important;
+  background-clip: padding-box !important;
+}
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker::before,
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker::after,
+.scan-page .delivery-table td:nth-child(7) .row-marker.remake-marker::marker {
+  content: none !important;
+  display: none !important;
+}
+
+.mobile-priority-ribbon-v441 {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 5px 4px 0;
+  padding: 6px 9px;
+  border: 1px solid #efc0c7;
+  border-left: 4px solid #c7374f;
+  border-radius: 8px 8px 3px 3px;
+  background: #fff5f6;
+  color: #405064;
+  font-size: 11px;
+}
+.mobile-priority-ribbon-v441.is-remake { border-color: #cfd5dd; border-left-color: #303846; background: #f5f6f8; }
+.mobile-priority-ribbon-v441.is-missing_glass_rush { border-color: #efc8bd; border-left-color: #c74f3e; background: #fff4ef; }
+.mobile-priority-ribbon-v441 strong { font-weight: 950; text-transform: uppercase; }
+.mobile-priority-ribbon-v441 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-priority-ribbon-v441 em { grid-column: 1 / -1; color: #7b8795; font-style: normal; font-size: 10px; font-weight: 720; }
+.mobile-list-card.is-priority-date-moved-source-v441 { filter: grayscale(.82); opacity: .7; background: #f3f5f7 !important; cursor: default !important; }
+
+
+/* ========================================================================== */
+/* v0.442 Indian Trail location clarity, PRE context, and Location width       */
+/* ========================================================================== */
+
+/* Give Location enough room for real rack names plus the compact PRIOR/PRE
+   status without stealing excessive space from the main order information. */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 17% !important; }
+.scan-page .delivery-table th:nth-child(6),
+.scan-page .delivery-table td:nth-child(6) { width: 17% !important; }
+.scan-page .delivery-table th:nth-child(9),
+.scan-page .delivery-table td.location-cell { width: 11% !important; }
+.scan-page .delivery-table th:nth-child(10),
+.scan-page .delivery-table td:nth-child(10) { width: 11% !important; }
+
+/* Explicit history markup keeps the rack label ellipsized while reserving
+   fixed space for PRIOR, avoiding the former Coral 2 / PRIOR clipping. */
+.scan-page .delivery-table .location-badge.has-explicit-prior-v442::after {
+  content: none !important;
+  display: none !important;
+}
+.scan-page .delivery-table .location-badge.has-explicit-prior-v442 {
+  display: inline-grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 5px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.location-history-label-v442 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.location-history-prior-v442 {
+  flex: 0 0 auto;
+  padding: 6px 4px;
+  border: 1px solid #c2cad3;
+  border-radius: 999px;
+  background: #f8fafb;
+  color: #667787;
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: .08em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  align-self: stretch;
+  justify-content: center;
+  min-height: 52px;
+}
+
+/* Indian Trail before physical receive: transport rack + system PRE bay in one
+   compact cell. After the receive scan, normal Bay-only presentation takes over. */
+.location-preassigned-v442 {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+}
+.location-preassigned-rack-v442 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 900;
+  color: color-mix(in srgb, var(--rack-location-color, #527086) 70%, #213c50);
+}
+.location-preassigned-bay-v442 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border: 1px solid #d7b86b;
+  border-radius: 6px;
+  background: #fff8df;
+  color: #6f5520;
+  white-space: nowrap;
+}
+.location-preassigned-bay-v442 > b {
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: #e7ad23;
+  color: #fff;
+  font-size: 7.5px;
+  font-weight: 950;
+  letter-spacing: .04em;
+}
+.location-preassigned-bay-v442 > span {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+
+/* ========================================================================== */
+/* v0.443 vertical historical rack marker                                     */
+/* ========================================================================== */
+.scan-page .delivery-table .location-badge.has-explicit-prior-v442 {
+  display: inline-grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  justify-items: start !important;
+  align-items: center !important;
+  gap: 3px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.scan-page .delivery-table .location-badge.has-explicit-prior-v442 .location-history-label-v442 {
+  width: 100%;
+  max-width: 100%;
+}
+.scan-page .delivery-table .location-badge.has-explicit-prior-v442 .location-history-prior-v442 {
+  justify-self: start;
+}
+
+/* ========================================================================== */
+/* v0.446 Location hierarchy: PRIOR above, PRE rail, Bay-owned color          */
+/* ========================================================================== */
+/* Historical rack state is metadata, not part of the rack-colored cell. Keep
+   PRIOR horizontal above the rack surface so long names retain the full row. */
+.scan-page .delivery-table .location-history-stack-v446 {
+  display: grid;
+  grid-template-rows: auto auto;
+  justify-items: stretch;
+  align-items: start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+.scan-page .delivery-table .location-history-stack-v446 > .location-history-prior-v442 {
+  justify-self: start;
+  align-self: auto;
+  min-height: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  transform: none !important;
+  white-space: nowrap;
+  font-size: 7.5px;
+  line-height: 1.1;
+  letter-spacing: .055em;
+}
+.scan-page .delivery-table .location-history-stack-v446 > .location-rack-cell-v349 {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Before receipt, the rack remains the primary surface and PRE becomes a thin
+   vertical bay rail on its right edge. This keeps both locations visible in a
+   narrow table column without squeezing the rack label. */
+.scan-page .delivery-table .location-preassigned-v442.location-preassigned-v446 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .delivery-table .location-preassigned-v446 .location-preassigned-rack-v442 {
+  align-self: center;
+  width: 100%;
+  min-width: 0;
+  padding-left: 2px;
+}
+.scan-page .delivery-table .location-preassigned-bay-v442.location-preassigned-bay-v446 {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  min-width: 22px;
+  min-height: 34px;
+  padding: 3px 2px;
+  border: 1px solid var(--bay-location-border, #d7b86b);
+  border-radius: 6px;
+  background: var(--bay-location-bg, #fff8df);
+  color: var(--bay-location-fg, #6f5520);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.scan-page .delivery-table .location-preassigned-bay-v446 > span {
+  max-width: none;
+  overflow: visible;
+  color: inherit;
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: .035em;
+}
+
+/* Once received, Bay owns the Location visual completely. Use the same bay
+   family palette as the Bay Map instead of leaving a generic green bay pill or
+   allowing the former transport rack to tint the current location. */
+.scan-page .delivery-table .location-badge.bay.bay-location-accent-v446 {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  justify-content: flex-start;
+  border-color: var(--bay-location-border, #cdd7e7) !important;
+  background: var(--bay-location-bg, #f8fafc) !important;
+  color: var(--bay-location-fg, #07122f) !important;
+  border-radius: 7px;
+  padding: 4px 7px;
+  box-shadow: inset 3px 0 0 var(--bay-location-border, #cdd7e7);
+  text-align: left;
+}
+.scan-page .delivery-table .location-badge.bay.bay-location-accent-v446 .location-history-label-v442 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.indian-trail-existing-order-bay-v446 {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 4px 7px;
+  border: 1px solid #9fc7ad;
+  border-radius: 6px;
+  background: #eef9f2;
+  color: #246b3c;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+/* ========================================================================== */
+/* v0.447 scan timing + readable Inbound override stage status                */
+/* ========================================================================== */
+.last-scan-pill-v157.is-late-v447 {
+  border-color: #e6a4aa !important;
+  background: linear-gradient(180deg, #fff8f8 0%, #fdebec 100%) !important;
+  color: #a62834 !important;
+  box-shadow: 0 2px 7px rgba(151, 31, 45, .10) !important;
+}
+.last-scan-pill-v157.is-late-v447 .last-scan-pill-icon-v157 {
+  background: #c93443 !important;
+  color: #fff !important;
+}
+.last-scan-pill-v157.is-late-v447 :is(.last-scan-pill-label-v157, b) {
+  color: #a52130 !important;
+}
+.last-scan-pill-v157.is-late-v447 :is(.last-scan-pill-divider-v157, em) {
+  color: #a95660 !important;
+}
+.last-scan-pill-v157.is-on-time-v447 .last-scan-pill-label-v157 {
+  color: #2c5e8d !important;
+}
+
+/* A receive performed through an Inbound override needs two readable lines in
+   the narrow Stage column instead of one long value that clips at the edge. */
+.scan-page .delivery-table td:nth-child(10) .process-pill.is-stacked-v447 {
+  width: 100%;
+  max-width: 100%;
+  display: inline-flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding-block: 4px;
+  white-space: normal !important;
+  text-align: center;
+  line-height: 1.05;
+  overflow: hidden;
+}
+.scan-page .delivery-table td:nth-child(10) .process-pill.is-stacked-v447 > span,
+.scan-page .delivery-table td:nth-child(10) .process-pill.is-stacked-v447 > small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scan-page .delivery-table td:nth-child(10) .process-pill.is-stacked-v447 > small {
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .035em;
+  line-height: 1.1;
+  white-space: normal;
+}
+
+/* ========================================================================== */
+/* v0.448 rack lifecycle labels and persistent Bay ownership                  */
+/* ========================================================================== */
+/* Rack lifecycle is small metadata above the rack-colored surface. PRIOR is
+   reserved for a rack that became historical after physical Inbound receipt. */
+.scan-page .delivery-table .location-rack-state-stack-v448 {
+  display: grid;
+  grid-template-rows: auto auto;
+  align-items: start;
+  justify-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .delivery-table .location-rack-state-v448,
+.scan-page .delivery-table .location-rack-state-stack-v448 > .location-history-prior-v442 {
+  justify-self: start;
+  margin: 0 0 0 2px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f4f6f8;
+  color: #697887;
+  font-size: 7.5px;
+  font-weight: 950;
+  line-height: 1.15;
+  letter-spacing: .05em;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-incomplete > .location-rack-state-v448 {
+  border: 1px solid #dcc27e;
+  background: #fff9e8;
+  color: #8a6516;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-complete > .location-rack-state-v448 {
+  border: 1px solid #9bcea8;
+  background: #edf8f0;
+  color: #28733c;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way > .location-rack-state-v448 {
+  border: 1px solid #9dbce7;
+  background: #edf4ff;
+  color: #215da8;
+}
+/* On-the-way racks remain identifiable but recede behind the blue lifecycle
+   state. The PRE rail stays crisp because only the rack label is faded. */
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way .location-badge.rack,
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way .location-preassigned-rack-v442,
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way .line-rack-location-display-v350 {
+  opacity: .58;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way > .location-rack-cell-v349 {
+  border-color: color-mix(in srgb, var(--rack-location-color, #7890a3) 25%, #d8e2ea) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--rack-location-color, #7890a3) 10%, #fff) 0%,
+    color-mix(in srgb, var(--rack-location-color, #7890a3) 5%, #fff) 100%) !important;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--rack-location-color, #7890a3) 58%, #c7d4df) !important;
+}
+
+/* ========================================================================== */
+/* v0.449 Indian Trail override reconciliation and inline Bay editing          */
+/* ========================================================================== */
+/* A prerequisite mismatch such as "Received 1; Outbound 0" must remain
+   readable in the narrow Progress column. Keep each stage on its own line and
+   indent the prerequisite line slightly so the sequence reads top-to-bottom. */
+.scan-page .delivery-table td:nth-child(10) .process-pill.is-stage-sequence-v449 {
+  align-items: flex-start !important;
+  padding-inline: 6px !important;
+  text-align: left !important;
+  overflow: visible !important;
+}
+.scan-page .delivery-table td:nth-child(10) .process-pill-lines-v449 {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.15;
+  white-space: normal;
+}
+.scan-page .delivery-table td:nth-child(10) .process-pill-lines-v449 > span {
+  display: block;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+.scan-page .delivery-table td:nth-child(10) .process-pill-lines-v449 > .is-indented-v449 {
+  padding-left: 7px;
+  color: #53667a;
+}
+
+/* A rack removed specifically by an Indian Trail prerequisite override keeps
+   its history but carries a more useful reason than the generic PRIOR marker. */
+.scan-page .delivery-table .location-rack-state-stack-v448.is-overridden-by-it > .location-history-prior-v442 {
+  border: 1px solid #a8b9e8;
+  background: #eef2ff;
+  color: #344f9c;
+  font-size: 7px;
+  letter-spacing: .035em;
+}
+
+/* Received Bay locations can be corrected inline exactly like Staging rack
+   locations. The real custom-select trigger overlays the normal Bay-colored
+   badge so the table does not morph when editing begins. */
+.scan-page .delivery-table .line-bay-location-control-v449 {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .delivery-table .line-bay-location-display-v449 {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scan-page .delivery-table .line-bay-location-control-v449 .custom-select-shell {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-height: 100%;
+}
+.scan-page .delivery-table .line-bay-location-control-v449 .custom-select-trigger {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 100%;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+}
+.scan-page .delivery-table .line-bay-location-control-v449 .custom-select-trigger :is(.custom-select-value, .custom-select-arrow) {
+  opacity: 0 !important;
+}
+.scan-page .delivery-table .line-bay-location-control-v449:hover .line-bay-location-display-v449,
+.scan-page .delivery-table .line-bay-location-control-v449:focus-within .line-bay-location-display-v449 {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bay-location-border, #4f78b8) 35%, transparent);
+}
+
+/* The Stage selector lives inside a sticky card. Keep the complete header row
+   above scan-table paint layers and preserve its pointer ownership after the
+   page has scrolled far enough for the scanner card to become sticky. */
+.scan-page #scanProgressBand {
+  position: relative !important;
+  z-index: 120 !important;
+  pointer-events: auto !important;
+  overflow: visible !important;
+}
+.scan-page #scanProgressBand .scanner-panel-context-row-v196,
+.scan-page #scanProgressBand .scanner-panel-stage-select-v196,
+.scan-page #scanProgressBand .scanner-panel-stage-select-v196 .custom-select-shell,
+.scan-page #scanProgressBand .scanner-panel-stage-select-v196 .custom-select-trigger {
+  position: relative !important;
+  z-index: 121 !important;
+  pointer-events: auto !important;
+}
+.custom-select-menu.is-scan-context-menu[data-select-id="deliveryStageSelect"] {
+  z-index: 60000 !important;
+}

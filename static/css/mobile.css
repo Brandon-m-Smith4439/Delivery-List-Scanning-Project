@@ -2370,3 +2370,20 @@
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+
+/* v0.424: the live global search owns the full mobile header row after the
+   redundant Search button was removed. */
+@media (max-width: 760px) {
+  .header-search.header-search-v424,
+  body[data-page="scan"] .header-search.header-search-v424 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+
+  .header-search.header-search-v424 .search-box,
+  .header-search.header-search-v424 .search-box input {
+    min-height: 46px !important;
+    height: 46px !important;
+  }
+}

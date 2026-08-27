@@ -1,26 +1,158 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.423**. SQLite remains the active/default backend.
+Current maintained release: **v0.449**. SQLite remains the active/default backend.
 
-v0.423 combines main through v0.385 with the 37 Website Version 3 releases renumbered as v0.386-v0.422, then completes merge validation and response-delivery performance work.
+v0.449 makes Indian Trail overrides reconcile the complete physical workflow, preserves override rack history, restores reliable sticky Stage selection, and adds inline Bay correction on the Inbound Scan view.
 
-
-## Install v0.423
+## Install v0.449
 
 1. Stop the scanner server.
-2. Replace the application source with the complete v0.423 project contents.
+2. Replace the application source with the complete v0.449 project contents.
 3. Start the server and hard-refresh the browser (`Ctrl+F5`).
 4. No database reset or migration is required; SQLite schema remains version 11.
 
-## v0.423 highlights
+## v0.449 highlights
 
-- Preserves the complete main-branch Home Operations Hub, Scan workflow, Racks lifecycle, Bay Map, physical-piece totals, Rush traceability, and responsive presentation through v0.385.
-- Integrates the Version 3 Settings dashboard and its server-paginated delivery-list editor, granular role permissions, user/session/station management, Customer Routes, Customer Emails, Lookup Manager, Superseded Orders review, and automation workspace.
-- Integrates portable presentation settings, expanded Spanish localization, and reversible Glass Type combine/uncombine aliases while retaining stable backend identifiers.
-- Keeps `Settings` as the operator-facing navigation name while retaining the Version 3 administration capabilities underneath.
-- Preserves the main SQLite database as authoritative. No schema reset or migration is required; SQLite schema remains version 11.
-- Adds compact gzip JSON responses, cached gzip static assets, immutable versioned asset caching, side-effect-free dashboard configuration reads, and atomic configuration writes.
-- Consolidates both branches' functional regression coverage and advances application/cache references and `APPLICATION_VERSION` to v0.423.
+- An explicit Indian Trail / Inbound prerequisite override now backfills the same physical item on **Staging and Outbound** to the received quantity, with dedicated audit/scan events instead of leaving those stage copies at zero.
+- Any active rack assignment for the overridden physical item is removed automatically. The former rack remains historical and is labeled **OVERRIDDEN BY IT** rather than generic PRIOR.
+- Inbound receive still promotes the physical Bay to current Location; Bay assignment identity is exposed so a selected Inbound row can change its Bay inline using the same low-friction pattern as rack reassignment. Received Bay moves remain **Received** rather than being downgraded to a generic moved state.
+- Legacy stage-sequence progress such as `IT received 1; Outbound 0` is stacked as separate **Received** and **Outbound** lines with the second line indented so the Progress column cannot clip it.
+- Strengthens sticky Scan Stage selector pointer/stacking ownership after page scroll.
+- Preserves v0.448 rack lifecycle labels, durable Bay refresh, and authoritative ON TIME/LATE metrics.
+- SQLite schema remains version **11**; no database reset or migration is required.
+
+## v0.439 highlights
+
+- Smart Search Stage cells now show the **Stage Lookup Manager display name**, not rack/bay/truck location wording.
+- Keeps **Stage + Scanned** together as one right-side status group whenever space allows, with the pair wrapping together instead of splitting apart.
+- Removes seconds from Smart Search scan timestamps; scan time is shown to the minute only.
+- Uses richer workflow accents for Staging, Outbound, Received, CPU, Greenville, and DTC while keeping the full-card stage gradient soft and readable.
+- Preserves the v0.438 **795px** search width, compact 36px height, tighter Order/Job/Customer spacing, distinct never-scanned icon, 20-result cap, cached focus recall, and one-click navigation.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.439.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.437 highlights
+
+- Reduces the desktop Global Search maximum width from 980px to 690px (about 30%) and aligns the Smart Search dropdown to the same footprint.
+- Reduces the desktop search surface from 56px to 36px and the input from 54px to 34px (about 35%) so the header feels substantially lighter.
+- Reduces desktop search text modestly to 17px so it remains comfortable within the shorter control.
+- Keeps the v0.436 Job Nr. proximity/column allocation, v0.435 stage gradients/icons, semantic cells, 20-result cap, cached focus recall, and navigation behavior unchanged.
+- Keeps mobile at a practical 42px control height rather than forcing the 36px desktop height onto touch layouts.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.437.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.436 highlights
+
+- Restores the Global Search control to the pre-v0.435 56px surface / 54px input height instead of making the header taller.
+- Expands the desktop header center track up to 980px so Global Search and its Smart Search dropdown gain real horizontal room rather than being capped by the older 640px header column.
+- Keeps responsive widths intact at 1260px and below so smaller screens retain the existing compact header behavior.
+- Tightens the Order/Item-to-Job gap and reduces the Order/Item column share, giving Job Nr. substantially more horizontal room while preserving a useful Customer column.
+- Preserves v0.435 stage-at-a-glance card gradients/icons, semantic cells, 20-result cap, cached focus recall, and one-click navigation.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.436.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.435 highlights
+
+- Enlarges the Global Search control to 960px maximum width with a taller 60px search surface and larger 19.5px input text.
+- Increases Smart Search card, identity, metadata, glass, and status-chip sizing from the very compact v0.434 treatment while using the additional dropdown width to keep information fitting cleanly.
+- Gives every genuinely scanned result a soft full-card gradient keyed to its current workflow stage; never-scanned results remain neutral white.
+- Replaces the neutral cube tile on scanned results with the designated stage icon for Staging, Outbound, Indian Trail Received, CPU, Greenville, or DTC.
+- Keeps stage washes intentionally light so Route, Flags, Glass Type, and Stage cells remain independently readable and semantic.
+- Preserves the 20-result cap, cached focus recall, changed delivery dates, scan timestamps, route/glass/flag colors, and one-click navigation.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.435.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.434 highlights
+
+- Preserves the v0.433 Smart Search reference-card hierarchy while substantially reducing each result's height and horizontal footprint.
+- Shrinks the leading cube tile, card padding/gaps, top-row column spacing, typography, Type chip, DD/Flags/Route/Stage chips, and icon sizes so Job and Customer have more usable width.
+- Keeps Order/Item visually strongest while preventing the oversized reference layout from forcing normal status chips onto extra lines.
+- Retains the same neutral hover, Lookup Manager glass colors, route/flag/stage semantic colors, changed delivery dates, scan timestamps, 20-result cap, cached focus recall, and one-click navigation.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.434.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.433 highlights
+
+- Rebuilds each Smart Search match as a polished reference-style record card with a blue cube icon tile, large Order/Item identity, Job and Customer columns, a thin identity divider, a clean Size/Qty/Type row, and a final semantic chip row.
+- Matches the supplied visual hierarchy with larger typography, a white card surface, soft blue-gray dropdown canvas, rounded borders, light neutral shadow, and visible separation between adjacent results.
+- Converts DD, Flags, Route, Stage, and Scanned metadata into compact icon chips while keeping Glass Type driven by the Lookup Manager color and Route/Stage driven by their maintained semantic palettes.
+- Keeps Flags present for every result, including **None**, and preserves changed-delivery-date text, Rush/Remake states, scanned time, 20-result search, cached reopen-on-focus, and one-click navigation.
+- Enlarges and slightly widens the Global Search field to visually align with the supplied reference.
+- Keeps hover/focus neutral with no semantic recoloring.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.433.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.432 highlights
+
+- Increases Smart Search result text size while preserving the compact four-row layout.
+- Makes Route a true bordered/tinted cell with a distinct, lighter route palette, including explicit Indian Trail, CPU, DTC, Greenville, and Airport colors.
+- Makes Flags an always-present cell: **None** when no priority applies, **RUSH**, **REMAKE**, or **REMAKE · RUSH** with restrained flag-specific color.
+- Restricts the unscanned gray treatment to the Stage cell only; the rest of the result stays neutral white.
+- Keeps hover colorless and reduces it to a nearly invisible neutral depth cue.
+- Removes the remaining JavaScript animation replay for Home Find Delivery List date groups so each dropdown performs only the single CSS-owned expansion.
+- Adds the designated stage icon inside each Forward View STG/OUT/IN/CPU/GNV/DTC counter and slightly enlarges the scanned/total count.
+- Enlarges the Home greeting and full date to better use the open hero space.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.432.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.431 highlights
+
+- Fixes Smart Search focus recall so clicking back into Global Search keeps the cached results open instead of reopening them for one frame and immediately hiding them.
+- Keeps the overall Smart Search result neutral; stage color is confined to the Stage cell, and never-scanned status is rendered in neutral gray.
+- Keeps Route, Glass Type, RUSH, and REMAKE as independent semantic cells with their own maintained colors.
+- Removes colored Smart Search hover feedback; hover/focus now uses only a subtle neutral border and shadow.
+- Removes the Home Delivery Library forced reflow/animation replay that caused date headers to flash before expanding.
+- Adds compact Forward View stage counters in workflow order: STG, OUT, IN, CPU, GNV, and DTC, each showing scanned/total pieces for that delivery date.
+- Preserves the 20-result Smart Search cap, changed-delivery-date display, one-click navigation, and existing Airport Road staging progress source.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.431.
+- SQLite schema remains version 11; no migration or database reset is required.
+
+## v0.430 highlights
+
+- Adds a light stage-colored gradient to Smart Search matches that have actually been scanned, while unscanned matches remain neutral.
+- Converts each metadata field into a compact cell so Order/Item, Job Nr., Customer, Size, Qty, Type, DD, flags, Route, Stage, and Scanned time are easier to parse at a glance.
+- Gives the Route cell a stable route color, Rush/Remake their own priority colors, and Glass Type a Lookup Manager-driven glass-color gradient.
+- Uses a small gap and border around each result so adjacent orders are visually distinct without bringing back large-card spacing.
+- Reopens the current Smart Search results immediately when the Global Search input regains focus, reusing the last results when the query is unchanged.
+- Preserves the four-line hierarchy, changed-delivery-date text, one-click navigation, and 20-result cap.
+- Keeps SQLite schema version 11 unchanged; no migration or database reset is required.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.430.
+
+## v0.429 highlights
+
+- Refines Smart/Global Search into compact record strips with larger, easier-to-read text while keeping the same four-line operational hierarchy.
+- Sections the identity, glass, delivery, and current-stage lines with subtle hairline dividers and consistent aligned spacing instead of adding bulky cards.
+- Fixes Delivery Date / priority flag / Route crowding with deliberate inline gaps and preserves real whitespace between multiple priority flags.
+- Replaces the Glass Type underline with a small Lookup Manager-colored dot plus strong text for a cleaner visual cue.
+- Gives RUSH and REMAKE compact alert tags and current-stage text a small status dot, reserving stronger color only for information that needs attention.
+- Keeps Order/Item as the strongest anchor, Customer truncation, changed-delivery-date rendering, scan timestamp, one-click navigation, and the 20-result cap unchanged.
+- Keeps SQLite schema version 11 unchanged; no migration or database reset is required.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.429.
+
+## v0.428 highlights
+
+- Keeps each Smart/Global Search match condensed to the existing four text rows while standardizing label weight, value typography, spacing, and field separators across the entire result.
+- Adds consistent inline **Customer:** and **Scanned:** labels and applies the same muted label treatment to Job Nr., Size, Qty, Type, DD, Route, and Stage.
+- Adds restrained visual polish with a subtle left-edge accent, cleaner row separators, a soft neutral result background, and a stronger hover/focus accent without adding card height, pills, or large boxes.
+- Keeps the order/item identifier as the strongest text anchor, preserves Lookup Manager glass-color underlining, and retains restrained Rush/Remake and stage status colors.
+- Preserves the 20-result cap, changed delivery dates, route, priority flags, scan time, navigation behavior, and the existing backend search payload.
+- Keeps SQLite schema version 11 unchanged; no migration or database reset is required.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.428.
+
+## v0.426 highlights
+
+- Compresses each Global Search match into four tight text rows with minimal vertical padding and no card-like boxes, gradients, or pill containers.
+- Keeps the requested information order: Order/Item + Job Nr. + Customer; Size + Qty + Glass Type; DD + changed date + REMAKE/RUSH + Route; current Stage + scanned date/time.
+- Keeps Glass Type color meaning as a subtle colored underline instead of a large tinted field.
+- Converts REMAKE, RUSH, Route, and Stage presentation to simple inline text while retaining their useful status colors.
+- Removes result-to-result grid gaps and hover lift so the search dropdown reads like a compact operational lookup list.
+- Preserves v0.425 priority-date, Rush/Remake aggregation, navigation, and Lookup Manager glass-color data behavior.
+- Keeps SQLite schema version 11 unchanged; no migration or database reset is required.
+- Advances browser cache references and `APPLICATION_VERSION` to v0.426.
+
+## v0.423 integration baseline
+
+The v0.423 release remains the merged Main + Website Version 3 integration baseline underneath the maintained v0.434 release.
 
 ## Website Version 3 integrated highlights
 

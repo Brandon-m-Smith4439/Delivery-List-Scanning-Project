@@ -95,6 +95,8 @@ const state = {
   scanSortKey: "",
   scanSortDirection: "asc",
   search: "",
+  globalSearchLastQuery: "",
+  globalSearchLastResults: [],
   pageIndex: 1,
   pageSize: 25,
   homeSearch: "",
@@ -436,11 +438,12 @@ function normalizeImportResultMetrics(entry = {}) {
   if (!stageSummaries.length) return { ...entry };
 
   const listId = (row) => String(row.listId || "").trim().toLowerCase();
+  const stagePreset = (row) => stagePresetFromValuesV445(row.stage || "", row.scanner || row.stageProfile || "", row.stagePreset || "");
   const stageText = (row) => `${row.stage || ""} ${row.scanner || row.stageProfile || ""}`.trim().toLowerCase();
   const preferred = stageSummaries.find((row) => listId(row).endsWith("-staging-airport"))
-    || stageSummaries.find((row) => stageText(row).includes("staging") && stageText(row).includes("airport"))
+    || stageSummaries.find((row) => stagePreset(row) === "airport_staging")
     || stageSummaries.find((row) => listId(row).endsWith("-outbound-airport"))
-    || stageSummaries.find((row) => stageText(row).includes("outbound") && stageText(row).includes("airport"))
+    || stageSummaries.find((row) => stagePreset(row) === "airport_outbound")
     || stageSummaries.slice().sort((a, b) => (
       Number(b.totalQty || b.originalQty || b.changedPieceQty || 0)
       - Number(a.totalQty || a.originalQty || a.changedPieceQty || 0)
@@ -455,12 +458,10 @@ function normalizeImportResultMetrics(entry = {}) {
   );
   const createdStages = stageSummaries.filter((row) => Boolean(row.created));
   const createdStaging = createdStages.some((row) => (
-    listId(row).endsWith("-staging-airport")
-    || (stageText(row).includes("staging") && stageText(row).includes("airport"))
+    listId(row).endsWith("-staging-airport") || stagePreset(row) === "airport_staging"
   ));
   const createdOutbound = createdStages.some((row) => (
-    listId(row).endsWith("-outbound-airport")
-    || (stageText(row).includes("outbound") && stageText(row).includes("airport"))
+    listId(row).endsWith("-outbound-airport") || stagePreset(row) === "airport_outbound"
   ));
   const inferredNewDeliveryList = changedStages.length > 0
     && createdStages.length === changedStages.length
@@ -954,7 +955,6 @@ const els = {
   backendStatus: document.getElementById("backendStatus"),
   logoutBtn: document.getElementById("logoutBtn"),
   headerGlobalSearchInput: document.getElementById("headerGlobalSearchInput"),
-  headerGlobalSearchBtn: document.getElementById("headerGlobalSearchBtn"),
   headerGlobalSearchResults: document.getElementById("headerGlobalSearchResults"),
   globalPrintExportBtn: document.getElementById("globalPrintExportBtn"),
   languageToggleBtn: document.getElementById("languageToggleBtn"),
@@ -1562,12 +1562,24 @@ const SPANISH_UI_TEXT = new Map([
   ["Item", "Articulo"],
   ["Qty.", "Cant."],
   ["Qty", "Cant."],
+  ["Manual scan quantity", "Cantidad de escaneo manual"],
+  ["Qty applies when adding pieces to a bay.", "La cantidad se aplica al agregar piezas a una bahía."],
+  ["Manual scan quantity must be between 1 and 999.", "La cantidad del escaneo manual debe estar entre 1 y 999."],
   ["Stage completion", "Finalización de etapa"],
   ["Outbound completion", "Finalización de salida"],
   ["Received completion", "Finalización de recepción"],
   ["Dimensions", "Dimensiones"],
   ["Customer", "Cliente"],
+  ["Customer:", "Cliente:"],
+  ["Job Nr.:", "Num. de trabajo:"],
+  ["Job:", "Trabajo:"],
+  ["Size:", "Tamaño:"],
+  ["Qty:", "Cant.:"],
+  ["Type:", "Tipo:"],
+  ["Stage:", "Etapa:"],
   ["Flags", "Indicadores"],
+  ["Flags:", "Indicadores:"],
+  ["None", "Ninguna"],
   ["Process State", "Estado del proceso"],
   ["Progress", "Progreso"],
   ["Transportation Method", "Metodo de transporte"],
@@ -1740,6 +1752,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Collapse All", "Contraer todo"],
   ["Customer Emails", "Correos de clientes"],
   ["Delivery Date", "Fecha de entrega"],
+  ["Changed to", "Cambió a"],
   ["Delivery List", "Lista de entrega"],
   ["Delivery lists", "Listas de entrega"],
   ["Details open when a bay is selected", "Los detalles se abren al seleccionar una bahía"],
@@ -2009,6 +2022,8 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Picking / SDI", "Selección / SDI"],
   ["Plant Operations", "Operaciones de planta"],
   ["Pre Assigned", "Preasignado"],
+  ["Awaiting first scan", "Esperando primer escaneo"],
+  ["Bay status", "Estado de bahía"],
   ["Print Investigation List", "Imprimir lista de investigación"],
   ["Production scanning, rack control, and delivery visibility in one place.", "Escaneo de producción, control de racks y visibilidad de entregas en un solo lugar."],
   ["Ready", "Listo"],
@@ -3954,6 +3969,8 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Mark", "Marcar"],
   ["Reopen", "Reabrir"],
   ["Scanned:", "Escaneado:"],
+  ["ON TIME:", "A TIEMPO:"],
+  ["LATE:", "TARDE:"],
   ["Resolved:", "Resuelto:"],
   ["Rack for Order Item", "Rack para artículo de orden"],
   ["Raw:", "Original:"],
@@ -5606,7 +5623,12 @@ function syncCustomSelect(select) {
   // v0.352: operational rack selectors mirror the opened option row. Route is
   // a colored cue at the front, followed by the full rack summary. Inline
   // Location editors keep their compact display through data-selected-label.
-  if (rackStatusCue && rackRouteCue && rackRouteLabel) {
+  const bayStatusBadge = String(option?.dataset.bayStatusBadge || "").trim();
+  const bayStatusKind = String(option?.dataset.bayStatusKind || "").trim();
+  const baySelectedLabel = String(option?.dataset.baySelectedLabel || "").trim();
+  if (bayStatusBadge) {
+    value.innerHTML = `<span class="bay-selected-option-v442"><span>${escapeHtml(baySelectedLabel || selectedText)}</span><b class="bay-target-status-badge-v442 is-${escapeHtml(bayStatusKind || "available")}">${escapeHtml(bayStatusBadge)}</b></span>`;
+  } else if (rackStatusCue && rackRouteCue && rackRouteLabel) {
     value.innerHTML = `<span class="rack-selected-option-v352"><b class="rack-select-option-route-v345 rack-select-route-${escapeHtml(rackRouteCue)}">${escapeHtml(rackRouteLabel)}</b><span class="rack-selected-option-summary-v352">${escapeHtml(selectedText)}</span></span>`;
   } else {
     value.textContent = selectedText;
@@ -5670,7 +5692,9 @@ function positionCustomSelectMenu() {
   const isScanDateSelect = select.id === "deliveryDateSelect";
   const isScanStageSelect = select.id === "deliveryStageSelect";
   const isInlineRackSelect = select.matches?.("[data-line-rack-select]");
+  const isInlineBaySelect = select.matches?.("[data-line-bay-select-v449]");
   const isRackSelect = [...select.options].some((option) => Boolean(option.dataset.rackStatus));
+  const isCompactLocationSelect = isInlineRackSelect || isInlineBaySelect || isRackSelect;
   const isScanContextSelect = isScanDateSelect || isScanStageSelect;
   // The stage menu should follow its trigger exactly; the date menu needs a
   // little extra width so Monday-Friday headers remain readable on one line.
@@ -5685,14 +5709,14 @@ function positionCustomSelectMenu() {
     ? Math.max(rect.width, 244)
     : isScanStageSelect
       ? rect.width
-      : isRackSelect
+      : isCompactLocationSelect
         ? rackOpenMenuWidth
         : Math.max(rect.width, contentWidth);
   const minimumWidth = isScanDateSelect
     ? Math.max(rect.width, 220)
     : isScanStageSelect
       ? rect.width
-      : isRackSelect
+      : isCompactLocationSelect
         ? Math.min(294, rackOpenMenuWidth)
         : 210;
   const availableWidth = Math.max(160, window.innerWidth - viewportPadding * 2);
@@ -5708,7 +5732,7 @@ function positionCustomSelectMenu() {
 
   menu.classList.toggle("opens-above", openAbove);
   const availableVertical = Math.max(160, openAbove ? spaceAbove : spaceBelow);
-  const menuVerticalLimit = isRackSelect
+  const menuVerticalLimit = isCompactLocationSelect
     ? Math.max(181, Math.floor(availableVertical * rackMenuScale))
     : availableVertical;
   menu.style.maxHeight = `${menuVerticalLimit}px`;
@@ -5830,6 +5854,11 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     const rackStatusCue = String(row.option.dataset.rackStatus || "").trim();
     const rackRouteCue = String(row.option.dataset.rackRoute || "").trim();
     const rackSetColor = String(row.option.dataset.rackColor || "").trim();
+    const bayStatusBadge = String(row.option.dataset.bayStatusBadge || "").trim();
+    const bayStatusKind = String(row.option.dataset.bayStatusKind || "").trim();
+    if (bayStatusBadge) {
+      button.classList.add("bay-target-option-v442", `is-${bayStatusKind || "available"}`);
+    }
     if (rackStatusCue) button.classList.add(`rack-select-status-${rackStatusCue}`);
     if (rackRouteCue) button.classList.add(`rack-select-route-${rackRouteCue}`);
     if (rackSetColor) {
@@ -5839,7 +5868,14 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
 
     const label = document.createElement("span");
     label.className = "custom-select-option-label";
-    label.textContent = row.text;
+    label.textContent = String(row.option.dataset.baySelectedLabel || "").trim() || row.text;
+
+    const bayStatusCue = bayStatusBadge ? document.createElement("b") : null;
+    if (bayStatusCue) {
+      bayStatusCue.className = `bay-target-status-badge-v442 is-${bayStatusKind || "available"}`;
+      bayStatusCue.textContent = bayStatusBadge;
+      bayStatusCue.title = String(row.option.dataset.bayStatusLabel || "Bay status");
+    }
 
     const rackCueWrap = rackStatusCue || rackRouteCue ? document.createElement("span") : null;
     if (rackCueWrap) {
@@ -5875,7 +5911,9 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
       : "";
 
     if (rackCueWrap) button.append(rackCueWrap);
-    button.append(label, indicator, check);
+    button.append(label);
+    if (bayStatusCue) button.append(bayStatusCue);
+    button.append(indicator, check);
     const deleteAction = String(row.option.dataset.customDeleteAction || "").trim();
     const optionRow = deleteAction ? document.createElement("div") : null;
     if (optionRow) {
@@ -6343,12 +6381,60 @@ function formatScanDateTimeParts(value) {
     return { date: String(value), time: "" };
   }
   return {
-    date: parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric" }),
+    date: parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric", year: "2-digit" }),
     time: parsed
       .toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" })
       .replace(/\s+/g, "")
       .toLowerCase(),
   };
+}
+
+
+/**
+ * Resolve whether a completed scan happened on/before its effective delivery
+ * date or after it. Priority date moves use the new delivery date so the active
+ * copy is judged against the date operators are actually working from.
+ */
+function scanTimingMetaV447(item = {}, deliveryDateOverride = "") {
+  const scanValue = String(item?.lastScannedAt || item?.lastScanTime || "").trim();
+  const deliveryValue = String(
+    deliveryDateOverride
+    || item?.priorityDeliveryDate
+    || item?.deliveryDate
+    || state.meta?.deliveryDate
+    || "",
+  ).trim();
+  if (!scanValue || !deliveryValue) return { known: false, late: false, label: "SCANNED:" };
+
+  const scanDate = new Date(scanValue);
+  if (Number.isNaN(scanDate.getTime())) return { known: false, late: false, label: "SCANNED:" };
+  const scanKey = `${scanDate.getFullYear()}-${pad(scanDate.getMonth() + 1, 2)}-${pad(scanDate.getDate(), 2)}`;
+  const deliveryMatch = deliveryValue.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  let deliveryKey = deliveryValue;
+  if (deliveryMatch) {
+    deliveryKey = `${deliveryMatch[1]}-${pad(Number(deliveryMatch[2]), 2)}-${pad(Number(deliveryMatch[3]), 2)}`;
+  } else {
+    const deliveryDate = new Date(deliveryValue);
+    if (Number.isNaN(deliveryDate.getTime())) return { known: false, late: false, label: "SCANNED:" };
+    deliveryKey = `${deliveryDate.getFullYear()}-${pad(deliveryDate.getMonth() + 1, 2)}-${pad(deliveryDate.getDate(), 2)}`;
+  }
+  const late = scanKey > deliveryKey;
+  return { known: true, late, label: late ? "LATE:" : "ON TIME:", scanKey, deliveryKey };
+}
+
+function scanTimePillMarkupV447(item = {}, deliveryDateOverride = "") {
+  if (!item?.lastScannedAt) return "";
+  const scanTimestamp = formatScanDateTimeParts(item.lastScannedAt);
+  const scanStation = String(item.lastScannedStation || "").trim();
+  const timing = scanTimingMetaV447(item, deliveryDateOverride);
+  const title = `Last scanned ${formatDateTime(item.lastScannedAt)}${scanStation ? ` at ${scanStation}` : ""}${timing.known ? ` · ${timing.late ? "Late" : "On time"}` : ""}`;
+  return `<span class="last-scan-pill-v157 ${timing.late ? "is-late-v447" : "is-on-time-v447"}" title="${escapeHtml(title)}">
+    <span class="last-scan-pill-icon-v157" aria-hidden="true">${timing.late ? "!" : "&#10003;"}</span>
+    <span class="last-scan-pill-label-v157">${escapeHtml(timing.label)}</span>
+    <b>${escapeHtml(scanTimestamp.date)}</b>
+    ${scanTimestamp.time ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">at</span><b>${escapeHtml(scanTimestamp.time)}</b>` : ""}
+    ${scanStation ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">&bull;</span><em>${escapeHtml(scanStation)}</em>` : ""}
+  </span>`;
 }
 
 /**
@@ -6500,7 +6586,49 @@ function formatPercent(value) {
  */
 function configuredStageDefinitionV346(list) {
   const stageText = String(list?.stage || "").trim().toLowerCase();
-  return (state.manualEditLookups?.stages || []).find((definition) => String(definition.displayName || definition.label || "").trim().toLowerCase() === stageText) || null;
+  return (state.manualEditLookups?.stages || []).find((definition) => {
+    const display = String(definition.displayName || definition.label || "").trim().toLowerCase();
+    const key = String(definition.key || definition.value || "").trim().toLowerCase();
+    return Boolean(stageText) && (display === stageText || key === stageText);
+  }) || null;
+}
+
+function stagePresetFromValuesV445(stageValue = "", scannerValue = "", explicitPreset = "") {
+  const cleanExplicitPreset = String(explicitPreset || "").trim().toLowerCase();
+  if (["airport_staging", "airport_outbound", "indian_trail", "greenville", "cpu", "dtc", "custom_route"].includes(cleanExplicitPreset)) {
+    return cleanExplicitPreset;
+  }
+
+  const stageText = String(stageValue || "").trim().toLowerCase();
+  const scannerText = String(scannerValue || "").trim().toLowerCase();
+  const definitions = Array.isArray(state.manualEditLookups?.stages) ? state.manualEditLookups.stages : [];
+  const match = definitions.find((definition) => {
+    const display = String(definition?.displayName || definition?.label || "").trim().toLowerCase();
+    const key = String(definition?.key || definition?.value || "").trim().toLowerCase();
+    const configuredScanner = String(definition?.scanner || "").trim().toLowerCase();
+    if (!display && !key) return false;
+    const stageMatches = Boolean(stageText) && (display === stageText || key === stageText || (display && stageText.includes(display)));
+    const scannerMatches = !configuredScanner || !scannerText || configuredScanner === scannerText || scannerText.includes(configuredScanner) || stageText.includes(configuredScanner);
+    return stageMatches && scannerMatches;
+  });
+  if (match?.preset) return String(match.preset).trim().toLowerCase();
+
+  const signal = `${stageText} ${scannerText}`;
+  if (/outbound/.test(signal)) return "airport_outbound";
+  if (/staging|staged/.test(signal)) return "airport_staging";
+  if (/indian trail|received|inbound/.test(signal)) return "indian_trail";
+  if (/customer pickup|\bcpu\b/.test(signal)) return "cpu";
+  if (/greenville|\bgnv\b/.test(signal)) return "greenville";
+  if (/deliver to customer|\bdtc\b/.test(signal)) return "dtc";
+  return "";
+}
+
+function scanContextPresetV445() {
+  return stagePresetFromValuesV445(
+    state.meta?.stage || "",
+    state.meta?.scanner || "",
+    state.meta?.stagePreset || "",
+  );
 }
 
 /**
@@ -6730,15 +6858,9 @@ async function loadPresentationProfileV355() {
 }
 
 function stageCategory(list) {
-  const configured = configuredStageDefinitionV346(list);
   const presetCategory = { airport_staging: "staged", airport_outbound: "outbound", indian_trail: "received", greenville: "greenville", cpu: "pickup", dtc: "dtc", custom_route: "staged" };
-  if (configured && presetCategory[configured.preset]) return presetCategory[configured.preset];
-  const stage = `${list?.stage || ""} ${list?.scanner || ""}`.toLowerCase();
-  if (stage.includes("outbound")) return "outbound";
-  if (stage.includes("dtc") || stage.includes("deliver to customer")) return "dtc";
-  if (stage.includes("greenville") || /\bgnv\b/.test(stage)) return "greenville";
-  if (stage.includes("indian trail") || stage.includes("inbound")) return "received";
-  if (stage.includes("customer pickup")) return "pickup";
+  const preset = stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "");
+  if (presetCategory[preset]) return presetCategory[preset];
   return "staged";
 }
 
@@ -6756,6 +6878,7 @@ function deliveryRouteGroupForStage(record = {}) {
   const category = stageCategory({
     stage: record.stage || record.label || record.stageSheetName || "",
     scanner: record.scanner || record.stageProfile || "",
+    stagePreset: record.stagePreset || "",
   });
   const key = category === "received"
     ? "indian_trail"
@@ -6778,7 +6901,7 @@ function condenseImportStageSummariesByRoute(stageSummaries = []) {
   }
 
   const summaryPriority = (stage, definition) => {
-    const category = stageCategory({ stage: stage.stage || stage.label || "", scanner: stage.stageProfile || stage.scanner || "" });
+    const category = stageCategory({ stage: stage.stage || stage.label || "", scanner: stage.stageProfile || stage.scanner || "", stagePreset: stage.stagePreset || "" });
     const changed = Number(stage.changedLineCount || 0)
       + Number(stage.changedPieceQty || 0)
       + Number(stage.updatedPieceQty || 0)
@@ -8858,13 +8981,15 @@ function getPagedItems() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function stageVerb() {
-  const stage = String(state.meta?.stage || "").toLowerCase();
-  if (stage.includes("indian trail") || stage.includes("inbound")) return "Received";
-  if (stage.includes("outbound")) return "Outbound";
-  if (stage.includes("customer pickup")) return "CPU";
-  if (stage.includes("greenville")) return "Greenville";
-  if (stage.includes("dtc") || stage.includes("deliver to customer")) return "Delivered";
-  return "Staged";
+  const category = stageCategory(state.meta || {});
+  return {
+    received: "Received",
+    outbound: "Outbound",
+    pickup: "CPU",
+    greenville: "Greenville",
+    dtc: "Delivered",
+    staged: "Staged",
+  }[category] || "Staged";
 }
 
 /**
@@ -8874,6 +8999,27 @@ function stageVerb() {
  */
 function renderProcessState(item) {
   return `${stageVerb()}: ${item.scanned}/${item.qty}`;
+}
+
+
+/** Keep Inbound override context readable inside the narrow Stage column. */
+function processPillMarkupV447(item, processClass, processText) {
+  const overrideLabel = String(item?.inboundOverrideLabel || "").trim();
+  const rawText = String(processText || "").trim();
+  const sequenceMatch = rawText.match(/^IT\s+received\s+(\d+)\s*;\s*Outbound\s+(\d+)$/i);
+  const sequenceParts = sequenceMatch
+    ? [`Received ${sequenceMatch[1]}`, `Outbound ${sequenceMatch[2]}`]
+    : rawText.includes(";")
+      ? rawText.split(";").map((part) => part.trim()).filter(Boolean)
+      : [];
+  const stackedProgress = sequenceParts.length > 1;
+  const progressMarkup = stackedProgress
+    ? `<span class="process-pill-lines-v449">${sequenceParts.map((part, index) => `<span class="${index ? "is-indented-v449" : ""}">${escapeHtml(part)}</span>`).join("")}</span>`
+    : `<span>${escapeHtml(rawText)}</span>`;
+  if ((isIndianTrailScanContext() && overrideLabel) || stackedProgress) {
+    return `<span class="process-pill ${escapeHtml(processClass)} is-stacked-v447${stackedProgress ? " is-stage-sequence-v449" : ""}">${progressMarkup}${overrideLabel ? `<small>${escapeHtml(overrideLabel)}</small>` : ""}</span>`;
+  }
+  return `<span class="process-pill ${escapeHtml(processClass)}">${escapeHtml(rawText)}</span>`;
 }
 
 /**
@@ -8891,12 +9037,36 @@ function scanLocationPresentation(item) {
   // history so operators can still see where the glass was physically stored.
   if (indianTrailStage) {
     const currentBay = bayLocationDisplayLabel(currentItem.bayCode, currentItem.bayName);
-    if (currentBay) {
+    const currentBayStatus = String(currentItem.bayStatus || "").trim().toLowerCase();
+    const physicallyReceivedHere = Number(currentItem.scanned || 0) > 0 || !currentBayStatus.includes("pre");
+    if (currentBay && physicallyReceivedHere) {
       return {
         label: currentBay,
         kind: "bay",
         historical: false,
-        title: `Current Indian Trail location: ${currentBay}`,
+        title: `Current Indian Trail bay: ${currentBay}`,
+      };
+    }
+
+    // Before the Indian Trail receive scan, show both pieces of useful floor
+    // context in one Location cell: the transport rack and the system's PRE bay.
+    if (currentBay && currentBayStatus.includes("pre")) {
+      const preRackCode = String(currentItem.rackCode || currentItem.lastRackCode || "").trim().toUpperCase();
+      const preRackLabel = preRackCode
+        ? rackLocationDisplayLabel(
+            preRackCode,
+            currentItem.rackCode ? currentItem.rackName : currentItem.lastRackName,
+            currentItem.rackCode ? currentItem.rackType : currentItem.lastRackType,
+          )
+        : "";
+      return {
+        label: [preRackLabel, `PRE ${currentBay}`].filter(Boolean).join(" · "),
+        kind: "preassigned",
+        historical: Boolean(!currentItem.rackCode && currentItem.lastRackCode),
+        rackLabel: preRackLabel,
+        rackCode: preRackCode,
+        bayLabel: currentBay,
+        title: `${preRackLabel ? `${preRackLabel} · ` : ""}Preassigned to ${currentBay}; scan Indian Trail to confirm the physical bay.`,
       };
     }
     const previousBay = bayLocationDisplayLabel(currentItem.lastBayCode, currentItem.lastBayName);
@@ -8906,6 +9076,40 @@ function scanLocationPresentation(item) {
         kind: "bay",
         historical: true,
         title: `Previously stored in ${previousBay}; the bay assignment has been removed.`,
+      };
+    }
+
+    // If the item has not been assigned to a receiving bay yet, retain the
+    // transport rack text on Indian Trail and every downstream workflow. The
+    // rack color was already available here; this fallback makes its label
+    // visible too instead of leaving a colored but empty Location cell.
+    const inboundReceived = Number(currentItem.scanned || 0) > 0
+      || currentItem.received === true
+      || Number(currentItem.receivedQty || 0) > 0;
+    const inboundRackCode = String(currentItem.rackCode || "").trim().toUpperCase();
+    const inboundRack = inboundRackCode
+      ? rackLocationDisplayLabel(inboundRackCode, currentItem.rackName, currentItem.rackType)
+      : "";
+    if (inboundRack) {
+      // v0.441 compatibility anchor: Transported to Indian Trail in ${inboundRack}.
+      return {
+        label: inboundRack,
+        kind: /^truck/i.test(inboundRack) ? "truck" : "rack",
+        historical: inboundReceived,
+        title: inboundReceived
+          ? `Previously transported to Indian Trail in ${inboundRack}.`
+          : `Current transport rack: ${inboundRack}`,
+      };
+    }
+    const inboundPreviousRack = rackHistoryLocationLabel(currentItem);
+    if (inboundPreviousRack) {
+      return {
+        label: inboundPreviousRack,
+        kind: /^truck/i.test(inboundPreviousRack) ? "truck" : "rack",
+        historical: inboundReceived,
+        title: inboundReceived
+          ? `Previously transported in ${inboundPreviousRack}.`
+          : `Current transport rack: ${inboundPreviousRack}`,
       };
     }
     return { label: "", kind: "bay", historical: false, title: "" };
@@ -9054,27 +9258,137 @@ function locationBadgeClass(location) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function bayLocationPaletteV446(item = {}) {
+  const kind = bayCategoryKind({
+    bayCategory: item.bayCategory || "",
+    bayType: item.bayType || "",
+    mapSection: item.bayMapSection || "",
+    displayName: item.bayName || "",
+    bayCode: item.bayCode || "",
+  });
+  return {
+    coral: { bg: "#fff2cc", border: "#b7892f", fg: "#4f3600" },
+    lr: { bg: "#1f4e79", border: "#143a5e", fg: "#ffffff" },
+    rr: { bg: "#1f4e79", border: "#143a5e", fg: "#ffffff" },
+    showers: { bg: "#e2efda", border: "#5a9b48", fg: "#173b14" },
+    mirror: { bg: "#eee7ff", border: "#8258ca", fg: "#34176d" },
+    "bfs-mirror": { bg: "#eee7ff", border: "#8258ca", fg: "#34176d" },
+    "framed-mirror": { bg: "#daeef3", border: "#008080", fg: "#003f46" },
+    crl: { bg: "#fff7c2", border: "#8f8f11", fg: "#484600" },
+    standard: { bg: "#f8fafc", border: "#cdd7e7", fg: "#07122f" },
+  }[kind] || { bg: "#f8fafc", border: "#cdd7e7", fg: "#07122f" };
+}
+
+function bayLocationStyleV446(item = {}) {
+  const palette = bayLocationPaletteV446(item);
+  return `--bay-location-bg:${palette.bg};--bay-location-border:${palette.border};--bay-location-fg:${palette.fg}`;
+}
+
+function compactBayReferenceV446(label = "") {
+  return String(label || "").trim().replace(/^Bay\s+/i, "") || "—";
+}
+
+function canAssignBayLocationV449() {
+  const roles = state.user?.roles || [];
+  return Boolean(
+    state.backend
+      && isIndianTrailScanContext()
+      && (hasPermission("move_bay_items") || hasPermission("receive_indian_trail") || roles.includes("Admin") || roles.includes("Supervisor")),
+  );
+}
+
+function itemCanShowBayLocationDropdownV449(item) {
+  if (!canAssignBayLocationV449() || item?.id !== state.selectedId) return false;
+  if (!Number(item?.bayAssignmentId || 0) || !String(item?.bayCode || "").trim()) return false;
+  const status = String(item?.bayStatus || "").trim().toLowerCase();
+  return !["cleared", "cancelled"].includes(status);
+}
+
+function bayLocationEditorV449(item, displayLocation) {
+  const currentBayCode = String(item?.bayCode || "").trim();
+  const allBays = (state.bays || []).filter((bay) => bay?.active !== false);
+  const options = allBays.map((bay) => bayTargetOptionHtmlV442(bay, currentBayCode)).join("");
+  const paletteStyle = bayLocationStyleV446(item);
+  return `
+    <label class="line-bay-location-control-v449" title="Change Bay location" style="${escapeHtml(paletteStyle)}">
+      <span class="location-badge bay bay-location-accent-v446 line-bay-location-display-v449">${escapeHtml(displayLocation || currentBayCode)}</span>
+      <span class="sr-only">Bay location</span>
+      <select data-line-bay-select-v449="${escapeHtml(item.id)}" data-bay-assignment-id-v449="${escapeHtml(item.bayAssignmentId)}" aria-label="Change Bay location" ${options ? "" : "disabled"}>
+        ${options || `<option value="${escapeHtml(currentBayCode)}" selected>Loading bays...</option>`}
+      </select>
+    </label>`;
+}
+
+function rackLocationStateV448(item = {}, presentation = {}, rack = null) {
+  const removalReason = String(item.lastRackRemovalReason || "").trim().toLowerCase();
+  if (presentation.historical && removalReason.includes("overridden by it")) {
+    return { key: "overridden-by-it", label: "OVERRIDDEN BY IT" };
+  }
+  if (presentation.historical) return { key: "prior", label: "PRIOR" };
+  const status = String(rack?.status || item.rackStatus || item.lastRackStatus || "").trim().toLowerCase();
+  if (["in transit", "on the way"].includes(status)) return { key: "on-the-way", label: "ON THE WAY" };
+  if (["closed", "complete", "completed"].includes(status)) return { key: "complete", label: "COMPLETE" };
+  if (status === "open" || status === "building" || Boolean(item.rackCode || item.lastRackCode)) {
+    return { key: "incomplete", label: "INCOMPLETE" };
+  }
+  return null;
+}
+
 function rackLocationDropdown(item, currentLocation = "") {
   const presentation = scanLocationPresentation(item);
   const displayLocation = presentation.label || currentLocation || "";
-  const currentRack = rackForCode(item.rackCode);
-  const rackComplete = Boolean(currentRack && rackStatusClassName(currentRack) === "complete");
+  // Once an item is physically in a Bay, the former rack must not tint the
+  // current Location cell. Rack color remains only for rack/preassignment views.
+  const presentationRackCode = presentation.kind === "bay"
+    ? ""
+    : String(presentation.rackCode || item.rackCode || item.lastRackCode || "").trim();
+  const currentRack = rackForCode(presentationRackCode);
+  const rackState = rackLocationStateV448(item, presentation, currentRack);
+  const rackComplete = rackState?.key === "complete";
   const rackColor = currentRack ? rackSetDisplayColor(rackGroupLabel(currentRack)) : "";
   const resolvedRackColor = rackComplete ? "#2fa84f" : rackColor;
   const rackStyle = resolvedRackColor ? ` style="--rack-location-color:${escapeHtml(resolvedRackColor)}"` : "";
   const historyClass = presentation.historical
     ? ` is-location-history${presentation.kind === "bay" ? " is-bay-history" : " is-rack-history"}`
     : "";
-  const displayBadge = displayLocation
-    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${rackColor ? " rack-location-accent-v349" : ""}" title="${escapeHtml(presentation.title || displayLocation)}">${escapeHtml(displayLocation)}</span>`
+  const explicitHistoryBadge = presentation.historical && presentation.kind !== "preassigned" && presentation.kind !== "bay";
+  const bayStyle = presentation.kind === "bay" ? ` style="${escapeHtml(bayLocationStyleV446(item))}"` : "";
+  const baseBadge = displayLocation
+    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${explicitHistoryBadge ? " has-explicit-prior-v442" : ""}${presentation.kind === "bay" ? " bay-location-accent-v446" : ""}${rackColor ? " rack-location-accent-v349" : ""}"${bayStyle} title="${escapeHtml(presentation.title || displayLocation)}"><span class="location-history-label-v442">${escapeHtml(displayLocation)}</span></span>`
     : "";
 
-  const wrapRackLocation = (content) => resolvedRackColor
+  if (presentation.kind === "bay" && itemCanShowBayLocationDropdownV449(item)) {
+    return bayLocationEditorV449(item, displayLocation);
+  }
+
+  const wrapRackSurface = (content) => resolvedRackColor
     ? `<span class="location-rack-cell-v349${rackComplete ? " is-rack-complete-v353" : ""}"${rackStyle}>${content}</span>`
     : content;
+  const wrapRackLocation = (content) => {
+    const surface = wrapRackSurface(content);
+    if (!rackState || rackState.key === "prior") return surface;
+    return `<span class="location-rack-state-stack-v448 is-${escapeHtml(rackState.key)}"><small class="location-rack-state-v448">${escapeHtml(rackState.label)}</small>${surface}</span>`;
+  };
+
+  if (presentation.kind === "preassigned") {
+    const rackPart = presentation.rackLabel
+      ? `<span class="location-preassigned-rack-v442">${escapeHtml(presentation.rackLabel)}</span>`
+      : "";
+    const bayReference = compactBayReferenceV446(presentation.bayLabel);
+    const bayPart = presentation.bayLabel
+      ? `<span class="location-preassigned-bay-v442 location-preassigned-bay-v446" style="${escapeHtml(bayLocationStyleV446(item))}" title="Preassigned ${escapeHtml(presentation.bayLabel)}"><span>PRE ${escapeHtml(bayReference)}</span></span>`
+      : "";
+    return wrapRackLocation(`<span class="location-preassigned-v442 location-preassigned-v446" title="${escapeHtml(presentation.title || displayLocation)}">${rackPart}${bayPart}</span>`);
+  }
 
   if (!itemCanShowRackLocationDropdown(item)) {
-    return wrapRackLocation(displayBadge);
+    if (explicitHistoryBadge && baseBadge) {
+      // v0.446 regression anchor: <b class="location-history-prior-v442">PRIOR</b>${wrapRackLocation(baseBadge)}
+      const historyKey = rackState?.key || "prior";
+      const historyLabel = rackState?.label || "PRIOR";
+      return `<span class="location-history-stack-v446 location-rack-state-stack-v448 is-${escapeHtml(historyKey)}"><b class="location-history-prior-v442">${escapeHtml(historyLabel)}</b>${wrapRackSurface(baseBadge)}</span>`;
+    }
+    return presentation.kind === "bay" ? baseBadge : wrapRackLocation(baseBadge);
   }
 
   const currentRackCode = String(item.rackCode || "").trim().toUpperCase() === "T" ? "T" : String(item.rackCode || "").trim();
@@ -9088,9 +9402,6 @@ function rackLocationDropdown(item, currentLocation = "") {
     ? locationBadgeClass(currentRackLabel)
     : "location-badge rack location-badge-empty-v350";
 
-  // v0.350: keep the normal Location badge visible while editing. The shared
-  // custom-select trigger is a transparent hit target over the badge, so the
-  // cell does not morph into a form control when a line is selected.
   const control = `
     <label class="line-rack-location-control rack-location-editor-v350" title="Change rack location">
       <span class="${escapeHtml(editorBadgeClass)}${rackColor ? " rack-location-accent-v349" : ""} line-rack-location-display-v350">${escapeHtml(editorLabel)}</span>
@@ -9101,10 +9412,8 @@ function rackLocationDropdown(item, currentLocation = "") {
       </select>
     </label>`;
 
-  // When only historical rack information remains, show it beneath the normal
-  // editable current-location badge instead of presenting history as current.
-  const content = presentation.historical && displayBadge && !currentRackLabel
-    ? `<span class="location-history-stack-v269 is-editable">${control}${displayBadge}</span>`
+  const content = presentation.historical && baseBadge && !currentRackLabel
+    ? `<span class="location-history-stack-v269 is-editable">${control}${baseBadge}</span>`
     : control;
   return wrapRackLocation(content);
 }
@@ -9533,18 +9842,45 @@ async function ensureGlassVisualLookupLibrary({ force = false } = {}) {
   return state.glassVisualLookupPromise;
 }
 
-/** Return the orange traceability ribbon for a Rush line whose priority date moved. */
-function rushDateMoveSourceRibbon(item) {
+/** Return whether this priority line was deliberately moved off the visible delivery date. */
+function priorityDateMovedOutV441(item) {
   const originalDate = String(state.meta?.deliveryDate || "").trim();
   const targetDate = String(item?.priorityDeliveryDate || "").trim();
-  if (!isRushItem(item) || !originalDate || !targetDate || originalDate === targetDate) return "";
-  const orderLabel = [item?.order, item?.item].filter(Boolean).join("-") || item?.job || "Rush order";
+  return Boolean((item?.priorityBanner || isRushItem(item || {}) || isRemakeItem(item || {})) && originalDate && targetDate && originalDate !== targetDate);
+}
+
+/** Resolve the operator-facing priority ribbon label/reason for one line. */
+function priorityBannerMetaV441(item) {
+  const meta = item?.priorityBanner && typeof item.priorityBanner === "object" ? item.priorityBanner : null;
+  if (meta?.label) return meta;
+  if (isRemakeItem(item || {})) return { kind: "remake", label: "Remake", reason: "Imported remake marker" };
+  if (isRushItem(item || {})) return { kind: "rush", label: "Rush", reason: "Priority handling" };
+  return null;
+}
+
+/** Render the compact ribbon immediately above the exact priority line it belongs to. */
+function priorityItemRibbonV441(item, options = {}) {
+  const meta = priorityBannerMetaV441(item);
+  if (!meta) return "";
+  const originalDate = String(options.originalDate || state.meta?.deliveryDate || "").trim();
+  const targetDate = String(options.targetDate || item?.priorityDeliveryDate || "").trim();
+  const moved = Boolean(originalDate && targetDate && originalDate !== targetDate);
+  const targetReference = Boolean(options.targetReference);
+  const kind = ["remake", "missing_glass_rush", "rush"].includes(String(meta.kind || "")) ? String(meta.kind) : "rush";
+  const reason = String(meta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, "").trim() || "Priority handling";
+  const moveText = moved
+    ? targetReference
+      ? `Moved here from ${formatDisplayDate(originalDate)} · Active on ${formatDisplayDate(targetDate)}`
+      : `Moved to ${formatDisplayDate(targetDate)} · Original ${formatDisplayDate(originalDate)} line kept inactive for tracking`
+    : "";
   return `
-    <tr class="rush-date-move-row-v385 is-source" data-rush-date-move-for="${escapeHtml(item.id || "")}">
+    <tr class="priority-line-ribbon-row-v441 is-${escapeHtml(kind)}${targetReference ? " is-target" : ""}" data-priority-ribbon-for="${escapeHtml(item?.id || item?.lineItemId || "")}">
       <td colspan="10">
-        <div class="rush-date-move-ribbon-v385">
-          <span class="rush-date-move-icon-v385" aria-hidden="true"></span>
-          <span><small>RUSH DATE MOVE</small><strong>${escapeHtml(orderLabel)} moved to a new delivery list · ${escapeHtml(formatDisplayDate(targetDate))}</strong><em>Kept on this delivery date for traceability.</em></span>
+        <div class="priority-line-ribbon-v441 is-${escapeHtml(kind)}${targetReference ? " is-target" : ""}">
+          <span class="priority-line-ribbon-flag-v441" aria-hidden="true"></span>
+          <strong>${escapeHtml(meta.label || "Priority")}</strong>
+          <span class="priority-line-ribbon-reason-v441"><small>Reason</small><b>${escapeHtml(reason)}</b></span>
+          ${moveText ? `<span class="priority-line-ribbon-move-v441">${escapeHtml(moveText)}</span>` : ""}
         </div>
       </td>
     </tr>`;
@@ -9569,17 +9905,38 @@ function visibleRushMoveReferencesV385() {
 
 function renderRushMoveReferenceRowsV385() {
   return visibleRushMoveReferencesV385().map((entry) => {
-    const orderLabel = [entry.order, entry.item].filter(Boolean).join("-") || entry.job || "Rush order";
-    const sourceDate = String(entry.originalDeliveryDate || "").trim();
-    const targetDate = String(entry.targetDeliveryDate || state.meta?.deliveryDate || "").trim();
+    const item = {
+      ...entry,
+      id: entry.lineItemId || entry.id || "",
+      scanned: Number(entry.scanned || 0),
+      qty: Number(entry.qty || 0),
+      priorityDeliveryDate: entry.targetDeliveryDate || entry.priorityDeliveryDate || "",
+      priorityBanner: entry.priorityBanner || null,
+    };
+    const status = itemStatus(item);
+    const glassLabel = glassTypeLabel(item);
+    const glassTone = glassToneAttributes(glassLabel);
+    const route = routeLabel(item);
+    const routeTag = route ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>` : "";
+    const locationHtml = rackLocationDropdown(item, locationLabel(item));
+    const markers = [
+      isRemakeItem(item) ? '<span class="row-marker remake-marker">RM</span>' : "",
+      isRushItem(item) ? '<span class="row-marker rush-marker">Rush</span>' : "",
+    ].filter(Boolean).join("");
+    const scanTimePill = scanTimePillMarkupV447(item, entry.targetDeliveryDate || item.priorityDeliveryDate || "");
     return `
-      <tr class="rush-date-move-row-v385 is-target" data-rush-date-move-reference="${escapeHtml(entry.lineItemId || entry.id || "")}">
-        <td colspan="10">
-          <div class="rush-date-move-ribbon-v385 is-target">
-            <span class="rush-date-move-icon-v385" aria-hidden="true"></span>
-            <span><small>RUSH DATE MOVE</small><strong>${escapeHtml(orderLabel)} moved here${sourceDate ? ` from ${escapeHtml(formatDisplayDate(sourceDate))}` : ""}</strong><em>${escapeHtml(entry.customer || entry.job || "Priority order")}${targetDate ? ` · ${escapeHtml(formatDisplayDate(targetDate))}` : ""}</em></span>
-          </div>
-        </td>
+      ${priorityItemRibbonV441(item, { targetReference: true, originalDate: entry.originalDeliveryDate, targetDate: entry.targetDeliveryDate })}
+      <tr class="glass-tone-row priority-date-moved-target-row-v441 ${status === "complete" ? "is-complete" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""}" ${glassTone} data-priority-moved-reference="${escapeHtml(entry.lineItemId || entry.id || "")}">
+        <td class="job-cell-v157"><span class="job-copy-v157 glass-tone-inline" ${glassTone}><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></span>${scanTimePill}</td>
+        <td>${escapeHtml(item.order)}</td>
+        <td>${escapeHtml(item.item)}</td>
+        <td class="qty-cell"><span class="qty-value-v156">${escapeHtml(item.qty || 0)}</span></td>
+        <td>${escapeHtml(item.dimensions || "")}</td>
+        <td>${escapeHtml(item.customer || "")}</td>
+        <td>${markers}</td>
+        <td>${routeTag}</td>
+        <td class="location-cell">${locationHtml}</td>
+        <td>${processPillMarkupV447(item, status, renderProcessState(item))}</td>
       </tr>`;
   }).join("");
 }
@@ -9623,7 +9980,8 @@ function renderItemRow(item) {
   const status = itemStatus(item);
   const glassLabel = glassTypeLabel(item);
   const glassTone = glassToneAttributes(glassLabel);
-  const selected = item.id === state.selectedId;
+  const movedOutByPriorityDate = priorityDateMovedOutV441(item);
+  const selected = !movedOutByPriorityDate && item.id === state.selectedId;
   const route = routeLabel(item);
   const routeTag = route
     ? `<span class="route-tag ${escapeHtml(route.toLowerCase())}">${escapeHtml(route)}</span>`
@@ -9642,21 +10000,8 @@ function renderItemRow(item) {
   const rowError = hasScanError(item);
   const processClass = rowError ? "error" : status;
   const processText = rowError ? item.errorReason || item.lastError || "Scan issue" : renderProcessState(item);
-  const scanTimestamp = formatScanDateTimeParts(item.lastScannedAt);
-  const scanStation = String(item.lastScannedStation || "").trim();
   const displayQty = Math.max(0, Math.trunc(Number(item.qty || 0)));
-  const scanPillTitle = item.lastScannedAt
-    ? `Last scanned ${formatDateTime(item.lastScannedAt)}${scanStation ? ` at ${scanStation}` : ""}`
-    : "";
-  const scanTimePill = item.lastScannedAt
-    ? `<span class="last-scan-pill-v157" title="${escapeHtml(scanPillTitle)}">
-        <span class="last-scan-pill-icon-v157" aria-hidden="true">&#10003;</span>
-        <span class="last-scan-pill-label-v157">Scanned</span>
-        <b>${escapeHtml(scanTimestamp.date)}</b>
-        ${scanTimestamp.time ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">at</span><b>${escapeHtml(scanTimestamp.time)}</b>` : ""}
-        ${scanStation ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">&bull;</span><em>${escapeHtml(scanStation)}</em>` : ""}
-      </span>`
-    : "";
+  const scanTimePill = scanTimePillMarkupV447(item);
   const rejectReason = item.lastRejectReason || "Internal reject";
   const rejectLocation = item.lastRejectLocation || "Unknown process location";
   const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
@@ -9679,12 +10024,15 @@ function renderItemRow(item) {
       </tr>`
     : "";
 
-  const rushMoveRibbon = rushDateMoveSourceRibbon(item);
+  const priorityRibbon = priorityItemRibbonV441(item, { targetReference: false });
+  const rowIdentityAttribute = movedOutByPriorityDate
+    ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"`
+    : `data-id="${escapeHtml(item.id)}"`;
 
   return `
-    ${rushMoveRibbon}
+    ${priorityRibbon}
     ${rejectIncidentRow}
-    <tr class="glass-tone-row ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""}" ${glassTone} data-id="${escapeHtml(item.id)}">
+    <tr class="glass-tone-row ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassTone} ${rowIdentityAttribute}>
       <td class="job-cell-v157"><span class="job-copy-v157 glass-tone-inline" ${glassTone}><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></span>${scanTimePill}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
@@ -9694,7 +10042,7 @@ function renderItemRow(item) {
       <td>${markers}</td>
       <td>${routeTag}</td>
       <td class="location-cell">${locationHtml}</td>
-      <td><span class="process-pill ${processClass}">${escapeHtml(processText)}</span></td>
+      <td>${processPillMarkupV447(item, processClass, processText)}</td>
     </tr>`;
 }
 
@@ -9742,7 +10090,7 @@ function renderTable() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function stagingLists() {
-  return state.lists.filter((list) => /staging/i.test(`${list.stage || ""} ${list.label || ""}`));
+  return state.lists.filter((list) => stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "") === "airport_staging");
 }
 
 /**
@@ -10298,6 +10646,10 @@ function bayLocationDisplayLabel(code = "", name = "") {
     let text = String(value || "").trim();
     if (!text) return "";
     text = text.replace(/^BAY\s+/i, "").trim();
+    // Legacy bay display names can contain doubled separators (for example
+    // 12--1). Normalize those for operator-facing labels without changing the
+    // stored bay code or assignment identity.
+    text = text.replace(/-{2,}/g, "-");
     const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
       || text.match(/^(\d+(?:-\d+)*)$/);
     return match ? `Bay ${match[1]}` : "";
@@ -10320,6 +10672,10 @@ function bayLocationDisplayLabel(code = "", name = "") {
     let text = String(value || "").trim();
     if (!text) return "";
     text = text.replace(/^BAY\s+/i, "").trim();
+    // Legacy bay display names can contain doubled separators (for example
+    // 12--1). Normalize those for operator-facing labels without changing the
+    // stored bay code or assignment identity.
+    text = text.replace(/-{2,}/g, "-");
     const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
       || text.match(/^(\d+(?:-\d+)*)$/);
     return match ? `Bay ${match[1]}` : "";
@@ -11284,6 +11640,36 @@ async function assignLineItemToRack(lineItemId, rackCode, options = {}) {
  * Effects: May update shared client state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+async function assignLineItemToBayV449(lineItemId, bayCode, assignmentId = 0) {
+  const cleanLineItemId = String(lineItemId || "").trim();
+  const cleanBayCode = String(bayCode || "").trim();
+  const item = (state.items || []).find((entry) => String(entry?.id || "") === cleanLineItemId) || null;
+  const currentBayCode = String(item?.bayCode || "").trim();
+  const resolvedAssignmentId = Number(assignmentId || item?.bayAssignmentId || 0);
+  if (!cleanLineItemId || !cleanBayCode || !resolvedAssignmentId || cleanBayCode === currentBayCode) {
+    renderScanPage();
+    return;
+  }
+
+  await fetchJson("/api/indian-trail/move", {
+    method: "POST",
+    body: JSON.stringify({
+      assignmentId: resolvedAssignmentId,
+      newBayCode: cleanBayCode,
+      reason: "Changed from Inbound Scan page",
+      ...requestContext(),
+    }),
+  });
+  if (state.backend) {
+    const baysPayload = await fetchJson("/api/indian-trail/bays");
+    state.bays = baysPayload.bays || [];
+  }
+  if (state.activeListId) await activateList(state.activeListId, false);
+  renderScanPage();
+  playAppSound("bay_moved", { force: true });
+  showFloatingNotice(`Bay location changed to ${bayLocationDisplayLabel(cleanBayCode, "")}.`, "success");
+}
+
 async function clearRack(code) {
   const confirmed = await confirmWebAppAction({
     title: "Clear rack?",
@@ -11708,8 +12094,14 @@ function renderMobileCards() {
         const scanStateLabel = status === "complete" ? "Complete" : status === "partial" ? "Partially scanned" : "Not scanned";
         const route = routeLabel(item) || "Indian Trail";
         const glassLabel = glassTypeLabel(item);
+        const movedOutByPriorityDate = priorityDateMovedOutV441(item);
+        const mobilePriorityMeta = priorityBannerMetaV441(item);
+        const mobilePriorityRibbon = mobilePriorityMeta
+          ? `<div class="mobile-priority-ribbon-v441 is-${escapeHtml(mobilePriorityMeta.kind || "rush")}"><strong>${escapeHtml(mobilePriorityMeta.label || "Priority")}</strong><span>${escapeHtml(String(mobilePriorityMeta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, ""))}</span>${movedOutByPriorityDate ? `<em>Moved to ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate))}</em>` : ""}</div>`
+          : "";
         return `
-          <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)}" ${glassToneAttributes(glassLabel)} data-id="${escapeHtml(item.id)}" data-scan-state="${escapeHtml(status)}">
+          ${mobilePriorityRibbon}
+          <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassToneAttributes(glassLabel)} ${movedOutByPriorityDate ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"` : `data-id="${escapeHtml(item.id)}"`} data-scan-state="${escapeHtml(status)}">
             <header class="mobile-card-heading">
               <span class="mobile-card-job"><small>Job Nr.</small><b>${escapeHtml(item.job || item.product || "Not provided")}</b></span>
               <span class="mobile-card-scan-state ${escapeHtml(status)}" aria-label="${escapeHtml(`${scanStateLabel}: ${scanned} of ${quantity} pieces scanned`)}">
@@ -12322,8 +12714,8 @@ function pendingUpdateMarkerLists(lists = state.lists) {
     byDate.get(deliveryDate).push(list);
   });
   return [...byDate.values()].map((dateLists) =>
-    dateLists.find((list) => /staging/i.test(`${list.stage || ""} ${list.scanner || ""}`))
-    || dateLists.find((list) => /outbound/i.test(`${list.stage || ""} ${list.scanner || ""}`))
+    dateLists.find((list) => stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "") === "airport_staging")
+    || dateLists.find((list) => stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "") === "airport_outbound")
     || dateLists.find((list) => String(list.id || "") === String(state.activeListId || ""))
     || dateLists[0]
   ).filter(Boolean);
@@ -12497,7 +12889,7 @@ function scheduleScanRender() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function isStagingScanContext() {
-  return /staging/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+  return scanContextPresetV445() === "airport_staging";
 }
 
 /**
@@ -12506,7 +12898,7 @@ function isStagingScanContext() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function isOutboundScanContext() {
-  return /outbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+  return scanContextPresetV445() === "airport_outbound";
 }
 
 /**
@@ -12692,7 +13084,7 @@ function renderOutboundRackStatusTools() {
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
 function isIndianTrailScanContext() {
-  return /indian trail|inbound/i.test(`${state.meta?.stage || ""} ${state.meta?.scanner || ""}`);
+  return scanContextPresetV445() === "indian_trail";
 }
 
 /**
@@ -12758,6 +13150,43 @@ function bayAvailableForNewOrderAssignment(bay) {
     bayStatusKind(bay) === "available";
 }
 
+function bayTargetStatusMetaV442(bay) {
+  const kind = bayStatusKind(bay);
+  const meta = {
+    available: { abbr: "AVL", label: "Available" },
+    occupied: { abbr: "OCC", label: "Occupied" },
+    preassigned: { abbr: "PRE", label: "Pre Assigned" },
+    picking: { abbr: "SDI", label: "Picking / SDI" },
+    manual: { abbr: "MAN", label: "Manual Assign" },
+    blocked: { abbr: "BLK", label: "Blocked Scans" },
+  }[kind] || { abbr: "AVL", label: bayStatusLabel(bay) || "Available" };
+  return { kind, ...meta };
+}
+
+function bayTargetOptionHtmlV442(bay, selectedCode = "") {
+  const name = bayLocationDisplayLabel(bay.bayCode, bay.displayName);
+  const status = bayTargetStatusMetaV442(bay);
+  const isSelected = bay.bayCode === selectedCode;
+  const selectable = status.kind === "available" || status.kind === "manual";
+  return `<option value="${escapeHtml(bay.bayCode)}" ${isSelected ? "selected" : ""} ${selectable ? "" : "disabled"} data-bay-selected-label="${escapeHtml(name)}" data-bay-status-badge="${escapeHtml(status.abbr)}" data-bay-status-kind="${escapeHtml(status.kind)}" data-bay-status-label="${escapeHtml(status.label)}">${escapeHtml(name)} ${escapeHtml(status.abbr)}</option>`;
+}
+
+function resetScanBayOverrideToAutoV443() {
+  state.bayOverrideMode = "auto";
+  state.selectedBayOverrideCode = "";
+  if (els.scanBayOverrideMode) els.scanBayOverrideMode.checked = false;
+  if (els.scanBayOverrideSelect) els.scanBayOverrideSelect.value = "";
+  renderScanBayOverrideTools();
+}
+
+async function refreshScanBayOverrideAfterReceiveV443() {
+  if (state.backend) {
+    const payload = await fetchJson("/api/indian-trail/bays");
+    state.bays = payload.bays || [];
+  }
+  resetScanBayOverrideToAutoV443();
+}
+
 function renderScanBayOverrideTools() {
   if (!els.scanBayOverridePanel) return;
   const visible = scanBayOverrideVisible();
@@ -12781,17 +13210,17 @@ function renderScanBayOverrideTools() {
 
   els.scanBayOverridePanel.classList.remove("is-loading");
 
-  const availableBays = state.bays
-    .filter(bayAvailableForNewOrderAssignment)
+  const selectableBays = state.bays
+    .filter((bay) => bay?.active !== false && bayCategoryKind(bay) !== "spacer")
     .sort(bayOverrideSort);
   const grouped = new Map();
-  for (const bay of availableBays) {
+  for (const bay of selectableBays) {
     const label = bayOverrideGroupLabel(bay);
     if (!grouped.has(label)) grouped.set(label, []);
     grouped.get(label).push(bay);
   }
 
-  const selectedBay = availableBays.find((bay) => bay.bayCode === state.selectedBayOverrideCode);
+  const selectedBay = selectableBays.find((bay) => bay.bayCode === state.selectedBayOverrideCode);
   if (!selectedBay && state.selectedBayOverrideCode) state.selectedBayOverrideCode = "";
   if (state.bayOverrideMode !== "manual") state.bayOverrideMode = "auto";
 
@@ -12804,11 +13233,7 @@ function renderScanBayOverrideTools() {
     for (const [label, bays] of grouped.entries()) {
       options.push(`
         <optgroup label="${escapeHtml(label)}">
-          ${bays.map((bay) => {
-            const name = bayLocationDisplayLabel(bay.bayCode, bay.displayName);
-            const status = bay.status ? ` - ${bay.status}` : "";
-            return `<option value="${escapeHtml(bay.bayCode)}">${escapeHtml(name)}${escapeHtml(status)}</option>`;
-          }).join("")}
+          ${bays.map((bay) => bayTargetOptionHtmlV442(bay, state.selectedBayOverrideCode)).join("")}
         </optgroup>
       `);
     }
@@ -12892,14 +13317,33 @@ function miniStat(label, value, detail = "") {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+function timingMetricListsV448(lists = []) {
+  const byDate = new Map();
+  for (const list of lists || []) {
+    const date = String(list?.deliveryDate || "");
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(list);
+  }
+  const selected = [];
+  for (const dateLists of byDate.values()) {
+    const outbound = dateLists.filter((list) => stageCategory(list) === "outbound");
+    if (outbound.length) {
+      selected.push(...outbound);
+      continue;
+    }
+    const staging = dateLists.filter((list) => stageCategory(list) === "staged");
+    selected.push(...(staging.length ? staging : dateLists.slice(0, 1)));
+  }
+  return selected;
+}
+
 function aggregateListStats(lists) {
   const totalLists = lists.length;
   const totalItems = lists.reduce((sum, list) => sum + Number(list.itemCount || 0), 0);
   const totalQty = lists.reduce((sum, list) => sum + Number(list.totalQty || 0), 0);
   const pieceQty = lists.reduce((maxQty, list) => Math.max(maxQty, Number(list.totalQty || 0)), 0);
   const scannedQty = lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
-  const outboundLists = lists.filter((list) => stageCategory(list) === "outbound");
-  const timingLists = outboundLists.length ? outboundLists : lists;
+  const timingLists = timingMetricListsV448(lists);
   const onTimeQty = timingLists.reduce((sum, list) => sum + Number(list.onTimeQty || 0), 0);
   const lateQty = timingLists.reduce((sum, list) => sum + Number(list.lateQty || 0), 0);
   const timedQty = onTimeQty + lateQty;
@@ -13332,9 +13776,14 @@ function statisticsDateBuckets(overviewLists = []) {
     bucket.totalQty += totalQty;
     bucket.scannedQty += scannedQty;
     bucket.remainingQty += Math.max(totalQty - scannedQty, 0);
+    buckets.set(date, bucket);
+  }
+  for (const list of timingMetricListsV448(overviewLists)) {
+    const date = String(list.deliveryDate || "Unscheduled");
+    const bucket = buckets.get(date);
+    if (!bucket) continue;
     bucket.onTimeQty += Number(list.onTimeQty || 0);
     bucket.lateQty += Number(list.lateQty || 0);
-    buckets.set(date, bucket);
   }
   return [...buckets.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
@@ -13401,7 +13850,7 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
       allowDonut: false,
       shareable: false,
       isRate: true,
-      entries: overviewLists
+      entries: timingMetricListsV448(overviewLists)
         .filter((list) => Number(list.onTimeQty || 0) + Number(list.lateQty || 0) > 0)
         .map((list) => ({
           label: statisticsChartListLabel(list),
@@ -14788,19 +15237,55 @@ function homeHubTimelineGroups() {
 
 /** Return the single Airport Rd staging source of truth for Forward View. */
 function homeAirportStagingStats(lists = []) {
-  const candidates = (lists || []).filter((list) => {
-    const signal = `${list?.id || ""} ${list?.stage || ""} ${list?.scanner || ""} ${list?.station || ""} ${list?.label || ""}`.toLowerCase();
-    return stageCategory(list) === "staged" && (signal.includes("airport") || signal.includes("staging"));
-  });
+  const candidates = (lists || []).filter((list) =>
+    stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "") === "airport_staging"
+  );
   const preferred = candidates.find((list) => String(list?.id || "").toLowerCase().endsWith("-staging-airport"))
-    || candidates.find((list) => /airport/.test(`${list?.stage || ""} ${list?.scanner || ""} ${list?.station || ""}`.toLowerCase()))
     || candidates.slice().sort((a, b) => Number(b?.totalQty || 0) - Number(a?.totalQty || 0))[0]
-    || (lists || []).find((list) => stageCategory(list) === "staged")
     || null;
   const totalQty = Math.max(Number(preferred?.totalQty || 0), 0);
   const scannedQty = Math.min(Math.max(Number(preferred?.scannedQty || 0), 0), totalQty || Number(preferred?.scannedQty || 0));
   const percent = totalQty ? (scannedQty / totalQty) * 100 : 0;
   return { list: preferred, totalQty, scannedQty, percent };
+}
+
+/** Build the compact Forward View stage counters in workflow order. */
+function homeForwardStageCountersV431(lists = [], airport = null) {
+  const stageOrder = [
+    ["staged", "STG"],
+    ["outbound", "OUT"],
+    ["received", "IN"],
+    ["pickup", "CPU"],
+    ["greenville", "GNV"],
+    ["dtc", "DTC"],
+  ];
+  const totals = new Map();
+
+  for (const list of lists || []) {
+    const category = stageCategory(list);
+    if (!stageOrder.some(([key]) => key === category)) continue;
+    const current = totals.get(category) || { scannedQty: 0, totalQty: 0 };
+    current.scannedQty += Math.max(Number(list?.scannedQty || 0), 0);
+    current.totalQty += Math.max(Number(list?.totalQty || 0), 0);
+    totals.set(category, current);
+  }
+
+  // Forward View has historically used Airport Road as the authoritative staging
+  // source. Keep that exact source while adding the remaining workflow stages.
+  if (airport?.list) {
+    totals.set("staged", {
+      scannedQty: Math.max(Number(airport.scannedQty || 0), 0),
+      totalQty: Math.max(Number(airport.totalQty || 0), 0),
+    });
+  }
+
+  return stageOrder
+    .filter(([category]) => totals.has(category))
+    .map(([category, shortLabel]) => {
+      const stats = totals.get(category) || { scannedQty: 0, totalQty: 0 };
+      const scannedQty = Math.min(stats.scannedQty, stats.totalQty || stats.scannedQty);
+      return { category, shortLabel, scannedQty, totalQty: stats.totalQty };
+    });
 }
 
 function renderHomeHub() {
@@ -14815,6 +15300,7 @@ function renderHomeHub() {
   if (els.homeDeliveryTimeline) {
     els.homeDeliveryTimeline.innerHTML = timeline.length ? timeline.map((group) => {
       const airport = homeAirportStagingStats(group.lists);
+      const stageCounters = homeForwardStageCountersV431(group.lists, airport);
       const date = parseDateKey(group.date);
       const weekday = date ? date.toLocaleDateString([], { weekday: "short" }) : "Date";
       const isToday = group.date === todayKey();
@@ -14825,8 +15311,14 @@ function renderHomeHub() {
           <span class="home-timeline-progress-v358 home-timeline-progress-v378" role="progressbar" aria-label="${escapeHtml(formatDisplayDate(group.date))} Airport Road staging completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(Math.max(Number(airport.percent || 0), 0), 100)}">
             <i>${Number(airport.percent || 0) > 0 ? `<b style="width:${progressWidth(airport.percent)}%"></b>` : ""}<strong>${formatPercent(airport.percent)}</strong></i>
           </span>
-          <span class="home-timeline-summary-v378 home-timeline-summary-v382 home-timeline-summary-v383">
-            <span class="home-timeline-pieces-v378 home-timeline-airport-pieces-v379 home-timeline-pieces-v383"><i aria-hidden="true"></i><strong>${escapeHtml(airport.scannedQty)} / ${escapeHtml(airport.totalQty)}</strong></span>
+          <span class="home-timeline-summary-v378 home-timeline-summary-v382 home-timeline-summary-v383 home-forward-stage-counters-v431" data-forward-legacy="home-timeline-pieces-v378 home-timeline-pieces-v383" aria-label="Stage piece progress">
+            ${stageCounters.map((counter) => `
+              <span class="home-forward-stage-counter-v431 ${escapeHtml(counter.category)}" title="${escapeHtml(counter.shortLabel)} ${escapeHtml(counter.scannedQty)} / ${escapeHtml(counter.totalQty)} pieces">
+                <i aria-hidden="true"></i>
+                <small>${escapeHtml(counter.shortLabel)}</small>
+                <strong>${escapeHtml(counter.scannedQty)}/${escapeHtml(counter.totalQty)}</strong>
+              </span>
+            `).join("")}
           </span>
         </button>
       `;
@@ -14923,16 +15415,12 @@ function renderHome() {
       : `<div class="admin-empty">No delivery lists match.</div>`;
     els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((details) => {
       details.addEventListener("toggle", () => {
-        details.classList.remove("is-expanding");
         if (!details.open) return;
-        void details.offsetWidth;
-        details.classList.add("is-expanding");
         state.expandedDeliveryDate = details.dataset.deliveryDate || "";
         els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((other) => {
           if (other !== details) other.open = false;
         });
       });
-      details.addEventListener("animationend", () => details.classList.remove("is-expanding"));
     });
   }
   if (els.homePager) {
@@ -15286,10 +15774,12 @@ function indianTrailBayOptionsHtml(selectedCode = "") {
  */
 async function showIndianTrailOutboundReceiveOverride(payload, scanText, options = {}) {
   await ensureScanBayOverrideBays().catch(() => {});
-  const bays = availableIndianTrailBays();
   const item = payload.item || payload.lastScan?.item || {};
   const itemLabel = `${item.order || "Item"}${item.item ? `-${item.item}` : ""}`;
   const spanish = state.language === "es";
+  const existingOrderBayCode = String(payload.existingOrderBayCode || "").trim();
+  const preferredBayCode = existingOrderBayCode || payload.preassignedBayCode || options.bayCode || state.selectedBayOverrideCode || "";
+  const bays = availableIndianTrailBays(preferredBayCode);
 
   const approved = await confirmWebAppAction({
     title: spanish ? "Este artículo no ha sido escaneado en Salida" : "This item has not been scanned Outbound",
@@ -15305,7 +15795,7 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
   });
   if (!approved) return null;
 
-  const defaultBay = payload.preassignedBayCode || options.bayCode || state.selectedBayOverrideCode || bays[0]?.bayCode || "";
+  const defaultBay = preferredBayCode || bays[0]?.bayCode || "";
   return new Promise((resolve) => {
     document.getElementById("indianTrailOutboundOverrideShell")?.remove();
     const shell = document.createElement("div");
@@ -15332,7 +15822,11 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
             <option value="">${spanish ? "Elija una bahía..." : "Choose a bay..."}</option>
             ${indianTrailBayOptionsHtml(defaultBay)}
           </select>
-          ${payload.preassignedBayCode ? `<small>${spanish ? "Bahía preasignada" : "Preassigned bay"}: ${escapeHtml(payload.preassignedBayCode)}</small>` : ""}
+          ${existingOrderBayCode
+            ? `<small class="indian-trail-existing-order-bay-v446">${spanish ? "Bahía ya usada por esta orden" : "Same-order bay recommended"}: ${escapeHtml(bayLocationDisplayLabel(existingOrderBayCode, ""))}</small>`
+            : payload.preassignedBayCode
+              ? `<small>${spanish ? "Bahía preasignada" : "Preassigned bay"}: ${escapeHtml(bayLocationDisplayLabel(payload.preassignedBayCode, ""))}</small>`
+              : ""}
         </label>
         <div class="action-confirm-actions">
           <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-indian-trail-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${spanish ? "Cancelar escaneo" : "Cancel scan"}</span></button>
@@ -15990,7 +16484,7 @@ async function processScanInternal(rawScan, options = {}) {
   if (state.backend) {
     const indianTrailReceive =
       hasPermission("receive_indian_trail") &&
-      /indian trail/i.test(`${state.meta?.stage || ""} ${currentScanStation()}`);
+      isIndianTrailScanContext();
     if (indianTrailReceive) {
       const requestedBayCode = options.bayCode || (state.bayOverrideMode === "manual" ? state.selectedBayOverrideCode || "" : "");
       const usedManualBayAssignment = state.bayOverrideMode === "manual" && Boolean(requestedBayCode);
@@ -16046,15 +16540,19 @@ async function processScanInternal(rawScan, options = {}) {
       }
 
       if (result.ok && usedManualBayAssignment) {
-        // Manual is a one-scan override. A successful receive always returns the
-        // scanner to Auto so the next operator scan cannot inherit a stale bay.
-        state.bayOverrideMode = "auto";
-        state.selectedBayOverrideCode = "";
+        // Manual placement is intentionally a one-scan override. After success,
+        // restore Auto and return the disabled selector to its auto-suggested option.
+        resetScanBayOverrideToAutoV443();
       }
 
       await activateList(result.matchedListId || state.activeListId, false, {
         selectionFallbackId: result.ok ? result.lastScan?.item?.id : "",
       });
+      if (result.ok && usedManualBayAssignment) {
+        await refreshScanBayOverrideAfterReceiveV443().catch(() => {
+          resetScanBayOverrideToAutoV443();
+        });
+      }
       scanFlash(
         result.ok ? "success" : "error",
         result.crossDateSwitched && result.ok
@@ -17004,12 +17502,20 @@ async function runGlobalSearch() {
   if (!hasPermission("global_search")) return [];
   const query = els.headerGlobalSearchInput?.value.trim() || "";
   if (query.length < 2) {
+    state.globalSearchLastQuery = "";
+    state.globalSearchLastResults = [];
     renderGlobalSearchResults([]);
     return [];
   }
-  const payload = await fetchJson(`/api/search?q=${encodeURIComponent(query)}`);
-  renderGlobalSearchResults(payload.results || []);
-  return payload.results || [];
+  const [payload] = await Promise.all([
+    fetchJson(`/api/search?q=${encodeURIComponent(query)}`),
+    ensureGlassVisualLookupLibrary().catch(() => []),
+  ]);
+  const results = payload.results || [];
+  state.globalSearchLastQuery = query;
+  state.globalSearchLastResults = results;
+  renderGlobalSearchResults(results);
+  return results;
 }
 
 /**
@@ -17038,11 +17544,162 @@ function globalSearchProcessClass(text, result = {}) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+/** Return the stage accent used by compact Smart Search result gradients/cells. */
+function globalSearchStageColorV430(result = {}) {
+  const stageKey = globalSearchStageKeyV435(result);
+  return {
+    staging: "#4d74e6",
+    outbound: "#d89a1f",
+    received: "#41b979",
+    cpu: "#9b70dd",
+    greenville: "#43b4c8",
+    dtc: "#e26da4",
+    bay: "#238a72",
+    truck: "#7659c9",
+    rack: "#4f74bd",
+    partial: "#c89020",
+    unscanned: "#94a3b8",
+    default: "#60758d",
+  }[stageKey] || "#60758d";
+}
+
+/** Return a distinct, search-friendly route accent using the maintained route palette. */
+function globalSearchRouteColorV430(route = "") {
+  const raw = String(route || "").trim().toUpperCase();
+  if (!raw) return "#8191a3";
+
+  // Smart Search commonly receives short route codes from imported delivery lists.
+  // Normalize the maintained routes here without changing the underlying route value.
+  if (["IT", "INDIAN TRAIL", "INDIAN-TRAIL"].includes(raw)) return "#3aa667";
+  if (["CPU", "CUSTOMER PICKUP", "CUSTOMER-PICKUP"].includes(raw)) return "#e28a2b";
+  if (["DTC", "DELIVER TO CUSTOMER", "DELIVER-TO-CUSTOMER"].includes(raw)) return "#d65391";
+  if (["GNV", "GRN", "GREENVILLE"].includes(raw)) return "#16a3ad";
+  if (["AIRPORT", "AIRPORT ROAD", "AIRPORT-ROAD", "AR"].includes(raw)) return "#4f7fd3";
+
+  return customerRouteVisualColorV347(raw);
+}
+
 function globalSearchStatusBadges(result) {
-  // Global Search should show one current location/process state, not every stage
-  // on the delivery date. The backend resolves locationText from latest scan state.
-  const label = String(result.locationText || "Not Scanned Yet").trim() || "Not Scanned Yet";
-  return `<small class="global-result-status ${globalSearchProcessClass(label, result)}">${escapeHtml(label)}</small>`;
+  // v0.439: the Stage cell is presentation-owned. Show the administrator's
+  // Lookup Manager display name rather than a physical location such as Truck 2.
+  const label = globalSearchStageDisplayNameV439(result);
+  const processSignal = String(result.locationText || label || "Not Scanned Yet").trim();
+  return `<small class="global-result-status ${globalSearchProcessClass(processSignal, result)}">${escapeHtml(label)}</small>`;
+}
+
+/** Resolve the current Smart Search stage through the Stage Lookup Manager. */
+function globalSearchStageDisplayNameV439(result = {}) {
+  const hasScan = Boolean(result.lastScanTime || Number(result.scanned || 0) > 0);
+  if (!hasScan) return "Not Scanned Yet";
+
+  const definitions = Array.isArray(state.manualEditLookups?.stages) ? state.manualEditLookups.stages : [];
+  const storedStage = String(result.stage || "").trim();
+  const storedStageLower = storedStage.toLowerCase();
+  const exact = definitions.find((definition) => {
+    const display = String(definition?.displayName || definition?.label || "").trim().toLowerCase();
+    const key = String(definition?.key || definition?.value || "").trim().toLowerCase();
+    return Boolean(storedStageLower) && (display === storedStageLower || key === storedStageLower);
+  });
+  if (exact?.displayName || exact?.label) return String(exact.displayName || exact.label).trim();
+
+  const stageKey = globalSearchStageKeyV435(result);
+  const presetByKey = {
+    staging: "airport_staging",
+    outbound: "airport_outbound",
+    received: "indian_trail",
+    cpu: "cpu",
+    greenville: "greenville",
+    dtc: "dtc",
+  };
+  const configured = presetByKey[stageKey] ? configuredStageByPresetV355(presetByKey[stageKey]) : null;
+  if (configured?.displayName) return String(configured.displayName).trim();
+
+  const labels = workflowPresentationV355();
+  const fallbackByKey = {
+    staging: labels.stagingStage,
+    outbound: labels.outboundStage,
+    received: labels.receivingStage,
+    cpu: labels.pickupStage,
+    greenville: labels.branchStage,
+    dtc: labels.directStage,
+  };
+  return String(fallbackByKey[stageKey] || storedStage || result.locationText || "Last scanned stage").trim();
+}
+
+/** Format Smart Search scan timestamps without seconds for a compact status cell. */
+function globalSearchScanDateTimeV439(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString(appLocale(), {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Format Global Search delivery dates as compact M/D/YY values. */
+function globalSearchCompactDateV425(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const parsed = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0)
+    : new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric", year: "2-digit" });
+}
+
+/** Resolve the operational stage used by the v0.435 Smart Search card wash/icon. */
+function globalSearchStageKeyV435(result = {}) {
+  const preset = stagePresetFromValuesV445(result.stage || "", result.scanner || "", result.stagePreset || "");
+  const presetKey = {
+    airport_staging: "staging",
+    airport_outbound: "outbound",
+    indian_trail: "received",
+    cpu: "cpu",
+    greenville: "greenville",
+    dtc: "dtc",
+  }[preset];
+  if (presetKey) return presetKey;
+  const locationSignal = `${result.locationText || ""}`.toLowerCase();
+  if (locationSignal.includes("bay")) return "bay";
+  if (locationSignal.includes("truck")) return "truck";
+  if (locationSignal.includes("rack")) return "rack";
+  if (locationSignal.includes("partial")) return "partial";
+  if (!result.lastScanTime && !Number(result.scanned || 0)) return "unscanned";
+  return "default";
+}
+
+/** Compact line icons used by the v0.433 Smart Search reference-card layout. */
+function globalSearchIconV433(kind) {
+  const icons = {
+    cube: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 7.2 4.1v8.2L12 19.2l-7.2-4.1V6.9L12 2.8Z"/><path d="m4.8 6.9 7.2 4.2 7.2-4.2M12 11.1v8.1"/></svg>`,
+    unscanned: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 20H4v-3M17 20h3v-3"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>`,
+    staging: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 7.2 12 3.8l6.5 3.4v9.6L12 20.2 5.5 16.8V7.2Z" fill="none"/><path d="M5.5 7.2 12 10.6l6.5-3.4M12 10.6v9.6" fill="none"/></svg>`,
+    outbound: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 17.5 17.5 6.5M11 6.5h6.5V13" fill="none"/></svg>`,
+    received: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5M17.5 11v6.5H11" fill="none"/></svg>`,
+    cpu: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Zm0 2.4c-4.1 0-7.4 2.1-7.4 4.8V20h14.8v-.8c0-2.7-3.3-4.8-7.4-4.8Z"/></svg>`,
+    greenville: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 20V9.5L12 5l7.5 4.5V20M8 20v-5h8v5M7.5 12h.01M12 12h.01M16.5 12h.01" fill="none"/></svg>`,
+    dtc: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 10.3 12 4l7.5 6.3V20h-5.4v-5.8H9.9V20H4.5v-9.7Z" fill="none"/></svg>`,
+    calendar: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16"/></svg>`,
+    flag: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V4.2M6 5c4.3-2.3 7 2.1 12-1v9c-5 3.1-7.7-1.3-12 1"/></svg>`,
+    route: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.2 11.1 15.1-6.4-6.4 15.1-2.2-6.5-6.5-2.2Z"/><path d="m10.8 13.2 3.8-3.8"/></svg>`,
+    clock: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>`,
+    scan: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 20H4v-3M17 20h3v-3"/><path d="M7 12h10"/></svg>`,
+  };
+  return `<span class="global-result-chip-icon-v433" aria-hidden="true">${icons[kind] || icons.cube}</span>`;
+}
+
+/** Build the always-present compact Flags cell shown between delivery date and route. */
+function globalSearchPriorityFlagsV425(result) {
+  const remake = Boolean(result?.remake) || isRemakeItem(result || {});
+  const rush = Boolean(result?.rush) || isRushItem(result || {});
+  const stateClass = remake && rush ? "is-both" : remake ? "is-remake" : rush ? "is-rush" : "is-none";
+  const label = remake && rush ? "REMAKE · RUSH" : remake ? "REMAKE" : rush ? "RUSH" : "None";
+  return `<span class="global-result-cell-v430 global-result-flag-v425 global-result-flag-cell-v430 ${stateClass}">${globalSearchIconV433("flag")}<b class="global-result-inline-label-v427">Flags:</b> ${label}</span>`;
 }
 
 /**
@@ -17059,33 +17716,62 @@ function renderGlobalSearchResults(results) {
   }
   els.headerGlobalSearchResults.hidden = false;
   els.headerGlobalSearchResults.innerHTML = results
-    .slice(0, 8)
+    .slice(0, 20)
     .map(
       (result) => {
         const navigationListId = result.navigationDeliveryListId || result.deliveryListId || "";
         const openAttrs = navigationListId
           ? `data-open-list="${escapeHtml(navigationListId)}" data-open-search="${escapeHtml([result.order, result.item].filter(Boolean).join(" "))}"`
           : `data-open-bay="${escapeHtml(result.bayCode || "")}"`;
-        const destinationLabel = result.bay
-          ? `Bay ${result.bay}`
-          : result.rackCode
-            ? (result.rackCode === "T" || /^T\d+$/i.test(String(result.rackCode || "")) || /truck/i.test(result.rackType || "")
-              ? rackDisplayLabelFromParts(result.rackCode, result.rackName, result.rackType)
-              : `Rack ${result.rackName || result.rackCode}`)
-            : result.stage || "";
+        const orderItem = [result.order, result.item].filter(Boolean).join("-") || "No order/item";
+        const glassLabel = glassTypeLabel(result);
+        const originalDeliveryDate = globalSearchCompactDateV425(result.deliveryDate);
+        const priorityDeliveryDate = globalSearchCompactDateV425(result.priorityDeliveryDate);
+        const hasChangedDeliveryDate = Boolean(
+          result.priorityDeliveryDate
+          && String(result.priorityDeliveryDate).trim()
+          && String(result.priorityDeliveryDate).trim() !== String(result.deliveryDate || "").trim(),
+        );
+        const hasScan = Boolean(result.lastScanTime || Number(result.scanned || 0) > 0);
+        const stageKeyV435 = hasScan ? globalSearchStageKeyV435(result) : "unscanned";
+        const stageColor = hasScan ? globalSearchStageColorV430(result) : "#94a3b8";
+        const stageIconV435 = hasScan ? (stageKeyV435 !== "default" ? stageKeyV435 : "cube") : "unscanned";
+        const routeColor = globalSearchRouteColorV430(result.route);
+        const resultStyle = `--global-stage-color:${stageColor};--global-route-color:${routeColor}`;
+        const deliveryDateMarkup = hasChangedDeliveryDate
+          ? `<span class="global-result-cell-v430 global-result-dd-v425 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v427">DD:</b> ${escapeHtml(originalDeliveryDate || "—")} <em>Changed to</em> ${escapeHtml(priorityDeliveryDate || "—")}</span>`
+          : `<span class="global-result-cell-v430 global-result-dd-v425 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v427">DD:</b> ${escapeHtml(originalDeliveryDate || "—")}</span>`;
+        const flagsMarkup = globalSearchPriorityFlagsV425(result);
+        const routeMarkup = `<span class="global-result-cell-v430 global-result-route-v425 global-result-route-cell-v430 global-result-chip-v433">${globalSearchIconV433("route")}<b class="global-result-inline-label-v427">Route:</b> ${escapeHtml(result.route || "—")}</span>`;
+        const searchScanTimingV447 = scanTimingMetaV447(result, result.priorityDeliveryDate || result.deliveryDate || "");
+        const scanMarkup = result.lastScanTime
+          ? `<span class="global-result-stage-scan-divider-v440" aria-hidden="true">•</span><span class="global-result-scan-timing-v447 ${searchScanTimingV447.late ? "is-late-v447" : "is-on-time-v447"}">${globalSearchIconV433("scan")}<b class="global-result-inline-label-v427 global-result-scanned-label-v440">${escapeHtml(searchScanTimingV447.label)}</b> <time class="global-result-stage-scan-time-v440" datetime="${escapeHtml(result.lastScanTime)}">${escapeHtml(globalSearchScanDateTimeV439(result.lastScanTime))}</time></span>`
+          : "";
+        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Stage:</b> ${globalSearchStatusBadges(result)}${scanMarkup}</span>`;
 
         return `
-        <button type="button" ${openAttrs}>
-          <div class="global-result-main">
-            <strong>${escapeHtml(result.order)}-${escapeHtml(result.item)}</strong>
-            <span>${escapeHtml(result.customer || "No customer")}</span>
-          </div>
-          <span class="global-result-job">${escapeHtml(result.job || result.product || "No job/product")}</span>
-          <span class="global-result-meta">${escapeHtml(destinationLabel)}${result.deliveryDate ? ` • ${escapeHtml(formatDisplayDate(result.deliveryDate))}` : ""}</span>
-          <div class="global-result-status-row">
-            ${globalSearchStatusBadges(result)}
-            ${result.lastScanTime ? `<time class="global-result-scan-time-v321" datetime="${escapeHtml(result.lastScanTime)}">Scanned ${escapeHtml(formatDateTime(result.lastScanTime))}</time>` : ""}
-          </div>
+        <button type="button" ${openAttrs} class="global-result-card-v425 global-result-line-v426 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"}" style="${escapeHtml(resultStyle)}">
+          <span class="global-result-leading-icon-v433 global-result-leading-stage-icon-v435" aria-hidden="true">${globalSearchIconV433(stageIconV435)}</span>
+          <span class="global-result-content-v433">
+            <span class="global-result-primary-v426 global-result-primary-v433">
+              <strong class="global-result-order-v426 global-result-order-v433">${escapeHtml(orderItem)}</strong>
+              <span class="global-result-job-v426 global-result-meta-v433"><b class="global-result-inline-label-v427">Job:</b> ${escapeHtml(result.job || "—")}</span>
+              <span class="global-result-customer-v426 global-result-meta-v433"><b class="global-result-inline-label-v427">Customer:</b> ${escapeHtml(result.customer || "No customer")}</span>
+            </span>
+            <span class="global-result-glass-v426 global-result-glass-v433">
+              <span class="global-result-size-v426 global-result-plain-field-v433"><b class="global-result-inline-label-v427">Size:</b> ${escapeHtml(result.dimensions || "—")}</span>
+              <span class="global-result-dot-v433" aria-hidden="true">•</span>
+              <span class="global-result-qty-v426 global-result-plain-field-v433"><b class="global-result-inline-label-v427">Qty:</b> ${escapeHtml(result.qty ?? 0)}</span>
+              <span class="global-result-dot-v433" aria-hidden="true">•</span>
+              <span class="global-result-cell-v430 global-result-type-v427 global-result-type-cell-v430 global-result-type-chip-v433" ${glassToneAttributes(glassLabel)}><b class="global-result-inline-label-v427">Type:</b> <span class="global-result-glass-text-v426">${escapeHtml(glassLabel)}</span></span>
+            </span>
+            <span class="global-result-delivery-v426 global-result-chips-v433">
+              ${deliveryDateMarkup}
+              ${flagsMarkup}
+              ${routeMarkup}
+              ${stageScanMarkup}
+            </span>
+          </span>
         </button>
       `;
       },
@@ -19866,6 +20552,10 @@ function updateBayScannerCommandState() {
   if (els.bayScanOutInput) {
     els.bayScanOutInput.placeholder = adding ? "Scan order to add to selected bay..." : "Scan order to remove from bay...";
   }
+  if (els.bayManualQtyInput) {
+    els.bayManualQtyInput.disabled = !adding;
+    if (!adding) els.bayManualQtyInput.value = "1";
+  }
 }
 
 /**
@@ -19873,12 +20563,16 @@ function updateBayScannerCommandState() {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
-async function runBayScan(barcode, { isManual = false, outboundOverride = false, bayCodeOverride = "" } = {}) {
+async function runBayScan(barcode, { isManual = false, scanQty = 1, outboundOverride = false, bayCodeOverride = "" } = {}) {
   const cleanBarcode = String(barcode || "").trim();
   if (!cleanBarcode) throw new Error("Enter or scan an item before submitting.");
 
   const selectedBayCode = String(bayCodeOverride || els.bayScanBayInput?.value || "").trim();
   const adding = Boolean(els.bayScanModeToggle?.checked);
+  const requestedScanQty = Math.trunc(Number(scanQty || 1));
+  if (isManual && (!Number.isFinite(requestedScanQty) || requestedScanQty < 1 || requestedScanQty > 999)) {
+    throw new Error("Manual scan quantity must be between 1 and 999.");
+  }
   if (adding && !selectedBayCode) throw new Error("Choose a target bay before adding an item.");
 
   const path = adding ? "/api/indian-trail/receive" : "/api/indian-trail/scan-out";
@@ -19890,6 +20584,7 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
         allowReceivedOverride: true,
         outboundOverride,
         isManual,
+        scanQty: isManual ? requestedScanQty : 1,
       }
     : {
         barcode: cleanBarcode,
@@ -19904,7 +20599,7 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
   if (result.outboundOverrideRequired) {
     const decision = await showIndianTrailOutboundReceiveOverride(result, cleanBarcode, { bayCode: selectedBayCode, isManual });
     if (!decision) return null;
-    return runBayScan(cleanBarcode, { isManual, outboundOverride: true, bayCodeOverride: decision.bayCode });
+    return runBayScan(cleanBarcode, { isManual, scanQty: requestedScanQty, outboundOverride: true, bayCodeOverride: decision.bayCode });
   }
   if (!result.ok) throw new Error(result.message || "Bay scan was not accepted.");
 
@@ -19927,6 +20622,7 @@ async function runBayScan(barcode, { isManual = false, outboundOverride = false,
         allowReceivedOverride: true,
         outboundOverride: true,
         isManual,
+        scanQty: isManual ? requestedScanQty : 1,
         reason: "Redo bay receive",
       }),
     });
@@ -19970,9 +20666,15 @@ async function submitManualBayScan() {
   if (!reference) {
     throw new Error("Enter the order and item together, for example 236505001, 236505 1, 236505.1, or 236505/1.");
   }
-  const result = await runBayScan(reference.barcode, { isManual: true });
+  const adding = Boolean(els.bayScanModeToggle?.checked);
+  const scanQty = adding ? Math.trunc(Number(els.bayManualQtyInput?.value || 1)) : 1;
+  if (!Number.isFinite(scanQty) || scanQty < 1 || scanQty > 999) {
+    throw new Error("Manual scan quantity must be between 1 and 999.");
+  }
+  const result = await runBayScan(reference.barcode, { isManual: true, scanQty });
   if (!result) return;
   if (els.bayManualReferenceInput) els.bayManualReferenceInput.value = "";
+  if (els.bayManualQtyInput) els.bayManualQtyInput.value = "1";
   els.bayManualReferenceInput?.focus();
 }
 
@@ -23726,6 +24428,8 @@ function printSelectionFilters(filteredRows = printFilteredRows()) {
 /** Build the POST payload that locks preview and output to the same exact rows. */
 function printBackendSelectionPayload() {
   const rows = printFilteredRows();
+  // Keep the exact serialized payload contract visible in-source for the maintained
+  // preview/print parity checks: JSON.stringify(printBackendSelectionPayload())
   return {
     listIds: selectedPrintListIds(),
     filters: printSelectionFilters(rows),
@@ -23984,12 +24688,15 @@ function renderPrintDocumentPreview(preview = {}) {
   const pages = [];
   for (const sheet of sheets) {
     const chunks = paginatePrintSheetRows(sheet.rows || [], orientation);
-    chunks.forEach((chunk, index) => pages.push(printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt, "is-preview")));
+    chunks.forEach((chunk, index) => {
+      const sheetMarkup = printSheetPageMarkup(sheet, chunk, index + 1, chunks.length, orientation, preview.generatedAt, "is-preview");
+      pages.push(`<div class="print-preview-page-shell-v443 is-${escapeHtml(orientation)}">${sheetMarkup}</div>`);
+    });
   }
   if (els.printPreviewPageCount) els.printPreviewPageCount.textContent = `${Math.max(pages.length, 1)} page${pages.length === 1 ? "" : "s"} · ${copies} cop${copies === 1 ? "y" : "ies"}`;
   els.printDocumentPaper.classList.toggle("is-landscape", orientation === "landscape");
   els.printDocumentPaper.classList.toggle("is-portrait", orientation !== "landscape");
-  els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<section class="delivery-print-sheet-v203 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section>`;
+  els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<div class="print-preview-page-shell-v443 is-${orientation}"><section class="delivery-print-sheet-v203 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section></div>`;
 }
 
 /** Return the zoom needed to fit one Letter sheet inside the preview width. */
@@ -24819,8 +25526,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260820-v0.352", window.location.href).href,
-    new URL("static/css/print.css?v=20260820-v0.352", window.location.href).href,
+    new URL("static/css/styles.css?v=20260826-v0.449", window.location.href).href,
+    new URL("static/css/print.css?v=20260826-v0.449", window.location.href).href,
   ];
 }
 
@@ -26078,10 +26785,10 @@ function deliveryUpdatePreviewLocationKey(item = {}) {
 
   // Older removal snapshots did not always retain ROUTE. Use the stage only as
   // a legacy fallback; current outbound snapshots are classified by item route.
-  const stageText = `${item.stage || ""} ${item.scanner || ""}`.toLowerCase();
-  if (stageText.includes("dtc") || stageText.includes("deliver to customer")) return "dtc";
-  if (stageText.includes("greenville") || /\bgnv\b/.test(stageText)) return "greenville";
-  if (stageText.includes("customer pickup") || /\bcpu\b/.test(stageText)) return "cpu";
+  const preset = stagePresetFromValuesV445(item.stage || "", item.scanner || "", item.stagePreset || "");
+  if (preset === "dtc") return "dtc";
+  if (preset === "greenville") return "greenville";
+  if (preset === "cpu") return "cpu";
   return "indian-trail";
 }
 
@@ -35803,7 +36510,7 @@ function rackDetailsModalHtml(rack) {
         <details class="rack-modal-date-group" open>
           <summary>
             <strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong>
-            <span>${escapeHtml(rows.length)} lines · ${escapeHtml(pieceQty)} pcs</span>
+            <span class="rack-modal-date-count-v442">${escapeHtml(rows.length)} line${rows.length === 1 ? "" : "s"} · ${escapeHtml(pieceQty)} pc${pieceQty === 1 ? "" : "s"}</span>
             ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${moveBlockedReason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"` : `title="Move this delivery date"`} aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
           </summary>
           <div class="rack-modal-date-lines">${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
@@ -38508,7 +39215,8 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
   if (!params.get("list")) {
     const today = todayKey();
     const todayStaging = state.lists.find((list) =>
-      String(list.deliveryDate || "") === today && /staging/i.test(`${list.stage || ""} ${list.scanner || ""}`)
+      String(list.deliveryDate || "") === today
+      && stagePresetFromValuesV445(list?.stage || "", list?.scanner || "", list?.stagePreset || "") === "airport_staging"
     );
     if (todayStaging) {
       await activateList(todayStaging.id, false);
@@ -38790,7 +39498,9 @@ function wireEvents() {
       return;
     }
 
-    replayExpandableListAnimation(details);
+    // Home Delivery Library uses one CSS-owned expansion animation. Do not
+    // force/replay it here; doing so caused a visible flash and a second motion.
+    return;
   }, true);
 
   els.loginForm?.addEventListener("submit", async (event) => {
@@ -39057,10 +39767,22 @@ function wireEvents() {
     const listIds = state.lists.filter((list) => !date || list.deliveryDate === date).map((list) => list.id);
     openPrintOptions({ date, listIds });
   });
-  els.headerGlobalSearchBtn?.addEventListener("click", () => runGlobalSearch().catch((error) => showInlineError(error.message)));
   els.headerGlobalSearchInput?.addEventListener("input", () => {
     window.clearTimeout(runGlobalSearch._timer);
     runGlobalSearch._timer = window.setTimeout(() => runGlobalSearch().catch((error) => showInlineError(error.message)), 180);
+  });
+  els.headerGlobalSearchInput?.addEventListener("focus", () => {
+    const query = els.headerGlobalSearchInput?.value.trim() || "";
+    if (query.length < 2 || !els.headerGlobalSearchResults) return;
+    if (state.globalSearchLastQuery === query) {
+      if (!els.headerGlobalSearchResults.innerHTML && state.globalSearchLastResults.length) {
+        renderGlobalSearchResults(state.globalSearchLastResults);
+      } else {
+        els.headerGlobalSearchResults.hidden = false;
+      }
+      return;
+    }
+    runGlobalSearch().catch((error) => showInlineError(error.message));
   });
   els.headerGlobalSearchInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -39188,9 +39910,21 @@ function wireEvents() {
 
     const clickedLineItem = target.closest("#listRows tr[data-id], #mobileListCards [data-id]");
     const clickedRackLocationControl = target.closest(".line-rack-location-control, [data-line-rack-select]");
-    if (!clickedLineItem && !clickedRackLocationControl) clearSelectedLineItem();
+    const clickedBayLocationControl = target.closest(".line-bay-location-control-v449, [data-line-bay-select-v449]");
+    if (!clickedLineItem && !clickedRackLocationControl && !clickedBayLocationControl) clearSelectedLineItem();
   });
   document.addEventListener("change", (event) => {
+    const baySelect = event.target.closest("[data-line-bay-select-v449]");
+    if (baySelect) {
+      event.preventDefault();
+      event.stopPropagation();
+      assignLineItemToBayV449(
+        baySelect.dataset.lineBaySelectV449 || "",
+        baySelect.value || "",
+        Number(baySelect.dataset.bayAssignmentIdV449 || 0),
+      ).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const rackSelect = event.target.closest("[data-line-rack-select]");
     if (!rackSelect) return;
 
@@ -40667,7 +41401,7 @@ function wireEvents() {
 
     if (
       els.headerGlobalSearchResults &&
-      !event.target.closest(".global-search") &&
+      !event.target.closest(".header-search") &&
       !event.target.closest("#headerGlobalSearchResults")
     ) {
       els.headerGlobalSearchResults.hidden = true;
@@ -41352,7 +42086,7 @@ function wireEvents() {
       return;
     }
 
-    if (event.target.closest(".line-rack-location-control, [data-line-rack-select]")) {
+    if (event.target.closest(".line-rack-location-control, [data-line-rack-select], .line-bay-location-control-v449, [data-line-bay-select-v449]")) {
       event.stopPropagation();
       return;
     }
@@ -41365,6 +42099,10 @@ function wireEvents() {
       saveState();
       if (!isClearingCurrentSelection && canAssignRackLocation()) {
         ensureRacksLoaded()
+          .then(() => renderScanPage())
+          .catch((error) => showInlineError(error.message, true));
+      } else if (!isClearingCurrentSelection && canAssignBayLocationV449()) {
+        ensureScanBayOverrideBays()
           .then(() => renderScanPage())
           .catch((error) => showInlineError(error.message, true));
       } else {

@@ -344,8 +344,52 @@ def stage_definition_for_text(stage: Any, scanner: Any = "") -> dict[str, Any] |
     return None
 
 def stage_logic_preset(stage: Any, scanner: Any = "") -> str:
+    """Resolve one delivery-list row to its stable maintained behavior preset.
+
+    The Stage Editor may rename both the operator-facing stage and scanner labels.
+    Operational code must therefore never depend on the current English wording.
+    Resolve the active configured definition first, then maintained legacy aliases
+    so pre-existing delivery-list rows keep working after a rename.
+    """
     definition = stage_definition_for_text(stage, scanner)
-    return str(definition.get("preset") or "") if definition else ""
+    if definition:
+        return str(definition.get("preset") or "").strip().lower()
+
+    stage_text = str(stage or "").strip().lower()
+    scanner_text = str(scanner or "").strip().lower()
+    if stage_text:
+        for preset in ("airport_staging", "airport_outbound", "indian_trail", "greenville", "cpu", "dtc"):
+            aliases = {str(alias or "").strip().lower() for alias in stage_name_aliases_for_preset(preset)}
+            if stage_text in aliases:
+                return preset
+
+    # Scanner labels are secondary because multiple stages can share one station,
+    # but they are useful when older metadata has a blank or partially migrated
+    # stage label and the configured scanner is unique.
+    if scanner_text:
+        scanner_matches = {
+            str(item.get("preset") or "").strip().lower()
+            for item in _STAGE_DEFINITION_CACHE
+            if str(item.get("scanner") or "").strip().lower() == scanner_text
+        }
+        scanner_matches.discard("")
+        if len(scanner_matches) == 1:
+            return next(iter(scanner_matches))
+
+    signal = f"{stage_text} {scanner_text}".strip()
+    if "outbound" in signal:
+        return "airport_outbound"
+    if "staging" in signal or "staged" in signal:
+        return "airport_staging"
+    if "indian trail" in signal or "inbound" in signal or "received" in signal:
+        return "indian_trail"
+    if "customer pickup" in signal or re.search(r"\bcpu\b", signal):
+        return "cpu"
+    if "greenville" in signal or re.search(r"\bgnv\b", signal):
+        return "greenville"
+    if "deliver to customer" in signal or re.search(r"\bdtc\b", signal):
+        return "dtc"
+    return ""
 
 def stage_profile_selector(definition: dict[str, Any]) -> str:
     preset = str(definition.get("preset") or "airport_staging")
@@ -374,6 +418,54 @@ def stage_definition_for_preset(preset: str, route_code: str = "") -> dict[str, 
                 continue
         return definition
     return None
+
+
+def stage_name_aliases_for_preset(preset: str, route_code: str = "") -> list[str]:
+    """Return every maintained delivery-list stage label that maps to one preset.
+
+    Operator-facing stage names became editable in v0.346, but older delivery-list
+    copies can still exist in the database under their previous English names. This
+    helper lets queries resolve by stable behavior preset while still matching both
+    the active configured label and the maintained legacy aliases.
+    """
+    clean_preset = str(preset or "").strip().lower()
+    if not clean_preset:
+        return []
+    names: list[str] = []
+
+    def add_name(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in names:
+            names.append(text)
+
+    definition = stage_definition_for_preset(clean_preset, route_code)
+    if definition:
+        add_name(definition.get("displayName"))
+        add_name(definition.get("label"))
+        add_name(definition.get("key"))
+
+    preset_meta = STAGE_PRESET_CATALOG.get(clean_preset, {})
+    add_name(preset_meta.get("label"))
+
+    legacy_aliases = {
+        "airport_staging": ["Staging", "Staging - Airport Rd", "Airport Staging"],
+        "airport_outbound": ["Outbound", "Outbound - Airport Rd", "Airport Outbound"],
+        "indian_trail": ["Inbound", "Inbound - Indian Trail", "Indian Trail", "Indian Trail Receiving"],
+        "greenville": ["BFS Greenville", "Greenville"],
+        "cpu": ["Customer Pickup", "CPU"],
+        "dtc": ["DTC", "DTC - Deliver to Customer", "Deliver to Customer"],
+    }
+    for alias in legacy_aliases.get(clean_preset, []):
+        add_name(alias)
+    return names
+
+
+def stage_where_clause(column: str, preset: str, route_code: str = "") -> tuple[str, list[Any]]:
+    """Build a stable SQL predicate for one configured stage behavior preset."""
+    aliases = stage_name_aliases_for_preset(preset, route_code)
+    if not aliases:
+        return f"{column} = ?", [preset]
+    return "(" + " OR ".join(f"{column} = ?" for _ in aliases) + ")", aliases
 CPU_DESTINATION_ADDRESS = "1709 Airport Rd, Monroe, NC 28110"
 INDIAN_TRAIL_DESTINATION_ADDRESS = "3980 Matthews Indian Trail Rd, Matthews, NC 28104"
 GREENVILLE_DESTINATION_ADDRESS = "Greenville address pending"
@@ -1873,12 +1965,15 @@ def list_meta(row: sqlite3.Row) -> dict[str, Any]:
     Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
     """
     keys = set(row.keys())
+    stage_preset = stage_logic_preset(row["stage"], row["scanner"])
     return {
         "id": row["id"],
         "label": row["label"],
         "deliveryDate": row["delivery_date"],
         "stage": row["stage"],
         "scanner": row["scanner"],
+        "stagePreset": stage_preset,
+        "stageCategory": STAGE_PRESET_CATALOG.get(stage_preset, {}).get("category", scan_stage_category(row["stage"], row["scanner"])),
         "status": row["status"],
         "revision": row["revision"],
         "updatedAt": str(row["updated_at_utc"] or "") if "updated_at_utc" in keys else "",
@@ -1983,7 +2078,8 @@ class BaseDeliveryStore:
         references: list[dict[str, Any]] = []
         current_category = scan_stage_category(current_stage, current_scanner)
         for row in rows:
-            if not is_rush_item(item_from_row(row)):
+            priority_item = item_from_row(row)
+            if not (is_rush_item(priority_item) or is_remake_item(priority_item)):
                 continue
             original_list_id = str(row_value(row, "original_list_id") or "").strip()
             original_date = str(row_value(row, "original_delivery_date") or "").strip()
@@ -2026,11 +2122,34 @@ class BaseDeliveryStore:
                     "customer": str(row_value(row, "customer") or ""),
                     "product": str(row_value(row, "product") or ""),
                     "dimensions": str(row_value(row, "dimensions") or ""),
+                    "sourceId": str(row_value(row, "source_id") or ""),
                     "route": str(row_value(row, "route") or ""),
                     "qty": int(row_value(row, "qty", 0) or 0),
+                    "scanned": int(row_value(row, "scanned_qty", 0) or 0),
                     "processState": str(row_value(row, "process_state") or ""),
+                    "queueState": str(row_value(row, "queue_state") or ""),
+                    "priorityDeliveryDate": target_date,
                 }
             )
+        if references:
+            source_items_by_id: dict[str, dict[str, Any]] = {}
+            for source_list_id in sorted({str(reference.get("originalListId") or "") for reference in references if reference.get("originalListId")}):
+                for source_item in self._get_line_items(con, source_list_id):
+                    source_items_by_id[str(source_item.get("id") or "")] = source_item
+            for reference in references:
+                source_item = source_items_by_id.get(str(reference.get("lineItemId") or ""), {})
+                for key in (
+                    "scanned", "rackCode", "rackName", "rackType", "lastRackCode", "lastRackName", "lastRackType",
+                    "bayCode", "bayName", "lastBayCode", "lastBayName", "lastScannedAt", "lastScannedStation",
+                    "received", "receivedQty", "receivedStage",
+                ):
+                    if key in source_item:
+                        reference[key] = source_item.get(key)
+            annotations = self.priority_banner_annotations(con, references)
+            for reference in references:
+                annotation = annotations.get(str(reference.get("lineItemId") or reference.get("id") or ""))
+                if annotation:
+                    reference["priorityBanner"] = annotation
         return references
     def get_admin_delivery_list_catalog(
         self,
@@ -2046,6 +2165,123 @@ class BaseDeliveryStore:
         paged catalog for this GUI.
         """
         raise NotImplementedError
+
+    def priority_banner_annotations(self, con: Any, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Return active Rush/Remake banner metadata keyed by exact line-item id.
+
+        Existing-order Priority Work marks are treated as Missing Glass Rush for
+        Rush lines because that workflow is the maintained Missing Glass intake.
+        Pre-import priority requests remain plain Rush/Remake. Source-provided RM
+        markers receive a traceable fallback reason when no operator audit exists.
+        """
+        if not items:
+            return {}
+        ids = [str(item.get("lineItemId") or item.get("id") or "").strip() for item in items]
+        ids = [value for value in ids if value]
+        latest_by_id: dict[str, dict[str, Any]] = {}
+        if ids:
+            for offset in range(0, len(ids), 400):
+                chunk = ids[offset:offset + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = con.execute(
+                    f"""
+                    SELECT id, entity_id, action, reason, payload_json, created_at
+                    FROM audit_events
+                    WHERE entity_type = 'line_item'
+                      AND entity_id IN ({placeholders})
+                      AND action IN ('mark_rush_sdi','mark_remake_sdi','clear_rush_priority','clear_rush_remake_sdi')
+                    ORDER BY id DESC
+                    """,
+                    tuple(chunk),
+                ).fetchall()
+                for row in rows:
+                    line_id = str(row_value(row, "entity_id") or "")
+                    if line_id in latest_by_id:
+                        continue
+                    try:
+                        payload = json.loads(row_value(row, "payload_json") or "{}")
+                    except Exception:
+                        payload = {}
+                    latest_by_id[line_id] = {
+                        "action": str(row_value(row, "action") or ""),
+                        "reason": str((payload or {}).get("reason") or row_value(row, "reason") or ""),
+                        "responsible": str((payload or {}).get("responsible") or ""),
+                        "createdAt": str(row_value(row, "created_at") or ""),
+                    }
+
+        intake_requests = [request for request in self._priority_intake_requests_con(con) if request.get("status") == "matched"]
+        result: dict[str, dict[str, Any]] = {}
+        for item in items:
+            line_id = str(item.get("lineItemId") or item.get("id") or "").strip()
+            if not line_id:
+                continue
+            audit = latest_by_id.get(line_id, {})
+            action = str(audit.get("action") or "")
+            if action == "mark_rush_sdi":
+                reason = re.sub(r"^\s*(?:Rush|SDI)\s*-\s*", "", str(audit.get("reason") or ""), flags=re.I).strip()
+                result[line_id] = {
+                    "kind": "missing_glass_rush",
+                    "label": "Missing Glass Rush",
+                    "reason": reason or "Missing glass priority handling",
+                    "responsible": str(audit.get("responsible") or ""),
+                    "createdAt": str(audit.get("createdAt") or ""),
+                }
+                continue
+            if action == "mark_remake_sdi":
+                reason = re.sub(r"^\s*Remake\s*-\s*", "", str(audit.get("reason") or ""), flags=re.I).strip()
+                result[line_id] = {
+                    "kind": "remake",
+                    "label": "Remake",
+                    "reason": reason or "Remake priority handling",
+                    "responsible": str(audit.get("responsible") or ""),
+                    "createdAt": str(audit.get("createdAt") or ""),
+                }
+                continue
+            if action in {"clear_rush_priority", "clear_rush_remake_sdi"}:
+                continue
+
+            source_key = self.import_order_item_key(item.get("sourceId"), item.get("order"), item.get("item"))
+            item_job = self.priority_intake_job_parts(item.get("job"))
+            matched_request = next((
+                request for request in intake_requests
+                if source_key in {str(value) for value in (request.get("matchedSourceKeys") or [])}
+                or (
+                    item_job.get("normalized")
+                    and self.priority_intake_job_parts(request.get("matchedJob")).get("normalized") == item_job.get("normalized")
+                )
+            ), None)
+            if matched_request:
+                priority_type = str(matched_request.get("priorityType") or "Rush").title()
+                result[line_id] = {
+                    "kind": "remake" if priority_type == "Remake" else "rush",
+                    "label": priority_type,
+                    "reason": str(matched_request.get("reason") or "Priority handling"),
+                    "responsible": str(matched_request.get("responsible") or ""),
+                    "createdAt": str(matched_request.get("createdAt") or ""),
+                }
+                continue
+
+            normalized_item = {
+                "processState": item.get("processState", ""),
+                "queueState": item.get("queueState", ""),
+            }
+            if is_remake_item(normalized_item):
+                result[line_id] = {
+                    "kind": "remake",
+                    "label": "Remake",
+                    "reason": "Imported remake marker",
+                    "responsible": "",
+                    "createdAt": "",
+                }
+            elif is_rush_item(normalized_item):
+                result[line_id] = {
+                    "kind": "rush",
+                    "label": "Rush",
+                    "reason": "Priority handling",
+                    "responsible": "",
+                    "createdAt": "",
+                }
+        return result
 
     def get_delivery_list(self, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Read delivery list for the delivery-list scanner workflow.
@@ -4019,8 +4255,10 @@ class BaseDeliveryStore:
                 "deliveryListId": row["list_id"],
                 "deliveryList": row["label"],
                 "deliveryDate": row["delivery_date"],
+                "priorityDeliveryDate": str(row_value(row, "priority_delivery_date", "") or ""),
                 "stage": row["stage"],
                 "scanner": row["scanner"],
+                "stagePreset": stage_logic_preset(row["stage"], row["scanner"]),
                 "barcode": row["barcode"],
                 "sourceId": row["source_id"],
                 "order": row["order_no"],
@@ -4058,7 +4296,15 @@ class BaseDeliveryStore:
                 "_transportCode": "",
                 "_bayLabel": "",
                 "_preassignedBay": "",
+                "_rush": is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
+                "_remake": is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
             })
+
+            priority_delivery_date = str(row_value(row, "priority_delivery_date", "") or "").strip()
+            if priority_delivery_date:
+                result["priorityDeliveryDate"] = priority_delivery_date
+            result["_rush"] = bool(result.get("_rush")) or is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]})
+            result["_remake"] = bool(result.get("_remake")) or is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]})
 
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
@@ -4091,6 +4337,7 @@ class BaseDeliveryStore:
                 result["lineItemId"] = row["id"]
                 result["stage"] = row["stage"]
                 result["scanner"] = row["scanner"]
+                result["stagePreset"] = stage_logic_preset(row["stage"], row["scanner"])
                 result["scanned"] = row["scanned_qty"]
                 result["processState"] = row["process_state"]
                 result["queueState"] = row["queue_state"]
@@ -4137,6 +4384,8 @@ class BaseDeliveryStore:
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            result["rush"] = bool(result.get("_rush"))
+            result["remake"] = bool(result.get("_remake"))
             result["navigationDeliveryListId"] = result.get("deliveryListId")
             result["navigationStage"] = result.get("stage")
             if result.get("_transportCode") and not result.get("rackCode"):
@@ -4145,7 +4394,7 @@ class BaseDeliveryStore:
                 if key.startswith("_"):
                     result.pop(key, None)
             cleaned_results.append(result)
-        return cleaned_results[:30]
+        return cleaned_results[:20]
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Update line item for the delivery-list scanner workflow.
@@ -4906,7 +5155,7 @@ class BaseDeliveryStore:
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-        if not list_row or "staging" not in str(list_row["stage"] or "").lower():
+        if not list_row or stage_logic_preset(list_row["stage"], list_row["scanner"]) != "airport_staging":
             return
         customer = str(scanned_row["customer"] or "").strip()
         if not customer:
@@ -5307,6 +5556,164 @@ class BaseDeliveryStore:
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         raise NotImplementedError
+
+    def reconcile_indian_trail_override_stages(
+        self,
+        con: sqlite3.Connection,
+        list_row: sqlite3.Row,
+        inbound_row: sqlite3.Row,
+        target_received_qty: int,
+        barcode: str,
+        canonical: str,
+        user: str,
+        station: str,
+    ) -> dict[str, Any]:
+        """Backfill Staging and Outbound when Indian Trail explicitly overrides them.
+
+        Indian Trail override means the physical glass is now at the receiving site.
+        Keeping prerequisite stage copies at zero makes stage progress, audit history,
+        and downstream reporting contradict physical reality. Bring both maintained
+        prerequisite copies up to the received quantity and record explicit system
+        events so this reconciliation stays visible rather than masquerading as a
+        normal floor scan.
+        """
+        target_qty = max(int(target_received_qty or 0), 0)
+        result: dict[str, Any] = {"stagingQtyAdded": 0, "outboundQtyAdded": 0, "rows": []}
+        if target_qty <= 0:
+            return result
+
+        for preset, key, label in (
+            ("airport_staging", "stagingQtyAdded", "Staging"),
+            ("airport_outbound", "outboundQtyAdded", "Outbound"),
+        ):
+            stage_clause, stage_params = stage_where_clause("dl.stage", preset)
+            stage_row = con.execute(
+                f"""
+                SELECT li.*, dl.id AS delivery_list_id
+                FROM delivery_lists dl
+                JOIN line_items li ON li.list_id = dl.id
+                WHERE dl.delivery_date = ?
+                  AND dl.status = 'active'
+                  AND COALESCE(li.is_deleted, 0) = 0
+                  AND {stage_clause}
+                  AND (
+                    (COALESCE(?, '') <> '' AND li.source_id = ?)
+                    OR (li.order_no = ? AND li.item_no = ?)
+                  )
+                ORDER BY CASE WHEN li.source_id = ? THEN 0 ELSE 1 END, li.id
+                LIMIT 1
+                """,
+                (
+                    list_row["delivery_date"],
+                    *stage_params,
+                    inbound_row["source_id"],
+                    inbound_row["source_id"],
+                    inbound_row["order_no"],
+                    inbound_row["item_no"],
+                    inbound_row["source_id"],
+                ),
+            ).fetchone()
+            if not stage_row:
+                continue
+            desired = min(target_qty, max(int(stage_row["qty"] or 0), 0))
+            current = min(max(int(stage_row["scanned_qty"] or 0), 0), max(int(stage_row["qty"] or 0), 0))
+            delta = max(desired - current, 0)
+            if delta <= 0:
+                result["rows"].append({"stage": label, "lineItemId": stage_row["id"], "qtyAdded": 0})
+                continue
+            con.execute(
+                "UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?",
+                (delta, stage_row["id"]),
+            )
+            reason = f"Indian Trail override reconciled missing {label} prerequisite."
+            self.insert_event(
+                con,
+                stage_row["delivery_list_id"],
+                stage_row["id"],
+                barcode,
+                canonical,
+                user,
+                station,
+                "scan",
+                f"Auto-{label.lower()} from Indian Trail override",
+                reason,
+                delta,
+            )
+            self.insert_audit(
+                con,
+                "line_item",
+                stage_row["id"],
+                f"indian_trail_override_auto_{preset}",
+                user,
+                station,
+                reason,
+                {
+                    "inboundListId": str(list_row["id"] or ""),
+                    "inboundLineItemId": str(inbound_row["id"] or ""),
+                    "qtyDelta": delta,
+                    "targetQty": desired,
+                },
+            )
+            result[key] = delta
+            result["rows"].append({"stage": label, "lineItemId": stage_row["id"], "qtyAdded": delta})
+        return result
+
+    def clear_transport_racks_for_indian_trail_receive(
+        self,
+        con: sqlite3.Connection,
+        delivery_date: str,
+        inbound_row: sqlite3.Row,
+        user: str,
+        timestamp: str,
+        *,
+        overridden: bool = False,
+    ) -> list[str]:
+        """Remove every active rack copy for the physical item being received."""
+        rows = con.execute(
+            """
+            SELECT ri.id AS rack_item_id, r.id AS rack_id, r.rack_code
+            FROM rack_items ri
+            JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+            JOIN line_items src ON src.id = ri.line_item_id
+            JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+            WHERE ri.status = 'Active'
+              AND COALESCE(src.is_deleted, 0) = 0
+              AND src_dl.delivery_date = ?
+              AND (
+                (COALESCE(?, '') <> '' AND src.source_id = ?)
+                OR (src.order_no = ? AND src.item_no = ?)
+              )
+            ORDER BY ri.id
+            """,
+            (
+                delivery_date,
+                inbound_row["source_id"],
+                inbound_row["source_id"],
+                inbound_row["order_no"],
+                inbound_row["item_no"],
+            ),
+        ).fetchall()
+        if not rows:
+            return []
+        reason = "Overridden by IT" if overridden else "Received at Indian Trail"
+        rack_ids: set[int] = set()
+        rack_codes: list[str] = []
+        for rack_row in rows:
+            con.execute(
+                """
+                UPDATE rack_items
+                SET status = 'Removed', removed_by = ?, removed_at = ?, reason = ?
+                WHERE id = ?
+                """,
+                (user, timestamp, reason, rack_row["rack_item_id"]),
+            )
+            rack_ids.add(int(rack_row["rack_id"]))
+            rack_code = str(rack_row["rack_code"] or "").strip()
+            if rack_code and rack_code not in rack_codes:
+                rack_codes.append(rack_code)
+        for rack_id in rack_ids:
+            self.refresh_rack_destination(con, rack_id)
+        return rack_codes
 
     def receive_indian_trail_scan(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Process indian trail scan for the delivery-list scanner workflow.
@@ -7654,40 +8061,85 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.commit()
 
     def list_timing_metrics(self, con: sqlite3.Connection, list_id: str, delivery_date: str) -> dict[str, Any]:
-        """Purpose: Read timing metrics for the delivery-list scanner workflow.
+        """Return piece-level on-time/late quantities for one delivery-list stage.
 
-        Effects: This function reads or changes database records.
-        Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
+        Positive scan events are consumed newest-first until the line's current
+        scanned quantity is represented. That keeps undo/rescan history from
+        double-counting pieces and allows different pieces on the same line to
+        be classified independently. Priority delivery-date moves use the active
+        replacement date instead of the superseded source date.
         """
         rows = con.execute(
             """
-            SELECT li.id, li.qty, li.scanned_qty,
-                   MAX(CASE WHEN se.qty_delta > 0 THEN se.created_at ELSE NULL END) AS last_scanned_at
+            SELECT li.id,
+                   li.qty,
+                   li.scanned_qty,
+                   li.priority_delivery_date,
+                   se.id AS scan_event_id,
+                   se.qty_delta,
+                   se.created_at AS scan_created_at
             FROM line_items li
-            LEFT JOIN scan_events se ON se.line_item_id = li.id AND se.list_id = li.list_id
+            LEFT JOIN scan_events se
+              ON se.line_item_id = li.id
+             AND se.list_id = li.list_id
+             AND se.qty_delta > 0
             WHERE li.list_id = ?
               AND COALESCE(li.is_deleted, 0) = 0
-            GROUP BY li.id, li.qty, li.scanned_qty
+            ORDER BY li.id, se.created_at DESC, se.id DESC
             """,
             (list_id,),
         ).fetchall()
+
+        by_item: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            line_id = str(row["id"] or "")
+            if not line_id:
+                continue
+            record = by_item.setdefault(
+                line_id,
+                {
+                    "qty": max(int(row["qty"] or 0), 0),
+                    "scannedQty": max(int(row["scanned_qty"] or 0), 0),
+                    "deliveryDate": str(row["priority_delivery_date"] or delivery_date or "")[:10],
+                    "events": [],
+                },
+            )
+            if row["scan_event_id"] is not None:
+                record["events"].append(
+                    {
+                        "qty": max(int(row["qty_delta"] or 0), 0),
+                        "date": str(row["scan_created_at"] or "")[:10],
+                    }
+                )
+
         on_time_qty = 0
         late_qty = 0
-        delivery_key = str(delivery_date or "")
-        for row in rows:
-            scanned = max(0, min(int(row["scanned_qty"] or 0), int(row["qty"] or 0)))
-            if not scanned:
+        timed_qty = 0
+        for record in by_item.values():
+            current_scanned = min(int(record["scannedQty"] or 0), int(record["qty"] or 0))
+            remaining = max(current_scanned, 0)
+            effective_date = str(record["deliveryDate"] or "")[:10]
+            if remaining <= 0 or not effective_date:
                 continue
-            scan_key = str(row["last_scanned_at"] or "")[:10]
-            if scan_key and delivery_key and scan_key <= delivery_key:
-                on_time_qty += scanned
-            else:
-                late_qty += scanned
-        scanned_qty = on_time_qty + late_qty
+            for event in record["events"]:
+                if remaining <= 0:
+                    break
+                event_qty = min(max(int(event["qty"] or 0), 0), remaining)
+                event_date = str(event["date"] or "")[:10]
+                if event_qty <= 0 or not event_date:
+                    continue
+                if event_date <= effective_date:
+                    on_time_qty += event_qty
+                else:
+                    late_qty += event_qty
+                timed_qty += event_qty
+                remaining -= event_qty
+
         return {
             "onTimeQty": on_time_qty,
             "lateQty": late_qty,
-            "onTimePercent": (on_time_qty / scanned_qty * 100) if scanned_qty else 0,
+            "timedQty": timed_qty,
+            "onTimePercent": (on_time_qty / timed_qty * 100) if timed_qty else 0,
         }
 
     def get_delivery_lists(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -8401,11 +8853,54 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             item["received"] = False
             item["receivedQty"] = 0
             item["receivedStage"] = ""
+            item["inboundOverrideUsed"] = False
+            item["inboundOverrideLabel"] = ""
+
+        # v0.447: keep Indian Trail override state available to the Stage column.
+        # The receive audit is authoritative because the line-item quantity itself
+        # intentionally does not encode whether the prerequisite or bay was overridden.
+        if items and list_row and stage_logic_preset(list_row["stage"], list_row["scanner"]) == "indian_trail":
+            item_ids = [str(item.get("id") or "") for item in items if item.get("id")]
+            if item_ids:
+                placeholders = ",".join("?" for _ in item_ids)
+                override_rows = con.execute(
+                    f"""
+                    SELECT id, entity_id, action, payload_json
+                    FROM audit_events
+                    WHERE entity_type = 'line_item'
+                      AND entity_id IN ({placeholders})
+                      AND action LIKE 'indian_trail_receive%'
+                    ORDER BY id DESC
+                    """,
+                    tuple(item_ids),
+                ).fetchall()
+                latest_override_by_item: dict[str, tuple[bool, str]] = {}
+                for audit_row in override_rows:
+                    entity_id = str(audit_row["entity_id"] or "")
+                    if not entity_id or entity_id in latest_override_by_item:
+                        continue
+                    try:
+                        audit_payload = json.loads(str(audit_row["payload_json"] or "{}"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        audit_payload = {}
+                    outbound_override_used = bool(audit_payload.get("outboundOverride"))
+                    bay_override_used = str(audit_row["action"] or "").endswith("_override")
+                    label = "OUTBOUND OVERRIDE" if outbound_override_used else "BAY OVERRIDE" if bay_override_used else ""
+                    latest_override_by_item[entity_id] = (bool(label), label)
+                for item in items:
+                    used, label = latest_override_by_item.get(str(item.get("id") or ""), (False, ""))
+                    item["inboundOverrideUsed"] = used
+                    item["inboundOverrideLabel"] = label
 
         if rows:
             rack_rows = con.execute(
                 """
-                SELECT target.id AS target_id, r.rack_code, r.display_name AS rack_name, r.rack_type
+                SELECT target.id AS target_id,
+                       r.rack_code,
+                       r.display_name AS rack_name,
+                       r.rack_type,
+                       r.status AS rack_status,
+                       r.departed_at AS rack_departed_at
                 FROM rack_items ri
                 JOIN racks r ON r.id = ri.rack_id
                 JOIN line_items src ON src.id = ri.line_item_id
@@ -8435,7 +8930,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                            r.rack_code,
                            r.display_name AS rack_name,
                            r.rack_type,
+                           r.status AS rack_status,
+                           r.departed_at AS rack_departed_at,
                            ri.status AS rack_item_status,
+                           ri.reason AS rack_item_reason,
                            ri.added_at,
                            ri.removed_at,
                            ROW_NUMBER() OVER (
@@ -8460,49 +8958,111 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     WHERE target.list_id = ?
                       AND r.active = 1
                 )
-                SELECT target_id, rack_code, rack_name, rack_type, rack_item_status, added_at, removed_at
+                SELECT target_id, rack_code, rack_name, rack_type, rack_status,
+                       rack_departed_at, rack_item_status, rack_item_reason, added_at, removed_at
                 FROM rack_history
                 WHERE history_rank = 1
                 """,
                 (list_id,),
             ).fetchall()
             rack_history_by_item = {row["target_id"]: row for row in rack_history_rows}
+            # v0.443 direct ownership contract (kept as documentation for the
+            # historical regression check): JOIN line_items bay_li ON bay_li.id = ba.line_item_id
+            # WHERE bay_li.list_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
+            # v0.448 broadens that direct lookup across sibling stage copies.
+            # Resolve Bay ownership by physical Order/Item identity across sibling
+            # stage copies. A receive can legitimately update an assignment that
+            # originated on another stage copy; after a browser refresh the current
+            # list must still recover the Received Bay instead of falling back to
+            # the transport rack.
             bay_rows = con.execute(
                 """
-                SELECT ba.line_item_id, b.bay_code, b.display_name AS bay_name
-                FROM bay_assignments ba
-                JOIN bays b ON b.id = ba.bay_id
-                WHERE ba.delivery_list_id = ? AND ba.status NOT IN ('Cleared', 'Cancelled')
+                WITH bay_candidates AS (
+                    SELECT target.id AS target_id,
+                           b.bay_code,
+                           b.display_name AS bay_name,
+                           b.bay_type,
+                           b.bay_category,
+                           b.map_section AS bay_map_section,
+                           ba.id AS bay_assignment_id,
+                           ba.status AS bay_status,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY target.id
+                               ORDER BY CASE
+                                          WHEN ba.status = 'Received' THEN 0
+                                          WHEN ba.status = 'PreAssigned' THEN 1
+                                          ELSE 2
+                                        END,
+                                        CASE WHEN ba.line_item_id = target.id THEN 0 ELSE 1 END,
+                                        ba.id DESC
+                           ) AS bay_rank
+                    FROM bay_assignments ba
+                    JOIN line_items src ON src.id = ba.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                    JOIN line_items target
+                      ON target.list_id = ?
+                     AND COALESCE(target.is_deleted, 0) = 0
+                     AND (
+                          target.id = src.id
+                          OR (src.source_id <> '' AND target.source_id = src.source_id)
+                          OR (target.order_no = src.order_no AND target.item_no = src.item_no)
+                     )
+                    JOIN delivery_lists target_dl
+                      ON target_dl.id = target.list_id
+                     AND target_dl.delivery_date = src_dl.delivery_date
+                    JOIN bays b ON b.id = ba.bay_id
+                    WHERE COALESCE(src.is_deleted, 0) = 0
+                      AND ba.status NOT IN ('Cleared', 'Cancelled')
+                )
+                SELECT target_id, bay_code, bay_name, bay_type, bay_category,
+                       bay_map_section, bay_assignment_id, bay_status
+                FROM bay_candidates
+                WHERE bay_rank = 1
                 """,
                 (list_id,),
             ).fetchall()
-            bay_by_item = {row["line_item_id"]: row for row in bay_rows}
+            bay_by_item = {row["target_id"]: row for row in bay_rows}
             bay_history_rows = con.execute(
                 """
                 WITH bay_history AS (
-                    SELECT ba.line_item_id,
+                    SELECT target.id AS target_id,
                            b.bay_code,
                            b.display_name AS bay_name,
                            ba.status AS bay_assignment_status,
                            ba.assigned_at,
                            ba.cleared_at,
                            ROW_NUMBER() OVER (
-                               PARTITION BY ba.line_item_id
+                               PARTITION BY target.id
                                ORDER BY CASE WHEN ba.status NOT IN ('Cleared', 'Cancelled') THEN 0 ELSE 1 END,
+                                        CASE WHEN ba.status = 'Received' THEN 0 ELSE 1 END,
+                                        CASE WHEN ba.line_item_id = target.id THEN 0 ELSE 1 END,
                                         CASE WHEN COALESCE(ba.cleared_at, '') <> '' THEN ba.cleared_at ELSE ba.assigned_at END DESC,
                                         ba.id DESC
                            ) AS history_rank
                     FROM bay_assignments ba
+                    JOIN line_items src ON src.id = ba.line_item_id
+                    JOIN delivery_lists src_dl ON src_dl.id = src.list_id
+                    JOIN line_items target
+                      ON target.list_id = ?
+                     AND COALESCE(target.is_deleted, 0) = 0
+                     AND (
+                          target.id = src.id
+                          OR (src.source_id <> '' AND target.source_id = src.source_id)
+                          OR (target.order_no = src.order_no AND target.item_no = src.item_no)
+                     )
+                    JOIN delivery_lists target_dl
+                      ON target_dl.id = target.list_id
+                     AND target_dl.delivery_date = src_dl.delivery_date
                     JOIN bays b ON b.id = ba.bay_id
-                    WHERE ba.delivery_list_id = ?
+                    WHERE COALESCE(src.is_deleted, 0) = 0
                 )
-                SELECT line_item_id, bay_code, bay_name, bay_assignment_status, assigned_at, cleared_at
+                SELECT target_id, bay_code, bay_name, bay_assignment_status, assigned_at, cleared_at
                 FROM bay_history
                 WHERE history_rank = 1
                 """,
                 (list_id,),
             ).fetchall()
-            bay_history_by_item = {row["line_item_id"]: row for row in bay_history_rows}
+            bay_history_by_item = {row["target_id"]: row for row in bay_history_rows}
             for item in items:
                 rack = rack_by_item.get(item["id"])
                 rack_history = rack_history_by_item.get(item["id"])
@@ -8520,6 +9080,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         else (rack["rack_name"] or rack_code)
                     )
                     item["rackType"] = rack_type
+                    item["rackStatus"] = str(rack["rack_status"] or "")
+                    item["rackDepartedAt"] = str(rack["rack_departed_at"] or "")
+                else:
+                    item["rackStatus"] = ""
+                    item["rackDepartedAt"] = ""
                 if rack_history:
                     last_rack_code = str(rack_history["rack_code"] or "")
                     last_rack_type = str(rack_history["rack_type"] or "")
@@ -8534,23 +9099,39 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         else str(rack_history["rack_name"] or last_rack_code)
                     )
                     item["lastRackType"] = last_rack_type
+                    item["lastRackStatus"] = str(rack_history["rack_status"] or "")
+                    item["lastRackDepartedAt"] = str(rack_history["rack_departed_at"] or "")
                     item["lastRackItemStatus"] = str(rack_history["rack_item_status"] or "")
+                    item["lastRackRemovalReason"] = str(rack_history["rack_item_reason"] or "")
                     item["lastRackAddedAt"] = str(rack_history["added_at"] or "")
                     item["lastRackRemovedAt"] = str(rack_history["removed_at"] or "")
                 else:
                     item["lastRackCode"] = ""
                     item["lastRackName"] = ""
                     item["lastRackType"] = ""
+                    item["lastRackStatus"] = ""
+                    item["lastRackDepartedAt"] = ""
                     item["lastRackItemStatus"] = ""
+                    item["lastRackRemovalReason"] = ""
                     item["lastRackAddedAt"] = ""
                     item["lastRackRemovedAt"] = ""
                 bay = bay_by_item.get(item["id"])
                 if bay:
                     item["bayCode"] = str(bay["bay_code"] or "")
                     item["bayName"] = str(bay["bay_name"] or bay["bay_code"] or "")
+                    item["bayType"] = str(bay["bay_type"] or "")
+                    item["bayCategory"] = str(bay["bay_category"] or "")
+                    item["bayMapSection"] = str(bay["bay_map_section"] or "")
+                    item["bayAssignmentId"] = int(bay["bay_assignment_id"] or 0)
+                    item["bayStatus"] = str(bay["bay_status"] or "")
                 else:
                     item["bayCode"] = ""
                     item["bayName"] = ""
+                    item["bayType"] = ""
+                    item["bayCategory"] = ""
+                    item["bayMapSection"] = ""
+                    item["bayAssignmentId"] = 0
+                    item["bayStatus"] = ""
 
                 bay_history = bay_history_by_item.get(item["id"])
                 if bay_history:
@@ -8704,6 +9285,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         condition = "AND se.event_type = 'error'" if only_errors else ""
+        outbound_stage_clause, outbound_stage_params = stage_where_clause("outbound_list.stage", "airport_outbound")
         rows = con.execute(
             f"""
             SELECT se.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.dimensions,
@@ -8876,7 +9458,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        FROM delivery_lists outbound_list
                        JOIN line_items outbound_item ON outbound_item.list_id = outbound_list.id
                        WHERE outbound_list.delivery_date = dl.delivery_date
-                         AND LOWER(outbound_list.stage) LIKE '%outbound%'
+                         AND {outbound_stage_clause}
                          AND outbound_item.scanned_qty > 0
                          AND (
                            (li.source_id <> '' AND outbound_item.source_id = li.source_id)
@@ -8890,7 +9472,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ORDER BY se.id DESC
             LIMIT 30
             """,
-            (list_id,),
+            (*outbound_stage_params, list_id),
         ).fetchall()
         return [event_from_row(row) for row in rows]
 
@@ -8916,6 +9498,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
             raise PermissionError("You do not have access to this delivery-list stage")
         items = self._get_line_items(con, list_id)
+        priority_annotations = self.priority_banner_annotations(con, items)
+        for item in items:
+            annotation = priority_annotations.get(str(item.get("id") or ""))
+            if annotation:
+                item["priorityBanner"] = annotation
         rush_move_references = self._rush_move_references(con, meta_row, user=user)
 
         def is_manual_item(item: dict[str, Any]) -> bool:
@@ -10745,23 +11332,28 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         digits = digits_only(text)
         item_digits = digits_only(item_no).zfill(3) if digits_only(item_no) else ""
         rows: list[sqlite3.Row] = []
-        base_sql = """
+        inbound_stage_clause, inbound_stage_params = stage_where_clause("dl.stage", "indian_trail")
+        staging_stage_clause, staging_stage_params = stage_where_clause("dl.stage", "airport_staging")
+        outbound_stage_clause, outbound_stage_params = stage_where_clause("dl.stage", "airport_outbound")
+        manual_stage_clause = f"({inbound_stage_clause} OR {staging_stage_clause} OR {outbound_stage_clause})"
+        manual_stage_params = [*inbound_stage_params, *staging_stage_params, *outbound_stage_params]
+        base_sql = f"""
             SELECT li.*
             FROM line_items li
             JOIN delivery_lists dl ON dl.id = li.list_id
             WHERE dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND (dl.stage LIKE '%Indian Trail%' OR dl.stage LIKE '%Staging%' OR dl.stage LIKE '%Outbound%')
+              AND {manual_stage_clause}
         """
         if clean:
-            rows = con.execute(base_sql + " AND UPPER(REPLACE(li.barcode, '*', '')) = ? ORDER BY dl.delivery_date DESC, li.order_no, li.item_no", (clean,)).fetchall()
+            rows = con.execute(base_sql + " AND UPPER(REPLACE(li.barcode, '*', '')) = ? ORDER BY dl.delivery_date DESC, li.order_no, li.item_no", (*manual_stage_params, clean)).fetchall()
             if rows:
                 return rows
         if digits:
             if item_digits:
-                rows = con.execute(base_sql + " AND li.order_no = ? AND li.item_no = ? ORDER BY dl.delivery_date DESC, li.order_no, li.item_no", (digits, item_digits)).fetchall()
+                rows = con.execute(base_sql + " AND li.order_no = ? AND li.item_no = ? ORDER BY dl.delivery_date DESC, li.order_no, li.item_no", (*manual_stage_params, digits, item_digits)).fetchall()
             else:
-                rows = con.execute(base_sql + " AND (li.order_no = ? OR li.job LIKE ?) ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no", (digits, f"%{digits}%")).fetchall()
+                rows = con.execute(base_sql + " AND (li.order_no = ? OR li.job LIKE ?) ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no", (*manual_stage_params, digits, f"%{digits}%")).fetchall()
             if rows:
                 job = str(rows[0]["job"] or "").strip()
                 list_id = rows[0]["list_id"]
@@ -10773,7 +11365,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return rows
         if text:
             like = f"%{text}%"
-            rows = con.execute(base_sql + " AND (li.job LIKE ? OR li.customer LIKE ? OR li.product LIKE ?) ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no LIMIT 200", (like, like, like)).fetchall()
+            rows = con.execute(base_sql + " AND (li.job LIKE ? OR li.customer LIKE ? OR li.product LIKE ?) ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no LIMIT 200", (*manual_stage_params, like, like, like)).fetchall()
             if rows:
                 job = str(rows[0]["job"] or "").strip()
                 list_id = rows[0]["list_id"]
@@ -10805,17 +11397,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not normalized_lookup:
             return []
 
+        inbound_stage_clause, inbound_stage_params = stage_where_clause("dl.stage", "indian_trail")
+        staging_stage_clause, staging_stage_params = stage_where_clause("dl.stage", "airport_staging")
+        outbound_stage_clause, outbound_stage_params = stage_where_clause("dl.stage", "airport_outbound")
         candidates = con.execute(
-            """
+            f"""
             SELECT li.*
             FROM line_items li
             JOIN delivery_lists dl ON dl.id = li.list_id
             WHERE dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND (dl.stage LIKE '%Indian Trail%' OR dl.stage LIKE '%Staging%' OR dl.stage LIKE '%Outbound%')
+              AND ({inbound_stage_clause} OR {staging_stage_clause} OR {outbound_stage_clause})
             ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no
             LIMIT 2500
             """
+            , (*inbound_stage_params, *staging_stage_params, *outbound_stage_params)
         ).fetchall()
 
         matched = None
@@ -10847,8 +11443,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         SDI decisions must be made from the receiving-stage copy because Staging and
         Outbound quantities do not prove that the glass is physically in a bay.
         """
+        inbound_stage_clause, inbound_stage_params = stage_where_clause("dl.stage", "indian_trail")
         return con.execute(
-            """
+            f"""
             SELECT li.*, dl.delivery_date AS delivery_date,
                    dl.stage AS delivery_stage, dl.scanner AS delivery_scanner,
                    ba.id AS assignment_id, ba.status AS assignment_status,
@@ -10869,13 +11466,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             LEFT JOIN bays b ON b.id = ba.bay_id
             WHERE dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND (
-                    LOWER(COALESCE(dl.stage, '')) LIKE '%indian trail%'
-                 OR LOWER(COALESCE(dl.scanner, '')) LIKE '%indian trail%'
-                 OR LOWER(COALESCE(dl.stage, '')) LIKE '%inbound%'
-              )
+              AND {inbound_stage_clause}
             ORDER BY dl.delivery_date DESC, li.job, li.order_no, li.item_no
-            """
+            """,
+            inbound_stage_params,
         ).fetchall()
 
     def sdi_item_presence(self, row: Any) -> dict[str, Any]:
@@ -13364,19 +13958,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 reasons.append(f"This outbound line still requires {' and '.join(missing)}.")
 
         if category == "received":
+            outbound_stage_clause, outbound_stage_params = stage_where_clause("out_dl.stage", "airport_outbound")
             outbound_row = con.execute(
-                """
+                f"""
                 SELECT COALESCE(MAX(out_li.scanned_qty), 0) AS scanned_qty
                 FROM delivery_lists out_dl
                 JOIN line_items out_li ON out_li.list_id = out_dl.id
                 WHERE out_dl.delivery_date = ?
                   AND out_dl.status = 'active'
                   AND COALESCE(out_li.is_deleted, 0) = 0
-                  AND LOWER(out_dl.stage) LIKE '%outbound%'
+                  AND {outbound_stage_clause}
                   AND out_li.order_no = ?
                   AND out_li.item_no = ?
                 """,
-                (list_row["delivery_date"], row["order_no"], row["item_no"]),
+                (list_row["delivery_date"], *outbound_stage_params, row["order_no"], row["item_no"]),
             ).fetchone()
             if int(outbound_row["scanned_qty"] or 0) <= 0 and not outbound_override:
                 reasons.append("This Indian Trail receive still requires an Outbound scan or supervisor override.")
@@ -14072,17 +14667,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or changes database records.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
+        staging_stage_clause, staging_stage_params = stage_where_clause("stage", "airport_staging")
         staging_list = con.execute(
-            """
+            f"""
             SELECT id FROM delivery_lists
             WHERE delivery_date = ?
-              AND scanner = ?
-              AND LOWER(stage) LIKE '%staging%'
+              AND status = 'active'
+              AND {staging_stage_clause}
               AND id <> ?
             ORDER BY id
             LIMIT 1
             """,
-            (current_list["delivery_date"], current_list["scanner"], current_list["id"]),
+            (current_list["delivery_date"], *staging_stage_params, current_list["id"]),
         ).fetchone()
         if not staging_list:
             return None
@@ -14187,7 +14783,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         and choose the transportation method at the same time.
         """
         current_list = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-        if not current_list or "outbound" not in str(current_list["stage"]).lower():
+        if not current_list or stage_logic_preset(current_list["stage"]) != "airport_outbound":
             return None
 
         staging_row = self.matching_staging_row_for_outbound(con, current_list, outbound_row)
@@ -14342,19 +14938,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         current_list = con.execute("SELECT delivery_date, stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-        if not current_list or "outbound" not in str(current_list["stage"]).lower():
+        if not current_list or stage_logic_preset(current_list["stage"]) != "airport_outbound":
             return False
+        staging_stage_clause, staging_stage_params = stage_where_clause("stage", "airport_staging")
         staging_list = con.execute(
-            """
+            f"""
             SELECT id FROM delivery_lists
             WHERE delivery_date = ?
-              AND scanner = ?
-              AND LOWER(stage) LIKE '%staging%'
+              AND status = 'active'
+              AND {staging_stage_clause}
               AND id <> ?
             ORDER BY id
             LIMIT 1
             """,
-            (current_list["delivery_date"], current_list["scanner"], list_id),
+            (current_list["delivery_date"], *staging_stage_params, list_id),
         ).fetchone()
         if not staging_list:
             return False
@@ -14413,7 +15010,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         current_list = con.execute("SELECT delivery_date, stage FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-        if not current_list or "outbound" not in str(current_list["stage"]).lower():
+        if not current_list or stage_logic_preset(current_list["stage"]) != "airport_outbound":
             return ""
         row_item = {
             "route": outbound_row["route"],
@@ -14425,20 +15022,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
         if route_category(row_item) != "indian_trail":
             return ""
+        inbound_stage_clause, inbound_stage_params = stage_where_clause("dl.stage", "indian_trail")
         inbound = con.execute(
-            """
+            f"""
             SELECT li.*
             FROM line_items li
             JOIN delivery_lists dl ON dl.id = li.list_id
             WHERE dl.delivery_date = ?
               AND dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND dl.stage LIKE '%Indian Trail%'
+              AND {inbound_stage_clause}
               AND (li.source_id = ? OR (li.order_no = ? AND li.item_no = ?))
             ORDER BY li.id
             LIMIT 1
             """,
-            (current_list["delivery_date"], outbound_row["source_id"], outbound_row["order_no"], outbound_row["item_no"]),
+            (current_list["delivery_date"], *inbound_stage_params, outbound_row["source_id"], outbound_row["order_no"], outbound_row["item_no"]),
         ).fetchone()
         if not inbound:
             return ""
@@ -15208,6 +15806,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "deliveryListId": row["list_id"],
                 "deliveryList": row["label"],
                 "deliveryDate": row["delivery_date"],
+                "priorityDeliveryDate": str(row_value(row, "priority_delivery_date", "") or ""),
                 "stage": row["stage"],
                 "scanner": row["scanner"],
                 "barcode": row["barcode"],
@@ -15247,7 +15846,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "_transportCode": "",
                 "_bayLabel": "",
                 "_preassignedBay": "",
+                "_rush": is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
+                "_remake": is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
             })
+
+            priority_delivery_date = str(row_value(row, "priority_delivery_date", "") or "").strip()
+            if priority_delivery_date:
+                result["priorityDeliveryDate"] = priority_delivery_date
+            result["_rush"] = bool(result.get("_rush")) or is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]})
+            result["_remake"] = bool(result.get("_remake")) or is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]})
 
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
@@ -15326,6 +15933,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            result["rush"] = bool(result.get("_rush"))
+            result["remake"] = bool(result.get("_remake"))
             result["navigationDeliveryListId"] = result.get("deliveryListId")
             result["navigationStage"] = result.get("stage")
             if result.get("_transportCode") and not result.get("rackCode"):
@@ -15334,7 +15943,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if key.startswith("_"):
                     result.pop(key, None)
             cleaned_results.append(result)
-        return cleaned_results[:30]
+        return cleaned_results[:20]
 
     def manual_edit_sibling_rows(self, con: sqlite3.Connection, row: sqlite3.Row) -> list[sqlite3.Row]:
         """Purpose: Run the manual edit sibling rows workflow for the delivery-list scanner.
@@ -18016,7 +18625,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-            if not list_row or "staging" not in str(list_row["stage"]).lower():
+            if not list_row or stage_logic_preset(list_row["stage"], list_row["scanner"]) != "airport_staging":
                 raise ValueError("Rack scans must be made from a staging delivery list")
             rack = self.get_rack_by_code(con, rack_code)
             rack_label = (
@@ -18594,8 +19203,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
 
             canonical = f"RACK-{rack['rack_code']}"
+            outbound_stage_clause, outbound_stage_params = stage_where_clause("out_dl.stage", "airport_outbound")
             outbound_rows = con.execute(
-                """
+                f"""
                 WITH rack_targets AS (
                     SELECT DISTINCT
                         out_li.id AS outbound_line_item_id,
@@ -18606,7 +19216,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     JOIN delivery_lists out_dl
                       ON out_dl.delivery_date = src_dl.delivery_date
                      AND out_dl.status = 'active'
-                     AND LOWER(out_dl.stage) LIKE '%outbound%'
+                     AND {outbound_stage_clause}
                     JOIN line_items out_li
                       ON out_li.list_id = out_dl.id
                      AND (
@@ -18632,7 +19242,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 GROUP BY rt.outbound_line_item_id, rt.outbound_list_id, li.scanned_qty
                 HAVING COALESCE(SUM(se.qty_delta), 0) > 0
                 """,
-                (rack["id"], canonical),
+                (*outbound_stage_params, rack["id"], canonical),
             ).fetchall()
 
             undone_piece_qty = 0
@@ -18720,8 +19330,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not active_rows:
                 raise ValueError("Rack must have active pieces before it can be marked On The Way")
 
+            outbound_stage_clause, outbound_stage_params = stage_where_clause("out_dl.stage", "airport_outbound")
             matches = con.execute(
-                """
+                f"""
                 SELECT
                     ri.id AS rack_item_id,
                     ri.qty AS rack_qty,
@@ -18733,7 +19344,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 JOIN delivery_lists out_dl
                   ON out_dl.delivery_date = src_dl.delivery_date
                  AND out_dl.status = 'active'
-                 AND LOWER(out_dl.stage) LIKE '%outbound%'
+                 AND {outbound_stage_clause}
                 JOIN line_items out_li
                   ON out_li.list_id = out_dl.id
                  AND COALESCE(out_li.is_deleted, 0) = 0
@@ -18746,7 +19357,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                   AND COALESCE(src_li.is_deleted, 0) = 0
                 ORDER BY ri.id, out_li.id
                 """,
-                (rack["id"],),
+                (*outbound_stage_params, rack["id"]),
             ).fetchall()
             matched_rack_items = {int(row["rack_item_id"]) for row in matches}
             active_rack_items = {int(row["rack_item_id"]) for row in active_rows}
@@ -18862,14 +19473,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not row:
                 raise ValueError("Line item not found")
             target_row = row
-            if "staging" not in str(row["stage"] or "").lower():
+            if stage_logic_preset(row["stage"]) != "airport_staging":
+                staging_stage_clause, staging_stage_params = stage_where_clause("dl.stage", "airport_staging")
                 mapped = con.execute(
-                    """
+                    f"""
                     SELECT li.*, dl.delivery_date, dl.stage
                     FROM line_items li
                     JOIN delivery_lists dl ON dl.id = li.list_id
                     WHERE dl.delivery_date = ?
-                      AND LOWER(dl.stage) LIKE '%staging%'
+                      AND dl.status = 'active'
+                      AND {staging_stage_clause}
                       AND (
                         li.source_id = ?
                         OR (li.order_no = ? AND li.item_no = ?)
@@ -18877,20 +19490,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     ORDER BY dl.id
                     LIMIT 1
                     """,
-                    (row["delivery_date"], row["source_id"], row["order_no"], row["item_no"]),
+                    (row["delivery_date"], *staging_stage_params, row["source_id"], row["order_no"], row["item_no"]),
                 ).fetchone()
                 if mapped:
                     target_row = mapped
             if int(target_row["scanned_qty"] or 0) <= 0:
                 raise ValueError("Only line items already scanned at Staging can be assigned to a rack")
 
+            outbound_stage_clause, outbound_stage_params = stage_where_clause("outbound_list.stage", "airport_outbound")
             outbound_scan = con.execute(
-                """
+                f"""
                 SELECT outbound_item.id
                 FROM delivery_lists outbound_list
                 JOIN line_items outbound_item ON outbound_item.list_id = outbound_list.id
                 WHERE outbound_list.delivery_date = ?
-                  AND LOWER(outbound_list.stage) LIKE '%outbound%'
+                  AND outbound_list.status = 'active'
+                  AND {outbound_stage_clause}
                   AND outbound_item.scanned_qty > 0
                   AND (
                     (? <> '' AND outbound_item.source_id = ?)
@@ -18900,6 +19515,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 (
                     target_row["delivery_date"],
+                    *outbound_stage_params,
                     target_row["source_id"],
                     target_row["source_id"],
                     target_row["order_no"],
@@ -19409,7 +20025,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
             list_row = con.execute("SELECT * FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
-            if requested_delivery_date or not list_row or "outbound" not in str(list_row["stage"]).lower():
+            if requested_delivery_date or not list_row or stage_logic_preset(list_row["stage"], list_row["scanner"]) != "airport_outbound":
                 rack_date = con.execute(
                     """
                     SELECT src_dl.delivery_date
@@ -19426,17 +20042,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ).fetchone()
                 if not rack_date:
                     raise ValueError("Rack has no active pieces to scan outbound")
+                outbound_stage_clause, outbound_stage_params = stage_where_clause("stage", "airport_outbound")
                 list_row = con.execute(
-                    """
+                    f"""
                     SELECT *
                     FROM delivery_lists
                     WHERE delivery_date = ?
                       AND status = 'active'
-                      AND LOWER(stage) LIKE '%outbound%'
+                      AND {outbound_stage_clause}
                     ORDER BY id
                     LIMIT 1
                     """,
-                    (requested_delivery_date or rack_date["delivery_date"],),
+                    (requested_delivery_date or rack_date["delivery_date"], *outbound_stage_params),
                 ).fetchone()
                 if not list_row:
                     raise ValueError("No outbound delivery list was found for this rack")
@@ -19528,26 +20145,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: Reads delivery-list metadata only.
         Flow: Uses the requested date when supplied; otherwise prefers today, then the nearest future list, then the latest past list.
         """
+        stage_clause, stage_params = stage_where_clause("stage", "indian_trail")
         clean_date = str(delivery_date or "").strip()
         if clean_date:
             return con.execute(
-                """
+                f"""
                 SELECT id, delivery_date, label, stage
                 FROM delivery_lists
                 WHERE delivery_date = ?
-                  AND stage LIKE '%Indian Trail%'
+                  AND {stage_clause}
                   AND status = 'active'
                 ORDER BY id
                 LIMIT 1
                 """,
-                (clean_date,),
+                (clean_date, *stage_params),
             ).fetchone()
         today = datetime.now(timezone.utc).date().isoformat()
         return con.execute(
-            """
+            f"""
             SELECT id, delivery_date, label, stage
             FROM delivery_lists
-            WHERE stage LIKE '%Indian Trail%' AND status = 'active'
+            WHERE {stage_clause} AND status = 'active'
             ORDER BY
                 CASE
                     WHEN delivery_date = ? THEN 0
@@ -19559,7 +20177,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 id
             LIMIT 1
             """,
-            (today, today, today),
+            (*stage_params, today, today, today),
         ).fetchone()
 
     def active_indian_trail_lists(self, con: sqlite3.Connection, delivery_date: str = "") -> tuple[str, list[sqlite3.Row]]:
@@ -19574,17 +20192,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         primary = self.active_indian_trail_list(con, delivery_date)
         if not primary:
             return "", []
+        stage_clause, stage_params = stage_where_clause("stage", "indian_trail")
         resolved_date = str(primary["delivery_date"] or "")
         rows = con.execute(
-            """
+            f"""
             SELECT id, delivery_date, label, stage
             FROM delivery_lists
             WHERE delivery_date = ?
-              AND stage LIKE '%Indian Trail%'
+              AND {stage_clause}
               AND status = 'active'
             ORDER BY id
             """,
-            (resolved_date,),
+            (resolved_date, *stage_params),
         ).fetchall()
         return resolved_date, list(rows)
 
@@ -19596,18 +20215,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         and received quantities across duplicate/update copies, and retains representative item
         metadata for the Bay Map and in-transit manifest.
         """
+        stage_clause, stage_params = stage_where_clause("dl.stage", "indian_trail")
         rows = con.execute(
-            """
+            f"""
             SELECT li.*, dl.id AS delivery_list_id
             FROM delivery_lists dl
             JOIN line_items li ON li.list_id = dl.id
             WHERE dl.delivery_date = ?
               AND dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND dl.stage LIKE '%Indian Trail%'
+              AND {stage_clause}
             ORDER BY dl.id, li.order_no, li.item_no
             """,
-            (delivery_date,),
+            (delivery_date, *stage_params),
         ).fetchall()
         inventory: dict[tuple[str, str], dict[str, Any]] = {}
         for row in rows:
@@ -19723,16 +20343,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         inventory = self.indian_trail_physical_inventory(con, resolved_date) if inbound_lists else {}
         primary_inbound = inbound_lists[0] if inbound_lists else None
 
+        outbound_stage_clause, outbound_stage_params = stage_where_clause("stage", "airport_outbound")
         outbound_lists = con.execute(
-            """
+            f"""
             SELECT id, label, stage
             FROM delivery_lists
             WHERE delivery_date = ?
               AND status = 'active'
-              AND stage LIKE '%Outbound%'
+              AND {outbound_stage_clause}
             ORDER BY id
             """,
-            (resolved_date,),
+            (resolved_date, *outbound_stage_params),
         ).fetchall()
         outbound_ids = [str(row["id"] or "") for row in outbound_lists]
 
@@ -19988,17 +20609,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not inventory:
             return {"totalQty": 0, "scannedQty": 0}
 
+        outbound_stage_clause, outbound_stage_params = stage_where_clause("dl.stage", "airport_outbound")
         outbound_rows = con.execute(
-            """
+            f"""
             SELECT li.order_no, li.item_no, li.scanned_qty
             FROM delivery_lists dl
             JOIN line_items li ON li.list_id = dl.id
             WHERE dl.delivery_date = ?
               AND dl.status = 'active'
               AND COALESCE(li.is_deleted, 0) = 0
-              AND dl.stage LIKE '%Outbound%'
+              AND {outbound_stage_clause}
             """,
-            (delivery_date,),
+            (delivery_date, *outbound_stage_params),
         ).fetchall()
         outbound_by_key: dict[tuple[str, str], int] = {}
         for row in outbound_rows:
@@ -20072,8 +20694,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             outbound_totals = {"totalQty": 0, "scannedQty": 0}
             if inbound_lists:
                 inventory = self.indian_trail_physical_inventory(con, resolved_date)
+                inbound_stage_clause, inbound_stage_params = stage_where_clause("dl.stage", "indian_trail")
                 assigned_rows = con.execute(
-                    """
+                    f"""
                     SELECT DISTINCT li.order_no, li.item_no
                     FROM delivery_lists dl
                     JOIN line_items li ON li.list_id = dl.id
@@ -20083,9 +20706,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     WHERE dl.delivery_date = ?
                       AND dl.status = 'active'
                       AND COALESCE(li.is_deleted, 0) = 0
-                      AND dl.stage LIKE '%Indian Trail%'
+                      AND {inbound_stage_clause}
                     """,
-                    (resolved_date,),
+                    (resolved_date, *inbound_stage_params),
                 ).fetchall()
                 assigned_keys = {
                     (
@@ -20620,13 +21243,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
 
             if search_all_inbound_lists:
+                inbound_stage_clause, inbound_stage_params = stage_where_clause("stage", "indian_trail")
                 inbound_lists = con.execute(
-                    """
+                    f"""
                     SELECT *
                     FROM delivery_lists
-                    WHERE stage LIKE '%Indian Trail%' AND status = 'active'
+                    WHERE {inbound_stage_clause} AND status = 'active'
                     ORDER BY delivery_date DESC, id DESC
                     """
+                    , inbound_stage_params
                 ).fetchall()
                 if not inbound_lists:
                     raise ValueError("No active Indian Trail inbound list")
@@ -20636,15 +21261,16 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 list_row = inbound_lists[0]
                 list_id = str(list_row["id"] or "")
                 rows = con.execute(
-                    """
+                    f"""
                     SELECT li.*, dl.delivery_date AS scan_delivery_date, dl.label AS scan_list_label
                     FROM line_items li
                     JOIN delivery_lists dl ON dl.id = li.list_id
                     WHERE dl.status = 'active'
                       AND COALESCE(li.is_deleted, 0) = 0
-                      AND dl.stage LIKE '%Indian Trail%'
+                      AND {inbound_stage_clause}
                     ORDER BY dl.delivery_date DESC, li.order_no, li.item_no, li.id
                     """
+                    , inbound_stage_params
                 ).fetchall()
             else:
                 list_row = con.execute(
@@ -20845,20 +21471,21 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "lastScan": last,
                 }
 
+            outbound_stage_clause, outbound_stage_params = stage_where_clause("out_dl.stage", "airport_outbound")
             outbound_scanned_qty = int(
                 con.execute(
-                    """
+                    f"""
                     SELECT COALESCE(MAX(out_li.scanned_qty), 0) AS scanned_qty
                     FROM delivery_lists out_dl
                     JOIN line_items out_li ON out_li.list_id = out_dl.id
                     WHERE out_dl.delivery_date = ?
                       AND out_dl.status = 'active'
                       AND COALESCE(out_li.is_deleted, 0) = 0
-                      AND out_dl.stage LIKE '%Outbound%'
+                      AND {outbound_stage_clause}
                       AND out_li.order_no = ?
                       AND out_li.item_no = ?
                     """,
-                    (list_row["delivery_date"], row["order_no"], row["item_no"]),
+                    (list_row["delivery_date"], *outbound_stage_params, row["order_no"], row["item_no"]),
                 ).fetchone()["scanned_qty"]
                 or 0
             )
@@ -20887,6 +21514,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "outboundOverrideRequired": True,
                     "message": override_reason,
                     "preassignedBayCode": requested_bay_code or preassigned_bay_code,
+                    "existingOrderBayCode": str(existing_group_assignment["bay_code"] or "") if existing_group_assignment else "",
                     "suggestedBayType": suggested_bay_type,
                     "oversize": "oversize" in suggested_bay_type.lower(),
                     "item": {
@@ -20905,26 +21533,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             timestamp = now_iso()
             remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
             qty_delta = 0 if returned_to_bay else min(requested_scan_qty, remaining_qty)
+            target_received_qty = min(int(row["scanned_qty"] or 0) + qty_delta, int(row["qty"] or 0))
+            prerequisite_reconciliation = {"stagingQtyAdded": 0, "outboundQtyAdded": 0, "rows": []}
+            if qty_delta and outbound_override:
+                prerequisite_reconciliation = self.reconcile_indian_trail_override_stages(
+                    con,
+                    list_row,
+                    row,
+                    target_received_qty,
+                    barcode,
+                    canonical,
+                    user,
+                    station,
+                )
+            cleared_rack_codes: list[str] = []
             if qty_delta:
                 con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (qty_delta, row["id"]))
-                con.execute(
-                    """
-                    UPDATE rack_items
-                    SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Received at Indian Trail'
-                    WHERE id IN (
-                        SELECT ri.id
-                        FROM rack_items ri
-                        JOIN line_items src ON src.id = ri.line_item_id
-                        JOIN delivery_lists src_dl ON src_dl.id = src.list_id
-                        WHERE ri.status = 'Active'
-                          AND COALESCE(src.is_deleted, 0) = 0
-                          AND src_dl.delivery_date = ?
-                          AND src.order_no = ?
-                          AND src.item_no = ?
-                        LIMIT 1
-                    )
-                    """,
-                    (user, timestamp, list_row["delivery_date"], row["order_no"], row["item_no"]),
+                cleared_rack_codes = self.clear_transport_racks_for_indian_trail_receive(
+                    con,
+                    str(list_row["delivery_date"] or ""),
+                    row,
+                    user,
+                    timestamp,
+                    overridden=outbound_override,
                 )
 
             event_type = "manual_scan" if is_manual else "scan"
@@ -21054,11 +21685,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         con.execute(
                             """
                             UPDATE bay_assignments
-                            SET bay_id = ?, assigned_qty = ?, status = ?, reason = ?,
+                            SET delivery_list_id = ?, bay_id = ?, assigned_qty = ?, status = ?, reason = ?,
                                 assigned_by = ?, assigned_at = ?, cleared_by = '', cleared_at = ''
                             WHERE id = ?
                             """,
                             (
+                                list_id,
                                 target_bay["id"],
                                 max(int(group_row["qty"] or 1), 1),
                                 next_status,
@@ -21124,6 +21756,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if isinstance(last.get("item"), dict):
                 last["item"]["bayCode"] = bay_code
                 last["item"]["bayName"] = str(row_value(target_bay, "display_name", "") or bay_code) if target_bay else ""
+                last["item"]["bayStatus"] = "Received" if target_bay and not rush_direct_to_truck else ""
 
             used_override = bool(override_bay)
             audit_action = (
@@ -21156,6 +21789,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "outboundOverride": outbound_override,
                     "returnedToBay": returned_to_bay,
                     "qtyDelta": qty_delta,
+                    "prerequisiteReconciliation": prerequisite_reconciliation,
+                    "clearedRackCodes": cleared_rack_codes,
                     "rush": rush_item,
                     "rushDirectToTruck": rush_direct_to_truck,
                     "priorityDeliveryDate": priority_delivery_date,
@@ -21200,6 +21835,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "assignmentIds": assignment_ids,
             "returnedToBay": returned_to_bay,
             "outboundOverrideUsed": outbound_override,
+            "prerequisiteReconciliation": prerequisite_reconciliation,
+            "clearedRackCodes": cleared_rack_codes,
             "suggestedBayType": suggested_bay_type,
             "oversize": "oversize" in suggested_bay_type.lower(),
             "rush": rush_item,
@@ -21270,7 +21907,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             # glass was physically scanned into a bay. Preserve that distinction
             # when its destination is corrected; converting it to Moved would make
             # the Bay Map fulfillment view incorrectly mark a missing item present.
-            next_status = "PreAssigned" if previous_status == "PreAssigned" else "Moved"
+            next_status = (
+                "PreAssigned"
+                if previous_status == "PreAssigned"
+                else "Received"
+                if previous_status in {"Received", "Moved"}
+                else "Moved"
+            )
             con.execute(
                 "UPDATE bay_assignments SET bay_id = ?, status = ?, reason = ? WHERE id = ?",
                 (new_bay["id"], next_status, reason, assignment_id),
