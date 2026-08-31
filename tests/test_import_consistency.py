@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import unittest
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
 from backend.config import load_config
-from backend.store import SQLiteDeliveryStore
+from backend.store import SQLiteDeliveryStore, canonical_clear_glass_label, glass_cost_profile, glass_profile_identity_key, rack_barcode_text
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,7 +205,7 @@ class ImportConsistencyTests(unittest.TestCase):
             )
             self.assertFalse(blocked_receive["ok"])
             self.assertTrue(blocked_receive["outboundOverrideRequired"])
-            self.assertIn("not been scanned Outbound", blocked_receive["message"])
+            self.assertIn("not been scanned Staging and Outbound", blocked_receive["message"])
 
             # Outbound before Staging must also keep the original Staging/rack gate.
             blocked_outbound = store.record_scan(
@@ -809,6 +810,784 @@ class ImportConsistencyTests(unittest.TestCase):
                 candidate = Path(f"{database_path}{suffix}")
                 if candidate.exists():
                     candidate.unlink()
+
+
+    def test_v0450_twenty_piece_rack_inbound_bay_and_manual_scan_lifecycle(self) -> None:
+        """Exercise the floor's full 20-piece rack path, including Manual Scan branches."""
+        verification_root = ROOT / "_verification_v0450_twenty_piece"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as connection:
+                store.seed_bays(connection)
+                store.seed_bay_auto_assign_settings(connection)
+                store.seed_racks(connection)
+                connection.commit()
+                rack = connection.execute(
+                    "SELECT rack_code FROM racks WHERE active = 1 AND LOWER(status) = 'open' ORDER BY id LIMIT 1"
+                ).fetchone()
+            self.assertIsNotNone(rack)
+            rack_code = str(rack["rack_code"])
+            delivery_date = "2026-09-21"
+
+            # v0.450 regression: ten two-piece orders produce 20 physical scans while
+            # staying within the seeded Standard-bay inventory (siblings share a bay).
+            items = []
+            for order_index in range(10):
+                order = str(261000 + order_index)
+                for item_no in ("1", "2"):
+                    items.append(imported_item(order, item_no, 1, f"v0450:{order}:{item_no}"))
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": delivery_date, "items": items},
+                    "fileName": "Delivery List 09-21-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+
+            staging_id = f"{delivery_date}-staging-airport"
+            outbound_id = f"{delivery_date}-outbound-airport"
+            inbound_id = f"{delivery_date}-inbound-indian-trail"
+
+            # Load all 20 pieces into one rack. Every fifth item uses the same exact
+            # order/item text accepted by the browser's Manual Scan path.
+            for index, item in enumerate(items, start=1):
+                order_item = f"{item['order']}{item['item']}"
+                result = store.record_scan(
+                    {
+                        "listId": staging_id,
+                        "barcode": order_item if index % 5 == 0 else item["barcode"],
+                        "rackCode": rack_code,
+                        "isManual": index % 5 == 0,
+                        "user": "admin",
+                        "station": "Airport Rd",
+                    }
+                )
+                self.assertEqual(result["items"][index - 1]["scanned"], 1)
+
+            with store.connect() as connection:
+                active_rack_qty = connection.execute(
+                    "SELECT COALESCE(SUM(qty), 0) FROM rack_items WHERE rack_id = (SELECT id FROM racks WHERE rack_code = ?) AND status = 'Active'",
+                    (rack_code,),
+                ).fetchone()[0]
+            self.assertEqual(active_rack_qty, 20)
+
+            # Scan the physical rack Outbound once. It must advance every rack row
+            # and reserve one receiving bay per order before the truck reaches IT.
+            outbound = store.record_scan(
+                {
+                    "listId": outbound_id,
+                    "barcode": rack_barcode_text(rack_code, delivery_date),
+                    "user": "admin",
+                    "station": "Airport Rd",
+                }
+            )
+            self.assertEqual(outbound["outboundScannedQty"], 20)
+            inbound_before = store.get_delivery_list(inbound_id)
+            self.assertEqual(len(inbound_before["items"]), 20)
+            preassigned = {row["sourceId"]: row["bayCode"] for row in inbound_before["items"]}
+            self.assertTrue(all(preassigned.values()))
+            self.assertTrue(all(row["bayStatus"] == "PreAssigned" for row in inbound_before["items"]))
+            order_bays = {}
+            for row in inbound_before["items"]:
+                order_bays.setdefault(row["order"], set()).add(row["bayCode"])
+            self.assertEqual(len(order_bays), 10)
+            self.assertTrue(all(len(bays) == 1 for bays in order_bays.values()))
+
+            # Receive each piece one at a time. Rack ownership must clear one piece
+            # at a time while the preassigned bay becomes the physical Received bay.
+            for index, item in enumerate(items, start=1):
+                order_item = f"{item['order']}{item['item']}"
+                received = store.receive_indian_trail_scan(
+                    {
+                        "listId": inbound_id,
+                        "barcode": order_item if index % 4 == 0 else item["barcode"],
+                        "isManual": index % 4 == 0,
+                        "station": "Indian Trail",
+                    },
+                    "admin",
+                )
+                self.assertTrue(received["ok"])
+                self.assertEqual(received["bayCode"], preassigned[f"{item['order']}-{str(item['item']).zfill(3)}"])
+                with store.connect() as connection:
+                    remaining = connection.execute(
+                        "SELECT COALESCE(SUM(qty), 0) FROM rack_items WHERE rack_id = (SELECT id FROM racks WHERE rack_code = ?) AND status = 'Active'",
+                        (rack_code,),
+                    ).fetchone()[0]
+                self.assertEqual(remaining, 20 - index)
+
+            inbound_received = store.get_delivery_list(inbound_id)
+            self.assertTrue(all(row["scanned"] == 1 for row in inbound_received["items"]))
+            self.assertTrue(all(row["bayStatus"] == "Received" for row in inbound_received["items"]))
+            self.assertTrue(all(row["rackCode"] == "" for row in inbound_received["items"]))
+            self.assertTrue(all(row["lastRackCode"] == rack_code for row in inbound_received["items"]))
+
+            # Bay Map scan-out clears each physical assignment. Manual scan-out is
+            # exercised too, and the Inbound payload must retain the former bay as history.
+            for index, item in enumerate(items, start=1):
+                order_item = f"{item['order']}{item['item']}"
+                cleared = store.scan_out_bay_item(
+                    {
+                        "barcode": order_item if index % 6 == 0 else item["barcode"],
+                        "isManual": index % 6 == 0,
+                        "station": "Bay Map",
+                    },
+                    "admin",
+                )
+                self.assertTrue(cleared["ok"])
+                self.assertEqual(cleared["bayCode"], preassigned[f"{item['order']}-{str(item['item']).zfill(3)}"])
+
+            with store.connect() as connection:
+                active_assignments = connection.execute(
+                    "SELECT COUNT(*) FROM bay_assignments WHERE status NOT IN ('Cleared', 'Cancelled')"
+                ).fetchone()[0]
+            self.assertEqual(active_assignments, 0)
+
+            inbound_cleared = store.get_delivery_list(inbound_id)
+            for row in inbound_cleared["items"]:
+                self.assertEqual(row["bayCode"], "")
+                self.assertEqual(row["lastBayCode"], preassigned[row["sourceId"]])
+                self.assertEqual(row["lastBayAssignmentStatus"], "Cleared")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+    def test_v0450_rush_remake_missing_glass_search_and_bay_lifecycle(self) -> None:
+        """Verify each maintained priority intake path reaches and leaves a receiving bay."""
+        verification_root = ROOT / "_verification_v0450_priority_lifecycle"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as connection:
+                store.seed_bays(connection)
+                store.seed_bay_auto_assign_settings(connection)
+                store.seed_racks(connection)
+                connection.commit()
+                rack = connection.execute(
+                    "SELECT rack_code FROM racks WHERE active = 1 AND LOWER(status) = 'open' ORDER BY id LIMIT 1"
+                ).fetchone()
+            self.assertIsNotNone(rack)
+            rack_code = str(rack["rack_code"])
+            delivery_date = "2026-09-22"
+
+            rush = imported_item("262001", "1", 1, "v0450-priority:rush")
+            remake = imported_item("262002", "1", 1, "v0450-priority:remake")
+            remake["job"] = "88262002.2R TEST JOB"
+            missing = imported_item("262003", "1", 1, "v0450-priority:missing")
+
+            store.create_priority_intake_request(
+                {
+                    "priorityType": "Rush",
+                    "jobNumber": rush["job"],
+                    "reason": "Priority customer request",
+                    "responsible": "Test Operator",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            store.create_priority_intake_request(
+                {
+                    "priorityType": "Remake",
+                    "jobNumber": "88262002",
+                    "reason": "Replacement glass required",
+                    "responsible": "Test Operator",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": delivery_date, "items": [rush, remake, missing]},
+                    "fileName": "Delivery List 09-22-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+
+            inbound_id = f"{delivery_date}-inbound-indian-trail"
+            inbound = store.get_delivery_list(inbound_id)
+            missing_row = next(row for row in inbound["items"] if row["order"] == missing["order"])
+            marked = store.mark_sdi(
+                {
+                    "lineItemIds": [missing_row["id"]],
+                    "orderType": "Rush",
+                    "reason": "Missing lite replacement",
+                    "responsible": "Test Operator",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            self.assertTrue(marked["ok"])
+
+            # v0.469 keeps historical existing-order Rush marks searchable but
+            # no longer exposes Missing Glass Rush as a standalone flag type.
+            expected_kinds = {
+                rush["order"]: "rush",
+                remake["order"]: "remake",
+                missing["order"]: "rush",
+            }
+            for order, expected_kind in expected_kinds.items():
+                results = store.global_search(order)
+                match = next(result for result in results if result["order"] == order)
+                self.assertEqual(match["priorityBanner"]["kind"], expected_kind)
+
+            staging_id = f"{delivery_date}-staging-airport"
+            outbound_id = f"{delivery_date}-outbound-airport"
+            for item in (rush, remake, missing):
+                staged = store.record_scan(
+                    {
+                        "listId": staging_id,
+                        "barcode": item["barcode"],
+                        "rackCode": rack_code,
+                        "user": "admin",
+                        "station": "Airport Rd",
+                    }
+                )
+                self.assertEqual(next(row for row in staged["items"] if row["order"] == item["order"])["scanned"], 1)
+
+            outbound = store.record_scan(
+                {
+                    "listId": outbound_id,
+                    "barcode": rack_barcode_text(rack_code, delivery_date),
+                    "user": "admin",
+                    "station": "Airport Rd",
+                }
+            )
+            self.assertEqual(outbound["outboundScannedQty"], 3)
+
+            before_receive = store.get_delivery_list(inbound_id)
+            bay_by_order = {row["order"]: row["bayCode"] for row in before_receive["items"]}
+            self.assertTrue(all(bay_by_order.values()))
+            for item in (rush, remake, missing):
+                received = store.receive_indian_trail_scan(
+                    {"listId": inbound_id, "barcode": item["barcode"], "station": "Indian Trail"},
+                    "admin",
+                )
+                self.assertTrue(received["ok"])
+                self.assertEqual(received["bayCode"], bay_by_order[item["order"]])
+
+            physically_received = store.get_delivery_list(inbound_id)
+            self.assertTrue(all(row["bayStatus"] == "Received" for row in physically_received["items"]))
+            for item in (rush, remake, missing):
+                cleared = store.scan_out_bay_item(
+                    {"barcode": item["barcode"], "station": "Bay Map"},
+                    "admin",
+                )
+                self.assertTrue(cleared["ok"])
+
+            after_clear = store.get_delivery_list(inbound_id)
+            self.assertTrue(all(row["bayCode"] == "" for row in after_clear["items"]))
+            self.assertTrue(all(row["lastBayCode"] for row in after_clear["items"]))
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+
+    def test_v0451_global_search_combines_dimensions_flags_and_priority_metadata(self) -> None:
+        """Smart Search should AND arbitrary order metadata with maintained priority flags."""
+        verification_root = ROOT / "_verification_v0451_global_search"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            delivery_date = "2026-09-29"
+
+            rush = imported_item("273001", "1", 1, "v0451-search:rush")
+            rush["dimensions"] = "73 x 64"
+            rush["customer"] = "ALPHA BUILDERS"
+            remake = imported_item("273002", "1", 1, "v0451-search:remake")
+            remake["dimensions"] = "73 x 64"
+            remake["job"] = "88273002.2R TEST JOB"
+            missing = imported_item("273003", "1", 1, "v0451-search:missing")
+            missing["dimensions"] = "81 x 50"
+            normal = imported_item("273004", "1", 1, "v0451-search:normal")
+            normal["dimensions"] = "73 x 64"
+
+            store.create_priority_intake_request(
+                {
+                    "priorityType": "Rush",
+                    "jobNumber": rush["job"],
+                    "reason": "Hot replacement",
+                    "responsible": "Search Tester",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            store.create_priority_intake_request(
+                {
+                    "priorityType": "Remake",
+                    "jobNumber": "88273002",
+                    "reason": "Remake verification",
+                    "responsible": "Search Tester",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": delivery_date, "items": [rush, remake, missing, normal]},
+                    "fileName": "Delivery List 09-29-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+
+            inbound = store.get_delivery_list(f"{delivery_date}-inbound-indian-trail")
+            missing_row = next(row for row in inbound["items"] if row["order"] == missing["order"])
+            marked = store.mark_sdi(
+                {
+                    "lineItemIds": [missing_row["id"]],
+                    "orderType": "Rush",
+                    "reason": "Broke at Barefoot",
+                    "responsible": "Search Tester",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            self.assertTrue(marked["ok"])
+
+            rush_results = store.global_search("rush")
+            rush_kinds = {row["order"]: row.get("priorityBanner", {}).get("kind") for row in rush_results}
+            self.assertEqual(rush_kinds.get(rush["order"]), "rush")
+            self.assertEqual(rush_kinds.get(missing["order"]), "rush")
+
+            remake_results = store.global_search("remake")
+            self.assertEqual(next(row for row in remake_results if row["order"] == remake["order"])["priorityBanner"]["kind"], "remake")
+            reason_results = store.global_search("broke barefoot rush")
+            self.assertEqual([row["order"] for row in reason_results], [missing["order"]])
+
+            # The central v0.451 behavior: all terms must belong to the same order.
+            combined = store.global_search("73 x 64 rush")
+            self.assertEqual([row["order"] for row in combined], [rush["order"]])
+            compact_dimensions = store.global_search("73x64 remake")
+            self.assertEqual([row["order"] for row in compact_dimensions], [remake["order"]])
+            self.assertEqual([row["order"] for row in store.global_search("alpha rush")], [rush["order"]])
+
+            # Priority reason/responsible metadata is part of the same search corpus.
+            self.assertEqual([row["order"] for row in store.global_search("hot replacement")], [rush["order"]])
+            responsible_results = store.global_search("search tester broke")
+            self.assertEqual([row["order"] for row in responsible_results], [missing["order"]])
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+
+    def test_v0452_combined_glass_metadata_and_it_override_scan_history(self) -> None:
+        verification_root = ROOT / "_verification_v0452_alias_override"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as connection:
+                store.seed_bays(connection)
+                store.seed_bay_auto_assign_settings(connection)
+                store.seed_racks(connection)
+                connection.commit()
+
+            # Preserve each source profile's stored color for reversible uncombine,
+            # while exposing one explicit alias target for the browser's v0.452
+            # effective-color resolver.
+            store.upsert_glass_profile(
+                {"value": "French Antique", "label": "French Antique", "color": "#2FA84F"},
+                "admin",
+            )
+            store.upsert_glass_profile(
+                {"value": "1/4 French Antique Mirror", "label": "1/4 French Antique Mirror", "color": "#173B65"},
+                "admin",
+            )
+            combined = store.combine_glass_profiles(
+                {"target": "1/4 French Antique Mirror", "values": ["French Antique"]},
+                "admin",
+            )
+            alias = next(row for row in combined["glassAliases"] if row["value"] == "French Antique")
+            self.assertEqual(alias["label"], "1/4 French Antique Mirror")
+            colors = {row["value"]: row.get("color") for row in combined["glassColors"]}
+            self.assertEqual(colors["French Antique"], "#2FA84F")
+            self.assertEqual(colors["1/4 French Antique Mirror"], "#173B65")
+
+            item = imported_item("274001", "1", 1, "v0452-it-override:1")
+            item["barcode"] = "T200274001001000"
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": "2026-09-30", "items": [item]},
+                    "fileName": "Delivery List 09-30-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+
+            blocked = store.receive_indian_trail_scan(
+                {"listId": "2026-09-30-inbound-indian-trail", "barcode": item["barcode"], "station": "Indian Trail"},
+                "admin",
+            )
+            self.assertFalse(blocked["ok"])
+            self.assertEqual(blocked["missingPrerequisites"], ["staging", "outbound"])
+
+            received = store.receive_indian_trail_scan(
+                {
+                    "listId": "2026-09-30-inbound-indian-trail",
+                    "barcode": item["barcode"],
+                    "station": "Indian Trail",
+                    "outboundOverride": True,
+                },
+                "admin",
+            )
+            self.assertTrue(received["ok"])
+            self.assertEqual(received["prerequisiteReconciliation"]["stagingQtyAdded"], 1)
+            self.assertEqual(received["prerequisiteReconciliation"]["outboundQtyAdded"], 1)
+
+            staging = store.get_delivery_list("2026-09-30-staging-airport")["items"][0]
+            outbound = store.get_delivery_list("2026-09-30-outbound-airport")["items"][0]
+            self.assertEqual(staging["scanned"], 1)
+            self.assertEqual(outbound["scanned"], 1)
+            self.assertEqual(staging["lastScannedStation"], "Scan Override IT")
+            self.assertEqual(outbound["lastScannedStation"], "Scan Override IT")
+
+            with store.connect() as connection:
+                override_events = connection.execute(
+                    """
+                    SELECT list_id, event_type, station, qty_delta
+                    FROM scan_events
+                    WHERE event_type = 'scan_override_it'
+                    ORDER BY id
+                    """
+                ).fetchall()
+                self.assertEqual(len(override_events), 2)
+                self.assertEqual({row["station"] for row in override_events}, {"Scan Override IT"})
+                self.assertEqual({row["qty_delta"] for row in override_events}, {1})
+                staging_metrics = store.list_timing_metrics(connection, "2026-09-30-staging-airport", "2026-09-30")
+                outbound_metrics = store.list_timing_metrics(connection, "2026-09-30-outbound-airport", "2026-09-30")
+                self.assertEqual(staging_metrics["timedQty"], 0)
+                self.assertEqual(outbound_metrics["timedQty"], 0)
+
+            # A partially inconsistent legacy case (Outbound present, Staging absent)
+            # is also caught instead of silently receiving with mismatched stages.
+            second = imported_item("274002", "1", 1, "v0452-it-override:2")
+            second["barcode"] = "T200274002001000"
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": "2026-10-01", "items": [second]},
+                    "fileName": "Delivery List 10-01-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+            with store.connect() as connection:
+                connection.execute(
+                    "UPDATE line_items SET scanned_qty = 1 WHERE list_id = ?",
+                    ("2026-10-01-outbound-airport",),
+                )
+                connection.commit()
+            mismatch = store.receive_indian_trail_scan(
+                {"listId": "2026-10-01-inbound-indian-trail", "barcode": second["barcode"], "station": "Indian Trail"},
+                "admin",
+            )
+            self.assertFalse(mismatch["ok"])
+            self.assertEqual(mismatch["missingPrerequisites"], ["staging"])
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+    def test_v0460_clear_glass_requires_explicit_heat_treatment_in_statistics(self) -> None:
+        self.assertEqual(canonical_clear_glass_label("3/8 Clear"), "3/8 Clear Annealed")
+        self.assertEqual(canonical_clear_glass_label("3/8 Clear Annealed"), "3/8 Clear Annealed")
+        self.assertEqual(canonical_clear_glass_label("3/8 Clear Tempered"), "3/8 Clear Tempered")
+        self.assertEqual(canonical_clear_glass_label("3/8 UltraClear"), "3/8 UltraClear Annealed")
+        self.assertEqual(canonical_clear_glass_label("1/4 French Antique Mirror"), "1/4 French Antique Mirror")
+        self.assertEqual(glass_cost_profile("3/8 Clear")[0], "3/8 Clear Annealed")
+
+        verification_root = ROOT / "_verification_v0460_clear_glass"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            annealed = imported_item("275001", "1", 2, "v0460-clear:1")
+            annealed["product"] = "3/8 Clear"
+            tempered = imported_item("275002", "1", 1, "v0460-clear:2")
+            tempered["product"] = "3/8 Clear Tempered"
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-02", "items": [annealed, tempered]},
+                "fileName": "Delivery List 10-02-2026.xlsx",
+                "user": "admin",
+            })
+
+            staging_items = store.get_delivery_list("2026-10-02-staging-airport")["items"]
+            by_order = {item["order"]: item for item in staging_items}
+            self.assertEqual(by_order["275001"]["product"], "3/8 Clear")
+            self.assertEqual(by_order["275001"]["glassType"], "3/8 Clear Annealed")
+            self.assertEqual(by_order["275002"]["glassType"], "3/8 Clear Tempered")
+
+            report = store.reports_summary({"dateFrom": "2026-10-02", "dateTo": "2026-10-02"})
+            glass_rows = {row["glassType"]: row["qty"] for row in report["glassQuantityByType"]}
+            self.assertNotIn("3/8 Clear", glass_rows)
+            self.assertEqual(glass_rows.get("3/8 Clear Annealed"), 2)
+            self.assertEqual(glass_rows.get("3/8 Clear Tempered"), 1)
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+
+
+    def test_v0461_persisted_glass_aliases_uncombine_after_restart_and_label_normalization(self) -> None:
+        self.assertEqual(glass_profile_identity_key("3/8 Clear"), glass_profile_identity_key("3/8 Clear Annealed"))
+
+        verification_root = ROOT / "_verification_v0461_uncombine"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            # Simulate a combination created by an older release before the
+            # explicit Annealed wording became the maintained profile identity.
+            with store.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO admin_lookup_values
+                        (type, value, label, category, match_terms, is_active, source, created_at, updated_at)
+                    VALUES ('glass_alias', ?, ?, '', '', 1, 'manual', ?, ?)
+                    """,
+                    ("3/8 Clear Legacy Name", "3/8 Clear", "2026-08-01T12:00:00Z", "2026-08-01T12:00:00Z"),
+                )
+                connection.commit()
+
+            before = store.get_manual_edit_lookups()
+            self.assertEqual(len(before["glassAliases"]), 1)
+            alias = before["glassAliases"][0]
+            self.assertEqual(alias["target"], "3/8 Clear")
+            self.assertEqual(alias["targetKey"], glass_profile_identity_key("3/8 Clear Annealed"))
+
+            # Recreate the store to prove this does not depend on browser/server
+            # session memory. A normalized current target must still separate it.
+            restarted = self.make_store(verification_root)
+            result = restarted.uncombine_glass_profiles({"targets": ["3/8 Clear Annealed"]}, "admin")
+            self.assertEqual(result["glassAliases"], [])
+            with restarted.connect() as connection:
+                row = connection.execute(
+                    "SELECT is_active, source FROM admin_lookup_values WHERE type = 'glass_alias' AND value = ?",
+                    ("3/8 Clear Legacy Name",),
+                ).fetchone()
+            self.assertEqual(int(row["is_active"]), 0)
+            self.assertEqual(row["source"], "manual-hidden")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+
+
+    def test_v0468_whole_delivery_list_edit_deduplicates_and_updates_shared_fields_only(self) -> None:
+        verification_root = ROOT / "_verification_v0468_whole_edit"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            item = imported_item("276001", "1", 2, "v0468-whole:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-05", "items": [item]},
+                "fileName": "Delivery List 10-05-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                connection.execute(
+                    "UPDATE line_items SET scanned_qty = 1 WHERE list_id = ?",
+                    ("2026-10-05-staging-airport",),
+                )
+                connection.commit()
+                before_rows = connection.execute(
+                    "SELECT id, list_id, scanned_qty FROM line_items WHERE order_no = ? AND item_no = ? ORDER BY list_id",
+                    ("276001", "001"),
+                ).fetchall()
+            self.assertGreaterEqual(len(before_rows), 3)
+            before_scanned = {row["id"]: int(row["scanned_qty"] or 0) for row in before_rows}
+
+            whole = store.admin_search_line_items(
+                "",
+                "",
+                20,
+                0,
+                {"wholeList": True, "deliveryDate": "2026-10-05"},
+            )
+            self.assertTrue(whole["wholeList"])
+            self.assertEqual(whole["total"], 1)
+            self.assertEqual(len(whole["results"]), 1)
+            logical = whole["results"][0]
+            self.assertGreaterEqual(int(logical["stageCopyCount"]), 3)
+
+            result = store.update_line_item(
+                {
+                    "lineItemId": logical["lineItemId"],
+                    "customer": "WHOLE LIST CUSTOMER",
+                    "dimensions": '40" x 60"',
+                    "qty": 3,
+                    # Whole-list mode must ignore physical stage-owned values.
+                    "scanned": 0,
+                    "location": "",
+                    "editScope": "whole",
+                },
+                "admin",
+            )
+            self.assertGreaterEqual(int(result["stageRecordCount"]), 3)
+            with store.connect() as connection:
+                after_rows = connection.execute(
+                    "SELECT id, customer, dimensions, qty, scanned_qty FROM line_items WHERE order_no = ? AND item_no = ? ORDER BY list_id",
+                    ("276001", "001"),
+                ).fetchall()
+            self.assertEqual({row["customer"] for row in after_rows}, {"WHOLE LIST CUSTOMER"})
+            self.assertEqual({row["dimensions"] for row in after_rows}, {'40" x 60"'})
+            self.assertEqual({int(row["qty"] or 0) for row in after_rows}, {3})
+            self.assertEqual({row["id"]: int(row["scanned_qty"] or 0) for row in after_rows}, before_scanned)
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+
+    def test_v0469_unified_priority_work_applies_existing_and_waits_for_future_import(self) -> None:
+        """Unified Priority Work handles imported and future Rush/Remake/Both orders."""
+        verification_root = ROOT / "_verification_v0469_priority_work"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            delivery_date = "2026-10-12"
+            existing = imported_item("279001", "1", 2, "v0469-existing:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": delivery_date, "items": [existing]},
+                "fileName": "Delivery List 10-12-2026.xlsx",
+                "user": "admin",
+            })
+
+            lookup = store.priority_work_lookup("88279001", "Both")
+            self.assertTrue(lookup["found"])
+            self.assertEqual(lookup["deliveryDate"], delivery_date)
+            applied = store.submit_priority_work(
+                {
+                    "priorityType": "Both",
+                    "jobNumber": "88279001",
+                    "deliveryDate": "2026-10-14",
+                    "reason": "Missing Glass",
+                    "responsible": "Priority Tester",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            self.assertTrue(applied["ok"])
+            self.assertEqual(applied["action"], "applied")
+            self.assertEqual(applied["priorityType"], "Both")
+            self.assertEqual(applied["matchedDeliveryDate"], "2026-10-14")
+            with store.connect() as connection:
+                existing_rows = connection.execute(
+                    "SELECT process_state, priority_delivery_date FROM line_items WHERE source_id = ? ORDER BY list_id",
+                    ("279001-001",),
+                ).fetchall()
+            self.assertGreaterEqual(len(existing_rows), 3)
+            self.assertTrue(all("Rush" in str(row["process_state"] or "") for row in existing_rows))
+            self.assertTrue(all("Remake" in str(row["process_state"] or "") for row in existing_rows))
+            self.assertEqual({str(row["priority_delivery_date"] or "") for row in existing_rows}, {"2026-10-14"})
+            inbound = store.get_delivery_list(f"{delivery_date}-inbound-indian-trail")
+            existing_row = next(row for row in inbound["items"] if row["sourceId"] == "279001-001")
+            self.assertEqual(existing_row["priorityBanner"]["kind"], "both")
+            self.assertEqual(existing_row["priorityBanner"]["label"], "Rush + Remake")
+            self.assertEqual(existing_row["priorityBanner"]["reason"], "Missing Glass")
+
+            queued = store.submit_priority_work(
+                {
+                    "priorityType": "Remake",
+                    "jobNumber": "88279002",
+                    "deliveryDate": "2026-10-16",
+                    "reason": "Missing Glass",
+                    "responsible": "Priority Tester",
+                    "emailMode": "none",
+                },
+                "admin",
+            )
+            self.assertTrue(queued["ok"])
+            self.assertEqual(queued["action"], "queued")
+            self.assertFalse(queued["lookupResult"]["found"])
+
+            future = imported_item("279002", "1", 1, "v0469-future:1")
+            future["job"] = "88279002.2R TEST JOB"
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-15", "items": [future]},
+                "fileName": "Delivery List 10-15-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                future_rows = connection.execute(
+                    "SELECT process_state, priority_delivery_date FROM line_items WHERE source_id = ? ORDER BY list_id",
+                    ("279002-001",),
+                ).fetchall()
+            self.assertGreaterEqual(len(future_rows), 3)
+            self.assertTrue(all("Remake" in str(row["process_state"] or "") for row in future_rows))
+            self.assertEqual({str(row["priority_delivery_date"] or "") for row in future_rows}, {"2026-10-16"})
+            matched_request = next(
+                request for request in store.priority_intake_requests()
+                if request.get("jobNumber") == "88279002"
+            )
+            self.assertEqual(matched_request["status"], "matched")
+            self.assertEqual(matched_request["matchedDeliveryDate"], "2026-10-16")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
 
 
 if __name__ == "__main__":

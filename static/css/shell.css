@@ -1541,3 +1541,17 @@ body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355=
 body.portable-installed-logo-v358 .app-sidebar .brand [data-portable-label-v355="applicationName"] {
   display: none !important;
 }
+
+/* ========================================================================== */
+/* v0.456 Footer/sidebar color continuity                                     */
+/* ========================================================================== */
+/* The footer is part of the application shell, so use the same maintained
+   navy/radial treatment as the desktop sidebar rather than a separate blue. */
+.app > .desktop-footer.desktop-footer-v0163 {
+  border-top-color: rgba(141, 177, 230, 0.35) !important;
+  background-color: #041f4d !important;
+  background-image:
+    radial-gradient(circle at 35% 2%, rgba(58, 116, 215, 0.28), transparent 32%),
+    linear-gradient(180deg, #062c68 0%, #041f4d 52%, #05265c 100%) !important;
+  box-shadow: 0 -10px 30px rgba(4, 24, 60, 0.18) !important;
+}

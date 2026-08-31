@@ -37,6 +37,7 @@ from backend.import_safety import install_safe_delivery_import
 from backend.operations import OperationsFeatureService
 from backend.store import (
     SESSION_COOKIE_NAME,
+    canonical_clear_glass_label,
     canonical_permission_name,
     create_store,
     public_route_label,
@@ -599,11 +600,18 @@ def render_rack_packing_list(payload: dict) -> str:
         Effects: Performs an in-memory calculation and returns data without intentional external side effects.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
+        # v0.460: packing/report grouping uses the same explicit Clear
+        # Annealed/Tempered identity as Scan and Statistics while preserving the
+        # imported product field shown in the detail row.
+        def item_glass_type(row: dict) -> str:
+            raw = row.get("glassType") or row.get("product") or row.get("job") or "Other Glass"
+            return canonical_clear_glass_label(raw) or "Other Glass"
+
         rows = []
         sorted_items = sorted(
             items or [],
             key=lambda item: (
-                str(item.get("product") or item.get("job") or "Other Glass").lower(),
+                item_glass_type(item).lower(),
                 str(item.get("job") or ""),
                 str(item.get("order") or ""),
                 str(item.get("item") or ""),
@@ -611,13 +619,13 @@ def render_rack_packing_list(payload: dict) -> str:
         )
         current_glass = None
         for item in sorted_items:
-            glass_type = str(item.get("product") or item.get("job") or "Other Glass").strip() or "Other Glass"
+            glass_type = item_glass_type(item)
             if glass_type != current_glass:
                 current_glass = glass_type
                 group_qty = sum(
                     int(row.get("rackQty") or row.get("qty") or 0)
                     for row in sorted_items
-                    if str(row.get("product") or row.get("job") or "Other Glass").strip() == glass_type
+                    if item_glass_type(row) == glass_type
                 )
                 rows.append(
                     f'<tr class="packing-glass-group"><td colspan="10"><strong>{esc(glass_type)}</strong><span>{esc(group_qty)} pcs</span></td></tr>'
@@ -1468,7 +1476,8 @@ def summarize_print_package(package: dict, requested_stage_count: int = 0) -> di
             return 0
 
     def item_glass_type(item: dict) -> str:
-        return str(item.get("product") or item.get("job") or item.get("suggestedBay") or "Other Glass").strip() or "Other Glass"
+        raw = item.get("glassType") or item.get("product") or item.get("job") or item.get("suggestedBay") or "Other Glass"
+        return canonical_clear_glass_label(raw) or "Other Glass"
 
     for delivery_list in lists:
         items = list(delivery_list.get("items") or [])
@@ -2157,7 +2166,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
                 return
             lookups = STORE.get_manual_edit_lookups() or {}
-            self.send_json({"glassColors": lookups.get("glassColors", [])})
+            # v0.452: color consumers need aliases in the same lightweight payload.
+            # This removes the startup race where Scan could paint a combined source
+            # name before the separate presentation-profile request loaded aliases.
+            self.send_json({
+                "glassColors": lookups.get("glassColors", []),
+                "glassAliases": lookups.get("glassAliases", []),
+            })
             return
 
         if parsed.path == "/api/admin/manual-edit-lookups":
@@ -2215,6 +2230,11 @@ class Handler(SimpleHTTPRequestHandler):
                 "location": query_values.get("location", ["all"])[0],
                 "attention": [value for raw in query_values.get("attention", []) for value in str(raw).split(",") if value],
                 "glassTypes": [str(value).strip() for value in query_values.get("glassType", []) if str(value).strip()],
+                # v0.468: Whole Delivery List editing uses the same maintained
+                # search endpoint, scoped to one delivery date and de-duplicated
+                # by physical line identity in the store.
+                "wholeList": query_values.get("wholeList", ["0"])[0] in {"1", "true", "yes"},
+                "deliveryDate": str(query_values.get("deliveryDate", [""])[0] or "").strip(),
             }
             self.send_json(STORE.admin_search_line_items(query, list_id, limit, offset, filters))
             return
@@ -2313,6 +2333,15 @@ class Handler(SimpleHTTPRequestHandler):
             query = params.get("q", [""])[0]
             bay_code = params.get("bayCode", [""])[0]
             self.send_json(STORE.get_sdi_workspace(query, bay_code))
+            return
+
+        if parsed.path == "/api/indian-trail/priority-work-lookup":
+            if not self.require_permission("manage_rush_work"):
+                return
+            params = parse_qs(parsed.query)
+            query = params.get("q", [""])[0]
+            priority_type = params.get("priorityType", ["Rush"])[0]
+            self.send_json(STORE.priority_work_lookup(query, priority_type))
             return
 
         if parsed.path == "/api/indian-trail/layout":
@@ -2945,6 +2974,7 @@ class Handler(SimpleHTTPRequestHandler):
                         data.get("roles") or [],
                         station=data.get("station"),
                         email=data.get("email"),
+                        display_name=data.get("displayName"),
                         updated_by=user["username"],
                     )
                 )
@@ -3255,6 +3285,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.delete_bay_group(data, user["username"]))
+                return
+
+            if parsed.path == "/api/indian-trail/priority-work":
+                user = self.require_permission("manage_rush_work")
+                if not user:
+                    return
+                self.send_json(STORE.submit_priority_work(data, user["username"]))
                 return
 
             if parsed.path == "/api/indian-trail/priority-intake":

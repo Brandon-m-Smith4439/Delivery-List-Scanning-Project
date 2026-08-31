@@ -1,15 +1,198 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.449**. SQLite remains the active/default backend.
+Current maintained release: **v0.469**. SQLite remains the active/default backend.
 
-v0.449 makes Indian Trail overrides reconcile the complete physical workflow, preserves override rack history, restores reliable sticky Stage selection, and adds inline Bay correction on the Inbound Scan view.
+v0.469 consolidates Rush and Remake intake into one Priority Work workflow that can act immediately on imported jobs or wait for future imports, supports Rush + Remake together, folds Missing Glass into maintained reasons, and adds printable Rush/Remake/Missing Glass paperwork.
 
-## Install v0.449
+## Install v0.469
 
 1. Stop the scanner server.
-2. Replace the application source with the complete v0.449 project contents.
+2. Copy the v0.469 changed files over the matching paths in your current project.
 3. Start the server and hard-refresh the browser (`Ctrl+F5`).
 4. No database reset or migration is required; SQLite schema remains version 11.
+
+## v0.469 highlights
+
+- Rebuilt **Priority Work** around one central New Request workflow. Operators choose **Rush**, **Remake**, or **Rush + Remake** instead of switching between separate request systems.
+- The Job Nr. / SO / Order lookup checks active imported delivery lists as the operator types. If the work already exists, the GUI shows the matched customer/order/pieces/stages and can apply Priority Work immediately. If it has not been imported yet, the same request is saved durably and waits for a future authoritative import.
+- Existing imported work can keep its current delivery date or receive a new priority delivery date before the Rush/Remake/Both mark is applied across every synchronized stage copy of the same physical Order/Item.
+- **Missing Glass Rush is no longer a standalone workflow or flag type.** Missing Glass is a reusable reason under Rush, Remake, or Rush + Remake. Historical existing-order Rush marks continue to read as Rush with their saved reason instead of resurrecting a separate Missing Glass Rush classification.
+- Added **Rush**, **Remake**, and **Missing Glass** printout actions directly to the Priority Work GUI. The paperwork can be printed before an order imports (with the request details) or after a match (including the imported order/item/glass/dimensions/quantity rows).
+- Work Center now organizes active requests into Rush, Remake, and Rush + Remake sections. Requests with a Missing Glass reason can print the dedicated Missing Glass sheet without becoming a separate priority type.
+- Pending priority delivery dates are carried into the matched imported stage copies, and combined requests persist both Remake and Rush state. Existing audit/notification/import reconciliation paths are reused rather than introducing a duplicate priority table.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.469** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.468 highlights
+
+- Added **Whole Delivery List** to the Manual Edit scope selector. It shows each logical Order/Item once for the selected delivery date and saves shared order fields across every synchronized stage copy. Stage-owned **Scanned** progress and physical **Location** remain protected and editable only from a specific stage.
+- Whole-list Manual Edit search/filtering is scoped to one delivery date and de-duplicates stage copies by the same durable physical-line identity used by the existing synchronization path. Glass filter counts also count each logical line once instead of multiplying by stage count.
+- Fixed the selected **All Glass Types** Print / Export chip so its visible label is white like the other selected All-filter buttons.
+- Removed the old decorative empty circle from the compact **Delivery list changes** preview header.
+- Consolidated icon-only **Save** and **Delete** buttons into one late-loaded shared visual profile. Save stays navy/blue with white ink on hover; Delete stays white/red and becomes red/white on hover, preventing the Manual Edit save button from flashing white.
+- Added regression coverage proving whole-list editing updates shared Customer/Dimensions/Qty across all stage copies while preserving each stage's existing scanned quantity.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.468** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.467 highlights
+
+- Increased Scan filter-count numerals slightly without enlarging the surrounding filter chips; Print / Export filter counts receive the same readability bump.
+- Changed the Delivery List row default from **25 to 50** and added **200** as the new maximum Rows option in both the top and bottom pagers. Operators can still choose 25, 50, or 100.
+- Rebuilt the positive-load Bay Map shuttle sequence around exact per-pane timing. Glass panes now remain separate, load one at a time into the rear cargo area, travel on a layer behind the truck instead of over the roof/cab, and disappear only after they are fully occluded by the truck body.
+- Truck departure is no longer tied to a rough percentage of the animation. It waits until the final visible pane has completely loaded, then holds at Outbound for an additional **2 seconds** before leaving. Inbound unloading is individually sequenced as well, with the truck remaining docked through the complete unload and dwell.
+- Preserved the v0.459 load-aware piece count and zero-piece waiting-cloud behavior. The existing 120-pane safety ceiling remains for extreme loads.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.467** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.466 highlights
+
+- Removed parentheses from Scan filter quantities across Status, Attention, Route, and Glass Type. Counts now render as clean numeric badges such as `4` instead of `(4)`; Print / Export already used bare numeric counts and remains consistent.
+- Replaced the simple luminance threshold for selected glass filters with a direct contrast-ratio comparison between white and navy ink against the actual color-filled chip. Vivid Mirror/Tempered colors now automatically choose the more readable label color.
+- Separated the exact-glass count badge from the glass-colored label ink. Selected Scan and Print / Export glass filters use a pale count pill with dark navy numerals, preventing white-on-white count text on purple/green selections.
+- Standardized selected filter count badges so ordinary active filters keep white counts on app blue while exact glass selections keep dark counts on a pale surface.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.466** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.465 highlights
+
+- Corrected Print / Export preview geometry without changing the actual printed delivery list. The preview Letter-paper shell now uses an outline instead of a layout-affecting border, leaving the same exact `.4in` printable margins and `10.2in` / `7.7in` printable heights as the real portrait/landscape print job. This removes the small landscape bottom-edge difference and restores the portrait Check column to the same usable width as paper.
+- Exact glass-type selections in both Scan filters and Print / Export now fill the complete choice with that glass type's canonical Lookup Manager color. The former app-blue check badge is removed; selected text automatically switches between dark and white ink based on the saved color's luminance.
+- Moved **New Orders / New/Updated** and **Errors** into the **Status** filter group. **Attention** now contains only **Rushes, Remakes, and Internal Rejects** on Scan, Print / Export, and the saved Print Preset editor. Older saved presets are migrated in memory so their Updated/Error selections are preserved.
+- Updated Print / Export backend exact-status matching so Status choices remain OR-combined even when New/Updated or Errors are selected, matching the browser filter behavior.
+- Expanded the Scan **Route** filter section to the same full drawer width as **Glass Type** for a more balanced filter layout.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.465** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.464 highlights
+
+- Increased the complete Scan glass-type group band from **38px to 43px** after floor review. The inner foreground control is **41px**, preserving the intentional 2px structural allowance without returning to the old 54px table-cell height.
+- Preserved the glass-color gradient, static sheen, NEW/UPDATED badge treatment, piece count, and Collapse/Expand controls unchanged.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.464** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.463 highlights
+
+- Fixed the remaining Scan glass-type header height at the actual table-layout source. The shared Delivery List cell rule reserves 54px for normal item rows; v0.462 shortened only the inner header button, so the parent glass-group cell still painted a taller second color layer.
+- Glass-group structural rows now explicitly own a compact **38px** row/cell height, with the foreground control held to **36px**. The glass name, NEW badge, piece count, Collapse/Expand control, gradient, and static sheen remain intact without the extra vertical band.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.463** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.462 highlights
+
+- Reduced Scan glass-type group headers from the 42px reference height to a compact 36px control height, with slightly smaller count/toggle pills so the header occupies less vertical space without crowding its text.
+- Rebuilt the group-level **New / Updated** badge as a semantic `mark` element. This removes it from the older broad `span/strong/b` white-text selector entirely, while an exact final owner forces dark ink, yellow fill, and dark text fill for reliable contrast.
+- Increased the fixed glass-header sheen modestly with a wider, brighter highlight band. The sheen remains completely static and has no animation.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.462** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.461 highlights
+
+- Lookup Manager **Uncombine Glass Types** now reconstructs saved combinations from persisted alias rows instead of depending on the current-session target label. Alias payloads expose a stable normalized target identity, the browser sends durable alias IDs when separating, and the backend can also match older target labels by physical glass-profile identity. This keeps combinations created on older versions reversible after a server restart or later naming normalization.
+- The Statistics command header is now a true dark-blue/navy banner with high-contrast white title/copy, readable live-range/status chips, and translucent light actions while retaining the shared non-Home header geometry.
+- Fixed the Scan glass header **New/Updated** text at the actual winning CSS specificity. The nested yellow marker now explicitly owns black ink/text-fill even against the older broad white-text group-header rule.
+- Rebuilt the Scan glass-header sheen as a static pseudo-element overlay above the canonical glass gradient. This makes the highlight visibly present without animation and without changing the Lookup Manager glass color.
+- Added regression coverage for uncombining an alias created under the older `3/8 Clear` target after recreating the store, proving the current `3/8 Clear Annealed` profile can still separate it.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.461** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.460 highlights
+
+- Clear glass now always has an explicit operational heat-treatment identity. Imported/source labels such as **3/8 Clear**, **1/2 Clear**, **1/4 Clear**, **1/8 Clear**, and **3/8 UltraClear** that omit both Tempered and Annealed are treated as the corresponding **Annealed** glass type for grouping, Statistics, print/export summaries, and operator-facing glass labels. Explicit Tempered and Annealed names remain separate. Historical source product text is preserved unchanged.
+- Updated the built-in clear-glass cost/reference names to use explicit **Annealed** labels so Lookup Manager and reporting no longer advertise an ambiguous standalone `3/8 Clear` glass type.
+- Added a canonical `glassType` field to line-item/event payloads while keeping the original imported `product` field intact, allowing clients to consistently group legacy clear-glass rows without rewriting database history.
+- Scan glass-group **New/Updated** badges now use black text even inside white-text glass headers, preventing the inherited header color from washing out the `New` label.
+- Added a subtle fixed sheen layer to Scan glass-type headers. The sheen is static (no animation) and preserves the compact v0.459 dark Lookup Manager gradient.
+- Added regression coverage proving raw `3/8 Clear` reports as `3/8 Clear Annealed`, explicit `3/8 Clear Tempered` remains Tempered, and Statistics never emits a standalone `3/8 Clear` category.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.460** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.459 highlights
+
+- Bay Map shuttle load visuals now scale much more directly with **pieces on the way**. Normal floor loads render one animated pane per physical piece, with stack spacing compressed as counts rise so the lane remains readable. A generous safety ceiling protects the page from pathological DOM growth without changing the maintained numeric transit count.
+- Shuttle timing is recalculated from load size: heavier glass loads receive longer Outbound loading and Indian Trail unloading pauses, while small loads move through a shorter cycle.
+- The **0 pieces** state remains physically parked at Outbound, but the waiting thought-cloud has been refined so its three dots read as a clearer left-to-right sequence.
+- Statistics glass colors now resolve through one explicit canonical Lookup Manager helper before chart rendering, including combined aliases. If the lightweight glass-color library finishes loading after Statistics first paints, the page immediately rerenders so generated fallback colors cannot remain on screen.
+- The Statistics header is one step darker while staying inside the shared pale-blue workspace family.
+- Scan glass-type section headers now follow the approved reference more closely without the decorative glass icon: a compact 42px dark glass-colored gradient band, strong white glass name at left, bordered piece-count pill, and a compact Collapse/Expand control at right.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.459** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.458 highlights
+
+- Bay Map shuttle animation now derives its visual load from the live **pieces on the way** count. Small loads show only the matching number of glass panes; larger loads compress the visual stack up to a practical display cap while the exact piece count remains in the maintained transit label.
+- Shuttle cycle duration now scales with the in-transit quantity, so larger glass loads spend longer at the Outbound loading pause and Indian Trail unloading pause instead of using one fixed wait for every run.
+- When **0 pieces** are in transit, the shuttle no longer drives an empty loop. It waits at the Outbound side with a small thought-cloud whose three dots animate left-to-right, clearly communicating that the truck is waiting for glass to be loaded.
+- Statistics **Glass mix by quantity** and **Glass type breakage** entries now carry the canonical Lookup Manager glass color into Bar, Donut, Line-point, and Table-swatch rendering. Combined aliases continue resolving through their canonical target profile, so Statistics matches Scan and other glass-aware interfaces.
+- Darkened the shared pale-blue Statistics header slightly while preserving the v0.457 139px geometry, accent rail, circle decoration, and overall application styling.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.458** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.457 highlights
+
+- Edit Users now exposes **Display name** in each expandable account card. Saving Access & profile changes updates display name, email, role, and station assignments through the same audited profile transaction instead of adding a duplicate user endpoint.
+- Increased every primary page header except Home by about **20%** (116px → 139px desktop) through the final shared UI layer so Statistics, Scan, Racks, Rejects, Bay Map, and Admin keep one consistent header scale. Home retains its established hero proportions.
+- Removed the repeated Statistics analytics subtitle/range sentence, enlarged the **Filter categories** search field, reduced Reset to a compact fixed action, and converted the analytics toolbar to a flexible row that fills the available width cleanly.
+- Home Delivery Library expansion no longer removes/re-adds animation classes or forces a layout flush. The native `[open]` state owns one smooth reveal, so the animation replays on every reopen without the visible restart flash.
+- Scan glass-type group headers use a softer, darker canonical glass gradient with a subtle framed border and gentler hover surface, keeping Lookup Manager identity without the overly bright stripe effect.
+- Indian Trail receive confirmation now shows **Job Nr. before Customer**, adds **Dimensions** and **QTY**, removes the redundant Item metadata pill, and grows about 15% from the v0.456 compact size to make the added verification data readable while keeping the styled Done action.
+- Rebuilt Bay Map endpoint motion around a new 16-second shuttle cycle: sequential translucent light-blue panes load from the left into the truck at Outbound, the truck travels and flips at Indian Trail, then panes unload sequentially out to the right before the truck returns. Reduced-motion behavior remains static.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.457** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.456 highlights
+
+- Matched the desktop footer to the same navy/radial gradient owned by the sidebar so the application shell reads as one continuous frame.
+- Brought the Statistics header onto the exact shared 116px page-header geometry, added the same open-circle decoration and left accent rail used by the other primary workspaces, and increased color saturation/contrast across analytics cards, KPI surfaces, chart controls, and supporting panels.
+- Removed the outer **Priority metrics** section card while keeping the four priority statistic cards as a standalone dashboard row. Their semantic warning/success/open colors are brighter and easier to scan.
+- Standardized all Statistics analytics selector bars to the same 42px height. Reporting range labels now use compact numeric `M/D/YYYY` dates while the maintained two-month calendar interaction remains unchanged.
+- Home Delivery Library date groups explicitly restart their reveal animation on every collapse/re-expand cycle. The **Open stage** label is forced white when its stage card/button is hovered or focused so it stays readable on the colored action surface.
+- Scan glass-type group headers now consume three dark gradient stops precomputed from the canonical Lookup Manager glass color, producing a clear glass-hue-to-navy gradient instead of a flat colored strip.
+- Reduced the Indian Trail receive confirmation to a substantially smaller floor-friendly footprint while preserving scanned-order metadata, the BAY destination hero, Bay override controls, and All Scans hint. The **Done** button now has an explicit green primary-action treatment.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.456** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.455 highlights
+
+- Fixed the remaining Scan glass-group header issue at its actual cascade source. v0.454 colored the surrounding table cell, but an older opaque blue `button` background still covered that color. The glass-group button is now transparent and the visible header surface uses the canonical Lookup Manager glass hue darkened into a high-contrast band, with strong white glass name/count/collapse text.
+- Repaired the Indian Trail success notification packaging/formatting issue. The v0.453 popup markup lived in `app.js`, while its layout overrides lived in `styles.css`; because the following v0.454 package was incremental and did not include `styles.css`, an installation that skipped the v0.453 full package could run the new markup with the old generic grid rules. v0.455 deliberately includes and strengthens the authoritative `styles.css` layout so scanned-order metadata pills, the large BAY hero, enlarged Override Bay selector, side-by-side Move action, helper hint, and bottom-right Done button remain aligned.
+- Removed the v0.454 Table-only date selector and its temporary range-snapshot logic. Statistics now has one **Chart date range** calendar directly in the analytics toolbar, and the same selected Date From / Date To applies consistently to Bar, Line, Donut, and Table views and every Data selection.
+- The analytics range control reuses the maintained two-month calendar interaction used elsewhere in the app, displays the active date span directly on the control, preselects the current reporting range when opened, and continues to drive the existing authoritative report query instead of introducing duplicate aggregation logic.
+- Preserved the v0.454 Statistics header alignment, removal of Delivery lists / Delivery dates from the Data selector, complete Table rows, and expanding non-scrolling Bar chart.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.455** while keeping SQLite schema version **11** unchanged.
+
+## v0.454 highlights
+
+- Scan content-group headers now use the exact Lookup Manager glass-type hue as their visual source, darkened into a strong readable header surface. Glass names are high-contrast white instead of faded blue-gray text, while combined glass aliases continue resolving through the canonical profile color added in v0.452.
+- Statistics now uses the same pale blue-gray page-header language as the rest of the application instead of a separate dark navy command banner. The reporting date selector and status elements use the same neutral control surfaces as the main workspaces.
+- Removed the **Delivery lists** and **Delivery dates** groups from the Statistics Data selector. Workflow stages, production mix, breakage/rejects, and people/activity remain available.
+- Table view now exposes a dedicated **Table date** filter. Choosing one delivery date temporarily focuses the existing authoritative Statistics range/report query on that date; leaving Table view or choosing **Use page range** restores the prior reporting range instead of maintaining a second client-only calculation path.
+- Table view always expands to every matching row rather than inheriting the chart Top 10/20/etc. limit, making it the complete review surface for the selected date/range.
+- Bar charts no longer create an internal vertical scroll area. Their SVG height expands with the visible category count and scales to the available desktop width; small screens retain horizontal overflow only when necessary.
+- SQLite schema remains version **11**; no migration or database reset is required.
+
+## v0.453 highlights
+
+- The Bay Map in-transit animation now uses clearer light-blue glass motion at both endpoints: on the Outbound side the panes approach from the left and move into the truck, while on the Indian Trail side the panes move out from the truck toward the right. The artwork remains intentionally simple and reduced-motion behavior stays unchanged.
+- Rebuilt the Indian Trail receive success notification into a wider, cleaner layout. The top section now emphasizes the scanned order with structured customer/job metadata pills instead of the older repeated headline copy.
+- Kept the large destination hero but removed the redundant Order/Job line beneath the bay name, enlarged the "PLACE THIS ORDER IN" label, enlarged the Override Bay selector, and placed the Move to selected bay action directly beside it for quicker correction.
+- Moved the Done action to a clear bottom-right footer position and preserved the All Scans helper link/hint without forcing the notification to grow taller.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.453** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
+
+## v0.452 highlights
+
+- Combined Glass Types now load color metadata and alias metadata together for every authenticated operator. A combined source name can retain its old stored color for reversible uncombine, but while combined it always renders with the canonical target profile's configured color. Stable fallback colors are also shared across all aliases in an unconfigured combined family.
+- Historical rack locations labeled **PRIOR** now use a neutral gray rack surface/rail instead of the rack set's active color, making completed transportation visually distinct from current rack assignments.
+- Indian Trail now validates both **Staging** and **Outbound** prerequisites. If either is missing and a supervisor overrides the receive, both stage copies are reconciled to the received quantity as needed.
+- Reconciled prerequisite quantities are stored as explicit `scan_override_it` events with station label **Scan Override IT**. Staging/Outbound line timestamps display **SCAN OVERRIDE IT: <date> at <time>** instead of presenting the synthetic event as a normal ON TIME/LATE Airport scan. Synthetic override events are excluded from delivery timeliness metrics.
+- The Bay Map shuttle keeps the v0.451 endpoint-aligned progress meter but replaces rack sprites with three simple light-blue vertical glass panes that slide into the truck at Outbound and out of the truck at Indian Trail during the endpoint pauses.
+- Added regression coverage for combined glass alias/color metadata, full prerequisite override history, synthetic timing exclusion, and a legacy mismatch where Outbound is present but Staging is missing.
+- SQLite schema remains version **11**; no migration or database reset is required.
+
+## v0.451 highlights
+
+- Priority ribbon rows now explicitly override the shared 54px Delivery List cell height. Rush, Remake, and Missing Glass banners collapse to their own compact height and sit directly on the line item with no inherited white band beneath them.
+- Global Search now treats each meaningful term as an **AND** condition across the same order. Queries such as `73 x 64 rush`, `73x64 remake`, or `ALPHA BUILDERS rush` can combine dimensions, flags, customer/job information, route, order/item identifiers, product, stage, delivery date, rack/bay data, and other maintained line metadata.
+- Rush, Remake, and Missing Glass Rush are directly searchable as flags. Priority reason/responsible metadata participates in the same search without duplicating the priority classification rules; results continue to use the shared `priority_banner_annotations` resolver.
+- Dimension separators (`x` / `×`) are normalized for search, so spacing around the separator does not change the result. Every term must match the same physical order result rather than independently matching unrelated records.
+- The Bay Map in-transit dual progress meter now ends beneath the shuttle's actual left/right stopping points instead of stretching edge-to-edge. During the existing endpoint pauses, a small glass rack visibly unloads at Inbound and another rack loads at Outbound before the truck reverses direction. Reduced-motion users keep the static truck without transfer animation.
+- Added regression coverage for combined size + flag search, direct flag searches, Missing Glass Rush, compact dimension syntax, customer + flag combinations, and priority reason/responsible searches.
+- SQLite schema remains version **11**; no migration or database reset is required.
+
+## v0.450 highlights
+
+- Priority ribbons were shortened and their internal padding reduced as the first density pass for flagged Delivery List work.
+- Smart Search priority flags use high-contrast states: **Rush** is bright red, **Remake** is near-black, and **Missing Glass Rush** is bright red-orange. Smart Search reuses the maintained backend priority annotation resolver so these states do not introduce duplicate classification logic.
+- The Indian Trail receive success notification keeps the large **PLACE THIS ORDER IN / BAY** destination hero while reducing the supporting icon, selector, helper text, and action buttons to normal interface sizing.
+- After an item is scanned out from the Bay Map, Inbound Location keeps its most recent Bay as history and shows the same explicit **PRIOR** lifecycle label used for historical rack locations.
+- Added a 20-piece regression that stages ten two-piece orders into one rack, scans the rack Outbound, verifies all Outbound Bay preassignments, receives every piece one by one while confirming the rack clears one piece at a time, scans all pieces out from the Bay Map, and confirms Bay history remains available afterward. Manual Scan is exercised during Staging, Inbound receive, and Bay Map scan-out.
+- Added Rush intake, Remake intake, and Missing Glass Rush lifecycle coverage through Smart Search, Staging, Outbound rack scan, Inbound Bay receipt, and Bay Map removal.
+- SQLite schema remains version **11**; no migration or database reset is required.
 
 ## v0.449 highlights
 

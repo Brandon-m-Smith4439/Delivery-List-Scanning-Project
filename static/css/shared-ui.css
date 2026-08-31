@@ -427,3 +427,74 @@ body :is(
 ) button:not(.icon-only):not(.gui-close-button) > span:not([aria-hidden="true"]) {
   font-size: inherit !important;
 }
+
+/* ========================================================================== */
+/* v0.457 Shared non-Home page-header scale                                   */
+/* ========================================================================== */
+/* Keep Home's hero proportions unchanged while giving every other primary
+   workspace header about 20% more vertical presence from the shared shell. */
+.page-view:not(.home-page) .app-page-header-v357 {
+  box-sizing: border-box !important;
+  height: 139px !important;
+  min-height: 139px !important;
+  padding-top: 24px !important;
+  padding-bottom: 24px !important;
+}
+
+@media (max-width: 980px) {
+  .page-view:not(.home-page) .app-page-header-v357 {
+    height: auto !important;
+    min-height: 0 !important;
+    padding-top: 20px !important;
+    padding-bottom: 20px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.468 Shared save / delete icon action profile                            */
+/* ========================================================================== */
+/* Save and trash icon buttons now share one late-loaded owner so individual
+   Admin/Rack legacy hover rules cannot repaint one control white or otherwise
+   drift away from the maintained action language. */
+button.icon-only.icon-save,
+button.icon-only.icon-trash {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease !important;
+}
+button.icon-only.icon-save {
+  border-color: #123f72 !important;
+  background: #123f72 !important;
+  color: #fff !important;
+}
+button.icon-only.icon-save:hover:not(:disabled):not(.is-blocked),
+button.icon-only.icon-save:focus-visible:not(:disabled):not(.is-blocked) {
+  border-color: #155caa !important;
+  background: #155caa !important;
+  color: #fff !important;
+  box-shadow: 0 7px 15px rgba(21, 92, 170, .2) !important;
+  transform: translateY(-1px) !important;
+}
+button.icon-only.icon-trash {
+  border-color: #e4b8bf !important;
+  background: #fff !important;
+  color: #a92434 !important;
+}
+button.icon-only.icon-trash:hover:not(:disabled):not(.is-blocked),
+button.icon-only.icon-trash:focus-visible:not(:disabled):not(.is-blocked) {
+  border-color: #a92434 !important;
+  background: #a92434 !important;
+  color: #fff !important;
+  box-shadow: 0 7px 15px rgba(169, 36, 52, .18) !important;
+  transform: translateY(-1px) !important;
+}
+button.icon-only:is(.icon-save, .icon-trash):active:not(:disabled):not(.is-blocked) {
+  transform: translateY(0) !important;
+  box-shadow: none !important;
+}

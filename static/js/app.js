@@ -41,10 +41,13 @@ const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
 const ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE = 3;
 const MANUAL_EDIT_PAGE_SIZE = 20;
+const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_FILTER_GROUPS = Object.freeze({
-  status: Object.freeze(["remaining", "partial", "complete"]),
-  attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority", "updated", "errors"]),
+  // v0.465: New Orders and Errors are operational status states, while the
+  // Attention group is reserved for Rush, Remake, and Internal Reject work.
+  status: Object.freeze(["remaining", "partial", "complete", "updated", "errors"]),
+  attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority"]),
   route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
 });
 const SCAN_FILTER_LABELS = Object.freeze({
@@ -98,7 +101,8 @@ const state = {
   globalSearchLastQuery: "",
   globalSearchLastResults: [],
   pageIndex: 1,
-  pageSize: 25,
+  // v0.467: show more delivery-list rows by default; operators can still reduce it.
+  pageSize: 50,
   homeSearch: "",
   homeStageFilter: "all",
   overviewRange: "30",
@@ -252,6 +256,9 @@ const state = {
   lookupGlassFamilyV350: "Annealed",
   manualEditDirty: false,
   manualEditListId: "",
+  // v0.468: keep Whole Delivery List as a presentation/search scope while
+  // retaining one real stage ID as the delivery-date anchor.
+  manualEditScopeV468: "stage",
   manualEditQuery: "",
   manualEditResultRows: [],
   manualEditTotalRows: 0,
@@ -290,6 +297,8 @@ const state = {
   // v0.262: breakage charts use one combined dataset and switch the charted
   // unit without forcing users through duplicate piece/SQFT/cost datasets.
   statisticsBreakageMeasure: "sqft",
+  // v0.455: one calendar range owns the entire analytics workspace regardless
+  // of whether the data is shown as a bar, line, donut, or table.
   statisticsCustomDateFrom: "",
   statisticsCustomDateTo: "",
   statisticsCalendarMonth: "",
@@ -312,6 +321,10 @@ const state = {
   sdiCurrentQuery: "",
   priorityIntakeQuery: "",
   priorityNewRequestMode: "rush",
+  priorityWorkLookup: null,
+  priorityWorkLookupTimer: null,
+  priorityWorkLookupRequestId: 0,
+  priorityWorkDeliveryDateTouched: false,
   sdiCurrentTypeFilter: "all",
   priorityIntakeEditingRequestId: "",
   sdiCurrentFilterTimer: null,
@@ -988,6 +1001,8 @@ const els = {
   statsChartSortSelect: document.getElementById("statsChartSortSelect"),
   statsChartLimitSelect: document.getElementById("statsChartLimitSelect"),
   statsChartFilterInput: document.getElementById("statsChartFilterInput"),
+  statisticsChartRangeButton: document.getElementById("statisticsChartRangeButton"),
+  statisticsChartRangeText: document.getElementById("statisticsChartRangeText"),
   statisticsBreakageMeasureControl: document.getElementById("statisticsBreakageMeasureControl"),
   statsBreakageMeasureSelect: document.getElementById("statsBreakageMeasureSelect"),
   statisticsExternalRemakesControl: document.getElementById("statisticsExternalRemakesControl"),
@@ -1223,6 +1238,12 @@ const els = {
   sdiSelectionSummary: document.getElementById("sdiSelectionSummary"),
   priorityIntakeForm: document.getElementById("priorityIntakeForm"),
   priorityIntakeJob: document.getElementById("priorityIntakeJob"),
+  priorityIntakeLookupStatus: document.getElementById("priorityIntakeLookupStatus"),
+  priorityIntakeDeliveryDate: document.getElementById("priorityIntakeDeliveryDate"),
+  priorityIntakeSubmitLead: document.getElementById("priorityIntakeSubmitLead"),
+  priorityIntakePrintRushBtn: document.getElementById("priorityIntakePrintRushBtn"),
+  priorityIntakePrintRemakeBtn: document.getElementById("priorityIntakePrintRemakeBtn"),
+  priorityIntakePrintMissingBtn: document.getElementById("priorityIntakePrintMissingBtn"),
   priorityIntakeReason: document.getElementById("priorityIntakeReason"),
   priorityIntakeReasonCustom: document.getElementById("priorityIntakeReasonCustom"),
   priorityIntakeResponsible: document.getElementById("priorityIntakeResponsible"),
@@ -2069,6 +2090,23 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Snooze selected/all", "Posponer seleccionados/todos"],
   ["SO / Order Nr.", "SO / Núm. de orden"],
   ["Job Nr. / SO / Order Nr.", "Núm. de trabajo / SO / Núm. de orden"],
+  ["Priority Work", "Trabajo prioritario"],
+  ["Rush + Remake", "Urgente + rehacer"],
+  ["Expedite this work", "Acelerar este trabajo"],
+  ["Replacement glass", "Vidrio de reemplazo"],
+  ["Replacement and expedite", "Reemplazar y acelerar"],
+  ["Imported order found — apply now", "Orden importada encontrada — aplicar ahora"],
+  ["Not imported yet — request will wait", "Aún no importada — la solicitud esperará"],
+  ["Checking imported delivery lists...", "Comprobando listas de entrega importadas..."],
+  ["Enter a Job Nr., SO, or Order Nr.", "Ingrese un núm. de trabajo, SO o núm. de orden"],
+  ["The scanner will check active delivery lists automatically.", "El escáner comprobará automáticamente las listas de entrega activas."],
+  ["Apply Priority Work", "Aplicar trabajo prioritario"],
+  ["Save Priority Work", "Guardar trabajo prioritario"],
+  ["Save & Wait for Import", "Guardar y esperar la importación"],
+  ["Priority Delivery Date", "Fecha de entrega prioritaria"],
+  ["Rush Printout", "Impresión urgente"],
+  ["Remake Printout", "Impresión de rehacer"],
+  ["Missing Glass Printout", "Impresión de vidrio faltante"],
   ["Paste the full Job Nr., customer description, SO number, order number, or barcode.", "Pegue el núm. de trabajo completo, la descripción del cliente, el número SO, el número de orden o el código de barras."],
   ["Enter a Job Nr., SO number, order number, or barcode.", "Ingrese un núm. de trabajo, número SO, número de orden o código de barras."],
   ["Bay Map update complete", "Actualización del mapa de bahías completada"],
@@ -2450,6 +2488,9 @@ const SPANISH_UI_EXTENDED = new Map([
   ["delivery date / stage", "fecha de entrega / etapa"],
   ["delivery list file checked. Existing New/Updated markers were refreshed where applicable.", "archivo de lista revisado. Se actualizaron los indicadores Nuevo/Actualizado donde correspondía."],
   ["Delivery list stage", "Etapa de lista de entrega"],
+  ["Edit scope", "Alcance de edición"],
+  ["Whole Delivery List", "Lista de entrega completa"],
+  ["Whole Delivery List shows each logical Order/Item once. Shared order fields save across every stage copy; scanned progress and physical location remain stage-specific.", "La lista de entrega completa muestra cada Orden/Artículo lógico una sola vez. Los campos compartidos de la orden se guardan en todas las copias de etapa; el progreso escaneado y la ubicación física siguen siendo específicos de cada etapa."],
   ["Delivery Progress", "Progreso de entrega"],
   ["Delivery Scanner Statistics Report", "Informe de estadísticas del escáner de entregas"],
   ["Destination", "Destino"],
@@ -2655,6 +2696,7 @@ const SPANISH_UI_EXTENDED = new Map([
   ["Scans by Operator", "Escaneos por operador"],
   ["Scans reset", "Escaneos restablecidos"],
   ["Search within stage", "Buscar dentro de la etapa"],
+  ["Search whole delivery list", "Buscar en toda la lista de entrega"],
   ["Select a bay to manage it.", "Seleccione una bahía para administrarla."],
   ["Select a delivery list to load editable rows.", "Seleccione una lista para cargar filas editables."],
   ["Select an item", "Seleccione un artículo"],
@@ -3356,7 +3398,6 @@ const SPANISH_UI_V359 = new Map([
   ["Choose the Date From.", "Seleccione la fecha Desde."],
   ["Apply Dates", "Aplicar fechas"],
   ["Four high-value signals for the selected reporting range.", "Cuatro indicadores clave para el rango de informe seleccionado."],
-  ["Piece quantity by glass type for the selected reporting range.", "Cantidad de piezas por tipo de vidrio para el rango de informe seleccionado."],
   ["Donut", "Dona"],
   ["Cost", "Costo"],
   ["Top 30", "Primeros 30"],
@@ -3364,6 +3405,14 @@ const SPANISH_UI_V359 = new Map([
   ["Top 100", "Primeros 100"],
   ["Showing chart categories", "Mostrando categorías de la gráfica"],
   ["Statistics date range", "Rango de fechas de estadísticas"],
+  ["Chart date range", "Rango de fechas de la gráfica"],
+  ["Reporting dates", "Fechas del informe"],
+  ["Choose dates", "Elegir fechas"],
+  ["Chart Date Range", "Rango de fechas de la gráfica"],
+  ["Choose chart range dates from the first month", "Seleccione las fechas del rango de la gráfica del primer mes"],
+  ["Choose chart range dates from the second month", "Seleccione las fechas del rango de la gráfica del segundo mes"],
+  ["Clear Selection", "Borrar selección"],
+  ["All delivery dates", "Todas las fechas de entrega"],
   ["Previous month", "Mes anterior"],
   ["Next month", "Mes siguiente"],
   ["Choose statistics range dates from the first month", "Seleccione las fechas del rango de estadísticas del primer mes"],
@@ -4930,7 +4979,7 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^(\d+)\s+active\s*\|\s*(\d+)\s+complete$/i, (_, active, complete) => `${active} activos | ${complete} completos`],
   [/^(\d+)\s+stages?\s*[•|]\s*Delivery on-time\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Entrega a tiempo ${value}`],
   [/^(\d+)\s+stages?\s*[•|]\s*Updated\s*(.*)$/i, (_, stages, value) => `${stages} etapas • Actualizado ${value}`],
-  [/^All Glass\s*\((\d+)\)$/i, (_, count) => `Todo el vidrio (${count})`],
+  [/^All Glass\s*\(?\s*(\d+)\s*\)?$/i, (_, count) => `Todo el vidrio ${count}`],
   [/^(.+?)\s+(\d+)pcs\s+\((Empty|Open|Complete|On the way|Received)\)$/i, (_, code, qty, status) => `${code} ${qty} pzas (${SPANISH_UI_TEXT.get(status) || status})`],
   [/^(.+?)\s+\((Empty|Open|Complete|On the way|Received)\)$/i, (_, code, status) => `${code} (${SPANISH_UI_TEXT.get(status) || status})`],
   [/^(.+?)\s+-\s+(Empty|Open|Complete|On the way|Received)$/i, (_, label, status) => `${label} - ${SPANISH_UI_TEXT.get(status) || status}`],
@@ -4961,7 +5010,7 @@ const SPANISH_DYNAMIC_PATTERNS = [
   [/^Temp Delivery Lists folder not found:\s*(.+)$/i, (_, folder) => `No se encontró la carpeta temporal de listas: ${folder}`],
   [/^Request failed:\s*(.+)$/i, (_, value) => `La solicitud falló: ${value}`],
   [/^Search failed:\s*(.+)$/i, (_, value) => `La búsqueda falló: ${value}`],
-  [/^(All|Complete|Partial|Remaining|Remakes|Rushes|Updated|Review)\s*\((\d+)\)$/i, (_, label, count) => `${SPANISH_UI_TEXT.get(label) || label} (${count})`],
+  [/^(All|Complete|Partial|Remaining|Remakes|Rushes|Updated|Review)\s*\(?\s*(\d+)\s*\)?$/i, (_, label, count) => `${SPANISH_UI_TEXT.get(label) || label} ${count}`],
   [/^(\d+)\s+days$/i, (_, count) => `${count} días`],
   [/^(\d+)\s+bays?\s*\/\s*(\d+)\s+used$/i, (_, bays, used) => `${bays} bahías / ${used} usadas`],
   [/^(\d+)\s+active\s*\|\s*(\d+)\s+complete$/i, (_, active, complete) => `${active} activos | ${complete} completos`],
@@ -6426,6 +6475,19 @@ function scanTimePillMarkupV447(item = {}, deliveryDateOverride = "") {
   if (!item?.lastScannedAt) return "";
   const scanTimestamp = formatScanDateTimeParts(item.lastScannedAt);
   const scanStation = String(item.lastScannedStation || "").trim();
+  // v0.452: prerequisite scans synthesized by an Indian Trail override must be
+  // unmistakable. They satisfy workflow quantity but are not presented as a
+  // normal Airport floor scan or as an on-time/late physical scan.
+  const indianTrailOverride = scanStation.toLowerCase() === "scan override it";
+  if (indianTrailOverride) {
+    const title = `Scan Override IT at ${formatDateTime(item.lastScannedAt)}`;
+    return `<span class="last-scan-pill-v157 is-it-override-v452" title="${escapeHtml(title)}">
+      <span class="last-scan-pill-icon-v157" aria-hidden="true">&#8635;</span>
+      <span class="last-scan-pill-label-v157">SCAN OVERRIDE IT:</span>
+      <b>${escapeHtml(scanTimestamp.date)}</b>
+      ${scanTimestamp.time ? `<span class="last-scan-pill-divider-v157" aria-hidden="true">at</span><b>${escapeHtml(scanTimestamp.time)}</b>` : ""}
+    </span>`;
+  }
   const timing = scanTimingMetaV447(item, deliveryDateOverride);
   const title = `Last scanned ${formatDateTime(item.lastScannedAt)}${scanStation ? ` at ${scanStation}` : ""}${timing.known ? ` · ${timing.late ? "Late" : "On time"}` : ""}`;
   return `<span class="last-scan-pill-v157 ${timing.late ? "is-late-v447" : "is-on-time-v447"}" title="${escapeHtml(title)}">
@@ -6539,6 +6601,51 @@ function filterListsByOverviewRange(lists = state.lists) {
     const date = parseDateKey(list.deliveryDate);
     return date && date >= start && date <= end;
   });
+}
+
+/** Return the actual date keys represented by the active Statistics range. */
+function statisticsActiveRangeKeysV455() {
+  if (state.overviewRange === "custom") {
+    const dateFrom = String(state.statisticsCustomDateFrom || "");
+    const dateTo = String(state.statisticsCustomDateTo || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      return { dateFrom, dateTo };
+    }
+  }
+
+  if (state.overviewRange === "all") {
+    const dates = [...new Set((state.lists || [])
+      .map((list) => String(list?.deliveryDate || "").trim())
+      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))]
+      .sort();
+    return dates.length ? { dateFrom: dates[0], dateTo: dates[dates.length - 1] } : { dateFrom: "", dateTo: "" };
+  }
+
+  const days = Math.max(Number(state.overviewRange || 30), 1);
+  const end = new Date();
+  end.setHours(12, 0, 0, 0);
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  return { dateFrom: dateInputValue(start), dateTo: dateInputValue(end) };
+}
+
+/** Keep the calendar button synchronized with the range used by every chart view. */
+function syncStatisticsChartRangeControlV455() {
+  const range = statisticsActiveRangeKeysV455();
+  let label = localizedUiValue("All delivery dates");
+  if (range.dateFrom && range.dateTo) {
+    // v0.456: Statistics reporting ranges use compact numeric dates everywhere
+    // the operator reads the active range; calendar month headings remain textual.
+    label = range.dateFrom === range.dateTo
+      ? formatNumericDeliveryDate(range.dateFrom)
+      : `${formatNumericDeliveryDate(range.dateFrom)} – ${formatNumericDeliveryDate(range.dateTo)}`;
+  }
+  if (els.statisticsChartRangeText) els.statisticsChartRangeText.textContent = label;
+  if (els.statisticsChartRangeButton) {
+    const expanded = Boolean(els.statisticsDateCalendar && !els.statisticsDateCalendar.hidden);
+    els.statisticsChartRangeButton.setAttribute("aria-expanded", expanded ? "true" : "false");
+    els.statisticsChartRangeButton.title = `${localizedUiValue("Chart date range")}: ${label}`;
+  }
 }
 
 /**
@@ -9345,13 +9452,18 @@ function rackLocationDropdown(item, currentLocation = "") {
   const currentRack = rackForCode(presentationRackCode);
   const rackState = rackLocationStateV448(item, presentation, currentRack);
   const rackComplete = rackState?.key === "complete";
+  const rackPrior = rackState?.key === "prior";
   const rackColor = currentRack ? rackSetDisplayColor(rackGroupLabel(currentRack)) : "";
-  const resolvedRackColor = rackComplete ? "#2fa84f" : rackColor;
+  // v0.452: PRIOR is a completed historical location, so neutral gray replaces
+  // the rack-set color instead of leaving a finished rack looking active.
+  const resolvedRackColor = rackPrior ? "#94A1AD" : rackComplete ? "#2fa84f" : rackColor;
   const rackStyle = resolvedRackColor ? ` style="--rack-location-color:${escapeHtml(resolvedRackColor)}"` : "";
   const historyClass = presentation.historical
     ? ` is-location-history${presentation.kind === "bay" ? " is-bay-history" : " is-rack-history"}`
     : "";
-  const explicitHistoryBadge = presentation.historical && presentation.kind !== "preassigned" && presentation.kind !== "bay";
+  // v0.450: cleared Bay locations use the same explicit PRIOR treatment as rack
+  // history so the Inbound list keeps physical traceability after Bay Map scan-out.
+  const explicitHistoryBadge = presentation.historical && presentation.kind !== "preassigned";
   const bayStyle = presentation.kind === "bay" ? ` style="${escapeHtml(bayLocationStyleV446(item))}"` : "";
   const baseBadge = displayLocation
     ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${explicitHistoryBadge ? " has-explicit-prior-v442" : ""}${presentation.kind === "bay" ? " bay-location-accent-v446" : ""}${rackColor ? " rack-location-accent-v349" : ""}"${bayStyle} title="${escapeHtml(presentation.title || displayLocation)}"><span class="location-history-label-v442">${escapeHtml(displayLocation)}</span></span>`
@@ -9528,22 +9640,22 @@ function renderCounts() {
     "dtc-route": pieceCount(state.items.filter((item) => routeCategory(item) === "dtc")),
     "greenville-route": pieceCount(state.items.filter((item) => routeCategory(item) === "greenville")),
   };
-  if (els.countAll) els.countAll.textContent = `(${totalItems})`;
-  if (els.countRemaining) els.countRemaining.textContent = `(${stats.remainingItems})`;
-  if (els.countPartial) els.countPartial.textContent = `(${stats.partialItems})`;
-  if (els.countComplete) els.countComplete.textContent = `(${stats.completeItems})`;
-  if (els.countInternalRejects) els.countInternalRejects.textContent = `(${internalRejectCount})`;
+  if (els.countAll) els.countAll.textContent = `${totalItems}`;
+  if (els.countRemaining) els.countRemaining.textContent = `${stats.remainingItems}`;
+  if (els.countPartial) els.countPartial.textContent = `${stats.partialItems}`;
+  if (els.countComplete) els.countComplete.textContent = `${stats.completeItems}`;
+  if (els.countInternalRejects) els.countInternalRejects.textContent = `${internalRejectCount}`;
   const manualRemakeAll = pieceCount(remakeItems.filter((item) => item.manualOnly || String(item.manualSource || "").trim()));
   const sourceRemakeAll = Math.max(remakeAll - manualRemakeAll, 0);
   if (els.countRemakes) {
     els.countRemakes.textContent = manualRemakeAll
-      ? `(${sourceRemakeAll} A+W + ${manualRemakeAll} manual)`
-      : `(${sourceRemakeAll})`;
+      ? `${sourceRemakeAll} A+W + ${manualRemakeAll} manual`
+      : `${sourceRemakeAll}`;
     els.countRemakes.title = manualRemakeAll
       ? `${remakeAll} active remake pieces total: ${sourceRemakeAll} from A+W and ${manualRemakeAll} preserved manual`
       : `${sourceRemakeAll} active A+W remake pieces`;
   }
-  if (els.countRushes) els.countRushes.textContent = `(${rushAll})`;
+  if (els.countRushes) els.countRushes.textContent = `${rushAll}`;
   document.querySelectorAll('[data-filter="remakes"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(remakeOpen));
     button.classList.toggle("is-clear", !remakeOpen);
@@ -9556,21 +9668,21 @@ function renderCounts() {
     button.classList.toggle("has-alert", Boolean(internalRejectCount));
     button.classList.toggle("is-clear", !internalRejectCount);
   });
-  if (els.countUpdated) els.countUpdated.textContent = `(${updatedCount})`;
+  if (els.countUpdated) els.countUpdated.textContent = `${updatedCount}`;
   updateScanFilterGlanceBadge(els.scanFilterRemakeBadge, remakeAll, "remake pieces");
   updateScanFilterGlanceBadge(els.scanFilterRushBadge, rushAll, "rush pieces");
   updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new-order pieces");
   updateScanFilterGlanceBadge(els.scanFilterRejectBadge, internalRejectCount, "internal reject pieces");
-  if (els.countErrors) els.countErrors.textContent = `(${stats.errorCount})`;
+  if (els.countErrors) els.countErrors.textContent = `${stats.errorCount}`;
 
   document.querySelectorAll('[data-filter="errors"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(stats.errorCount));
   });
 
-  if (els.countIndianTrailRoute) els.countIndianTrailRoute.textContent = `(${routeCounts["indian-trail-route"]})`;
-  if (els.countCpuRoute) els.countCpuRoute.textContent = `(${routeCounts["cpu-route"]})`;
-  if (els.countDtcRoute) els.countDtcRoute.textContent = `(${routeCounts["dtc-route"]})`;
-  if (els.countGreenvilleRoute) els.countGreenvilleRoute.textContent = `(${routeCounts["greenville-route"]})`;
+  if (els.countIndianTrailRoute) els.countIndianTrailRoute.textContent = `${routeCounts["indian-trail-route"]}`;
+  if (els.countCpuRoute) els.countCpuRoute.textContent = `${routeCounts["cpu-route"]}`;
+  if (els.countDtcRoute) els.countDtcRoute.textContent = `${routeCounts["dtc-route"]}`;
+  if (els.countGreenvilleRoute) els.countGreenvilleRoute.textContent = `${routeCounts["greenville-route"]}`;
   let filterSelectionChanged = false;
   document.querySelectorAll(".route-filter-tab").forEach((button) => {
     const filter = button.dataset.filter || "";
@@ -9591,10 +9703,10 @@ function renderCounts() {
     const signature = JSON.stringify([selectedGlassTypes, sortedGlassEntries]);
     if (signature !== state.lastGlassFilterSignature) {
       els.glassFilterTabs.innerHTML = [
-        `<button class="tab glass-filter-tab ${state.glassTypeFilters.size ? "" : "is-active"}" data-glass-filter="all" type="button" aria-pressed="${state.glassTypeFilters.size ? "false" : "true"}">All Glass Types <span>(${totalItems})</span></button>`,
+        `<button class="tab glass-filter-tab ${state.glassTypeFilters.size ? "" : "is-active"}" data-glass-filter="all" type="button" aria-pressed="${state.glassTypeFilters.size ? "false" : "true"}">All Glass Types <span>${totalItems}</span></button>`,
         ...sortedGlassEntries.map(([label, count]) => {
           const active = state.glassTypeFilters.has(label);
-          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""}" ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>(${escapeHtml(count)})</span></button>`;
+          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""}" ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>${escapeHtml(count)}</span></button>`;
         }),
       ].join("");
       state.lastGlassFilterSignature = signature;
@@ -9677,13 +9789,47 @@ function glassAliasTargetV360(value = "") {
 }
 
 function glassAliasRowsForTargetV360(target = "") {
-  const cleanTarget = String(target || "").trim().toLowerCase();
-  return (state.manualEditLookups?.glassAliases || []).filter((item) => String(item?.label || item?.target || "").trim().toLowerCase() === cleanTarget);
+  const cleanTarget = String(target || "").replace(/\s+/g, " ").trim();
+  if (!cleanTarget) return [];
+  const cleanLower = cleanTarget.toLowerCase();
+  const identity = glassProfileIdentityKeyV353(cleanTarget);
+  return (state.manualEditLookups?.glassAliases || []).filter((item) => {
+    const persistedTarget = String(item?.label || item?.target || "").replace(/\s+/g, " ").trim();
+    if (!persistedTarget) return false;
+    if (persistedTarget.toLowerCase() === cleanLower) return true;
+    // v0.461: older persisted combinations can target a pre-normalized label
+    // such as `3/8 Clear`. Match the durable physical-profile identity so the
+    // same alias rows remain selectable after restart or later label cleanup.
+    const persistedKey = String(item?.targetKey || "").trim() || glassProfileIdentityKeyV353(persistedTarget);
+    return Boolean(identity && persistedKey === identity);
+  });
+}
+
+/**
+ * v0.460: clear glass must have an explicit heat-treatment identity anywhere
+ * operators see it. Legacy/imported Clear or UltraClear text that omits both
+ * Tempered and Annealed is operationally Annealed; source product text remains
+ * unchanged for audit/history.
+ */
+function canonicalClearGlassLabelV460(value = "") {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw || /\bmirror\b/i.test(raw) || !/(?:\bclear\b|\bultra\s*clear\b)/i.test(raw)) return raw;
+  const tempered = /\b(?:temper(?:ed)?|temp|toughened)\b/i.test(raw);
+  const base = raw
+    .replace(/\b(?:temper(?:ed)?|temp|toughened|anneal(?:ed)?|ann)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${base || raw} ${tempered ? "Tempered" : "Annealed"}`.trim();
 }
 
 function glassTypeLabel(item) {
-  const raw = String(item.product || item.job || item.suggestedBay || "Other Glass").trim() || "Other Glass";
-  return glassAliasTargetV360(raw) || raw;
+  // Resolve combine aliases from the untouched imported source name first; the
+  // backend glassType field is a fallback canonical hint, not a replacement for
+  // administrator alias ownership.
+  const sourceRaw = String(item?.product || item?.job || item?.suggestedBay || "Other Glass").trim() || "Other Glass";
+  const backendCanonical = String(item?.glassType || "").trim();
+  const combined = glassAliasTargetV360(sourceRaw) || backendCanonical || sourceRaw;
+  return canonicalClearGlassLabelV460(combined) || combined;
 }
 
 // v0.312: Glass colors are centrally owned by Lookup Manager. Any component
@@ -9746,41 +9892,58 @@ function buildGlassVisualColorMap(extraLabels = []) {
   const rows = Array.isArray(state.manualEditLookups?.glassColors) ? state.manualEditLookups.glassColors : [];
   const costs = Array.isArray(state.manualEditLookups?.glassCosts) ? state.manualEditLookups.glassCosts : [];
   const labels = new Map();
-  [...rows, ...costs].forEach((item) => {
-    const rawLabel = String(item?.value || item?.label || "").trim();
-    const label = glassAliasTargetV360(rawLabel) || rawLabel;
-    if (label) labels.set(glassVisualLookupKeyV349(label), label);
-  });
-  (extraLabels || []).forEach((value) => {
-    const label = String(value || "").trim();
-    if (label) labels.set(glassVisualLookupKeyV349(label), label);
-  });
 
+  const rememberLabelV452 = (value) => {
+    const rawLabel = String(value || "").trim();
+    if (!rawLabel) return;
+    const targetLabel = glassAliasTargetV360(rawLabel) || rawLabel;
+    labels.set(glassVisualLookupKeyV349(rawLabel), rawLabel);
+    labels.set(glassVisualLookupKeyV349(targetLabel), targetLabel);
+  };
+  [...rows, ...costs].forEach((item) => rememberLabelV452(item?.value || item?.label));
+  (extraLabels || []).forEach(rememberLabelV452);
+
+  // v0.452: a combined source name must never overwrite the canonical profile's
+  // configured color. Older source rows can legitimately retain their pre-combine
+  // color in storage for reversible uncombine; while combined, only the target
+  // profile owns the display color used throughout Scan, Bay Map, racks, and search.
   const overrides = new Map();
   rows.forEach((item) => {
     const rawLabel = String(item?.value || item?.label || "").trim();
     const label = glassAliasTargetV360(rawLabel) || rawLabel;
+    const targetLabel = label;
     const rawKey = glassVisualLookupKeyV349(rawLabel);
-    const key = glassVisualLookupKeyV349(label);
-    const canonicalKey = glassVisualLookupKeyV349(glassProfileCanonicalLabelV350(label));
+    const targetKey = glassVisualLookupKeyV349(targetLabel);
+    const canonicalKey = glassVisualLookupKeyV349(glassProfileCanonicalLabelV350(targetLabel));
     const color = normalizeGlassVisualColor(item?.color);
-    if (rawKey && color) overrides.set(rawKey, color);
-    if (key && color) overrides.set(key, color);
-    // A canonical Glass Types profile (for example Mirror or 1/4 Clear
-    // Annealed) intentionally owns the visual color for all imported aliases.
-    if (canonicalKey && key === canonicalKey && color) overrides.set(`canonical:${canonicalKey}`, color);
+    const isCombinedSource = Boolean(rawKey && targetKey && rawKey !== targetKey);
+    if (!color || isCombinedSource) return;
+    if (targetKey) overrides.set(targetKey, color);
+    if (rawKey) overrides.set(rawKey, color);
+    if (canonicalKey && targetKey === canonicalKey) overrides.set(`canonical:${canonicalKey}`, color);
   });
 
   const used = new Set([...overrides.values()]);
+  const effectiveColors = new Map();
   const result = new Map();
   [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([key, label]) => {
-    const canonicalKey = glassVisualLookupKeyV349(glassProfileCanonicalLabelV350(label));
-    const configured = overrides.get(key) || overrides.get(`canonical:${canonicalKey}`);
-    const color = configured || glassVisualFallbackColor(glassProfileCanonicalLabelV350(label) || label, used);
+    const targetLabel = glassAliasTargetV360(label) || label;
+    const targetKey = glassVisualLookupKeyV349(targetLabel);
+    const canonicalLabel = glassProfileCanonicalLabelV350(targetLabel) || targetLabel;
+    const canonicalKey = glassVisualLookupKeyV349(canonicalLabel);
+    const configured = overrides.get(targetKey) || overrides.get(`canonical:${canonicalKey}`);
+    let color = effectiveColors.get(targetKey) || effectiveColors.get(`canonical:${canonicalKey}`) || configured;
+    if (!color) {
+      color = glassVisualFallbackColor(canonicalLabel, used);
+      used.add(color);
+    }
+    if (targetKey) effectiveColors.set(targetKey, color);
+    if (canonicalKey) effectiveColors.set(`canonical:${canonicalKey}`, color);
     result.set(key, color);
     result.set(String(label).trim().toLowerCase(), color);
+    if (targetKey) result.set(targetKey, color);
+    if (targetLabel) result.set(String(targetLabel).trim().toLowerCase(), color);
     if (canonicalKey) result.set(`canonical:${canonicalKey}`, color);
-    if (!configured) used.add(color);
   });
   return result;
 }
@@ -9802,13 +9965,46 @@ function glassVisualCssVariables(label, colorMap = null) {
   const red = Number.parseInt(color.slice(1, 3), 16);
   const green = Number.parseInt(color.slice(3, 5), 16);
   const blue = Number.parseInt(color.slice(5, 7), 16);
+  // v0.457: derive a smoother, slightly more restrained three-stop header
+  // gradient from the canonical Lookup Manager color. The glass hue stays
+  // recognizable while the section band reads as a polished header, not a
+  // saturated color stripe.
+  const blendHex = (target, sourceWeight) => {
+    const targetRed = Number.parseInt(target.slice(1, 3), 16);
+    const targetGreen = Number.parseInt(target.slice(3, 5), 16);
+    const targetBlue = Number.parseInt(target.slice(5, 7), 16);
+    const mix = (source, targetChannel) => Math.round((source * sourceWeight) + (targetChannel * (1 - sourceWeight)));
+    return `#${[mix(red, targetRed), mix(green, targetGreen), mix(blue, targetBlue)]
+      .map((channel) => channel.toString(16).padStart(2, "0"))
+      .join("")}`.toUpperCase();
+  };
+  const headerStart = blendHex("#0B2A42", .56);
+  const headerMid = blendHex("#153B55", .34);
+  const headerEnd = blendHex("#203A50", .10);
+  // v0.466: selected glass filters use the higher-contrast of white or navy
+  // against the actual color-filled chip. This avoids threshold edge cases on
+  // vivid greens/purples while keeping light yellow/clear fills readable.
+  const relativeLuminanceV466 = (channels) => {
+    const srgb = channels.map((channel) => channel / 255).map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return (.2126 * srgb[0]) + (.7152 * srgb[1]) + (.0722 * srgb[2]);
+  };
+  const selectionChannelsV466 = [red, green, blue].map((channel) => Math.round((channel * .94) + (255 * .06)));
+  const backgroundLuminanceV466 = relativeLuminanceV466(selectionChannelsV466);
+  const whiteContrastV466 = 1.05 / (backgroundLuminanceV466 + .05);
+  const darkInkChannelsV466 = [16, 36, 58];
+  const darkContrastV466 = (backgroundLuminanceV466 + .05) / (relativeLuminanceV466(darkInkChannelsV466) + .05);
+  const selectedInk = whiteContrastV466 >= darkContrastV466 ? "#FFFFFF" : "#10243A";
   return [
     `--glass-type-color:${color}`,
+    `--glass-type-selected-ink:${selectedInk}`,
     `--glass-type-accent:rgba(${red},${green},${blue},.50)`,
     `--glass-type-border:rgba(${red},${green},${blue},.16)`,
     `--glass-type-soft:rgba(${red},${green},${blue},.024)`,
     `--glass-type-soft-strong:rgba(${red},${green},${blue},.052)`,
     `--glass-type-ring:rgba(${red},${green},${blue},.055)`,
+    `--glass-type-header-start:${headerStart}`,
+    `--glass-type-header-mid:${headerMid}`,
+    `--glass-type-header-end:${headerEnd}`,
   ].join(";");
 }
 
@@ -9828,9 +10024,15 @@ async function ensureGlassVisualLookupLibrary({ force = false } = {}) {
         state.manualEditLookups = {
           ...(state.manualEditLookups || {}),
           glassColors: Array.isArray(payload?.glassColors) ? payload.glassColors : [],
+          // v0.452: aliases arrive with colors so the first Scan render cannot
+          // briefly use a source glass name/color before presentation metadata loads.
+          glassAliases: Array.isArray(payload?.glassAliases) ? payload.glassAliases : (state.manualEditLookups?.glassAliases || []),
         };
         state.glassVisualLookupLoaded = true;
         state.lastGlassFilterSignature = "";
+        // v0.459: if Statistics painted before the lookup response completed,
+        // repaint once so chart colors cannot remain on generated fallbacks.
+        if (state.page === "statistics") renderStatisticsPage();
         return state.manualEditLookups.glassColors;
       })
       .catch(() => {
@@ -9866,7 +10068,7 @@ function priorityItemRibbonV441(item, options = {}) {
   const targetDate = String(options.targetDate || item?.priorityDeliveryDate || "").trim();
   const moved = Boolean(originalDate && targetDate && originalDate !== targetDate);
   const targetReference = Boolean(options.targetReference);
-  const kind = ["remake", "missing_glass_rush", "rush"].includes(String(meta.kind || "")) ? String(meta.kind) : "rush";
+  const kind = ["remake", "both", "rush"].includes(String(meta.kind || "")) ? String(meta.kind) : "rush";
   const reason = String(meta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, "").trim() || "Priority handling";
   const moveText = moved
     ? targetReference
@@ -10071,10 +10273,10 @@ function renderTable() {
       return `
         <tr class="glass-group-row glass-tone-group" ${glassToneAttributes(label)} data-glass-group="${escapeHtml(label)}">
           <td colspan="10">
-            <button type="button" data-toggle-glass-group="${escapeHtml(label)}">
-              <strong>${escapeHtml(label)}${updatedCount ? ` <span class="new-line-marker group-marker" title="New or updated lines">${escapeHtml(updatedCount)} New</span>` : ""}</strong>
-              <span>${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pieces</span>
-              <small>${collapsed ? "Expand" : "Collapse"}</small>
+            <button type="button" data-toggle-glass-group="${escapeHtml(label)}" aria-expanded="${collapsed ? "false" : "true"}">
+              <strong class="glass-group-title-v459">${escapeHtml(label)}${updatedCount ? ` <mark class="new-line-marker group-marker glass-group-new-v462" title="New or updated lines">${escapeHtml(updatedCount)} New</mark>` : ""}</strong>
+              <span class="glass-group-progress-v459">${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pieces</span>
+              <small class="glass-group-toggle-v459">${collapsed ? "Expand" : "Collapse"}</small>
             </button>
           </td>
         </tr>
@@ -13401,13 +13603,13 @@ function homeStatisticsRangeParts() {
   if (state.overviewRange === "custom" && state.statisticsCustomDateFrom && state.statisticsCustomDateTo) {
     return {
       label,
-      dates: `${formatDisplayDate(state.statisticsCustomDateFrom)} through ${formatDisplayDate(state.statisticsCustomDateTo)}`,
+      dates: `${formatNumericDeliveryDate(state.statisticsCustomDateFrom)} through ${formatNumericDeliveryDate(state.statisticsCustomDateTo)}`,
     };
   }
 
   const lists = filterListsByOverviewRange(state.lists).map((list) => list.deliveryDate).filter(Boolean).sort();
   if (!lists.length) return { label, dates: "No active delivery dates" };
-  return { label, dates: `${formatDisplayDate(lists[0])} through ${formatDisplayDate(lists[lists.length - 1])}` };
+  return { label, dates: `${formatNumericDeliveryDate(lists[0])} through ${formatNumericDeliveryDate(lists[lists.length - 1])}` };
 }
 
 /**
@@ -13443,23 +13645,23 @@ function homeReportDateParams() {
   return `?dateFrom=${encodeURIComponent(dateInputValue(start))}&dateTo=${encodeURIComponent(dateInputValue(end))}`;
 }
 
-/** Open the Statistics custom-range picker using the maintained Print / Export calendar language. */
+/** Open the Statistics chart-range calendar with the currently active dates preselected. */
 function openStatisticsDateCalendar() {
+  const active = statisticsActiveRangeKeysV455();
   const fallbackEnd = todayKey() || printCalendarDateKey(new Date());
-  const currentStart = String(state.statisticsCustomDateFrom || fallbackEnd);
-  const currentEnd = String(state.statisticsCustomDateTo || currentStart);
-  const editingExistingRange = state.overviewRange === "custom" && Boolean(currentStart && currentEnd);
-  state.statisticsCalendarDraftStart = editingExistingRange ? currentStart : "";
-  state.statisticsCalendarDraftEnd = editingExistingRange ? currentEnd : "";
-  state.statisticsCalendarMonth = printCalendarDateKey(printCalendarMonthDate(currentStart));
+  state.statisticsCalendarDraftStart = active.dateFrom || fallbackEnd;
+  state.statisticsCalendarDraftEnd = active.dateTo || active.dateFrom || fallbackEnd;
+  state.statisticsCalendarMonth = printCalendarDateKey(printCalendarMonthDate(state.statisticsCalendarDraftStart));
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = false;
+  syncStatisticsChartRangeControlV455();
   renderStatisticsDateCalendar();
 }
 
-/** Close the Statistics custom-range picker without applying its draft. */
+/** Close the Statistics chart-range calendar without changing the active range. */
 function closeStatisticsDateCalendar() {
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
   if (els.overviewRangeSelect) els.overviewRangeSelect.value = state.overviewRange || "30";
+  syncStatisticsChartRangeControlV455();
 }
 
 /** Render the same two-month custom-range interaction used by Print / Export. */
@@ -13476,14 +13678,14 @@ function renderStatisticsDateCalendar() {
   if (els.statisticsCalendarRightMonthLabel) els.statisticsCalendarRightMonthLabel.textContent = monthLabel(rightMonth);
   els.statisticsCalendarLeftGrid.innerHTML = dateRangeCalendarMonthButtons(leftMonth, today, availableDates, start, end, "data-statistics-calendar-date");
   els.statisticsCalendarRightGrid.innerHTML = dateRangeCalendarMonthButtons(rightMonth, today, availableDates, start, end, "data-statistics-calendar-date");
-  if (els.statisticsCalendarFromValue) els.statisticsCalendarFromValue.textContent = start ? formatDisplayDate(start) : "Select start date";
-  if (els.statisticsCalendarToValue) els.statisticsCalendarToValue.textContent = end ? formatDisplayDate(end) : "Select end date";
+  if (els.statisticsCalendarFromValue) els.statisticsCalendarFromValue.textContent = start ? formatNumericDeliveryDate(start) : "Select start date";
+  if (els.statisticsCalendarToValue) els.statisticsCalendarToValue.textContent = end ? formatNumericDeliveryDate(end) : "Select end date";
   els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="from"]')?.classList.toggle("is-active", !start || Boolean(end));
   els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="to"]')?.classList.toggle("is-active", Boolean(start) && !end);
   if (els.statisticsCalendarSelectionText) {
     if (!start) els.statisticsCalendarSelectionText.textContent = "Choose the Date From.";
-    else if (!end) els.statisticsCalendarSelectionText.textContent = `Date From: ${formatDisplayDate(start)}. Now choose the Date To.`;
-    else els.statisticsCalendarSelectionText.textContent = `${formatDisplayDate(start)} – ${formatDisplayDate(end)}`;
+    else if (!end) els.statisticsCalendarSelectionText.textContent = `Date From: ${formatNumericDeliveryDate(start)}. Now choose the Date To.`;
+    else els.statisticsCalendarSelectionText.textContent = `${formatNumericDeliveryDate(start)} – ${formatNumericDeliveryDate(end)}`;
   }
   if (els.statisticsCalendarApply) els.statisticsCalendarApply.disabled = !(start && end);
 }
@@ -13517,8 +13719,10 @@ function applyStatisticsCalendarRange() {
   state.statisticsCustomDateTo = dateTo;
   state.overviewRange = "custom";
   state.homeChartSelectedLabel = "";
+  state.homeReportSummary = null;
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
   if (els.overviewRangeSelect) els.overviewRangeSelect.value = "custom";
+  syncStatisticsChartRangeControlV455();
   renderStatisticsPage();
   void loadHomeReportSummary();
 }
@@ -13957,15 +14161,18 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
   }
 
   if (metric === "glass") {
+    const glassRows = glassQuantitiesForStatistics(overviewLists);
+    const glassColorMap = buildGlassVisualColorMap(glassRows.map((row) => row.label));
     return {
       metric,
       icon: "glass",
       title: "Glass mix by quantity",
-      subtitle: "Piece quantity by glass type for the selected reporting range.",
+      subtitle: "",
       suffix: "",
-      entries: glassQuantitiesForStatistics(overviewLists).map((row) => ({
+      entries: glassRows.map((row) => ({
         label: row.label,
         value: Number(row.qty || 0),
+        color: statisticsGlassColorV459(row.label, glassColorMap),
         detail: `${Number(row.qty || 0)} pieces`,
       })),
     };
@@ -14049,6 +14256,7 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
       }));
     }
 
+    const breakageGlassColorMap = machineMetric ? null : buildGlassVisualColorMap(rows.map((row) => row.label));
     return {
       metric, icon: machineMetric ? "machine" : "reject",
       title: `${machineMetric ? "Machine" : "Glass type"} breakage overview`,
@@ -14056,6 +14264,7 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
       suffix: "", format, isBreakageDetail: true, breakageKind: machineMetric ? "machine" : "glass", breakageMeasure: measure,
       entries: rows.map((row) => ({
         label: row.label, value: Number(row[measure] || 0),
+        color: machineMetric ? "" : statisticsGlassColorV459(row.label, breakageGlassColorMap),
         pieces: Number(row.pieces || 0), sqft: Number(row.sqft || 0), estimatedCost: Number(row.estimatedCost || 0), eventCount: Number(row.eventCount || 0),
         unpricedPieces: Number(row.unpricedPieces || 0), missingDimensionPieces: Number(row.missingDimensionPieces || 0),
         glassTypes: Array.isArray(row.glassTypes) ? row.glassTypes : [], machines: Array.isArray(row.machines) ? row.machines : [], reasons: Array.isArray(row.reasons) ? row.reasons : [], responsibles: Array.isArray(row.responsibles) ? row.responsibles : [],
@@ -14190,7 +14399,9 @@ function filteredStatisticsChartEntries(dataset) {
   });
 
   const totalMatches = entries.length;
-  const numericLimit = limitValue === "all" ? 0 : Number(limitValue || 0);
+  // v0.454: Table view is the complete audit-style readout. It always expands
+  // to every matching row; the Display limit continues to constrain charts.
+  const numericLimit = state.homeChartView === "table" ? 0 : (limitValue === "all" ? 0 : Number(limitValue || 0));
   if (numericLimit > 0) entries = entries.slice(0, numericLimit);
   return { entries, totalMatches };
 }
@@ -14200,8 +14411,22 @@ function filteredStatisticsChartEntries(dataset) {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function chartEntryColor(index) {
-  return `var(--pie-${(index % 10) + 1})`;
+function statisticsGlassColorV459(label, colorMap = null) {
+  const clean = String(label || "Other Glass").trim() || "Other Glass";
+  const aliasTarget = glassAliasTargetV360(clean) || clean;
+  const canonical = canonicalClearGlassLabelV460(aliasTarget) || aliasTarget;
+  return normalizeGlassVisualColor(
+    colorMap?.get?.(clean.toLowerCase())
+    || colorMap?.get?.(glassVisualLookupKeyV349(clean))
+    || colorMap?.get?.(canonical.toLowerCase())
+    || colorMap?.get?.(glassVisualLookupKeyV349(canonical)),
+  ) || glassVisualColor(canonical, [clean]);
+}
+
+function chartEntryColor(index, entry = null) {
+  // v0.459: glass datasets arrive with their canonical Lookup Manager color.
+  // Non-glass metrics alone fall back to the general Statistics palette.
+  return normalizeGlassVisualColor(entry?.color) || `var(--pie-${(index % 10) + 1})`;
 }
 
 /**
@@ -14311,7 +14536,7 @@ function statisticsBarChartHtml(dataset, entries) {
         <title>${escapeHtml(aria)}</title>
         <text x="${labelWidth - 10}" y="${y + 14}" text-anchor="end" class="statistics-chart-category-label">${escapeHtml(entry.label)}</text>
         <rect x="${labelWidth}" y="${y + 3}" width="${plotWidth}" height="16" rx="5" class="statistics-chart-bar-rail"></rect>
-        <rect x="${labelWidth}" y="${y + 3}" width="${barWidth}" height="16" rx="5" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index)}"></rect>
+        <rect x="${labelWidth}" y="${y + 3}" width="${barWidth}" height="16" rx="5" class="statistics-chart-bar-value" style="--chart-color:${chartEntryColor(index, entry)}"></rect>
         <text x="${width - valueWidth + 8}" y="${y + 14}" class="statistics-chart-value-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
       </g>
     `;
@@ -14319,7 +14544,7 @@ function statisticsBarChartHtml(dataset, entries) {
 
   return `
     <div class="statistics-chart-svg-viewport statistics-chart-bar-viewport">
-      <svg class="statistics-chart-svg statistics-chart-bar-svg" style="min-width:${width}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
+      <svg class="statistics-chart-svg statistics-chart-bar-svg" style="width:100%;min-width:0" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(dataset.title)} bar chart">
         <text x="${labelWidth}" y="18" class="statistics-chart-axis-title">Category</text>
         <text x="${width - valueWidth + 9}" y="18" class="statistics-chart-axis-title">Value</text>
         ${ticks}
@@ -14373,7 +14598,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
         r="${radius}"
         fill="none"
         stroke-width="42"
-        style="stroke:${chartEntryColor(index)}"
+        style="stroke:${chartEntryColor(index, entry)}"
         stroke-dasharray="${length} ${Math.max(circumference - length, 0)}"
         stroke-dashoffset="${-offset}"
         transform="rotate(-90 ${center} ${center})"
@@ -14388,7 +14613,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
     const selected = entry.label === state.homeChartSelectedLabel;
     return `
       <button class="statistics-chart-svg-legend-row ${selected ? "is-selected" : ""}" type="button" data-chart-entry-label="${escapeHtml(entry.label)}">
-        <i style="--chart-color:${chartEntryColor(index)}"></i>
+        <i style="--chart-color:${chartEntryColor(index, entry)}"></i>
         <span>${escapeHtml(entry.label)}</span>
         <strong>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))} <small>${formatPercent(percent)}</small></strong>
       </button>
@@ -14450,7 +14675,7 @@ function statisticsLineChartHtml(dataset, entries) {
     return `
       <g class="statistics-chart-line-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(point.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
         <title>${escapeHtml(aria)}</title>
-        <circle cx="${point.x}" cy="${point.y}" r="${selected ? 5 : 4}" class="statistics-chart-line-point"></circle>
+        <circle cx="${point.x}" cy="${point.y}" r="${selected ? 5 : 4}" class="statistics-chart-line-point" style="--chart-color:${chartEntryColor(index, point)}"></circle>
         <circle cx="${point.x}" cy="${point.y}" r="12" class="statistics-chart-line-hit"></circle>
         ${showLabel ? `<text x="${point.x}" y="${height - 24}" text-anchor="middle" class="statistics-chart-line-label">${escapeHtml(truncateChartLabel(point.label, 13))}</text>` : ""}
       </g>
@@ -14576,7 +14801,7 @@ function statisticsDataTableHtml(dataset, entries, total) {
     return `
       <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
         <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
-        <td><span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
+        <td><span class="statistics-table-category-v0258" style="--chart-color:${chartEntryColor(index, entry)}"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
         <td><b>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))}</b></td>
         <td>${escapeHtml(share)}</td>
         <td>${escapeHtml(entry.detail || "")}</td>
@@ -14613,7 +14838,8 @@ function renderStatisticsAnalytics() {
   const total = entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
 
   if (els.statisticsChartTitle) els.statisticsChartTitle.textContent = dataset.title;
-  if (els.statisticsChartSubtitle) els.statisticsChartSubtitle.textContent = `${dataset.subtitle} ${homeStatisticsRangeLabel()}`;
+  // v0.457: the analytics header no longer repeats the dataset description and
+  // reporting range. The calendar selector already owns that context.
   if (els.statisticsChartDatasetIcon) {
     els.statisticsChartDatasetIcon.className = `statistics-section-icon-v0258 is-analytics is-${dataset.icon || "analytics"}`;
   }
@@ -14627,9 +14853,10 @@ function renderStatisticsAnalytics() {
   if (els.statsBreakageMeasureSelect) els.statsBreakageMeasureSelect.value = state.statisticsBreakageMeasure;
   if (els.statisticsExternalRemakesControl) els.statisticsExternalRemakesControl.hidden = !externalRemakesVisible;
   if (els.statsIncludeExternalRemakes) els.statsIncludeExternalRemakes.checked = Boolean(state.statisticsIncludeExternalRemakes);
-  [els.statsChartMetricSelect, els.statsBreakageMeasureSelect, els.statsChartSortSelect, els.statsChartLimitSelect, els.overviewRangeSelect].forEach((select) => {
+  [els.statsChartMetricSelect, els.statsBreakageMeasureSelect, els.statsChartSortSelect, els.statsChartLimitSelect].forEach((select) => {
     if (select) syncCustomSelect(select);
   });
+  syncStatisticsChartRangeControlV455();
 
   els.statisticsChartViewButtons?.forEach((button) => {
     const view = button.dataset.statisticsView || "bar";
@@ -14878,7 +15105,7 @@ function openHomeStatisticsReport() {
   const breakage = statisticsBreakagePayload();
   const breakageStats = selectedRangeBreakageStats();
   const generatedAt = new Date().toLocaleString(appLocale());
-  const rangeLabel = els.overviewRangeSelect?.selectedOptions?.[0]?.textContent || "Current statistics range";
+  const rangeLabel = homeStatisticsRangeParts().label || "Current statistics range";
   const externalLabel = breakageStats.includeExternal ? "Included" : "Excluded";
 
   const stageRows = stages
@@ -15209,7 +15436,6 @@ function renderStatisticsPage() {
   const overview = aggregateListStats(overviewLists);
   if (els.overviewRangeSelect && els.overviewRangeSelect.value !== state.overviewRange) {
     els.overviewRangeSelect.value = state.overviewRange;
-    syncCustomSelect(els.overviewRangeSelect);
   }
   if (els.statisticsLastUpdated) {
     const updated = new Date().toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
@@ -15357,6 +15583,9 @@ function runHomeHubAction(action) {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+/** v0.457: Home Delivery Library animation is CSS-owned again. The open
+ * selector is removed on collapse and re-applied on the next expand, which
+ * naturally replays the motion without a forced reflow or visible flash. */
 function renderHome() {
   if (!els.homePage) return;
   renderHomeStageFilter();
@@ -15415,7 +15644,12 @@ function renderHome() {
       : `<div class="admin-empty">No delivery lists match.</div>`;
     els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((details) => {
       details.addEventListener("toggle", () => {
-        if (!details.open) return;
+        if (!details.open) {
+          details.classList.remove("is-expanding");
+          return;
+        }
+        // v0.457: do not force/restart animation classes here. The CSS [open]
+        // selector replays once per expansion without flashing the revealed list.
         state.expandedDeliveryDate = details.dataset.deliveryDate || "";
         els.homeListGrid.querySelectorAll(".delivery-date-group").forEach((other) => {
           if (other !== details) other.open = false;
@@ -16234,24 +16468,33 @@ async function showIndianTrailPlacementPrompt(result) {
   const selectedCode = oversizeBay?.bayCode || result.bayCode || "";
   const placementBayLabel = bayLocationDisplayLabel(result.bayCode, result.bayDisplay || result.bayName);
   const placementBayShort = placementBayLabel.replace(/^Bay\s+/i, "") || String(result.bayCode || "").trim();
-  const eyebrow = isRush
-    ? (spanish ? "ARTICULO URGENTE RECIBIDO" : "RUSH ITEM RECEIVED")
-    : result.returnedToBay
-      ? (spanish ? "Articulo devuelto" : "Returned item")
-      : (spanish ? "Recibido en Indian Trail" : "Indian Trail received");
-  const title = directToTruck
-    ? (spanish ? `Enviar ${itemLabel} directamente al camion del instalador` : `Send ${itemLabel} straight to the installer truck`)
-    : isRush
-      ? (spanish ? `Coloque urgente ${itemLabel} en la bahia ${placementBayShort}` : `Rush ${itemLabel} into ${placementBayLabel}`)
-      : (spanish ? `Coloque ${itemLabel} en la bahia ${placementBayShort}` : `Place ${itemLabel} in ${placementBayLabel}`);
-  const descriptionParts = [item.customer || ""];
-  if (priorityDate && isRush) descriptionParts.push(`${spanish ? "Entrega prioritaria" : "Priority delivery"}: ${priorityDate}`);
+  const infoLabel = spanish ? "Orden escaneada" : "Scanned order";
+  const customerLabel = spanish ? "Cliente" : "Customer";
+  const jobLabel = "Job Nr.";
+  const dimensionsLabel = spanish ? "Dimensiones" : "Dimensions";
+  const quantityLabel = spanish ? "Cant." : "QTY";
+  const priorityLabel = spanish ? "Entrega prioritaria" : "Priority delivery";
+  const handlingLabel = spanish ? "Manejo" : "Handling";
+  const orderHeroLabel = spanish ? "COLOQUE ESTA ORDEN EN" : "PLACE THIS ORDER IN";
+  const bayHeroPrefix = spanish ? "BAHIA" : "BAY";
+  const overrideBayLabel = isRush ? (spanish ? "Bahia urgente" : "Priority Rush bay") : (spanish ? "Cambiar bahia" : "Override bay");
+  const moveBayLabel = isRush ? (spanish ? "Mover a bahia urgente seleccionada" : "Move to selected Rush bay") : (spanish ? "Move to the selected bay" : "Move to selected bay");
+  const directTruckLabel = spanish ? "Camion del instalador — omitir bahia" : "Installer truck — skip bay";
+  const metaPills = [];
+  // v0.457: floor operators identify the job first, then customer. Dimensions
+  // and total piece quantity are included here so the receive instruction can
+  // be verified without looking back at the Scan table.
+  metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-job-v457"><b>${escapeHtml(jobLabel)}</b><strong>${escapeHtml(item.job || "-")}</strong></span>`);
+  metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-customer-v457"><b>${escapeHtml(customerLabel)}</b><strong>${escapeHtml(item.customer || "-")}</strong></span>`);
+  metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-dimensions-v457"><b>${escapeHtml(dimensionsLabel)}</b><strong>${escapeHtml(item.dimensions || "-")}</strong></span>`);
+  metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-qty-v457"><b>${escapeHtml(quantityLabel)}</b><strong>${escapeHtml(item.qty == null ? "-" : String(item.qty))}</strong></span>`);
+  if (priorityDate && isRush) metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-priority"><b>${escapeHtml(priorityLabel)}</b><strong>${escapeHtml(priorityDate)}</strong></span>`);
   if (directToTruck) {
-    descriptionParts.push(spanish ? "No coloque este vidrio en una bahia." : "Do not place this glass in a bay.");
+    metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-direct"><b>${escapeHtml(handlingLabel)}</b><strong>${escapeHtml(directTruckLabel)}</strong></span>`);
   } else if (result.oversize) {
-    descriptionParts.push(spanish ? "Vidrio sobredimensionado detectado; verifique la bahia." : "Oversize glass detected—verify the bay below.");
-  } else if (isRush) {
-    descriptionParts.push(spanish ? "Use la bahia prioritaria indicada y mantenga este trabajo acelerado." : "Use the indicated priority bay and keep this work expedited.");
+    metaPills.push(`<span class="indian-trail-placement-meta-pill-v453 is-warning"><b>${escapeHtml(handlingLabel)}</b><strong>${escapeHtml(spanish ? "Vidrio sobredimensionado" : "Oversize glass")}</strong></span>`);
+  } else if (result.returnedToBay) {
+    metaPills.push(`<span class="indian-trail-placement-meta-pill-v453"><b>${escapeHtml(handlingLabel)}</b><strong>${escapeHtml(spanish ? "Articulo devuelto" : "Returned item")}</strong></span>`);
   }
   const shell = mountTimedScanConfirmation({
     id: "indianTrailPlacementShell",
@@ -16260,32 +16503,33 @@ async function showIndianTrailPlacementPrompt(result) {
     markup: `
       <section class="indian-trail-placement-panel" role="status" aria-live="assertive">
         <div class="indian-trail-placement-icon" aria-hidden="true"></div>
-        <div class="indian-trail-placement-copy">
-          <small>${escapeHtml(eyebrow)}</small>
-          <h2>${escapeHtml(title)}</h2>
-          <p>${escapeHtml(descriptionParts.filter(Boolean).join(" • "))}</p>
+        <div class="indian-trail-placement-copy indian-trail-placement-copy-v453">
+          <small>${escapeHtml(infoLabel)}</small>
+          <h2>${escapeHtml(itemLabel)}</h2>
+          <div class="indian-trail-placement-meta-v453">${metaPills.join("")}</div>
         </div>
         ${directToTruck ? `
           <div class="indian-trail-rush-destination">
-            <small>${spanish ? "Destino urgente" : "Rush destination"}</small>
-            <strong>${spanish ? "Camion del instalador — omitir bahia" : "Installer truck — skip bay"}</strong>
+            <small>${spanish ? "Destino" : "Destination"}</small>
+            <strong>${escapeHtml(directTruckLabel)}</strong>
           </div>
         ` : `
           <div class="indian-trail-placement-destination-v321">
-            <small>${spanish ? "COLOQUE ESTA ORDEN EN" : "PLACE THIS ORDER IN"}</small>
-            <strong>${spanish ? "BAHIA" : "BAY"} ${escapeHtml(placementBayShort)}</strong>
-            <span>${spanish ? "Orden" : "Order"} ${escapeHtml(item.order || "-")} · Job Nr. ${escapeHtml(item.job || "-")}</span>
+            <small>${escapeHtml(orderHeroLabel)}</small>
+            <strong>${escapeHtml(bayHeroPrefix)} ${escapeHtml(placementBayShort)}</strong>
           </div>
-          <label class="indian-trail-placement-field">
-            <span>${isRush ? (spanish ? "Bahia urgente" : "Priority Rush bay") : (spanish ? "Cambiar bahia" : "Override bay")}</span>
-            <select data-placement-bay>
-              ${indianTrailBayOptionsHtml(selectedCode)}
-            </select>
-          </label>
+          <div class="indian-trail-placement-actions indian-trail-placement-controls-v453">
+            <label class="indian-trail-placement-field">
+              <span>${escapeHtml(overrideBayLabel)}</span>
+              <select data-placement-bay>
+                ${indianTrailBayOptionsHtml(selectedCode)}
+              </select>
+            </label>
+            <button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>${escapeHtml(moveBayLabel)}</button>
+          </div>
         `}
         ${scanQuantityBoostMarkup(result.lastScan || {}, scanEntryDisplayItem(result.lastScan || {}) || item, { bayCode: result.bayCode || "" })}
-        <div class="indian-trail-placement-actions">
-          ${directToTruck ? "" : `<button type="button" data-placement-move ${result.assignmentId ? "" : "disabled"}>${isRush ? (spanish ? "Mover a bahia urgente seleccionada" : "Move to selected Rush bay") : (spanish ? "Mover a la bahia seleccionada" : "Move to selected bay")}</button>`}
+        <div class="indian-trail-placement-footer-v453">
           <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
           <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
         </div>
@@ -17696,9 +17940,14 @@ function globalSearchIconV433(kind) {
 /** Build the always-present compact Flags cell shown between delivery date and route. */
 function globalSearchPriorityFlagsV425(result) {
   const remake = Boolean(result?.remake) || isRemakeItem(result || {});
-  const rush = Boolean(result?.rush) || isRushItem(result || {});
-  const stateClass = remake && rush ? "is-both" : remake ? "is-remake" : rush ? "is-rush" : "is-none";
-  const label = remake && rush ? "REMAKE · RUSH" : remake ? "REMAKE" : rush ? "RUSH" : "None";
+  const bannerKind = String(result?.priorityBanner?.kind || "").trim().toLowerCase();
+  // v0.469: Missing Glass is now a reason inside the unified workflow rather
+  // than its own flag. Backend metadata remains authoritative for combined work.
+  const combined = bannerKind === "both";
+  const rush = combined || Boolean(result?.rush) || isRushItem(result || {});
+  const remakeFlag = combined || remake;
+  const stateClass = remakeFlag && rush ? "is-both" : remakeFlag ? "is-remake" : rush ? "is-rush" : "is-none";
+  const label = remakeFlag && rush ? "REMAKE · RUSH" : remakeFlag ? "REMAKE" : rush ? "RUSH" : "None";
   return `<span class="global-result-cell-v430 global-result-flag-v425 global-result-flag-cell-v430 ${stateClass}">${globalSearchIconV433("flag")}<b class="global-result-inline-label-v427">Flags:</b> ${label}</span>`;
 }
 
@@ -17838,10 +18087,143 @@ async function refreshBayMapPage() {
   maybeShowStaleBayAlert().catch(() => {});
 }
 
+/**
+ * v0.467: Keep one visible pane per in-transit piece (up to the existing 120
+ * pane safety ceiling), but make the loading timeline physically sequential.
+ * Every pane gets its own motion slot, the truck remains at Outbound until the
+ * final pane is fully behind the cargo body, then waits two additional seconds
+ * before departing. The same sequencing is mirrored for unloading at Inbound.
+ */
+function bayTransitAnimationProfileV459(pieceCount = 0) {
+  const pieces = Math.max(0, Math.round(Number(pieceCount || 0)));
+  if (!pieces) {
+    return {
+      pieces: 0, visiblePanes: 0, cycleSeconds: 0, paneStep: 0, paneStagger: 0,
+      stackWidth: 0, loadSeconds: 0, paneMotionSeconds: 0, postLoadDwellSeconds: 0,
+      travelSeconds: 0, flipSeconds: 0,
+    };
+  }
+  const visiblePanes = Math.min(pieces, 120);
+  const paneMotionSeconds = 0.78;
+  const paneStagger = visiblePanes <= 1
+    ? 0
+    : Math.max(0.045, Math.min(0.24, 5.5 / Math.max(visiblePanes - 1, 1)));
+  const loadSeconds = paneMotionSeconds + (Math.max(visiblePanes - 1, 0) * paneStagger);
+  const postLoadDwellSeconds = 2;
+  const travelSeconds = Math.max(2.8, Math.min(4.4, 2.8 + (pieces * 0.014)));
+  const flipSeconds = 0.24;
+  const cycleSeconds = (loadSeconds * 2) + (postLoadDwellSeconds * 2) + (travelSeconds * 2) + (flipSeconds * 2);
+  // Keep the waiting stack compact enough to sit beside the truck while still
+  // separating individual panes. Large loads overlap tightly instead of clumping.
+  const paneStep = visiblePanes <= 1 ? 0 : Math.max(0.18, Math.min(4.2, 22 / Math.max(visiblePanes - 1, 1)));
+  const stackWidth = Math.max(9, Math.min(29, ((visiblePanes - 1) * paneStep) + 7));
+  return {
+    pieces, visiblePanes, cycleSeconds, paneStep, paneStagger, stackWidth, loadSeconds,
+    paneMotionSeconds, postLoadDwellSeconds, travelSeconds, flipSeconds,
+  };
+}
+
+function bayTransitGlassPanesV459(profile) {
+  if (!profile?.visiblePanes) return "";
+  return Array.from({ length: profile.visiblePanes }, (_, index) =>
+    `<i style="--glass-pane-index-v459:${index};--glass-pane-index-v467:${index}"></i>`
+  ).join("");
+}
+
+/** Cancel and rebuild the load-aware Bay Map shuttle using exact second-based timing. */
+function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfileV467) {
+  const root = els.bayFlowPanel?.querySelector(".transit-animation-truck.has-transit-glass-v467");
+  const truck = root?.querySelector(".transit-moving-truck");
+  if (!root || !truck || !profile?.visiblePanes || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+
+  // v0.467 owns these animations through Web Animations so the truck departure
+  // can be tied to the *last* pane instead of a fixed percentage of the cycle.
+  root.getAnimations({ subtree: true }).forEach((animation) => animation.cancel());
+
+  const outboundTransfer = root.querySelector(".transit-rack-transfer-outbound");
+  const inboundTransfer = root.querySelector(".transit-rack-transfer-inbound");
+  const outboundPanes = [...root.querySelectorAll(".transit-rack-transfer-outbound > i")];
+  const inboundPanes = [...root.querySelectorAll(".transit-rack-transfer-inbound > i")];
+  const laneWidth = Math.max(root.clientWidth, 1);
+  const truckWidth = Math.max(truck.getBoundingClientRect().width, 72);
+  const sideGap = window.innerWidth <= 820 ? 28 : 30;
+  const leftTruckLeft = sideGap;
+  const rightTruckLeft = Math.max(sideGap, laneWidth - truckWidth - sideGap);
+  const stackWidth = Number(profile.stackWidth || 20);
+  const outboundLeft = Math.max(0, leftTruckLeft - stackWidth - 4);
+  const inboundRight = Math.max(1, sideGap - stackWidth - 2);
+  if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
+  if (inboundTransfer) inboundTransfer.style.setProperty("right", `${inboundRight}px`, "important");
+
+  const cycleMs = Math.max(Number(profile.cycleSeconds || 1) * 1000, 1000);
+  const loadMs = Number(profile.loadSeconds || 0) * 1000;
+  const paneMotionMs = Number(profile.paneMotionSeconds || .78) * 1000;
+  const paneStaggerMs = Number(profile.paneStagger || 0) * 1000;
+  const postLoadDwellMs = Number(profile.postLoadDwellSeconds || 2) * 1000;
+  const travelMs = Number(profile.travelSeconds || 3) * 1000;
+  const flipMs = Number(profile.flipSeconds || .24) * 1000;
+  const outboundDepartMs = loadMs + postLoadDwellMs;
+  const inboundArriveMs = outboundDepartMs + travelMs;
+  const inboundReadyMs = inboundArriveMs + flipMs;
+  const inboundUnloadEndMs = inboundReadyMs + loadMs;
+  const returnDepartMs = inboundUnloadEndMs + postLoadDwellMs;
+  const outboundArriveMs = returnDepartMs + travelMs;
+
+  const offset = (ms) => Math.max(0, Math.min(1, ms / cycleMs));
+  truck.animate([
+    { offset: 0, left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
+    { offset: offset(outboundDepartMs), left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
+    { offset: offset(inboundArriveMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
+    { offset: offset(inboundReadyMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
+    { offset: offset(returnDepartMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
+    { offset: offset(outboundArriveMs), left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
+    { offset: 1, left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
+  ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
+
+  const paneStep = Number(profile.paneStep || 0);
+  outboundPanes.forEach((pane, index) => {
+    const startMs = index * paneStaggerMs;
+    const endMs = startMs + paneMotionMs;
+    const paneLeft = outboundLeft + (index * paneStep);
+    // Move far enough into the cargo body that the pane is fully hidden behind
+    // the truck before opacity is dropped; z-index handles the physical occlusion.
+    const targetDx = Math.max(18, (leftTruckLeft + 25) - paneLeft);
+    pane.animate([
+      { offset: 0, opacity: 1, transform: "translateX(0)" },
+      { offset: offset(startMs), opacity: 1, transform: "translateX(0)" },
+      { offset: offset(Math.max(startMs, endMs - 70)), opacity: 1, transform: `translateX(${targetDx}px)` },
+      { offset: offset(endMs), opacity: 0, transform: `translateX(${targetDx + 5}px)` },
+      { offset: 1, opacity: 0, transform: `translateX(${targetDx + 5}px)` },
+    ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
+  });
+
+  inboundPanes.forEach((pane, index) => {
+    const startMs = inboundReadyMs + (index * paneStaggerMs);
+    const endMs = startMs + paneMotionMs;
+    const transferLeft = laneWidth - inboundRight - stackWidth;
+    const finalPaneLeft = transferLeft + (index * paneStep);
+    const insideRearX = rightTruckLeft + truckWidth - 24;
+    const startDx = insideRearX - finalPaneLeft;
+    pane.animate([
+      { offset: 0, opacity: 0, transform: `translateX(${startDx}px)` },
+      { offset: offset(startMs), opacity: 1, transform: `translateX(${startDx}px)` },
+      { offset: offset(endMs), opacity: 1, transform: "translateX(0)" },
+      { offset: offset(returnDepartMs), opacity: 1, transform: "translateX(0)" },
+      { offset: offset(Math.min(cycleMs, returnDepartMs + 120)), opacity: 0, transform: "translateX(2px)" },
+      { offset: 1, opacity: 0, transform: "translateX(2px)" },
+    ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
+  });
+}
+
 /** Start the Bay Map truck from its route origin after the page is fully painted. */
 function restartBayTruckAnimation() {
-  const truck = els.bayFlowPanel?.querySelector(".transit-moving-truck");
+  const root = els.bayFlowPanel?.querySelector(".transit-animation-truck");
+  const truck = root?.querySelector(".transit-moving-truck");
   if (!truck || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+  if (root?.classList.contains("has-transit-glass-v467")) {
+    requestAnimationFrame(() => requestAnimationFrame(() => startBayTransitAnimationV467()));
+    return;
+  }
   truck.style.animation = "none";
   truck.style.opacity = "0";
   void truck.offsetWidth;
@@ -17880,6 +18262,9 @@ function renderBayRouteFlow(summary) {
   const inTransitJobCount = Number(summary?.inTransitJobCount || 0);
   const truckQty = Number(summary?.truckInTransitQty || 0);
   const rackQty = Number(summary?.rackInTransitQty || 0);
+  const transitAnimation = bayTransitAnimationProfileV459(inTransitQty);
+  const transitPaneMarkup = bayTransitGlassPanesV459(transitAnimation);
+  state.bayTransitAnimationProfileV467 = transitAnimation;
   const routeComplete = outboundTotal > 0 && inboundTotal > 0 && outboundQty >= outboundTotal && inboundQty >= inboundTotal;
   const celebrateRouteCompletion = routeComplete && state.lastBayRouteComplete === false;
   state.lastBayRouteComplete = routeComplete;
@@ -17905,7 +18290,9 @@ function renderBayRouteFlow(summary) {
   if (state.bayRouteFlowSignature === flowSignature && els.bayFlowPanel.querySelector(".transit-moving-truck")) return;
   state.bayRouteFlowSignature = flowSignature;
 
-  const inTransitPieceLabel = `${inTransitQty} piece${inTransitQty === 1 ? "" : "s"} on the way`;
+  const inTransitPieceLabel = inTransitQty > 0
+    ? `${inTransitQty} piece${inTransitQty === 1 ? "" : "s"} on the way`
+    : "Waiting for outbound glass";
   const outboundStageLabel = outbound ? outbound.stage : "No outbound list";
   const portable = workflowPresentationV355();
   const inboundStageLabel = inbound ? inbound.stage : `No ${portable.receivingSite} list`;
@@ -17930,10 +18317,18 @@ function renderBayRouteFlow(summary) {
     <button class="flow-lane flow-lane-v2 transit-lane-button transit-lane-polished" type="button" data-open-transit-manifest title="Open ${escapeHtml(portable.receivingSite)} in-transit manifest">
       <span class="flow-truck"><b>${escapeHtml(inTransitPieceLabel)}</b></span>
       ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
-      <span class="transit-animation transit-animation-v59 transit-animation-truck" aria-hidden="true">
+      <span
+        class="transit-animation transit-animation-v59 transit-animation-truck ${inTransitQty > 0 ? "has-transit-glass-v459 has-transit-glass-v467" : "is-waiting-for-glass-v459"}"
+        style="--transit-cycle-duration-v459:${transitAnimation.cycleSeconds || 16.7}s;--transit-load-seconds-v459:${transitAnimation.loadSeconds || 2.15}s;--glass-pane-step-v459:${transitAnimation.paneStep}px;--glass-pane-stagger-v459:${transitAnimation.paneStagger}s;--glass-stack-width-v459:${transitAnimation.stackWidth}px"
+        data-transit-piece-count="${escapeHtml(inTransitQty)}"
+        aria-hidden="true"
+      >
+        <!-- v0.467: panes load/unload individually behind the truck; departure waits for the last pane plus two seconds. Zero pieces still parks at Outbound. -->
+        ${inTransitQty > 0 ? `<span class="transit-rack-transfer transit-rack-transfer-outbound">${transitPaneMarkup}</span>` : ""}
         <span class="transit-route-node transit-route-node-start"></span>
         <span class="transit-route-line"></span>
         <span class="transit-moving-truck">
+          <span class="transit-wait-cloud-v459"><i></i><i></i><i></i></span>
           <svg viewBox="0 0 92 44" focusable="false" aria-hidden="true">
             <rect class="transit-truck-cargo" x="7" y="7" width="49" height="27" rx="4"></rect>
             <path class="transit-truck-cab" d="M56 15h17l11 11v8H56V15Z"></path>
@@ -17946,6 +18341,7 @@ function renderBayRouteFlow(summary) {
           </svg>
         </span>
         <span class="transit-route-node transit-route-node-end"></span>
+        ${inTransitQty > 0 ? `<span class="transit-rack-transfer transit-rack-transfer-inbound">${transitPaneMarkup}</span>` : ""}
       </span>
       ${bayDualProgressHtml(outboundQty, outboundTotal, inboundQty, inboundTotal, { celebrate: celebrateRouteCompletion, context: "transit" })}
       <span class="transit-open-action"><b>Open manifest</b><i aria-hidden="true"></i></span>
@@ -17967,6 +18363,10 @@ function renderBayRouteFlow(summary) {
       <span class="flow-card-open" aria-hidden="true"><b>${inbound ? "Open Stage" : "Unavailable"}</b><i></i></span>
     </button>
   `;
+
+  if (inTransitQty > 0) {
+    requestAnimationFrame(() => requestAnimationFrame(() => startBayTransitAnimationV467(transitAnimation)));
+  }
 
   const miniRoute = document.getElementById("bayPanelRouteMini");
   if (miniRoute) {
@@ -21858,20 +22258,21 @@ async function openBayAllScansModal(page = 1) {
  */
 function setPriorityNewRequestMode(mode = "rush") {
   const requested = String(mode || "rush").trim().toLowerCase();
-  const normalized = requested === "missing" ? "missing" : requested === "remake" ? "remake" : "rush";
+  const normalized = requested === "both" ? "both" : requested === "remake" ? "remake" : "rush";
   state.priorityNewRequestMode = normalized;
 
   document.querySelectorAll('input[name="priorityNewRequestType"]').forEach((input) => {
     input.checked = String(input.dataset.priorityRequestMode || "rush") === normalized;
   });
   document.querySelectorAll("[data-priority-new-panel]").forEach((panel) => {
-    const visiblePanel = normalized === "missing" ? "missing" : "priority";
-    panel.hidden = panel.dataset.priorityNewPanel !== visiblePanel;
+    panel.hidden = panel.dataset.priorityNewPanel !== "priority";
   });
   updatePriorityIntakeEmailMode();
+  if (String(els.priorityIntakeJob?.value || "").trim()) schedulePriorityWorkLookup(0);
 }
 
 function priorityIntakeType() {
+  if (state.priorityNewRequestMode === "both") return "Both";
   return state.priorityNewRequestMode === "remake" ? "Remake" : "Rush";
 }
 
@@ -21993,6 +22394,117 @@ function updatePriorityIntakeEmailMode() {
   els.priorityIntakeEmailHint.innerHTML = `<strong>${escapeHtml(transport.transportLabel || "System email")}</strong><span>${transport.configured ? `Sends immediately from <b>${escapeHtml(transport.from || "the configured scanner mailbox")}</b>.` : "The scanner email transport is not configured, so system sending may fall back to an auditable draft state."}</span>`;
 }
 
+
+/** v0.469: Render the central Priority Work lookup state without switching to a second workflow. */
+function renderPriorityWorkLookupStatus() {
+  if (!els.priorityIntakeLookupStatus) return;
+  const query = String(els.priorityIntakeJob?.value || "").trim();
+  const lookup = state.priorityWorkLookup;
+  els.priorityIntakeLookupStatus.className = "priority-work-lookup-status-v469";
+  if (!query) {
+    els.priorityIntakeLookupStatus.classList.add("is-idle");
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>The scanner will check active delivery lists automatically.</small></div>`;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Checking imported work is automatic.</b> Enter the Job Nr. / SO / Order Nr. above.`;
+    const button = document.getElementById("priorityIntakeSubmitBtn");
+    if (button?.querySelector("span")) button.querySelector("span").textContent = state.priorityIntakeEditingRequestId ? "Save Changes" : "Save Priority Work";
+    return;
+  }
+  if (lookup?.loading) {
+    els.priorityIntakeLookupStatus.classList.add("is-loading");
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Checking imported delivery lists...</strong><small>${escapeHtml(query)}</small></div>`;
+    return;
+  }
+  if (lookup?.error) {
+    els.priorityIntakeLookupStatus.classList.add("is-error");
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Lookup could not be completed</strong><small>${escapeHtml(lookup.error)}</small></div>`;
+    return;
+  }
+  const button = document.getElementById("priorityIntakeSubmitBtn");
+  if (lookup?.found) {
+    els.priorityIntakeLookupStatus.classList.add("is-found");
+    const orders = (lookup.orders || []).join(", ") || "-";
+    const date = lookup.effectiveDeliveryDate || lookup.deliveryDate || "";
+    els.priorityIntakeLookupStatus.innerHTML = `
+      <span class="priority-work-lookup-icon-v469" aria-hidden="true"></span>
+      <div class="priority-work-lookup-copy-v469"><strong>Imported order found — apply now</strong><small>${escapeHtml(lookup.job || query)}${lookup.customer ? ` · ${escapeHtml(lookup.customer)}` : ""}</small></div>
+      <div class="priority-work-lookup-facts-v469"><span><b>${escapeHtml(orders)}</b><small>Order Nr.</small></span><span><b>${escapeHtml(lookup.pieceQty || 0)}</b><small>Pieces</small></span><span><b>${escapeHtml(lookup.stageCount || 0)}</b><small>Stages</small></span><span><b>${escapeHtml(date ? formatDisplayDate(date) : "-")}</b><small>Delivery</small></span></div>`;
+    if (!state.priorityWorkDeliveryDateTouched && els.priorityIntakeDeliveryDate && date) els.priorityIntakeDeliveryDate.value = date;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Already imported.</b> Saving will apply ${escapeHtml(priorityIntakeType())} across every matching stage copy now.`;
+    if (button?.querySelector("span")) button.querySelector("span").textContent = "Apply Priority Work";
+  } else {
+    els.priorityIntakeLookupStatus.classList.add("is-waiting");
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Not imported yet — request will wait</strong><small>${escapeHtml(query)} will be checked against future A+W imports automatically.</small></div>`;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Not imported yet.</b> Saving will queue this request and apply it automatically when the matching work arrives.`;
+    if (button?.querySelector("span")) button.querySelector("span").textContent = state.priorityIntakeEditingRequestId ? "Save Changes" : "Save & Wait for Import";
+  }
+}
+
+async function loadPriorityWorkLookup() {
+  const query = String(els.priorityIntakeJob?.value || "").trim();
+  if (!query || !state.backend) {
+    state.priorityWorkLookup = null;
+    renderPriorityWorkLookupStatus();
+    return null;
+  }
+  const requestId = Number(state.priorityWorkLookupRequestId || 0) + 1;
+  state.priorityWorkLookupRequestId = requestId;
+  state.priorityWorkLookup = { loading: true, query };
+  renderPriorityWorkLookupStatus();
+  try {
+    const params = new URLSearchParams({ q: query, priorityType: priorityIntakeType() });
+    const result = await fetchJson(`/api/indian-trail/priority-work-lookup?${params.toString()}`);
+    if (requestId !== state.priorityWorkLookupRequestId) return null;
+    state.priorityWorkLookup = result || { found: false, query };
+    renderPriorityWorkLookupStatus();
+    return state.priorityWorkLookup;
+  } catch (error) {
+    if (requestId !== state.priorityWorkLookupRequestId) return null;
+    state.priorityWorkLookup = { found: false, query, error: error?.message || "Priority Work lookup failed." };
+    renderPriorityWorkLookupStatus();
+    return state.priorityWorkLookup;
+  }
+}
+
+function schedulePriorityWorkLookup(delay = 280) {
+  if (state.priorityWorkLookupTimer) window.clearTimeout(state.priorityWorkLookupTimer);
+  state.priorityWorkLookupTimer = window.setTimeout(() => {
+    state.priorityWorkLookupTimer = null;
+    void loadPriorityWorkLookup();
+  }, Math.max(Number(delay || 0), 0));
+}
+
+function priorityWorkPrintTypeLabel(kind = "rush") {
+  if (kind === "missing") return "Missing Glass";
+  if (kind === "remake") return "Remake";
+  return "Rush";
+}
+
+/** Print lightweight shop paperwork even before an A+W import exists. */
+function printPriorityWorkSheet(kind = "rush", request = null) {
+  const printKind = ["rush", "remake", "missing"].includes(String(kind)) ? String(kind) : "rush";
+  const lookup = request?.lookupResult || state.priorityWorkLookup || {};
+  const job = String(request?.jobNumber || els.priorityIntakeJob?.value || lookup.job || "").trim();
+  const reason = String(request?.reason || priorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom) || "").trim();
+  const responsible = String(request?.responsible || priorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom) || "").trim();
+  const handling = String(request?.priorityType || priorityIntakeType());
+  const deliveryDate = String(request?.requestedDeliveryDate || request?.matchedDeliveryDate || els.priorityIntakeDeliveryDate?.value || lookup.effectiveDeliveryDate || lookup.deliveryDate || "");
+  const customer = String(request?.matchedCustomer || lookup.customer || "");
+  const orders = (request?.matchedOrders || lookup.orders || []).filter(Boolean);
+  const items = Array.isArray(request?.matchedItems) && request.matchedItems.length ? request.matchedItems : (lookup.items || []);
+  const typeLabel = priorityWorkPrintTypeLabel(printKind);
+  const title = `${typeLabel.toUpperCase()} WORK SHEET`;
+  const rows = items.length ? items.map((item) => `<tr><td>${escapeHtml(item.order || "-")}</td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.product || "-")}</td><td>${escapeHtml(item.dimensions || "-")}</td><td>${escapeHtml(item.qty || 0)}</td><td></td></tr>`).join("") : `<tr><td colspan="6" class="blank-row">Order details will populate after import.</td></tr>`;
+  const win = window.open("", "_blank", "noopener,noreferrer,width=1050,height=820");
+  if (!win) {
+    showInlineError("Allow popups to print Priority Work paperwork.", false);
+    return;
+  }
+  win.document.open();
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(typeLabel)} Priority Work</title><style>
+    @page{size:letter portrait;margin:.45in}*{box-sizing:border-box}body{margin:0;color:#102d4f;font-family:Arial,sans-serif;background:#fff}.sheet{border:2px solid #173e75;padding:18px}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:4px solid ${printKind === "remake" ? "#161b24" : printKind === "missing" ? "#dc5b20" : "#d82332"};padding-bottom:12px}.head small{font-size:10px;font-weight:900;letter-spacing:.14em}.head h1{margin:3px 0 0;font-size:27px}.head b{align-self:center;border:1px solid #b8c8d9;border-radius:8px;padding:8px 12px;font-size:12px}.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:14px 0}.fact{border:1px solid #cbd8e5;border-radius:8px;padding:9px}.fact small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.fact strong{display:block;margin-top:3px;font-size:13px}.reason{border:1px solid #cbd8e5;border-radius:8px;padding:10px;margin-bottom:12px}.reason small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase}.reason strong{display:block;margin-top:4px;min-height:32px;font-size:14px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aebdcb;padding:6px;text-align:left}th{background:#edf3f9;font-size:8px;text-transform:uppercase}.blank-row{height:80px;color:#7b8997;text-align:center}.notes{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.line{height:38px;border-bottom:1px solid #50677e;padding-top:20px;font-size:9px}.footer{display:flex;justify-content:space-between;margin-top:15px;color:#6c7f91;font-size:8px}.toolbar{margin:0 0 12px}.toolbar button{border:0;border-radius:7px;background:#0b447e;color:#fff;padding:9px 15px;font-weight:800}@media print{.toolbar{display:none}.sheet{border:0;padding:0}}</style></head><body><div class="toolbar"><button onclick="window.print()">Print ${escapeHtml(typeLabel)} Sheet</button></div><main class="sheet"><header class="head"><div><small>DELIVERY LIST SCANNER · PRIORITY WORK</small><h1>${escapeHtml(title)}</h1></div><b>${escapeHtml(lookup.found || request?.status === "matched" ? "IMPORTED" : "WAITING FOR IMPORT")}</b></header><section class="facts"><div class="fact"><small>Job Nr. / SO / Order</small><strong>${escapeHtml(job || "-")}</strong></div><div class="fact"><small>Priority Handling</small><strong>${escapeHtml(handling)}</strong></div><div class="fact"><small>Customer</small><strong>${escapeHtml(customer || "-")}</strong></div><div class="fact"><small>Order Nr.</small><strong>${escapeHtml(orders.join(", ") || "-")}</strong></div><div class="fact"><small>Priority Delivery Date</small><strong>${escapeHtml(deliveryDate ? formatDisplayDate(deliveryDate) : "Keep imported date")}</strong></div><div class="fact"><small>Person Responsible</small><strong>${escapeHtml(responsible || "-")}</strong></div></section><section class="reason"><small>Reason</small><strong>${escapeHtml(reason || (printKind === "missing" ? "Missing Glass" : "-"))}</strong></section><table><thead><tr><th>Order</th><th>Item</th><th>Glass</th><th>Dimensions</th><th>Qty</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table><section class="notes"><div class="line">Shop notes</div><div class="line">Completed / verified by</div></section><footer class="footer"><span>Printed ${escapeHtml(new Date().toLocaleString())}</span><span>${escapeHtml(typeLabel)} Priority Work</span></footer></main><script>setTimeout(()=>window.print(),150);<\/script></body></html>`);
+  win.document.close();
+}
+
 function updateSdiEmailMode() {
   const mode = String(els.sdiEmailMode?.value || "draft");
   if (els.sdiRecipientsField) els.sdiRecipientsField.hidden = mode === "none";
@@ -22055,36 +22567,88 @@ function openPriorityIntakeDraft(draft) {
 
 async function submitPriorityIntakeRequest(event) {
   event?.preventDefault?.();
+  const lookup = String(els.priorityIntakeJob?.value || "").trim();
+  if (!lookup) {
+    showInlineError("Enter a Job Nr., SO, or Order Nr.", false);
+    return;
+  }
+  // v0.469: force one final authoritative lookup before save so the submit path
+  // cannot queue a request for an order that arrived while the user was typing.
+  await loadPriorityWorkLookup();
   const payload = {
     priorityType: priorityIntakeType(),
-    jobNumber: els.priorityIntakeJob?.value || "",
+    jobNumber: lookup,
+    deliveryDate: els.priorityIntakeDeliveryDate?.value || "",
     reason: priorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom),
     responsible: priorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom),
     emailMode: els.priorityIntakeEmailMode?.value || "draft",
     recipients: priorityRecipients(els.priorityIntakeRecipientUsers, els.priorityIntakeRecipients),
     requestId: state.priorityIntakeEditingRequestId || "",
   };
+  if (!payload.reason) {
+    showInlineError("Choose a reason or add a custom reason.", false);
+    return;
+  }
+  if (!payload.responsible) {
+    showInlineError("Choose the person responsible or add a custom person.", false);
+    return;
+  }
   const submitButton = document.getElementById("priorityIntakeSubmitBtn");
   if (submitButton) submitButton.disabled = true;
   try {
-    const result = await fetchJson("/api/indian-trail/priority-intake", { method: "POST", body: JSON.stringify(payload) });
+    const result = await fetchJson("/api/indian-trail/priority-work", { method: "POST", body: JSON.stringify(payload) });
     state.sdiWorkspace = { ...(state.sdiWorkspace || {}), intakeRequests: result.requests || [], intakeSummary: state.sdiWorkspace?.intakeSummary || {} };
     rememberPriorityOption("reason", payload.reason);
     rememberPriorityOption("responsible", payload.responsible);
+    if (result.draft) openPriorityIntakeDraft(result.draft);
+    renderPriorityIntakeRequests();
+    renderSdiCurrentList();
+    void loadBayModalActionHistory("rush");
+
+    const appliedNow = result.action === "applied";
+    const requestSnapshot = {
+      priorityType: payload.priorityType,
+      jobNumber: payload.jobNumber,
+      reason: payload.reason,
+      responsible: payload.responsible,
+      requestedDeliveryDate: payload.deliveryDate,
+      matchedDeliveryDate: result.matchedDeliveryDate || "",
+      matchedCustomer: result.matchedCustomer || "",
+      matchedOrders: result.matchedOrders || [],
+      matchedItems: result.lookupResult?.items || [],
+      lookupResult: result.lookupResult || state.priorityWorkLookup || {},
+      status: appliedNow ? "matched" : "pending",
+    };
+    const emailNote = result.emailStatus === "sent" ? "Email sent." : result.emailStatus === "user_draft" ? "Email draft opened." : result.emailStatus === "not_requested" ? "No email requested." : `Email status: ${String(result.emailStatus || "saved").replaceAll("_", " ")}.`;
+    showActionFeedback({
+      kind: "success",
+      eyebrow: appliedNow ? "Priority Work applied" : "Priority Work queued",
+      title: appliedNow ? `${payload.priorityType} applied now` : `${payload.priorityType} waiting for import`,
+      message: result.message || (appliedNow ? "The imported work was updated across its active stages." : "The scanner will apply this request when the matching work is imported."),
+      details: [
+        { label: "Job Nr. / SO / Order", value: result.matchedJob || payload.jobNumber },
+        { label: "Customer", value: result.matchedCustomer || "" },
+        { label: "Delivery date", value: result.matchedDeliveryDate ? formatDisplayDate(result.matchedDeliveryDate) : payload.deliveryDate ? formatDisplayDate(payload.deliveryDate) : "Keep imported date" },
+        { label: "Items", value: result.affectedItems ? String(result.affectedItems) : "" },
+        { label: "Email", value: emailNote },
+      ],
+      primaryLabel: payload.priorityType === "Remake" ? "Print Remake sheet" : "Print Rush sheet",
+      secondaryLabel: "Done",
+      onPrimary: () => printPriorityWorkSheet(payload.priorityType === "Remake" ? "remake" : "rush", requestSnapshot),
+    });
+
     if (els.priorityIntakeJob) els.priorityIntakeJob.value = "";
+    if (els.priorityIntakeDeliveryDate) els.priorityIntakeDeliveryDate.value = "";
+    state.priorityWorkDeliveryDateTouched = false;
+    state.priorityWorkLookup = null;
     state.priorityIntakeEditingRequestId = "";
-    if (submitButton) submitButton.querySelector("span").textContent = "Save & Queue Request";
     setPriorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom, "");
     setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, "");
     if (els.priorityIntakeRecipients) els.priorityIntakeRecipients.value = "";
     els.priorityIntakeRecipientUsers?.querySelectorAll("[data-priority-recipient-email]").forEach((input) => { input.checked = false; });
     renderPriorityIntakeOptions();
-    if (result.draft) openPriorityIntakeDraft(result.draft);
-    renderPriorityIntakeRequests();
-    setBayModalSection("rush", "requests");
-    void loadBayModalActionHistory("rush");
-    const emailNote = result.emailStatus === "sent" ? "Email sent." : result.emailStatus === "user_draft" ? "Email draft opened." : result.emailStatus === "not_requested" ? "No email requested." : `Email status: ${String(result.emailStatus || "saved").replaceAll("_", " ")}.`;
-    showFloatingNotice(`${payload.priorityType} request queued for Job Nr. ${payload.jobNumber}. ${emailNote}`, "success");
+    renderPriorityWorkLookupStatus();
+    setBayModalSection("rush", "current");
   } finally {
     if (submitButton) submitButton.disabled = false;
   }
@@ -22094,8 +22658,11 @@ function beginPriorityIntakeEdit(requestId) {
   const request = (state.sdiWorkspace?.intakeRequests || []).find((row) => String(row.requestId) === String(requestId));
   if (!request) { showInlineError("Priority request not found.", false); return; }
   state.priorityIntakeEditingRequestId = String(request.requestId || "");
-  setPriorityNewRequestMode(String(request.priorityType || "Rush").toLowerCase() === "remake" ? "remake" : "rush");
+  const requestType = String(request.priorityType || "Rush").toLowerCase();
+  setPriorityNewRequestMode(requestType === "both" ? "both" : requestType === "remake" ? "remake" : "rush");
   if (els.priorityIntakeJob) els.priorityIntakeJob.value = request.jobNumber || "";
+  if (els.priorityIntakeDeliveryDate) els.priorityIntakeDeliveryDate.value = request.requestedDeliveryDate || request.matchedDeliveryDate || "";
+  state.priorityWorkDeliveryDateTouched = Boolean(els.priorityIntakeDeliveryDate?.value);
   setPriorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom, request.reason || "");
   setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, request.responsible || "");
   if (els.priorityIntakeEmailMode) els.priorityIntakeEmailMode.value = request.emailMode || "none";
@@ -22106,6 +22673,7 @@ function beginPriorityIntakeEdit(requestId) {
   if (submitButton) submitButton.querySelector("span").textContent = "Save Changes";
   updatePriorityIntakeEmailMode();
   setBayModalSection("rush", "intake");
+  schedulePriorityWorkLookup(0);
   els.priorityIntakeJob?.focus();
 }
 
@@ -22393,7 +22961,10 @@ function renderSdiCurrentList() {
   const intakeRequests = (state.sdiWorkspace?.intakeRequests || []).filter((request) => request.status !== "cancelled");
   const rushRequests = intakeRequests.filter((request) => String(request.priorityType || "Rush").toLowerCase() === "rush");
   const remakeRequests = intakeRequests.filter((request) => String(request.priorityType || "").toLowerCase() === "remake");
-  const missingItems = currentPriorityItems();
+  const bothRequests = intakeRequests.filter((request) => String(request.priorityType || "").toLowerCase() === "both");
+  // v0.469: older exact-item Rush marks remain visible, but Missing Glass is no
+  // longer presented as its own workflow/type. Those marks are folded into Rush.
+  const legacyRushItems = currentPriorityItems();
 
   const requestMatches = (request) => !query || [
     request.jobNumber, request.reason, request.responsible, request.createdBy,
@@ -22406,8 +22977,9 @@ function renderSdiCurrentList() {
 
   const visibleRush = rushRequests.filter(requestMatches);
   const visibleRemakes = remakeRequests.filter(requestMatches);
-  const visibleMissing = missingItems.filter(itemMatches);
-  const totalCount = intakeRequests.length + missingItems.length;
+  const visibleBoth = bothRequests.filter(requestMatches);
+  const visibleLegacyRush = legacyRushItems.filter(itemMatches);
+  const totalCount = intakeRequests.length + legacyRushItems.length;
   const currentTabCount = document.getElementById("sdiCurrentTabCount");
   if (currentTabCount) currentTabCount.textContent = String(totalCount);
 
@@ -22417,47 +22989,50 @@ function renderSdiCurrentList() {
     const customer = request.matchedCustomer || items.find((item) => item.customer)?.customer || "";
     const route = request.matchedRoute || items.find((item) => item.route)?.route || "";
     const orders = [...new Set(items.map((item) => item.order).filter(Boolean).concat(request.matchedOrders || []))];
+    const label = kind === "both" ? "Rush + Remake" : kind === "remake" ? "Remake" : "Rush";
+    const icon = kind === "both" ? "R+" : kind === "remake" ? "RM" : "!";
+    const printKind = kind === "remake" ? "remake" : "rush";
     const itemRows = items.length ? `<div class="priority-work-request-items-v348">${items.map((item) => `<span><b>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</b><small class="glass-tone-inline" ${glassToneAttributes(item.product || "Glass")}>${escapeHtml(item.product || "Glass")} · ${escapeHtml(item.dimensions || "-")} · ${escapeHtml(item.qty || 0)} pcs</small><small>${escapeHtml(item.route || "No route")} · ${escapeHtml(item.stage || "No stage")}${item.processState ? ` · ${escapeHtml(item.processState)}` : ""}${item.deliveryDate ? ` · ${escapeHtml(formatDisplayDate(item.deliveryDate))}` : ""}</small></span>`).join("")}</div>` : "";
     return `<article class="priority-work-request-card-v347 priority-work-request-card-v348 is-${kind} ${matched ? "is-matched" : "is-pending"}">
-      <span class="priority-work-card-icon-v347" aria-hidden="true">${kind === "remake" ? "RM" : "!"}</span>
-      <div class="priority-work-card-copy-v347"><small>${kind === "remake" ? "Remake" : "Rush"}</small><strong>${escapeHtml(request.jobNumber || "Job Nr. pending")}</strong>${customer ? `<span>${escapeHtml(customer)}</span>` : ""}</div>
+      <span class="priority-work-card-icon-v347" aria-hidden="true">${icon}</span>
+      <div class="priority-work-card-copy-v347"><small>${escapeHtml(label)}</small><strong>${escapeHtml(request.jobNumber || "Job Nr. pending")}</strong>${customer ? `<span>${escapeHtml(customer)}</span>` : ""}</div>
       <div class="priority-work-card-meta-v347"><b>${escapeHtml(priorityIntakeStatusLabel(request))}</b><span>${escapeHtml(request.reason || "No reason")}</span><small>${escapeHtml(request.responsible || "No responsible person")}</small></div>
-      <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Route</small><b>${escapeHtml(route || "-")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</b></span><span><small>Email</small><b>${escapeHtml(String(request.emailStatus || "not requested").replaceAll("_", " "))}</b></span></div>
+      <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Route</small><b>${escapeHtml(route || "-")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : request.requestedDeliveryDate ? formatDisplayDate(request.requestedDeliveryDate) : "Keep imported date")}</b></span><span><small>Email</small><b>${escapeHtml(String(request.emailStatus || "not requested").replaceAll("_", " "))}</b></span></div>
       ${itemRows}
-      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(request.createdBy || "")} · ${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
+      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(request.createdBy || "")} · ${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="${printKind}">Print</button>${/missing\s*glass/i.test(String(request.reason || "")) ? `<button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="missing">Missing Glass Sheet</button>` : ""}<button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
     </article>`;
   }).join("");
 
-  const missingByJob = new Map();
-  visibleMissing.forEach((item) => {
-    const key = String(item.groupKey || item.groupJob || item.job || item.order || "Missing Glass Rush");
-    if (!missingByJob.has(key)) missingByJob.set(key, []);
-    missingByJob.get(key).push(item);
+  const legacyByJob = new Map();
+  visibleLegacyRush.forEach((item) => {
+    const key = String(item.groupKey || item.groupJob || item.job || item.order || "Rush work");
+    if (!legacyByJob.has(key)) legacyByJob.set(key, []);
+    legacyByJob.get(key).push(item);
   });
-  const missingCards = [...missingByJob.entries()].map(([key, items]) => {
+  const legacyCards = [...legacyByJob.entries()].map(([key, items]) => {
     const first = items[0] || {};
     const ids = items.map((item) => String(item.lineItemId || "")).filter(Boolean).join("|");
     const pieces = items.reduce((sum, item) => sum + Math.max(Number(item.qty || item.missingQty || 1), 1), 0);
-    return `<article class="priority-work-missing-card-v347">
-      <header><span class="priority-work-card-icon-v347" aria-hidden="true">!</span><div><small>Missing Glass Rush</small><strong>${escapeHtml(first.groupJob || first.job || first.order || key)}</strong><span>${escapeHtml(first.groupCustomer || first.customer || "No customer")}</span></div><b>${items.length} line${items.length === 1 ? "" : "s"} · ${pieces} pcs</b></header>
-      <div class="priority-work-missing-lines-v347">${items.map((item) => `<span><strong>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</strong><small class="glass-tone-inline" ${glassToneAttributes(item.product || "Glass")}>${escapeHtml(item.product || "Glass")}${item.dimensions ? ` · ${escapeHtml(item.dimensions)}` : ""} · ${escapeHtml(item.qty || 0)} pcs</small><small>${escapeHtml(item.route || "No route")}${item.priorityDeliveryDate || item.deliveryDate ? ` · ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate || item.deliveryDate))}` : ""}${item.bayDisplay || item.bayCode ? ` · ${escapeHtml(item.bayDisplay || item.bayCode)}` : ""}</small></span>`).join("")}</div>
+    return `<article class="priority-work-missing-card-v347 priority-work-legacy-rush-v469">
+      <header><span class="priority-work-card-icon-v347" aria-hidden="true">!</span><div><small>Existing Rush work</small><strong>${escapeHtml(first.groupJob || first.job || first.order || key)}</strong><span>${escapeHtml(first.groupCustomer || first.customer || "No customer")}</span></div><b>${items.length} line${items.length === 1 ? "" : "s"} · ${pieces} pcs</b></header>
+      <div class="priority-work-missing-lines-v347">${items.map((item) => `<span><strong>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</strong><small class="glass-tone-inline" ${glassToneAttributes(item.product || "Glass")}>${escapeHtml(item.product || "Glass")}${item.dimensions ? ` · ${escapeHtml(item.dimensions)}` : ""} · ${escapeHtml(item.qty || 0)} pcs</small></span>`).join("")}</div>
       <footer><span>${escapeHtml(first.priorityReason || "Rush handling active")}</span><button type="button" data-sdi-edit-group="${escapeHtml(ids)}" data-sdi-edit-lookup="${escapeHtml(first.groupJob || first.job || first.order || "")}">Edit</button><button type="button" class="is-danger" data-sdi-clear-group="${escapeHtml(ids)}" data-sdi-clear-label="${escapeHtml(first.groupJob || first.job || first.order || "priority work")}">Clear Rush</button></footer>
     </article>`;
   }).join("");
 
   const sectionVisible = (kind) => typeFilter === "all" || typeFilter === kind;
   els.sdiCurrentList.innerHTML = `
-    <section class="priority-work-hero-v347 priority-work-hero-v348">
-      <div><strong>Work Center</strong></div>
-      <div class="priority-work-stat-grid-v347"><button type="button" data-sdi-current-type="rush"><b>${rushRequests.length}</b><span>Rush requests</span></button><button type="button" data-sdi-current-type="remake"><b>${remakeRequests.length}</b><span>Remake requests</span></button><button type="button" data-sdi-current-type="missing"><b>${missingItems.length}</b><span>Missing Glass Rush</span></button></div>
+    <section class="priority-work-hero-v347 priority-work-hero-v348 priority-work-hero-v469">
+      <div><strong>Work Center</strong><span>Rush, Remake, and combined priority work in one queue.</span></div>
+      <div class="priority-work-stat-grid-v347"><button type="button" data-sdi-current-type="rush"><b>${rushRequests.length + legacyRushItems.length}</b><span>Rush</span></button><button type="button" data-sdi-current-type="remake"><b>${remakeRequests.length}</b><span>Remake</span></button><button type="button" data-sdi-current-type="both"><b>${bothRequests.length}</b><span>Rush + Remake</span></button></div>
     </section>
     <div class="priority-work-toolbar-v347">
       <label class="search-box"><span class="search-icon"></span><input type="search" data-sdi-current-search value="${escapeHtml(state.sdiCurrentQuery)}" placeholder="Search Job Nr., order, customer, reason, or responsible person..."></label>
-      <div class="priority-work-filter-pills-v347"><button type="button" data-sdi-current-type="all" class="${typeFilter === "all" ? "is-active" : ""}">All</button><button type="button" data-sdi-current-type="rush" class="${typeFilter === "rush" ? "is-active" : ""}">Rush</button><button type="button" data-sdi-current-type="remake" class="${typeFilter === "remake" ? "is-active" : ""}">Remakes</button><button type="button" data-sdi-current-type="missing" class="${typeFilter === "missing" ? "is-active" : ""}">Missing Glass</button></div>
+      <div class="priority-work-filter-pills-v347"><button type="button" data-sdi-current-type="all" class="${typeFilter === "all" ? "is-active" : ""}">All</button><button type="button" data-sdi-current-type="rush" class="${typeFilter === "rush" ? "is-active" : ""}">Rush</button><button type="button" data-sdi-current-type="remake" class="${typeFilter === "remake" ? "is-active" : ""}">Remakes</button><button type="button" data-sdi-current-type="both" class="${typeFilter === "both" ? "is-active" : ""}">Both</button></div>
     </div>
-    ${sectionVisible("rush") ? `<section class="priority-work-section-v347 is-rush"><header><div><strong>Rush</strong></div><b>${visibleRush.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleRush, "rush") || `<span class="admin-empty">No Rush requests match this view.</span>`}</div></section>` : ""}
+    ${sectionVisible("rush") ? `<section class="priority-work-section-v347 is-rush"><header><div><strong>Rush</strong></div><b>${visibleRush.length + visibleLegacyRush.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleRush, "rush")}${legacyCards || (!visibleRush.length ? `<span class="admin-empty">No Rush work matches this view.</span>` : "")}</div></section>` : ""}
     ${sectionVisible("remake") ? `<section class="priority-work-section-v347 is-remake"><header><div><strong>Remakes</strong></div><b>${visibleRemakes.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleRemakes, "remake") || `<span class="admin-empty">No Remake requests match this view.</span>`}</div></section>` : ""}
-    ${sectionVisible("missing") ? `<section class="priority-work-section-v347 is-missing"><header><div><strong>Missing Glass Rush</strong></div><b>${visibleMissing.length}</b></header><div class="priority-work-card-list-v347">${missingCards || `<span class="admin-empty">No existing-order Missing Glass Rush work matches this view.</span>`}</div></section>` : ""}`;
+    ${sectionVisible("both") ? `<section class="priority-work-section-v347 is-both"><header><div><strong>Rush + Remake</strong></div><b>${visibleBoth.length}</b></header><div class="priority-work-card-list-v347">${requestCards(visibleBoth, "both") || `<span class="admin-empty">No combined Rush + Remake requests match this view.</span>`}</div></section>` : ""}`;
 }
 
 
@@ -22507,7 +23082,7 @@ function openSdiPanel(assignmentId = "") {
   if (found.bay?.bayCode) state.selectedBayCode = found.bay.bayCode;
   const bay = selectedBay();
   const assignment = found.assignment || selectedBayAssignment();
-  const assignmentLookup = assignment ? `${assignment.order || ""}-${assignment.item || ""}`.replace(/^-|-$/g, "") : "";
+  const assignmentLookup = assignment ? String(assignment.job || assignment.order || "").trim() : "";
   if (els.sdiPanel) {
     els.sdiPanel.dataset.assignmentId = assignment?.id || "";
     els.sdiPanel.dataset.originalLookup = assignmentLookup;
@@ -22516,14 +23091,12 @@ function openSdiPanel(assignmentId = "") {
   if (els.sdiBackdrop) els.sdiBackdrop.hidden = false;
   updateModalScrollLock();
   populateSdiBayOptions(found.bay?.bayCode || bay?.bayCode || "");
-  if (els.sdiOrderInput) els.sdiOrderInput.value = assignmentLookup;
-  if (els.sdiReasonInput) {
-    const rushReason = assignment && isRushItem(assignment) && !isRemakeItem(assignment) ? assignment.reason : "";
-    setPriorityChoiceValue(els.sdiReasonInput, els.sdiReasonCustom, String(rushReason || "").replace(/^\s*(?:Rush|SDI)\s*-\s*/i, ""));
+  if (els.priorityIntakeJob) els.priorityIntakeJob.value = assignmentLookup;
+  if (els.priorityIntakeDeliveryDate) els.priorityIntakeDeliveryDate.value = assignment?.priorityDeliveryDate || assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
+  state.priorityWorkDeliveryDateTouched = Boolean(els.priorityIntakeDeliveryDate?.value);
+  if (assignment?.reason && els.priorityIntakeReason) {
+    setPriorityChoiceValue(els.priorityIntakeReason, els.priorityIntakeReasonCustom, String(assignment.reason || "").replace(/^\s*(?:Rush|SDI|Remake|RM)\s*-\s*/i, ""));
   }
-  if (els.sdiDeliveryDateInput) els.sdiDeliveryDateInput.value = assignment?.deliveryDate || assignment?.originalDeliveryDate || "";
-  if (els.sdiTruckExemptInput) els.sdiTruckExemptInput.checked = Boolean(assignment?.priorityDirectToTruck);
-  if (els.sdiTypeInput) els.sdiTypeInput.value = "Rush";
   if (els.priorityIntakeResponsible && !priorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom)) {
     setPriorityChoiceValue(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, state.user?.displayName || state.user?.username || "");
   }
@@ -22538,10 +23111,10 @@ function openSdiPanel(assignmentId = "") {
   state.sdiCurrentGroupsInitialized = false;
   updateSdiSelectionSummary();
   setBayModalSection("rush", "intake");
-  setPriorityNewRequestMode(assignment ? "missing" : "rush");
-  loadSdiWorkspace(assignmentLookup).catch((error) => showInlineError(error.message, true));
-  if (assignment) els.sdiOrderInput?.focus();
-  else els.priorityIntakeJob?.focus();
+  setPriorityNewRequestMode(assignment && isRemakeItem(assignment) && isRushItem(assignment) ? "both" : assignment && isRemakeItem(assignment) ? "remake" : "rush");
+  loadSdiWorkspace("").catch((error) => showInlineError(error.message, true));
+  if (assignmentLookup) schedulePriorityWorkLookup(0);
+  els.priorityIntakeJob?.focus();
 }
 
 /**
@@ -23519,6 +24092,15 @@ function printItemStatusKey(item) {
   return "not-scanned";
 }
 
+/** Return every Status-box key for one Print / Export row. */
+function printItemStatusKeysV465(item) {
+  const keys = [printItemStatusKey(item)];
+  const attention = printItemAttentionKeys(item);
+  if (attention.includes("updated")) keys.push("updated");
+  if (attention.includes("error")) keys.push("error");
+  return keys;
+}
+
 /** Return all maintained attention keys present on one row. */
 function printItemAttentionKeys(item) {
   const keys = [];
@@ -23932,6 +24514,11 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   const previousRoutes = new Set(selectedPrintRouteGroups());
   const previousStatuses = new Set(selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]'));
   const previousAttention = new Set(selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]'));
+  // v0.465: absorb v0.464-era controls during an in-place rerender so a user
+  // does not lose New/Updated or Error selections while they move to Status.
+  for (const legacyStatus of ["updated", "error"]) {
+    if (previousAttention.delete(legacyStatus)) previousStatuses.add(legacyStatus);
+  }
   const previousGlass = new Set(selectedPrintGlassTypeValues());
   const previousGlassKeys = new Set([...previousGlass].map(printGlassTypeMatchKey));
   const previousAllGlass = allPrintGlassTypesSelected();
@@ -23998,16 +24585,17 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
 
   const scopedRows = printRowsForSelectedRoutes(baseRows, selectedRoutes);
   const glassCounts = new Map();
-  const statusCounts = new Map([["not-scanned", 0], ["partial", 0], ["complete", 0]]);
-  const attentionCounts = new Map([["remake", 0], ["rush", 0], ["reject", 0], ["updated", 0], ["error", 0]]);
+  const statusCounts = new Map([["not-scanned", 0], ["partial", 0], ["complete", 0], ["updated", 0], ["error", 0]]);
+  const attentionCounts = new Map([["remake", 0], ["rush", 0], ["reject", 0]]);
 
   for (const { item } of scopedRows) {
     const qty = itemPieceQty(item);
     const glass = glassTypeLabel(item) || "Other Glass";
     glassCounts.set(glass, (glassCounts.get(glass) || 0) + qty);
-    const status = printItemStatusKey(item);
-    statusCounts.set(status, (statusCounts.get(status) || 0) + qty);
-    for (const key of printItemAttentionKeys(item)) attentionCounts.set(key, (attentionCounts.get(key) || 0) + qty);
+    for (const status of printItemStatusKeysV465(item)) statusCounts.set(status, (statusCounts.get(status) || 0) + qty);
+    for (const key of printItemAttentionKeys(item)) {
+      if (attentionCounts.has(key)) attentionCounts.set(key, (attentionCounts.get(key) || 0) + qty);
+    }
   }
 
   const scopedPieceCount = scopedRows.reduce((sum, { item }) => sum + itemPieceQty(item), 0);
@@ -24015,6 +24603,8 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
     ["not-scanned", "Not Scanned"],
     ["partial", "Partial"],
     ["complete", "Complete"],
+    ["updated", "New/Updated"],
+    ["error", "Errors"],
   ];
   const availableSelectedStatuses = statusDefinitions
     .map(([value]) => value)
@@ -24047,8 +24637,6 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
     ["remake", "Remakes", true],
     ["rush", "Rushes", true],
     ["reject", "Internal Rejects", true],
-    ["updated", "New/Updated", false],
-    ["error", "Errors", false],
   ];
   const availableSelectedAttention = attentionDefinitions
     .map(([value, , showHealthState]) => ({ value, showHealthState }))
@@ -24397,7 +24985,7 @@ function printFilteredRows() {
   return printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()), selectedRoutes).filter(({ list, item }) => {
     if (!allGlass && selectedGlass.size && !selectedGlass.has(printGlassTypeMatchKey(glassTypeLabel(item)))) return false;
     if (!allGlass && !selectedGlass.size) return false;
-    if (selectedStatuses.size && !selectedStatuses.has(printItemStatusKey(item))) return false;
+    if (selectedStatuses.size && !printItemStatusKeysV465(item).some((key) => selectedStatuses.has(key))) return false;
     if (selectedAttention.size && !printItemAttentionKeys(item).some((key) => selectedAttention.has(key))) return false;
     if (!printRowMatchesExactSelection(list, item)) return false;
     if (state.printContext?.updatedOnly && !/\b(update|updated|new|change|changed|added|add)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`)) return false;
@@ -24579,8 +25167,8 @@ function printCompactFilterValue(values, allLabel, labels = {}, countedLabel = "
 
 /** Build a route-free list of only the unique filters that narrow the output. */
 function printCurrentFilterSummary() {
-  const statusLabels = { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete" };
-  const attentionLabels = { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects", updated: "New/Updated", error: "Errors" };
+  const statusLabels = { "not-scanned": "Not Scanned", partial: "Partial", complete: "Complete", updated: "New/Updated", error: "Errors" };
+  const attentionLabels = { remake: "Remakes", rush: "Rushes", reject: "Internal Rejects" };
   const parts = [];
   const glassTypes = allPrintGlassTypesSelected() ? [] : selectedPrintGlassTypeValues();
   const statuses = selectedPrintStatusValues();
@@ -25101,6 +25689,14 @@ function collectKnownPrintGlassTypes() {
   return state.printKnownGlassTypes;
 }
 
+/** Normalize old saved presets into the v0.465 Status/Attention ownership. */
+function printPresetStatusValuesV465(preset = {}) {
+  return [...new Set([...(preset.statuses || []), ...(preset.attention || []).filter((value) => ["updated", "error"].includes(String(value || "")))])];
+}
+function printPresetAttentionValuesV465(preset = {}) {
+  return [...new Set((preset.attention || []).filter((value) => ["remake", "rush", "reject"].includes(String(value || ""))))];
+}
+
 /** Build an editable preset using the filters currently available in the workspace. */
 function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassTypes, preset = currentPrintPreset()) {
   if (!els.printPresetSummary || !els.printPresetOutputSettings) return;
@@ -25109,13 +25705,13 @@ function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassT
     { value: "not-scanned", label: "Not Scanned" },
     { value: "partial", label: "Partial" },
     { value: "complete", label: "Complete" },
+    { value: "updated", label: "New/Updated" },
+    { value: "error", label: "Errors" },
   ];
   const attentionOptions = [
     { value: "remake", label: "Remakes" },
     { value: "rush", label: "Rushes" },
     { value: "reject", label: "Internal Rejects" },
-    { value: "updated", label: "New/Updated" },
-    { value: "error", label: "Errors" },
   ];
   const knownGlass = new Map((knownGlassOptions || []).map((option) => [String(option.value || ""), option]));
   for (const value of preset.glassTypes || []) {
@@ -25123,8 +25719,8 @@ function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassT
   }
   const glassOptions = [...knownGlass.values()].sort((a, b) => String(a.label || a.value).localeCompare(String(b.label || b.value)));
   els.printPresetSummary.innerHTML = `
-    ${printPresetBuilderGroup("Status", "statuses", statusOptions, preset.statuses, "All Status")}
-    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, preset.attention, "All Attention")}
+    ${printPresetBuilderGroup("Status", "statuses", statusOptions, printPresetStatusValuesV465(preset), "All Status")}
+    ${printPresetBuilderGroup("Attention", "attention", attentionOptions, printPresetAttentionValuesV465(preset), "All Attention")}
     ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups)}
     ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass", preset.glassFamilies)}`;
   els.printPresetOutputSettings.innerHTML = `
@@ -25406,8 +26002,8 @@ async function applyPrintPreset(name, { persist = true } = {}) {
     if (allInput) allInput.checked = allSelected;
     details.forEach((input) => { input.checked = !allSelected && wanted.has(input.value); });
   };
-  applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', preset.statuses);
-  applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', preset.attention);
+  applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', printPresetStatusValuesV465(preset));
+  applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', printPresetAttentionValuesV465(preset));
   if (els.printExportType) els.printExportType.value = ["pdf", "xlsx", "csv"].includes(String(preset.outputType || "")) ? String(preset.outputType) : "pdf";
   setPrintCopies(preset.copies || 1, false);
   setPrintOrientation(preset.orientation || "portrait", false);
@@ -25526,8 +26122,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260826-v0.449", window.location.href).href,
-    new URL("static/css/print.css?v=20260826-v0.449", window.location.href).href,
+    new URL("static/css/styles.css?v=20260831-v0.469", window.location.href).href,
+    new URL("static/css/print.css?v=20260831-v0.469", window.location.href).href,
   ];
 }
 
@@ -28749,9 +29345,9 @@ function lookupEditorMeta(type) {
       title: "Glass cost",
       explanation: "Controls the material cost per square foot used by Statistics breakage reporting. New or previously unpriced glass types can be added here without a database migration.",
       valueLabel: "Glass type",
-      valuePlaceholder: "3/8 Clear",
+      valuePlaceholder: "3/8 Clear Annealed",
       labelPlaceholder: "1.83",
-      example: "3/8 Clear → $1.83 / SQFT",
+      example: "3/8 Clear Annealed → $1.83 / SQFT",
       className: "glass-costs",
     };
   }
@@ -28761,9 +29357,9 @@ function lookupEditorMeta(type) {
       title: "Glass color",
       explanation: "Controls the exact glass-type color used by Delivery List Update Preview and provides one reusable visual palette for future glass-aware interfaces.",
       valueLabel: "Glass type",
-      valuePlaceholder: "3/8 Clear",
+      valuePlaceholder: "3/8 Clear Annealed",
       labelPlaceholder: "#2F80ED",
-      example: "3/8 Clear → Visual color",
+      example: "3/8 Clear Annealed → Visual color",
       className: "glass-colors",
     };
   }
@@ -29524,9 +30120,15 @@ async function uncombineSelectedGlassProfilesV362() {
     ? state.lookupGlassUncombineSelectionV362.filter((target) => glassAliasRowsForTargetV360(target).length > 0)
     : [];
   if (!targets.length) throw new Error("Select at least one combined glass type to uncombine.");
+  // v0.461: send the persisted alias IDs as the stable ownership key. The
+  // backend also accepts normalized targets for older clients, so combinations
+  // remain reversible regardless of server restarts or later display renames.
+  const aliasRows = targets.flatMap((target) => glassAliasRowsForTargetV360(target));
+  const aliasIds = [...new Set(aliasRows.map((row) => Number(row?.id || 0)).filter((id) => Number.isInteger(id) && id > 0))];
+  const persistedTargets = [...new Set(aliasRows.map((row) => String(row?.label || row?.target || "").trim()).filter(Boolean))];
   const payload = await fetchJson("/api/admin/manual-edit-lookups/glass-profile/uncombine", {
     method: "POST",
-    body: JSON.stringify({ targets }),
+    body: JSON.stringify({ targets: [...new Set([...targets, ...persistedTargets])], aliasIds }),
   });
   adoptManualEditLookups(payload);
   state.lookupGlassUncombineModeV362 = false;
@@ -31162,9 +31764,20 @@ async function saveRolePermissions(roleName) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function manualEditDeliveryDateForList(listId) {
-  const selectedList = state.lists.find((item) => item.id === listId);
+  const effectiveListId = listId === MANUAL_EDIT_WHOLE_LIST_VALUE_V468 ? state.manualEditListId : listId;
+  const selectedList = state.lists.find((item) => item.id === effectiveListId);
 
   return selectedList?.deliveryDate || state.lists[0]?.deliveryDate || "";
+}
+
+/** Return the current Manual Edit scope without replacing its real stage anchor. */
+function manualEditWholeListScopeV468() {
+  return state.manualEditScopeV468 === "whole";
+}
+
+/** Value used by the scope/stage selector. */
+function manualEditScopeSelectionValueV468() {
+  return manualEditWholeListScopeV468() ? MANUAL_EDIT_WHOLE_LIST_VALUE_V468 : (state.manualEditListId || "");
 }
 
 /**
@@ -31186,13 +31799,14 @@ function manualEditStageListsForCurrentDelivery(selectedListId) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function manualEditStageSummary(listId) {
+function manualEditStageSummary(listId, wholeList = manualEditWholeListScopeV468()) {
   const list = state.lists.find((item) => item.id === listId) || state.lists[0] || {};
 
   if (!list.id) {
     return "No stage selected";
   }
 
+  if (wholeList) return `${formatNumericDeliveryDate(list.deliveryDate)} - Whole delivery list`;
   return `${formatNumericDeliveryDate(list.deliveryDate)} - ${list.stage || "Stage"}`;
 }
 
@@ -31305,6 +31919,8 @@ function refreshManualEditFilterDrawer(openState = null) {
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const stageLists = manualEditStageListsForCurrentDelivery(selected);
+  const deliveryDate = manualEditDeliveryDateForList(selected);
+  const selectedScope = manualEditScopeSelectionValueV468();
   return `
     <div class="manual-edit-shell">
       <div class="manual-edit-nav-row">
@@ -31312,25 +31928,27 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
           <span aria-hidden="true">&larr;</span>
           Back to delivery lists
         </button>
-        <span class="manual-edit-current-stage">${escapeHtml(manualEditStageSummary(selected))}</span>
+        <span class="manual-edit-current-stage">${escapeHtml(manualEditStageSummary(selected, manualEditWholeListScopeV468()))}</span>
       </div>
 
       <div class="manual-edit-modal-tools">
-        <label class="manual-edit-control stage-control">
-          <span>Delivery list stage</span>
-          <select id="manualEditModalStage">
+        <label class="manual-edit-control stage-control manual-edit-scope-control-v468">
+          <span>Edit scope</span>
+          <select id="manualEditModalStage" aria-label="Manual edit scope">
+            <option value="${MANUAL_EDIT_WHOLE_LIST_VALUE_V468}" ${selectedScope === MANUAL_EDIT_WHOLE_LIST_VALUE_V468 ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(deliveryDate))} - Whole Delivery List</option>
             ${stageLists
               .map(
                 (list) =>
-                  `<option value="${escapeHtml(list.id)}" ${list.id === selected ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(list.deliveryDate))} - ${escapeHtml(list.stage || "Stage")}</option>`,
+                  `<option value="${escapeHtml(list.id)}" ${selectedScope === list.id ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(list.deliveryDate))} - ${escapeHtml(list.stage || "Stage")}</option>`,
               )
               .join("")}
           </select>
+          <small class="manual-edit-scope-help-v468">Whole Delivery List shows each logical Order/Item once. Shared order fields save across every stage copy; scanned progress and physical location remain stage-specific.</small>
         </label>
 
         <div class="manual-edit-search-with-filter">
           <label class="manual-edit-control search-control">
-            <span>Search within stage</span>
+            <span>${manualEditWholeListScopeV468() ? "Search whole delivery list" : "Search within stage"}</span>
             <input id="manualEditModalSearch" type="search" autocomplete="off" value="${escapeHtml(state.manualEditQuery || "")}" placeholder="Order number, Job Nr., customer, route...">
           </label>
           ${manualEditFilterDrawerHtml()}
@@ -31397,6 +32015,7 @@ async function ensureManualEditLookupsLoaded() {
 async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
+  state.manualEditScopeV468 = "stage";
   state.manualEditQuery = "";
   state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
   state.manualEditResultRows = [];
@@ -31428,10 +32047,16 @@ async function openManualEditForList(listId) {
  * Effects: May call the backend api.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filters = state.manualEditFilters) {
+async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filters = state.manualEditFilters, scope = state.manualEditScopeV468) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
-  if (listId) params.set("listId", listId);
+  const wholeList = scope === "whole";
+  if (wholeList) {
+    params.set("wholeList", "1");
+    params.set("deliveryDate", manualEditDeliveryDateForList(listId));
+  } else if (listId) {
+    params.set("listId", listId);
+  }
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   if (filters?.progress && filters.progress !== "all") params.set("progress", filters.progress);
@@ -31446,12 +32071,16 @@ async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filte
     results: payload.results || [],
     total: Math.max(Number(payload.total || 0), (payload.results || []).length),
     filterOptions: payload.filterOptions || { glassTypes: [] },
+    wholeList: Boolean(payload.wholeList),
+    deliveryDate: String(payload.deliveryDate || ""),
   };
 }
 
 /** Retain the older array-returning helper for the compact Admin-page editor. */
 async function fetchManualEditResults(query, listId) {
-  return (await fetchManualEditBatch(query, listId, 100, 0)).results;
+  // Compact Admin-page search remains stage-scoped even if the modal was last
+  // left in Whole Delivery List mode.
+  return (await fetchManualEditBatch(query, listId, 100, 0, state.manualEditFilters, "stage")).results;
 }
 
 /**
@@ -31461,7 +32090,9 @@ async function fetchManualEditResults(query, listId) {
  */
 async function runManualEditModalSearch(loadAll = false, requestedPage = 1, parallelPreflight = null) {
   const requestId = ++state.manualEditSearchRequestId;
-  const stage = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || "";
+  const selectedScope = document.getElementById("manualEditModalStage")?.value || manualEditScopeSelectionValueV468();
+  const wholeList = selectedScope === MANUAL_EDIT_WHOLE_LIST_VALUE_V468;
+  const selectedStageId = wholeList ? (state.manualEditListId || state.activeListId || state.lists[0]?.id || "") : selectedScope;
   const query = loadAll ? "" : (document.getElementById("manualEditModalSearch")?.value.trim() || "");
 
   if (loadAll) {
@@ -31471,12 +32102,13 @@ async function runManualEditModalSearch(loadAll = false, requestedPage = 1, para
     refreshManualEditFilterDrawer(false);
   }
 
-  state.manualEditListId = stage;
+  if (!wholeList && selectedStageId) state.manualEditListId = selectedStageId;
+  state.manualEditScopeV468 = wholeList ? "whole" : "stage";
   state.manualEditQuery = query;
   state.manualEditPage = Math.max(Number(requestedPage || 1), 1);
 
   const currentStageLabel = document.querySelector(".manual-edit-current-stage");
-  if (currentStageLabel) currentStageLabel.textContent = manualEditStageSummary(stage);
+  if (currentStageLabel) currentStageLabel.textContent = manualEditStageSummary(state.manualEditListId, wholeList);
 
   const target = document.getElementById("manualEditModalResults");
   if (target) {
@@ -31491,7 +32123,7 @@ async function runManualEditModalSearch(loadAll = false, requestedPage = 1, para
   }
 
   const offset = (state.manualEditPage - 1) * MANUAL_EDIT_PAGE_SIZE;
-  const resultPromise = fetchManualEditBatch(query, stage, MANUAL_EDIT_PAGE_SIZE, offset);
+  const resultPromise = fetchManualEditBatch(query, state.manualEditListId, MANUAL_EDIT_PAGE_SIZE, offset, state.manualEditFilters, state.manualEditScopeV468);
   const [resultPageValue] = await Promise.all([
     resultPromise,
     parallelPreflight ? Promise.resolve(parallelPreflight) : Promise.resolve(),
@@ -31504,9 +32136,11 @@ async function runManualEditModalSearch(loadAll = false, requestedPage = 1, para
     state.manualEditPage = totalPages;
     resultPage = await fetchManualEditBatch(
       query,
-      stage,
+      state.manualEditListId,
       MANUAL_EDIT_PAGE_SIZE,
       (state.manualEditPage - 1) * MANUAL_EDIT_PAGE_SIZE,
+      state.manualEditFilters,
+      state.manualEditScopeV468,
     );
     if (requestId !== state.manualEditSearchRequestId) return;
   }
@@ -33390,6 +34024,12 @@ function renderAdminUsersTable(editable = false, limit = 5) {
                   </header>
 
                   <div class="user-manager-profile-grid">
+                    <label class="user-manager-field user-admin-display-name-edit-v457">
+                      <span>Display name</span>
+                      <input data-user-display-name="${escapeHtml(username)}" type="text" autocomplete="off" value="${escapeHtml(user.displayName || username)}" placeholder="First and last name">
+                      <small>Shown throughout the scanner app.</small>
+                    </label>
+
                     <label class="user-manager-field user-admin-email-edit">
                       <span>Sign-in email</span>
                       <input data-user-email="${escapeHtml(username)}" type="email" autocomplete="off" value="${escapeHtml(user.email || "")}" placeholder="name@company.com">
@@ -35736,20 +36376,25 @@ function manualEditValidateRow(row) {
  */
 function manualEditCollectRowData(row, lineItemId) {
   const value = (field) => row?.querySelector(`[data-edit-field="${CSS.escape(field)}"]`)?.value ?? "";
+  const wholeListMode = row?.dataset?.manualEditScope === "whole";
   const data = {
     lineItemId: String(lineItemId || row?.dataset?.editRow || ""),
     order: value("order"),
     item: value("item"),
     customer: value("customer"),
     qty: value("qty"),
-    scanned: value("scanned"),
     dimensions: value("dimensions"),
     job: value("job"),
     queueState: value("queueState"),
     protectFromAwImport: Boolean(row?.querySelector('[data-edit-field="protectFromAwImport"]')?.checked),
+    editScope: wholeListMode ? "whole" : "stage",
   };
 
-  for (const field of ["location", "route", "processState", "product"]) {
+  if (!wholeListMode) {
+    data.scanned = value("scanned");
+    data.location = manualEditVisibleChoiceValue(row, "location");
+  }
+  for (const field of ["route", "processState", "product"]) {
     data[field] = manualEditVisibleChoiceValue(row, field);
   }
 
@@ -35799,7 +36444,8 @@ function manualEditChangedFields(row, data) {
     "queueState",
     "protectFromAwImport",
   ].filter((field) => (
-    manualEditComparableValue(field, data[field]) !== manualEditComparableValue(field, original[field])
+    Object.prototype.hasOwnProperty.call(data, field)
+    && manualEditComparableValue(field, data[field]) !== manualEditComparableValue(field, original[field])
   ));
 }
 
@@ -35810,6 +36456,7 @@ function manualEditChangedFields(row, data) {
  */
 function manualEditResultsHtml(results, page = state.manualEditPage, totalCount = results.length, showPager = false) {
   const visibleRows = Array.isArray(results) ? results : [];
+  const wholeListMode = manualEditWholeListScopeV468();
   const totalRows = Math.max(Number(totalCount || 0), visibleRows.filter((item) => !item._manualEditFilterMismatch).length);
   const pinnedRows = visibleRows.filter((item) => item._manualEditFilterMismatch).length;
   const matchingVisibleRows = Math.max(visibleRows.length - pinnedRows, 0);
@@ -35824,16 +36471,18 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
 
   return results.length
     ? `
-      <div class="manual-edit-result-summary">
-        <span>${totalRows ? `Showing ${escapeHtml(firstRow)}-${escapeHtml(lastRow)} of ${escapeHtml(totalRows)} matching rows` : "No matching rows"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
-        <small>${pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it."}</small>
+      <div class="manual-edit-result-summary${wholeListMode ? " is-whole-list-v468" : ""}">
+        <span>${totalRows ? `Showing ${escapeHtml(firstRow)}-${escapeHtml(lastRow)} of ${escapeHtml(totalRows)} matching ${wholeListMode ? "logical order lines" : "rows"}` : "No matching rows"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
+        <small>${wholeListMode ? "Whole-list mode shows each Order/Item once. Shared edits save across every stage copy; scan progress and physical location stay stage-specific." : (pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it.")}</small>
       </div>
 
       <div class="manual-edit-card-list">
         ${visibleRows
           .map((item) => {
             const rowLabel = `${item.order || ""}-${item.item || ""}`;
-            const stageText = item.stage || item.deliveryLabel || "";
+            const stageText = wholeListMode
+              ? `${Math.max(Number(item.stageCopyCount || 1), 1)} stage cop${Number(item.stageCopyCount || 1) === 1 ? "y" : "ies"}`
+              : (item.stage || item.deliveryLabel || "");
             const qtyValue = Math.max(Number(item.qty || 0), 0);
             const scannedValue = Math.min(Math.max(Number(item.scanned || 0), 0), qtyValue);
             const locationValue = manualEditCurrentLocationValue(item);
@@ -35859,8 +36508,9 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
 
             return `
               <details
-                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}"
+                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}${wholeListMode ? " is-whole-list-v468" : ""}"
                 data-edit-row="${escapeHtml(item.lineItemId)}"
+                data-manual-edit-scope="${wholeListMode ? "whole" : "stage"}"
                 data-manual-edit-original="${escapeHtml(JSON.stringify(originalValues))}"
                 ${item._manualEditJustUpdated ? "open" : ""}
               >
@@ -35880,8 +36530,8 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                   </div>
 
                   <div class="manual-edit-card-quantity">
-                    <span>Quantity</span>
-                    <strong>${escapeHtml(scannedValue)} / ${escapeHtml(qtyValue)}</strong>
+                    <span>${wholeListMode ? "Qty" : "Quantity"}</span>
+                    <strong>${wholeListMode ? escapeHtml(qtyValue) : `${escapeHtml(scannedValue)} / ${escapeHtml(qtyValue)}`}</strong>
                   </div>
 
                   <div class="manual-edit-row-actions">
@@ -35926,18 +36576,20 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                     <input class="manual-edit-input" data-edit-field="qty" type="number" min="0" value="${escapeHtml(qtyValue)}">
                   </label>
 
-                  <label class="manual-field small">
-                    <span>Scanned</span>
-                    <input class="manual-edit-input" data-edit-field="scanned" type="number" min="0" max="${escapeHtml(qtyValue)}" value="${escapeHtml(scannedValue)}">
-                  </label>
+                  ${wholeListMode ? "" : `
+                    <label class="manual-field small">
+                      <span>Scanned</span>
+                      <input class="manual-edit-input" data-edit-field="scanned" type="number" min="0" max="${escapeHtml(qtyValue)}" value="${escapeHtml(scannedValue)}">
+                    </label>
 
-                  ${manualEditChoiceFieldHtml({
-                    field: "location",
-                    label: "Location",
-                    value: locationValue,
-                    options: manualEditLocationOptions(item),
-                    customLabel: "Custom location...",
-                  })}
+                    ${manualEditChoiceFieldHtml({
+                      field: "location",
+                      label: "Location",
+                      value: locationValue,
+                      options: manualEditLocationOptions(item),
+                      customLabel: "Custom location...",
+                    })}
+                  `}
 
                   ${manualEditChoiceFieldHtml({
                     field: "route",
@@ -36057,13 +36709,15 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
     }
 
     const resultItem = state.manualEditResultRows.find((item) => String(item.lineItemId || "") === String(lineItemId));
+    const stageOnlyPatch = Object.prototype.hasOwnProperty.call(data, "scanned")
+      ? { scanned: Number(data.scanned || 0), location: data.location, locationDisplay: data.location }
+      : {};
     if (resultItem) {
       Object.assign(resultItem, {
         order: data.order,
         item: data.item,
         customer: data.customer,
         qty: Number(data.qty || 0),
-        scanned: Number(data.scanned || 0),
         route: data.route,
         processState: data.processState,
         product: data.product,
@@ -36071,8 +36725,7 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
         job: data.job,
         queueState: data.queueState,
         protectFromAwImport: Boolean(data.protectFromAwImport),
-        location: data.location,
-        locationDisplay: data.location,
+        ...stageOnlyPatch,
       });
     }
 
@@ -36095,15 +36748,13 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
           item: data.item,
           customer: data.customer,
           qty: Number(data.qty || 0),
-          scanned: Number(data.scanned || 0),
           route: data.route,
           processState: data.processState,
           product: data.product,
           dimensions: data.dimensions,
           job: data.job,
           queueState: data.queueState,
-          location: data.location,
-          locationDisplay: data.location,
+          ...stageOnlyPatch,
         };
     const verifiedKey = `${String(verifiedItem.order || "")}::${String(verifiedItem.item || "").padStart(3, "0")}`;
     const matchingIndex = refreshed.results.findIndex((item) => (
@@ -37966,7 +38617,10 @@ async function loadRejectSettingsModal() {
 }
 
 function manualOrderCreateDialogHtml() {
-  const selected = document.getElementById("manualEditModalStage")?.value || state.manualEditListId || state.activeListId || "";
+  const scopeValue = document.getElementById("manualEditModalStage")?.value || manualEditScopeSelectionValueV468();
+  const selected = scopeValue === MANUAL_EDIT_WHOLE_LIST_VALUE_V468
+    ? (state.manualEditListId || state.activeListId || "")
+    : (scopeValue || state.manualEditListId || state.activeListId || "");
   const deliveryDate = manualEditDeliveryDateForList(selected);
   const deliveryDateLabel = deliveryDate ? formatNumericDeliveryDate(deliveryDate) : "No date selected";
 
@@ -38065,7 +38719,8 @@ function syncManualOrderCreateRoutePreview(form = document.getElementById("manua
 
 async function submitManualOrderForm(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  data.listId = form.dataset.listId || document.getElementById("manualEditModalStage")?.value || state.manualEditListId;
+  const scopeValue = document.getElementById("manualEditModalStage")?.value || manualEditScopeSelectionValueV468();
+  data.listId = form.dataset.listId || (scopeValue === MANUAL_EDIT_WHOLE_LIST_VALUE_V468 ? state.manualEditListId : scopeValue) || state.manualEditListId;
   data.qty = Number(data.qty || 0);
   data.manualOnly = form.elements.manualOnly.checked;
   data.protectFromAwImport = form.elements.protectFromAwImport.checked;
@@ -39684,20 +40339,15 @@ function wireEvents() {
   els.statisticsChartViewButtons?.forEach((button) => {
     button.addEventListener("click", () => {
       if (button.disabled) return;
-      state.homeChartView = button.dataset.statisticsView || "bar";
+      const nextView = button.dataset.statisticsView || "bar";
+      state.homeChartView = nextView;
+      state.homeChartSelectedLabel = "";
       renderStatisticsAnalytics();
     });
   });
   els.statsChartMetricSelect?.addEventListener("change", () => {
     state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
-    // Delivery-date datasets are chronological by nature. Keep their first
-    // render in source order while preserving the user's explicit sort choice
-    // for every other dataset.
-    if (state.homeChartMetric.startsWith("date-")) {
-      state.homeChartSort = "source";
-    } else if (state.homeChartSort === "source") {
-      state.homeChartSort = "value-desc";
-    }
+    if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
   });
@@ -39743,7 +40393,7 @@ function wireEvents() {
   els.statisticsMiniCharts?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-statistics-metric]");
     if (!button) return;
-    state.homeChartMetric = button.dataset.statisticsMetric || "delivery";
+    state.homeChartMetric = button.dataset.statisticsMetric || "glass";
     if (button.dataset.statisticsMeasure) state.statisticsBreakageMeasure = button.dataset.statisticsMeasure;
     state.homeChartView = "bar";
     state.homeChartSelectedLabel = "";
@@ -39861,6 +40511,10 @@ function wireEvents() {
     state.homePageIndex = 1;
     renderHome();
   });
+  els.statisticsChartRangeButton?.addEventListener("click", () => {
+    if (els.statisticsDateCalendar && !els.statisticsDateCalendar.hidden) closeStatisticsDateCalendar();
+    else openStatisticsDateCalendar();
+  });
   els.overviewRangeSelect?.addEventListener("change", () => {
     const requestedRange = els.overviewRangeSelect.value || "30";
     if (requestedRange === "custom") {
@@ -39871,6 +40525,7 @@ function wireEvents() {
     state.statisticsCustomDateFrom = "";
     state.statisticsCustomDateTo = "";
     state.homeChartSelectedLabel = "";
+    state.homeReportSummary = null;
     closeStatisticsDateCalendar();
     renderStatisticsPage();
     void loadHomeReportSummary();
@@ -39933,13 +40588,13 @@ function wireEvents() {
     assignLineItemToRack(rackSelect.dataset.lineRackSelect || "", rackSelect.value || "").catch((error) => showInlineError(error.message, true));
   });
   els.pageSize?.addEventListener("change", () => {
-    state.pageSize = Number(els.pageSize.value) || 25;
+    state.pageSize = Number(els.pageSize.value) || 50;
     if (els.pageSizeBottom) els.pageSizeBottom.value = String(state.pageSize);
     state.pageIndex = 1;
     renderScanPage();
   });
   els.pageSizeBottom?.addEventListener("change", () => {
-    state.pageSize = Number(els.pageSizeBottom.value) || 25;
+    state.pageSize = Number(els.pageSizeBottom.value) || 50;
     if (els.pageSize) els.pageSize.value = String(state.pageSize);
     state.pageIndex = 1;
     renderScanPage();
@@ -40740,14 +41395,14 @@ function wireEvents() {
       if (state.manualEditDirty) {
         const confirmed = await confirmWebAppAction({
           title: "Discard unsaved edits?",
-          message: "You have unsaved manual delivery-list edits. Loading another stage will discard those changes.",
-          confirmLabel: "Load another stage",
+          message: "You have unsaved manual delivery-list edits. Changing the edit scope will discard those changes.",
+          confirmLabel: "Change edit scope",
           cancelLabel: "Keep editing",
           danger: false,
         });
 
         if (!confirmed) {
-          event.target.value = state.manualEditListId || "";
+          event.target.value = manualEditScopeSelectionValueV468();
           syncCustomSelect(event.target);
           return;
         }
@@ -41179,6 +41834,16 @@ function wireEvents() {
     submitPriorityIntakeRequest(event).catch((error) => showInlineError(error.message, true));
   });
   els.priorityIntakeEmailMode?.addEventListener("change", () => updatePriorityIntakeEmailMode());
+  els.priorityIntakeJob?.addEventListener("input", () => {
+    state.priorityWorkDeliveryDateTouched = false;
+    if (els.priorityIntakeDeliveryDate) els.priorityIntakeDeliveryDate.value = "";
+    schedulePriorityWorkLookup();
+  });
+  els.priorityIntakeJob?.addEventListener("blur", () => schedulePriorityWorkLookup(0));
+  els.priorityIntakeDeliveryDate?.addEventListener("input", () => { state.priorityWorkDeliveryDateTouched = true; });
+  els.priorityIntakePrintRushBtn?.addEventListener("click", () => printPriorityWorkSheet("rush"));
+  els.priorityIntakePrintRemakeBtn?.addEventListener("click", () => printPriorityWorkSheet("remake"));
+  els.priorityIntakePrintMissingBtn?.addEventListener("click", () => printPriorityWorkSheet("missing"));
   els.priorityIntakeReason?.addEventListener("change", () => updatePriorityChoiceVisibility(els.priorityIntakeReason, els.priorityIntakeReasonCustom, true));
   els.priorityIntakeResponsible?.addEventListener("change", () => updatePriorityChoiceVisibility(els.priorityIntakeResponsible, els.priorityIntakeResponsibleCustom, true));
   els.sdiReasonInput?.addEventListener("change", () => updatePriorityChoiceVisibility(els.sdiReasonInput, els.sdiReasonCustom, true));
@@ -41235,6 +41900,12 @@ function wireEvents() {
     if (typeButton) {
       state.sdiCurrentTypeFilter = typeButton.dataset.sdiCurrentType || "all";
       renderSdiCurrentList();
+      return;
+    }
+    const printRequestButton = event.target.closest("[data-priority-print-request]");
+    if (printRequestButton) {
+      const request = (state.sdiWorkspace?.intakeRequests || []).find((row) => String(row.requestId || "") === String(printRequestButton.dataset.priorityPrintRequest || ""));
+      if (request) printPriorityWorkSheet(printRequestButton.dataset.priorityPrintKind || "rush", request);
       return;
     }
     const editRequestButton = event.target.closest("[data-priority-current-edit-request]");
@@ -42266,6 +42937,13 @@ function wireEvents() {
         .map((input) => input.value)
         .filter(Boolean);
       const emailInput = document.querySelector(`[data-user-email="${CSS.escape(username)}"]`);
+      const displayNameInput = document.querySelector(`[data-user-display-name="${CSS.escape(username)}"]`);
+      const displayName = String(displayNameInput?.value || "").trim();
+      if (!displayName) {
+        showFloatingNotice("Display name is required.", "notice");
+        displayNameInput?.focus();
+        return;
+      }
 
       fetchJson("/api/admin/users/roles", {
         method: "POST",
@@ -42274,6 +42952,7 @@ function wireEvents() {
           roles: [select?.value || "Operator"],
           station: assignedStations.join(", "),
           email: emailInput?.value || "",
+          displayName,
         }),
       })
         .then(async () => {

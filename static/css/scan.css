@@ -4377,6 +4377,7 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   display: none !important;
 }
 
+.scan-page .scan-filter-route-section-v465,
 .scan-page .scan-filter-glass-section { grid-column: 1 / -1 !important; }
 .scan-page .scan-filter-glass-section .glass-filter-tabs {
   max-height: 170px !important;
@@ -4621,46 +4622,44 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 }
 
 /* ========================================================================== */
-/* v0.382 Scan selection stability and unmistakable glass-filter selection   */
+/* v0.465 Scan glass-filter selection uses the saved glass color              */
 /* ========================================================================== */
-/* Exact glass colors stay deliberately faint, but selection itself uses one
-   consistent app-blue outline/check so operators can immediately tell which
-   glass filters are active regardless of the saved glass hue. */
+/* The Lookup Manager color fill is now the selection indicator. This replaces
+   the old app-blue outline/check badge while retaining automatic readable ink. */
 .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active {
   position: relative !important;
-  border: 2px solid #7194b7 !important;
-  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #fff 76%) !important;
-  color: #173f61 !important;
-  padding-right: 38px !important;
+  border: 2px solid color-mix(in srgb, var(--glass-type-color) 72%, #17324d 28%) !important;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--glass-type-color) 88%, #ffffff 12%) 0%,
+    var(--glass-type-color) 100%) !important;
+  color: var(--glass-type-selected-ink, #fff) !important;
+  padding-right: 11px !important;
   box-shadow:
-    inset 4px 0 0 var(--glass-type-accent),
-    0 0 0 2px rgba(48, 101, 151, .11) !important;
+    inset 0 1px 0 rgba(255,255,255,.22),
+    0 3px 9px color-mix(in srgb, var(--glass-type-color) 20%, transparent) !important;
 }
 .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active::after {
-  content: "\2713" !important;
-  position: absolute !important;
-  right: 9px !important;
-  top: 50% !important;
-  width: 20px !important;
-  height: 20px !important;
-  display: grid !important;
-  place-items: center !important;
-  transform: translateY(-50%) !important;
-  border-radius: 999px !important;
-  background: #2f669d !important;
-  color: #fff !important;
-  font-size: 11px !important;
-  font-weight: 950 !important;
-  line-height: 1 !important;
-  box-shadow: 0 2px 5px rgba(28, 71, 112, .16) !important;
+  content: none !important;
+  display: none !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active::before {
+  border-color: color-mix(in srgb, currentColor 42%, transparent) !important;
+  background: color-mix(in srgb, currentColor 78%, transparent) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active > span {
+  color: var(--glass-type-selected-ink, #fff) !important;
+  opacity: .9 !important;
 }
 .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:hover,
 .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:focus-visible {
-  border-color: #557ea7 !important;
-  background: linear-gradient(135deg, var(--glass-type-soft-strong) 0%, #f8fbfe 76%) !important;
+  border-color: color-mix(in srgb, var(--glass-type-color) 58%, #102a44 42%) !important;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--glass-type-color) 82%, #ffffff 18%) 0%,
+    color-mix(in srgb, var(--glass-type-color) 91%, #102a44 9%) 100%) !important;
+  color: var(--glass-type-selected-ink, #fff) !important;
   box-shadow:
-    inset 4px 0 0 var(--glass-type-accent),
-    0 0 0 3px rgba(48, 101, 151, .12) !important;
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 0 0 3px color-mix(in srgb, var(--glass-type-color) 18%, transparent) !important;
 }
 
 /* ========================================================================== */
@@ -5422,4 +5421,583 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 }
 .custom-select-menu.is-scan-context-menu[data-select-id="deliveryStageSelect"] {
   z-index: 60000 !important;
+}
+
+
+/* ========================================================================== */
+/* v0.450 Priority ribbon density and direct line-item attachment              */
+/* ========================================================================== */
+/* Keep the priority cue immediately attached to the row it describes instead
+   of reserving a second padded table row around the ribbon. */
+.scan-page .delivery-table .priority-line-ribbon-row-v441 > td {
+  padding: 0 7px !important;
+}
+.scan-page .delivery-table .priority-line-ribbon-v441 {
+  min-height: 22px;
+  margin: 0 0 -1px;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 6px 6px 0 0;
+  font-size: 10.75px;
+  line-height: 1.1;
+}
+.scan-page .delivery-table .priority-line-ribbon-v441 > strong {
+  font-size: 10.75px;
+}
+.scan-page .delivery-table .priority-line-ribbon-flag-v441 {
+  width: 10px;
+  height: 12px;
+  flex-basis: 10px;
+}
+.scan-page .delivery-table .priority-line-ribbon-reason-v441 small {
+  font-size: 8.75px;
+}
+.scan-page .delivery-table .priority-line-ribbon-move-v441 {
+  font-size: 9.5px;
+}
+
+/* ========================================================================== */
+/* v0.451 Priority ribbon row collapse                                        */
+/* ========================================================================== */
+/* The shared delivery-table cell rule is 54px tall. Priority ribbons are
+   supplemental rows, so explicitly collapse their cell/row height instead of
+   inheriting a full line-item row and leaving a white band below the ribbon. */
+.scan-page .delivery-table tr.priority-line-ribbon-row-v441 {
+  height: 22px !important;
+  min-height: 0 !important;
+}
+.scan-page .delivery-table tr.priority-line-ribbon-row-v441 > td {
+  height: 22px !important;
+  min-height: 0 !important;
+  padding: 0 7px !important;
+  vertical-align: bottom !important;
+  line-height: 1 !important;
+}
+.scan-page .delivery-table tr.priority-line-ribbon-row-v441 .priority-line-ribbon-v441 {
+  box-sizing: border-box;
+  min-height: 20px;
+  margin: 0 0 -1px;
+  padding: 2px 7px;
+}
+
+/* ========================================================================== */
+/* v0.452 combined lifecycle clarity + Indian Trail prerequisite override     */
+/* ========================================================================== */
+/* PRIOR means the rack is finished history. Neutralize the complete rack
+   surface as well as its lifecycle label so an old rack-set color cannot make
+   the location look active after Indian Trail has received the glass. */
+.scan-page .delivery-table .location-rack-state-stack-v448.is-prior > .location-rack-cell-v349 {
+  --rack-location-color: #94a1ad !important;
+  border-color: #cbd3da !important;
+  background: linear-gradient(90deg, #eef1f3 0%, #f7f8f9 100%) !important;
+  box-shadow: inset 4px 0 0 #94a1ad, inset 0 0 0 1px rgba(84, 99, 112, .08) !important;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-prior .location-badge,
+.scan-page .delivery-table .location-rack-state-stack-v448.is-prior .location-history-label-v442 {
+  color: #596775 !important;
+}
+
+/* Synthetic prerequisite scans created at Indian Trail are intentionally
+   distinct from physical Airport ON TIME/LATE pills. */
+.last-scan-pill-v157.is-it-override-v452 {
+  border-color: #aebccc !important;
+  background: linear-gradient(180deg, #f6f8fb 0%, #edf1f5 100%) !important;
+  color: #435568 !important;
+  box-shadow: 0 2px 7px rgba(43, 63, 82, .08) !important;
+}
+.last-scan-pill-v157.is-it-override-v452 .last-scan-pill-icon-v157 {
+  background: #64788c !important;
+  color: #fff !important;
+}
+.last-scan-pill-v157.is-it-override-v452 :is(.last-scan-pill-label-v157, b) {
+  color: #435568 !important;
+}
+
+/* ========================================================================== */
+/* v0.454 Glass-type section header color ownership                           */
+/* ========================================================================== */
+/* The content-group header is the strongest glass cue on the Scan list. Use
+   the Lookup Manager hue as the source, darkened with navy so even very light
+   configured colors stay readable while preserving the exact family identity. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left: 5px solid color-mix(in srgb, var(--glass-type-color) 82%, #0b2f50 18%) !important;
+  border-bottom-color: color-mix(in srgb, var(--glass-type-color) 45%, #c6d4e3 55%) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--glass-type-color) 76%, #0a2948 24%) 0%,
+    color-mix(in srgb, var(--glass-type-color) 64%, #173e60 36%) 62%,
+    color-mix(in srgb, var(--glass-type-color) 50%, #284b68 50%) 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), inset 0 -1px 0 rgba(5,30,52,.12) !important;
+}
+.scan-page .glass-group-row.glass-tone-group button {
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 1000 !important;
+  letter-spacing: .015em !important;
+  text-shadow: 0 1px 2px rgba(4, 24, 42, .42) !important;
+}
+.scan-page .glass-group-row.glass-tone-group button :is(span, strong, b) {
+  color: #fff !important;
+  opacity: 1 !important;
+}
+.scan-page .glass-group-row.glass-tone-group button::before,
+.scan-page .glass-group-row.glass-tone-group button::after {
+  color: #fff !important;
+  opacity: .94 !important;
+}
+
+/* ========================================================================== */
+/* v0.455 Authoritative glass-group header surface                            */
+/* ========================================================================== */
+/* v0.454 correctly colored the table cell, but the older opaque button
+   background still painted on top of it. The button is now transparent so the
+   Lookup Manager color band is the actual visible header surface. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left: 5px solid color-mix(in srgb, var(--glass-type-color) 78%, #082a48 22%) !important;
+  border-top: 1px solid color-mix(in srgb, var(--glass-type-color) 58%, #173f61 42%) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--glass-type-color) 58%, #173f61 42%) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--glass-type-color) 70%, #082947 30%) 0%,
+    color-mix(in srgb, var(--glass-type-color) 58%, #123b5c 42%) 58%,
+    color-mix(in srgb, var(--glass-type-color) 46%, #244d6b 54%) 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(4,24,42,.16) !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  min-height: 48px !important;
+  border: 0 !important;
+  border-left: 0 !important;
+  background: transparent !important;
+  color: #fff !important;
+  padding: 9px 13px !important;
+  box-shadow: none !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] > strong {
+  color: #fff !important;
+  font-size: 14px !important;
+  font-weight: 1000 !important;
+  line-height: 1.12 !important;
+  letter-spacing: .012em !important;
+  text-shadow: 0 1px 2px rgba(2,19,34,.52) !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] > span,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] > small {
+  color: rgba(255,255,255,.96) !important;
+  opacity: 1 !important;
+  font-size: 11.5px !important;
+  font-weight: 950 !important;
+  text-shadow: 0 1px 2px rgba(2,19,34,.46) !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:hover,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:focus-visible {
+  background: rgba(255,255,255,.08) !important;
+  outline: none !important;
+}
+
+/* ========================================================================== */
+/* v0.456 Canonical glass header gradient                                     */
+/* ========================================================================== */
+/* app.js derives these three stops from the canonical Lookup Manager color.
+   This creates a visible hue-to-navy gradient instead of a flat color stripe. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left-color: var(--glass-type-header-start, var(--glass-type-color)) !important;
+  border-top-color: var(--glass-type-header-mid, #244d6b) !important;
+  border-bottom-color: var(--glass-type-header-mid, #244d6b) !important;
+  background:
+    linear-gradient(100deg,
+      var(--glass-type-header-start, #123f60) 0%,
+      var(--glass-type-header-mid, #174b6c) 46%,
+      var(--glass-type-header-end, #203f5a) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.15),
+    inset 0 -1px 0 rgba(2,19,34,.18),
+    0 2px 8px rgba(8,38,70,.08) !important;
+}
+
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:hover,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:focus-visible {
+  background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.025)) !important;
+}
+
+/* ========================================================================== */
+/* v0.457 Smoothed Scan glass-section headers                                 */
+/* ========================================================================== */
+/* Keep the canonical Lookup Manager hue but soften saturation and add a clean
+   framed edge so glass sections read as polished dividers instead of bright
+   color bars. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  border-left-width: 5px !important;
+  border-top: 1px solid rgba(255,255,255,.18) !important;
+  border-right: 1px solid rgba(8,33,52,.28) !important;
+  border-bottom: 1px solid rgba(8,33,52,.38) !important;
+  border-radius: 8px 8px 3px 3px !important;
+  background:
+    linear-gradient(105deg,
+      var(--glass-type-header-start, #153e56) 0%,
+      var(--glass-type-header-mid, #183d54) 48%,
+      var(--glass-type-header-end, #20394d) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    inset 0 -1px 0 rgba(0,18,31,.18),
+    0 3px 9px rgba(8,38,70,.10) !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  border-radius: 7px 7px 2px 2px !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:hover,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:focus-visible {
+  background: linear-gradient(90deg, rgba(255,255,255,.055), rgba(255,255,255,.018)) !important;
+}
+
+
+/* ========================================================================== */
+/* v0.459 Compact reference-style glass section headers                       */
+/* ========================================================================== */
+/* Keep the Lookup Manager hue as the source, but present it as a restrained
+   dark gradient band like the approved reference: no decorative glass icon,
+   a strong label at left, and compact progress/collapse controls at right. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  border: 1px solid color-mix(in srgb, var(--glass-type-header-mid, #214f62) 68%, #0b2738 32%) !important;
+  border-left: 4px solid color-mix(in srgb, var(--glass-type-color) 68%, #0d3a46 32%) !important;
+  border-radius: 7px !important;
+  background:
+    linear-gradient(102deg,
+      color-mix(in srgb, var(--glass-type-header-start, #174b52) 92%, #0a2634 8%) 0%,
+      color-mix(in srgb, var(--glass-type-header-mid, #174452) 90%, #0d2c3b 10%) 58%,
+      color-mix(in srgb, var(--glass-type-header-end, #183949) 88%, #102b38 12%) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.10),
+    inset 0 -1px 0 rgba(2,17,27,.28),
+    0 2px 6px rgba(8,38,70,.09) !important;
+  overflow: hidden !important;
+}
+
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  min-height: 42px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  align-items: center !important;
+  gap: 9px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 6px 10px 6px 12px !important;
+  text-align: left !important;
+}
+
+.scan-page .glass-group-title-v459 {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff !important;
+  font-size: 15px !important;
+  font-weight: 1000 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.005em !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,17,28,.42) !important;
+}
+
+.scan-page .glass-group-progress-v459,
+.scan-page .glass-group-toggle-v459 {
+  width: auto !important;
+  min-width: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border: 1px solid rgba(255,255,255,.34) !important;
+  border-radius: 7px !important;
+  background: rgba(255,255,255,.075) !important;
+  color: rgba(255,255,255,.98) !important;
+  padding: 4px 9px !important;
+  font-size: 10.5px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+  text-shadow: 0 1px 1px rgba(0,17,28,.35) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.scan-page .glass-group-toggle-v459 {
+  min-width: 72px !important;
+}
+
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:hover,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:focus-visible {
+  background: linear-gradient(90deg, rgba(255,255,255,.055), rgba(255,255,255,.018)) !important;
+  outline: none !important;
+}
+
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:hover .glass-group-toggle-v459,
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]:focus-visible .glass-group-toggle-v459 {
+  border-color: rgba(255,255,255,.58) !important;
+  background: rgba(255,255,255,.14) !important;
+}
+
+@media (max-width: 720px) {
+  .scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+  .scan-page .glass-group-progress-v459 {
+    display: none !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.460 Clear-glass/new-marker clarity + static glass-header sheen          */
+/* ========================================================================== */
+/* Keep the compact v0.459 header, but add one fixed low-contrast highlight so
+   the dark Lookup Manager gradient has a little depth without any animation. */
+.scan-page .glass-group-row.glass-tone-group > td {
+  background:
+    linear-gradient(118deg,
+      transparent 0%,
+      transparent 34%,
+      rgba(255,255,255,.025) 40%,
+      rgba(255,255,255,.105) 46%,
+      rgba(255,255,255,.035) 52%,
+      transparent 59%,
+      transparent 100%),
+    linear-gradient(102deg,
+      color-mix(in srgb, var(--glass-type-header-start, #174b52) 92%, #0a2634 8%) 0%,
+      color-mix(in srgb, var(--glass-type-header-mid, #174452) 90%, #0d2c3b 10%) 58%,
+      color-mix(in srgb, var(--glass-type-header-end, #183949) 88%, #102b38 12%) 100%) !important;
+}
+
+/* The yellow New/Updated badge sits inside a white-text glass header. Give it
+   its own explicit ink color so the inherited header rule cannot turn NEW white. */
+.scan-page .glass-group-title-v459 .new-line-marker,
+.scan-page .new-line-marker.group-marker {
+  color: #111827 !important;
+  text-shadow: none !important;
+}
+
+/* ========================================================================== */
+/* v0.461 Authoritative NEW ink + visible static glass sheen                  */
+/* ========================================================================== */
+/* v0.454's broad white-text rule has higher specificity than the first NEW
+   override, which is why the marker could still paint white. Own the exact
+   nested badge here and explicitly set both color and text fill. */
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]
+  .glass-group-title-v459 > .new-line-marker.group-marker {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  background: #fff1b8 !important;
+  border-color: #e4b236 !important;
+  text-shadow: none !important;
+}
+
+/* Put the sheen on the transparent button itself rather than burying it as a
+   low-opacity first background layer on the TD. This keeps it visible above
+   every canonical glass gradient while remaining completely static. */
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  position: relative !important;
+  isolation: isolate;
+  overflow: hidden !important;
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]::after {
+  content: "" !important;
+  position: absolute;
+  z-index: 0;
+  inset: -14% -4%;
+  pointer-events: none;
+  opacity: 1 !important;
+  background:
+    linear-gradient(116deg,
+      transparent 0%,
+      transparent 31%,
+      rgba(255,255,255,.025) 35%,
+      rgba(255,255,255,.16) 42%,
+      rgba(255,255,255,.075) 48%,
+      rgba(255,255,255,.018) 54%,
+      transparent 60%,
+      transparent 100%) !important;
+  transform: skewX(-8deg);
+}
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]
+  > :is(.glass-group-title-v459, .glass-group-progress-v459, .glass-group-toggle-v459) {
+  position: relative;
+  z-index: 1;
+}
+
+
+/* ========================================================================== */
+/* v0.462 Compact glass header density + guaranteed NEW ink + stronger sheen  */
+/* ========================================================================== */
+/* The NEW badge is now a <mark>, not a span, so the older broad white-text
+   selector cannot repaint it. Keep this exact owner as a final safety net. */
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]
+  .glass-group-title-v459 > mark.glass-group-new-v462 {
+  display: inline-grid !important;
+  place-items: center !important;
+  min-width: 52px !important;
+  height: 20px !important;
+  margin-left: 7px !important;
+  padding: 0 8px !important;
+  border: 1px solid #e4b236 !important;
+  border-radius: 999px !important;
+  background: #fff1b8 !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  font-size: 10px !important;
+  font-weight: 1000 !important;
+  line-height: 1 !important;
+  text-shadow: none !important;
+  vertical-align: middle !important;
+}
+
+/* Trim only enough vertical space to make the grouping rail lighter while
+   retaining comfortable room for the title, badge, count, and toggle. */
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  min-height: 36px !important;
+  gap: 8px !important;
+  padding: 4px 9px 4px 10px !important;
+}
+.scan-page .glass-group-title-v459 {
+  font-size: 14px !important;
+  line-height: 1.05 !important;
+}
+.scan-page .glass-group-progress-v459,
+.scan-page .glass-group-toggle-v459 {
+  min-height: 24px !important;
+  padding: 3px 8px !important;
+  font-size: 10px !important;
+}
+.scan-page .glass-group-toggle-v459 {
+  min-width: 66px !important;
+}
+
+/* Strengthen the static highlight slightly. It remains fixed—there is no
+   animation—so the sheen reads as material depth rather than motion. */
+.scan-page .glass-group-row.glass-tone-group > td > button[data-toggle-glass-group]::after {
+  background:
+    linear-gradient(116deg,
+      transparent 0%,
+      transparent 28%,
+      rgba(255,255,255,.035) 34%,
+      rgba(255,255,255,.11) 39%,
+      rgba(255,255,255,.245) 45%,
+      rgba(255,255,255,.12) 51%,
+      rgba(255,255,255,.03) 56%,
+      transparent 62%,
+      transparent 100%) !important;
+}
+
+/* ========================================================================== */
+/* v0.463/v0.464 Glass-group row owns its full table height                   */
+/* ========================================================================== */
+/* The shared Delivery List tbody cell rule reserves 54px for normal line
+   items. Glass-group rows are structural separators, so they explicitly own
+   their row/cell height. v0.464 tunes the compact band to 43px after floor
+   review, keeping a 2px allowance around the 41px foreground control. */
+.scan-page .delivery-table tr.glass-group-row.glass-tone-group {
+  height: 43px !important;
+  min-height: 0 !important;
+}
+.scan-page .delivery-table tr.glass-group-row.glass-tone-group > td {
+  height: 43px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  vertical-align: middle !important;
+  line-height: 1 !important;
+}
+.scan-page .delivery-table tr.glass-group-row.glass-tone-group > td > button[data-toggle-glass-group] {
+  width: 100% !important;
+  height: 41px !important;
+  min-height: 41px !important;
+  margin: 0 !important;
+  padding: 3px 8px 3px 10px !important;
+  box-sizing: border-box !important;
+}
+
+/* ========================================================================== */
+/* v0.466 Filter counts + glass-selection contrast                            */
+/* ========================================================================== */
+/* Filter quantities are compact numeric badges, not parenthetical copy. Use
+   the same count treatment across Status, Attention, Route, and Glass Type. */
+.scan-page .scan-filter-options .tab > span[id^="count"],
+.scan-page .scan-filter-glass-section .glass-filter-tab > span {
+  min-width: 24px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-left: 2px !important;
+  border: 1px solid rgba(72, 99, 126, .13) !important;
+  border-radius: 999px !important;
+  background: rgba(52, 79, 105, .08) !important;
+  color: #3d566f !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+  font-weight: 950 !important;
+  line-height: 1 !important;
+  opacity: 1 !important;
+  white-space: nowrap !important;
+}
+
+/* Standard selected filters use a translucent light count badge on app blue. */
+.scan-page .scan-filter-options .tab.is-active:not(.glass-filter-tab) > span[id^="count"] {
+  border-color: rgba(255,255,255,.20) !important;
+  background: rgba(255,255,255,.16) !important;
+  color: #fff !important;
+}
+
+/* Exact glass choices fill with the Lookup Manager color. The label uses the
+   WCAG-derived ink from app.js while the count always stays dark on a pale pill,
+   avoiding white-on-white counts on vivid Mirror/Tempered selections. */
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active {
+  color: var(--glass-type-selected-ink, #fff) !important;
+  font-weight: 950 !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active > span {
+  border-color: rgba(16,36,58,.12) !important;
+  background: rgba(255,255,255,.92) !important;
+  color: #10243a !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:hover,
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:focus-visible {
+  color: var(--glass-type-selected-ink, #fff) !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:hover > span,
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active:focus-visible > span {
+  background: #fff !important;
+  color: #10243a !important;
+}
+
+/* All Glass stays neutral when inactive and keeps a readable count when active. */
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"] > span {
+  color: #405a73 !important;
+}
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active > span {
+  border-color: rgba(255,255,255,.20) !important;
+  background: rgba(255,255,255,.18) !important;
+  color: #fff !important;
+}
+
+/* ========================================================================== */
+/* v0.467 Larger filter-count numerals                                         */
+/* ========================================================================== */
+/* Counts carry useful floor information; make them easier to scan without
+   enlarging the surrounding filter controls. */
+.scan-page .scan-filter-options .tab > span[id^="count"],
+.scan-page .scan-filter-glass-section .glass-filter-tab > span {
+  font-size: 11.5px !important;
+  min-width: 25px !important;
+  padding-inline: 6px !important;
+}
+
+/* ========================================================================== */
+/* v0.469 Unified Priority Work ribbon state                                  */
+/* ========================================================================== */
+/* Combined Rush + Remake work is one maintained priority state. Missing Glass
+   is now a reason, so it does not receive a separate ribbon color/type. */
+.priority-line-ribbon-v441.is-both {
+  --priority-ribbon: #7a2737;
+  --priority-soft: #f8eef1;
+}
+.mobile-priority-ribbon-v441.is-both {
+  border-color: #d9aeba;
+  border-left-color: #7a2737;
+  background: #fbf3f5;
 }

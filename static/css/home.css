@@ -8527,3 +8527,80 @@
   .home-stage-reference-v366 .home-stage-greeting-v362 { font-size: 34px !important; }
   .home-stage-reference-v366 .home-stage-date-simple-v362 { font-size: 23px !important; }
 }
+
+/* ========================================================================== */
+/* v0.456 Delivery Library repeat animation + Open Stage hover readability    */
+/* ========================================================================== */
+/* JS now re-adds is-expanding on every open. Keep the normal open state
+   stable, then animate only the explicitly restarted reveal. */
+.home-delivery-library-v366 .delivery-date-group-v367[open] .delivery-stage-list {
+  animation: none !important;
+  clip-path: inset(0 0 0 0);
+}
+
+@keyframes home-delivery-expand-v456 {
+  from {
+    opacity: .34;
+    clip-path: inset(0 0 94% 0);
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0);
+  }
+}
+
+.home-delivery-library-v366 .delivery-date-group-v367[open].is-expanding .delivery-stage-list {
+  animation: home-delivery-expand-v456 180ms cubic-bezier(.2, .72, .2, 1) both !important;
+  transform-origin: top center;
+  will-change: opacity, clip-path, transform;
+}
+
+/* Some older shared span rules can repaint this nested label dark even though
+   the button itself is white on hover. Own the actual text node explicitly. */
+.home-delivery-library-v366 .delivery-list-card-v368:hover .delivery-stage-open-v368 > span,
+.home-delivery-library-v366 .delivery-list-card-v368:focus-visible .delivery-stage-open-v368 > span,
+.home-delivery-library-v366 .delivery-stage-open-v368:hover > span,
+.home-delivery-library-v366 .delivery-stage-open-v368:focus-visible > span {
+  color: #fff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-delivery-library-v366 .delivery-date-group-v367[open].is-expanding .delivery-stage-list {
+    animation: none !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.457 Flash-free repeat Delivery Library expansion                         */
+/* ========================================================================== */
+/* The open attribute itself owns the animation again. Closing removes this
+   selector entirely, so the animation naturally starts fresh on the next open
+   without JS removing classes, forcing layout, or exposing a full-content
+   frame before the reveal begins. */
+@keyframes home-delivery-expand-v457 {
+  from {
+    opacity: .72;
+    transform: translateY(-3px) scaleY(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+.home-delivery-library-v366 .delivery-date-group-v367[open] .delivery-stage-list,
+.home-delivery-library-v366 .delivery-date-group-v367[open].is-expanding .delivery-stage-list {
+  animation: home-delivery-expand-v457 190ms cubic-bezier(.22, .74, .22, 1) both !important;
+  clip-path: none !important;
+  transform-origin: top center;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-delivery-library-v366 .delivery-date-group-v367[open] .delivery-stage-list,
+  .home-delivery-library-v366 .delivery-date-group-v367[open].is-expanding .delivery-stage-list {
+    animation: none !important;
+  }
+}

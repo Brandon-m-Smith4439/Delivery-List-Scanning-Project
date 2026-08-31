@@ -21547,3 +21547,32 @@ button.custom-select-trigger:hover:not(:disabled),
   background: linear-gradient(180deg, #fff5dc 0%, #f7dfaa 100%);
   color: #8b5a08;
 }
+
+/* ========================================================================== */
+/* v0.468 Delivery-list change preview + Whole Delivery List edit scope       */
+/* ========================================================================== */
+/* The compact update preview no longer uses the old decorative empty circle. */
+.delivery-update-preview-v313 .delivery-update-preview-header-v313::after {
+  content: none !important;
+  display: none !important;
+}
+
+.manual-edit-scope-control-v468 {
+  align-content: start;
+}
+.manual-edit-scope-help-v468 {
+  display: block;
+  max-width: 370px;
+  margin-top: 4px;
+  color: #60758c;
+  font-size: 9.5px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+.manual-edit-result-summary.is-whole-list-v468 {
+  border-color: #b7cde4;
+  background: linear-gradient(180deg, #f5f9fe 0%, #eaf2fb 100%);
+}
+.manual-edit-card.is-whole-list-v468 .manual-edit-card-stage strong {
+  color: #184f85;
+}

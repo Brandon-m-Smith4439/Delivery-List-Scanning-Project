@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/home.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/print.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260826-v0.449">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260826-v0.449">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/home.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/print.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260831-v0.469">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -303,50 +303,6 @@
             </div>
           </div>
           <div class="statistics-page-actions-v0258">
-            <div class="statistics-date-range-picker-v0262">
-              <label class="statistics-control-v0258 statistics-range-control-v0258">
-                <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-calendar" aria-hidden="true"></i>Date range</span>
-                <select id="overviewRangeSelect" data-native-select="true" aria-label="Statistics date range">
-                  <option value="1">Today</option>
-                  <option value="7">Last week</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="90">Last 90 days</option>
-                  <option value="365">Full year</option>
-                  <option value="all">All lists</option>
-                  <option value="custom">Custom range…</option>
-                </select>
-              </label>
-              <div id="statisticsDateCalendar" class="print-date-calendar-v201 print-date-calendar-v203 print-date-calendar-v205 statistics-date-calendar-v0262" hidden>
-                <header class="print-range-calendar-heading-v205">
-                  <div><small>Custom Statistics Range</small><strong>Select a Date From and Date To</strong></div>
-                </header>
-                <div class="print-range-values-v205">
-                  <article data-statistics-range-role="from"><small>Date From</small><strong id="statisticsCalendarFromValue">Select start date</strong></article>
-                  <span aria-hidden="true">→</span>
-                  <article data-statistics-range-role="to"><small>Date To</small><strong id="statisticsCalendarToValue">Select end date</strong></article>
-                </div>
-                <div class="print-range-months-v205">
-                  <section class="print-range-month-v205">
-                    <header><button id="statisticsCalendarPrev" type="button" aria-label="Previous month">‹</button><strong id="statisticsCalendarLeftMonthLabel"></strong><span></span></header>
-                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-                    <div id="statisticsCalendarLeftGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose statistics range dates from the first month"></div>
-                  </section>
-                  <section class="print-range-month-v205">
-                    <header><span></span><strong id="statisticsCalendarRightMonthLabel"></strong><button id="statisticsCalendarNext" type="button" aria-label="Next month">›</button></header>
-                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-                    <div id="statisticsCalendarRightGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose statistics range dates from the second month"></div>
-                  </section>
-                </div>
-                <footer class="print-calendar-footer-v201 print-calendar-footer-v205">
-                  <button id="statisticsCalendarReset" type="button">Reset Range</button>
-                  <span id="statisticsCalendarSelectionText">Choose the Date From.</span>
-                  <div>
-                    <button id="statisticsCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
-                    <button id="statisticsCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
-                  </div>
-                </footer>
-              </div>
-            </div>
             <button class="statistics-header-action-v0258 app-primary-button" id="statisticsRefreshBtn" type="button" title="Refresh statistics data" aria-label="Refresh statistics data">
               <span class="statistics-button-icon-v0258 is-refresh" aria-hidden="true"></span>
               <span>Refresh</span>
@@ -358,16 +314,8 @@
           </div>
         </header>
 
-        <section class="statistics-card-v0258 statistics-priority-panel-v0258">
-          <header class="statistics-section-heading-v0258">
-            <span class="statistics-section-icon-v0258 is-priority" aria-hidden="true"></span>
-            <div>
-              <h2>Priority metrics</h2>
-              <p>Four high-value signals for the selected reporting range.</p>
-            </div>
-          </header>
-          <div id="overviewStats" class="statistics-priority-grid-v0258"></div>
-        </section>
+        <!-- v0.456: priority metrics are standalone cards; remove the redundant card-within-card wrapper. -->
+        <div id="overviewStats" class="statistics-priority-grid-v0258 statistics-priority-grid-standalone-v456" aria-label="Priority metrics"></div>
 
         <section class="statistics-card-v0258 statistics-analytics-workspace-v0258" id="statisticsAnalyticsWorkspace">
           <header class="statistics-analytics-heading-v0258">
@@ -376,7 +324,6 @@
               <div>
                 <span>Live analytics</span>
                 <h2 id="statisticsChartTitle">Glass mix by quantity</h2>
-                <p id="statisticsChartSubtitle">Piece quantity by glass type for the selected reporting range.</p>
               </div>
             </div>
             <div class="statistics-view-switcher-v0258" role="group" aria-label="Statistics presentation type">
@@ -399,12 +346,6 @@
             <label class="statistics-control-v0258 statistics-data-control-v0258">
               <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-data" aria-hidden="true"></i>Data</span>
               <select id="statsChartMetricSelect">
-                <optgroup label="Delivery lists">
-                  <option value="delivery">Delivery completion by list</option>
-                  <option value="remaining">Open pieces by delivery list</option>
-                  <option value="timeliness">On-time completion by list</option>
-                  <option value="incomplete">Incomplete delivery lists</option>
-                </optgroup>
                 <optgroup label="Workflow stages">
                   <option value="stage-volume">Stage workload</option>
                   <option value="stage-open">Open work by stage</option>
@@ -420,12 +361,6 @@
                   <option value="breakage-reasons">Reject reasons by machine</option>
                   <option value="breakage-rate">Breakage percentage</option>
                 </optgroup>
-                <optgroup label="Delivery dates">
-                  <option value="date-volume">Pieces by delivery date</option>
-                  <option value="date-scanned">Scanned pieces by delivery date</option>
-                  <option value="date-open">Open pieces by delivery date</option>
-                  <option value="date-completion">Completion by delivery date</option>
-                </optgroup>
                 <optgroup label="People and activity">
                   <option value="operators">Scans by operator</option>
                   <option value="scan-issues">Scan issues</option>
@@ -434,6 +369,53 @@
                 </optgroup>
               </select>
             </label>
+            <div class="statistics-date-range-picker-v0262 statistics-chart-range-picker-v455">
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-calendar" aria-hidden="true"></i>Chart date range</span>
+              <button id="statisticsChartRangeButton" class="statistics-chart-range-button-v455" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="statisticsDateCalendar">
+                <span class="statistics-chart-range-icon-v455" aria-hidden="true"></span>
+                <span class="statistics-chart-range-copy-v455"><small>Reporting dates</small><strong id="statisticsChartRangeText">Last 30 days</strong></span>
+                <span class="statistics-chart-range-action-v455">Choose dates</span>
+              </button>
+              <select id="overviewRangeSelect" data-native-select="true" aria-label="Statistics date range" class="statistics-range-state-select-v455" aria-hidden="true" tabindex="-1" hidden>
+                <option value="1">Today</option>
+                <option value="7">Last week</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Full year</option>
+                <option value="all">All lists</option>
+                <option value="custom">Custom range</option>
+              </select>
+              <div id="statisticsDateCalendar" class="print-date-calendar-v201 print-date-calendar-v203 print-date-calendar-v205 statistics-date-calendar-v0262" hidden>
+                <header class="print-range-calendar-heading-v205">
+                  <div><small>Chart Date Range</small><strong>Select a Date From and Date To</strong></div>
+                </header>
+                <div class="print-range-values-v205">
+                  <article data-statistics-range-role="from"><small>Date From</small><strong id="statisticsCalendarFromValue">Select start date</strong></article>
+                  <span aria-hidden="true">→</span>
+                  <article data-statistics-range-role="to"><small>Date To</small><strong id="statisticsCalendarToValue">Select end date</strong></article>
+                </div>
+                <div class="print-range-months-v205">
+                  <section class="print-range-month-v205">
+                    <header><button id="statisticsCalendarPrev" type="button" aria-label="Previous month">‹</button><strong id="statisticsCalendarLeftMonthLabel"></strong><span></span></header>
+                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+                    <div id="statisticsCalendarLeftGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose chart range dates from the first month"></div>
+                  </section>
+                  <section class="print-range-month-v205">
+                    <header><span></span><strong id="statisticsCalendarRightMonthLabel"></strong><button id="statisticsCalendarNext" type="button" aria-label="Next month">›</button></header>
+                    <div class="print-calendar-weekdays-v201" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+                    <div id="statisticsCalendarRightGrid" class="print-calendar-grid-v201" role="grid" aria-label="Choose chart range dates from the second month"></div>
+                  </section>
+                </div>
+                <footer class="print-calendar-footer-v201 print-calendar-footer-v205">
+                  <button id="statisticsCalendarReset" type="button">Clear Selection</button>
+                  <span id="statisticsCalendarSelectionText">Choose the Date From.</span>
+                  <div>
+                    <button id="statisticsCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+                    <button id="statisticsCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
+                  </div>
+                </footer>
+              </div>
+            </div>
             <label id="statisticsBreakageMeasureControl" class="statistics-control-v0258 statistics-breakage-measure-control-v0262" hidden>
               <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-measure" aria-hidden="true"></i>Chart unit</span>
               <select id="statsBreakageMeasureSelect" aria-label="Breakage chart unit">
@@ -546,9 +528,12 @@
                       <span>Select one or more scan states</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">(0)</span></button>
-                      <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">(0)</span></button>
-                      <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">(0)</span></button>
+                      <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">0</span></button>
+                      <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">0</span></button>
+                      <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">0</span></button>
+                      <!-- v0.465: New Orders and Errors are Status filters, not priority Attention filters. -->
+                      <button class="tab" data-filter="updated" type="button">New Orders <span id="countUpdated">0</span></button>
+                      <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">0</span></button>
                     </div>
                   </section>
                   <section class="scan-filter-section" aria-label="Attention filters">
@@ -557,23 +542,21 @@
                       <span>Find priority or changed pieces</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">(0)</span></button>
-                      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">(0)</span></button>
-                      <button class="tab priority-tab internal-reject-filter" data-filter="internal-rejects" type="button">Internal Rejects <span id="countInternalRejects">(0)</span></button>
-                      <button class="tab" data-filter="updated" type="button">New Orders <span id="countUpdated">(0)</span></button>
-                      <button class="tab" data-filter="errors" type="button">Errors <span id="countErrors">(0)</span></button>
+                      <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">0</span></button>
+                      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">0</span></button>
+                      <button class="tab priority-tab internal-reject-filter" data-filter="internal-rejects" type="button">Internal Rejects <span id="countInternalRejects">0</span></button>
                     </div>
                   </section>
-                  <section class="scan-filter-section" aria-label="Route filters">
+                  <section class="scan-filter-section scan-filter-route-section-v465" aria-label="Route filters">
                     <div class="scan-filter-section-heading">
                       <h3>Route</h3>
                       <span>Show one or several destinations</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button"><span data-portable-label-v355="receivingSite">Indian Trail</span> <span id="countIndianTrailRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button"><span data-portable-label-v355="cpuRoute">CPU</span> <span id="countCpuRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button"><span data-portable-label-v355="dtcRoute">DTC</span> <span id="countDtcRoute">(0)</span></button>
-                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">(0)</span></button>
+                      <button class="tab route-filter-tab" data-filter="indian-trail-route" type="button"><span data-portable-label-v355="receivingSite">Indian Trail</span> <span id="countIndianTrailRoute">0</span></button>
+                      <button class="tab route-filter-tab" data-filter="cpu-route" type="button"><span data-portable-label-v355="cpuRoute">CPU</span> <span id="countCpuRoute">0</span></button>
+                      <button class="tab route-filter-tab" data-filter="dtc-route" type="button"><span data-portable-label-v355="dtcRoute">DTC</span> <span id="countDtcRoute">0</span></button>
+                      <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">0</span></button>
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
@@ -587,7 +570,7 @@
                     <span>Results update immediately.</span>
                     <span>Click anywhere outside this panel to close it.</span>
                   </footer>
-                  <span id="countAll" hidden>(0)</span>
+                  <span id="countAll" hidden>0</span>
                 </div>
               </details>
               <div class="scan-active-filter-bar" id="scanActiveFilterBar" aria-live="polite">
@@ -618,8 +601,9 @@
       <span>Rows</span>
       <select id="pageSize">
         <option>25</option>
-        <option>50</option>
+        <option selected>50</option>
         <option>100</option>
+        <option>200</option>
       </select>
     </label>
   </div>
@@ -653,8 +637,9 @@
                 <span>Rows</span>
                 <select id="pageSizeBottom">
                   <option>25</option>
-                  <option>50</option>
+                  <option selected>50</option>
                   <option>100</option>
+                  <option>200</option>
                 </select>
               </label>
             </div>
@@ -1343,9 +1328,9 @@
         <section class="sdi-panel modal-panel sdi-panel-v182" id="sdiPanel" hidden>
           <div class="section-heading sdi-heading-v182 sdi-heading-v346">
             <div>
-              <small>Order entry priority intake</small>
+              <small>Unified order entry priority intake</small>
               <h2>Priority Work</h2>
-              <span class="bay-scanner-subtitle">Create and manage Rush, Remake, and Missing Glass priority work.</span>
+              <span class="bay-scanner-subtitle">Create and manage Rush and Remake priority work from one workflow.</span>
             </div>
             <button id="sdiCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close Priority Work window">×</button>
           </div>
@@ -1357,106 +1342,46 @@
           </nav>
 
           <section class="bay-operation-view priority-intake-workspace-v346 priority-new-request-workspace-v349" data-bay-modal-panel="rush" data-bay-modal-view="intake">
-            <div class="priority-intake-type-v346 priority-new-request-type-v350" role="group" aria-label="New request type">
-              <label class="is-rush"><input type="radio" name="priorityNewRequestType" value="Rush" data-priority-request-mode="rush" checked><span><b>Rush</b><small>Match this Job Nr.</small></span></label>
-              <label class="is-remake"><input type="radio" name="priorityNewRequestType" value="Remake" data-priority-request-mode="remake"><span><b>Remake</b><small>Wait for .#R / RM</small></span></label>
-              <label class="is-missing"><input type="radio" name="priorityNewRequestType" value="Missing Glass" data-priority-request-mode="missing"><span><b>Missing Glass</b><small>Rush glass already imported.</small></span></label>
+            <!-- v0.469: one central Priority Work intake replaces the separate Missing Glass Rush workflow. -->
+            <div class="priority-intake-type-v346 priority-new-request-type-v350 priority-work-type-v469" role="group" aria-label="Priority work type">
+              <label class="is-rush"><input type="radio" name="priorityNewRequestType" value="Rush" data-priority-request-mode="rush" checked><span><b>Rush</b><small>Expedite this work</small></span></label>
+              <label class="is-remake"><input type="radio" name="priorityNewRequestType" value="Remake" data-priority-request-mode="remake"><span><b>Remake</b><small>Replacement glass</small></span></label>
+              <label class="is-both"><input type="radio" name="priorityNewRequestType" value="Both" data-priority-request-mode="both"><span><b>Rush + Remake</b><small>Replacement and expedite</small></span></label>
             </div>
 
-            <div class="priority-new-request-panel-v349" data-priority-new-panel="priority">
-              <form id="priorityIntakeForm" class="priority-intake-form-v346">
-                <div class="priority-intake-grid-v346">
-                  <section class="priority-intake-entry-card-v346">
-                    <div class="priority-intake-card-heading-v346"><span>1</span><div><strong>Request details</strong></div></div>
-                    <label><span>Job Nr.</span><input id="priorityIntakeJob" type="text" autocomplete="off" placeholder="Example: 88915190" required><small>Use the Smart Glazier Job Nr. root. You do not need the new Order Nr. yet.</small></label>
-                    <label class="priority-intake-choice-field-v347"><span>Reason</span><select id="priorityIntakeReason" required><option value="">Choose a reason...</option></select><input id="priorityIntakeReasonCustom" type="text" autocomplete="off" placeholder="Add custom reason" hidden><small>Saved custom reasons become reusable choices for future requests.</small></label>
-                    <label class="priority-intake-choice-field-v347"><span>Person responsible</span><select id="priorityIntakeResponsible" required><option value="">Choose a person...</option></select><input id="priorityIntakeResponsibleCustom" type="text" autocomplete="off" placeholder="Add custom person / team" hidden><small>Historical accountability stays tied to this person even after the order is imported.</small></label>
+            <div class="priority-new-request-panel-v349 priority-work-unified-v469" data-priority-new-panel="priority">
+              <form id="priorityIntakeForm" class="priority-intake-form-v346 priority-work-form-v469">
+                <div class="priority-intake-grid-v346 priority-work-grid-v469">
+                  <section class="priority-intake-entry-card-v346 priority-work-target-card-v469">
+                    <div class="priority-intake-card-heading-v346"><span>1</span><div><strong>Find or wait for the order</strong><small>The same workflow handles imported and not-yet-imported work.</small></div></div>
+                    <label class="priority-work-lookup-field-v469"><span>Job Nr. / SO / Order Nr.</span><input id="priorityIntakeJob" type="text" autocomplete="off" placeholder="Search Job Nr., SO, or Order Nr..." required><small>If the order already exists, it can be updated immediately. Otherwise the scanner waits for the matching import.</small></label>
+                    <div id="priorityIntakeLookupStatus" class="priority-work-lookup-status-v469 is-idle" aria-live="polite">
+                      <span class="priority-work-lookup-icon-v469" aria-hidden="true"></span>
+                      <div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>The scanner will check active delivery lists automatically.</small></div>
+                    </div>
+                    <label class="priority-work-date-field-v469"><span>Priority Delivery Date</span><input id="priorityIntakeDeliveryDate" type="date"><small>Keep the imported date or choose a new delivery date. For work that has not arrived yet, this date will be applied when it imports.</small></label>
+                    <label class="priority-intake-choice-field-v347"><span>Reason</span><select id="priorityIntakeReason" required><option value="">Choose a reason...</option></select><input id="priorityIntakeReasonCustom" type="text" autocomplete="off" placeholder="Add custom reason" hidden><small>Missing Glass is now a reason here instead of a separate request type.</small></label>
+                    <label class="priority-intake-choice-field-v347"><span>Person responsible</span><select id="priorityIntakeResponsible" required><option value="">Choose a person...</option></select><input id="priorityIntakeResponsibleCustom" type="text" autocomplete="off" placeholder="Add custom person / team" hidden><small>Accountability stays attached to the request and its imported order.</small></label>
                   </section>
 
-                  <section class="priority-intake-email-card-v346">
-                    <div class="priority-intake-card-heading-v346"><span>2</span><div><strong>Email handling</strong><small>Choose how this request should be communicated.</small></div></div>
+                  <section class="priority-intake-email-card-v346 priority-work-communication-card-v469">
+                    <div class="priority-intake-card-heading-v346"><span>2</span><div><strong>Communication &amp; paperwork</strong><small>Notify the team and print the shop paperwork you need.</small></div></div>
                     <label><span>Email action</span><select id="priorityIntakeEmailMode"><option value="draft">Create draft in my email app</option><option value="system">Send from system</option><option value="none">No email</option></select></label>
                     <div id="priorityIntakeRecipientsField" class="priority-email-recipient-field-v347"><span>Recipients from scanner users</span><div id="priorityIntakeRecipientUsers" class="priority-user-recipient-grid-v347"><small>Loading users with saved email addresses...</small></div><label><span>Additional email addresses</span><input id="priorityIntakeRecipients" type="text" autocomplete="off" placeholder="Optional: name@bldr.com; another@bldr.com"></label><small>Draft mode may be opened with no recipients so you can address it directly in Outlook or your default mail app.</small></div>
                     <div class="priority-intake-email-status-v346" id="priorityIntakeEmailHint"><strong>User email draft</strong><span>Opens a prepared message in your default mail application for you to review and send.</span></div>
-                    <div class="priority-intake-match-note-v346"><strong>What happens next</strong><ol><li>The request stays Pending.</li><li>A+W imports are checked automatically.</li><li>The matching order is marked Rush or Remake everywhere it belongs.</li><li>Rush arrivals trigger the production-priority popup.</li></ol></div>
+                    <section class="priority-work-print-actions-v469" aria-label="Priority work printouts">
+                      <header><div><small>SHOP PAPERWORK</small><strong>Print a work sheet at any time</strong></div><span>Uses the current form and imported-order details when available.</span></header>
+                      <div>
+                        <button type="button" id="priorityIntakePrintRushBtn" data-priority-print-kind="rush"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Rush</b><small>Printout</small></button>
+                        <button type="button" id="priorityIntakePrintRemakeBtn" data-priority-print-kind="remake"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Remake</b><small>Printout</small></button>
+                        <button type="button" id="priorityIntakePrintMissingBtn" data-priority-print-kind="missing"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Missing Glass</b><small>Printout</small></button>
+                      </div>
+                    </section>
+                    <div class="priority-intake-match-note-v346 priority-work-next-v469"><strong>What happens when you save</strong><ol><li>If the order is already imported, the selected Rush / Remake handling is applied across its stage copies now.</li><li>If it is not imported, the request waits and matches the future A+W import.</li><li>A selected delivery-date change follows the Priority Work.</li><li>Missing Glass is recorded through the Reason field rather than a separate workflow.</li></ol></div>
                   </section>
                 </div>
 
-                <footer class="priority-intake-submit-row-v346"><span><b>No duplicate order needed.</b> The request follows the source Job Nr. when it arrives.</span><button class="app-primary-button" id="priorityIntakeSubmitBtn" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg><span>Save &amp; Queue Request</span></button></footer>
-              </form>
-            </div>
-
-            <div class="priority-new-request-panel-v349 missing-glass-workflow-v355" data-priority-new-panel="missing" hidden>
-              <form id="sdiForm" class="missing-glass-form-v355">
-                <input id="sdiTypeInput" type="hidden" value="Rush">
-
-                <section class="missing-glass-main-v355">
-                  <header class="missing-glass-command-v355">
-                    <span class="missing-glass-command-icon-v355" aria-hidden="true"></span>
-                    <div>
-                      <small>MISSING GLASS</small>
-                      <strong>Find the imported order and identify exactly what is short</strong>
-                      <span>Compare expected quantity with physically accounted glass. Only selected missing lines are changed.</span>
-                    </div>
-                  </header>
-
-                  <section class="missing-glass-find-v355" aria-label="Find imported work">
-                    <label class="missing-glass-search-v355 sdi-job-lookup">
-                      <span>Job Nr. / SO / Order Nr.</span>
-                      <input id="sdiOrderInput" type="text" autocomplete="off" placeholder="Search job, order, SO, or barcode...">
-                      <div id="sdiLookupResults" class="sdi-lookup-results missing-glass-lookup-results-v351" hidden></div>
-                    </label>
-                    <label class="missing-glass-bay-v355">
-                      <span>Physical Bay</span>
-                      <select id="sdiBayInput"><option value="">All bays / no bay filter</option></select>
-                    </label>
-                    <button id="sdiSelectMissingBtn" class="missing-glass-select-v355" type="button">
-                      <span class="missing-glass-select-icon-v355" aria-hidden="true"></span>
-                      <span><strong>Select Missing</strong><small>Choose short lines automatically</small></span>
-                    </button>
-                  </section>
-
-                  <section class="missing-glass-results-v355" id="sdiItemSelection">
-                    <header class="missing-glass-results-heading-v355">
-                      <div><small>IMPORTED GLASS</small><strong>Expected vs. physically accounted</strong></div>
-                      <span>Missing quantity is calculated per line.</span>
-                    </header>
-                    <div id="sdiItemSelectionList" class="sdi-item-selection-list missing-glass-item-list-v355"><span class="admin-empty">Search for imported work above.</span></div>
-                  </section>
-                </section>
-
-                <aside class="missing-glass-setup-v355">
-                  <header class="missing-glass-setup-heading-v355">
-                    <div><small>RUSH SETUP</small><strong>Selected missing glass</strong></div>
-                    <span id="sdiSelectionSummary">No items selected</span>
-                  </header>
-
-                  <div class="missing-glass-setup-fields-v355">
-                    <label><span>Priority Delivery Date</span><input id="sdiDeliveryDateInput" type="date"></label>
-                    <label class="priority-intake-choice-field-v347"><span>Rush reason</span><select id="sdiReasonInput"><option value="">Choose a reason...</option></select><input id="sdiReasonCustom" type="text" autocomplete="off" placeholder="Add custom reason" hidden></label>
-                    <label class="priority-intake-choice-field-v347"><span>Person responsible</span><select id="sdiResponsibleInput"><option value="">Choose a person...</option></select><input id="sdiResponsibleCustom" type="text" autocomplete="off" placeholder="Add custom person / team" hidden></label>
-                    <label class="missing-glass-truck-v355"><input id="sdiTruckExemptInput" type="checkbox"><span><strong>Direct to installer truck</strong><small>Indian Trail Rush only. Skip normal bay placement.</small></span></label>
-                  </div>
-
-                  <details class="missing-glass-email-v355">
-                    <summary><span><small>COMMUNICATION</small><strong>Email options</strong></span><b>Optional</b></summary>
-                    <div class="missing-glass-email-body-v355">
-                      <label><span>Email action</span><select id="sdiEmailMode"><option value="draft">Create draft in my email app</option><option value="system">Send from system</option><option value="none">No email</option></select></label>
-                      <div id="sdiRecipientsField" class="priority-email-recipient-field-v347"><span>Recipients from scanner users</span><div id="sdiRecipientUsers" class="priority-user-recipient-grid-v347"></div><label><span>Additional email addresses</span><input id="sdiRecipients" type="text" autocomplete="off" placeholder="Optional email addresses"></label></div>
-                      <div class="priority-intake-email-status-v346" id="sdiEmailHint"><strong>User email draft</strong><span>Opens a prepared Missing Glass Rush message in your default mail application.</span></div>
-                    </div>
-                  </details>
-
-                  <div class="missing-glass-safety-v355">
-                    <strong>Only selected lines change.</strong>
-                    <span>Physically accounted glass remains untouched.</span>
-                  </div>
-
-                  <div class="missing-glass-actions-v355 sdi-actions">
-                    <button type="button" id="sdiClearBtn" class="missing-glass-clear-v355"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg><span>Clear Rush</span></button>
-                    <button type="submit" class="app-primary-button missing-glass-apply-v355" data-sdi-action="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 11h6l-1 9 9-13h-6z"></path></svg><span>Apply Missing Glass Rush</span></button>
-                  </div>
-                </aside>
+                <footer class="priority-intake-submit-row-v346 priority-work-submit-v469"><span id="priorityIntakeSubmitLead"><b>Checking imported work is automatic.</b> Enter the Job Nr. / SO / Order Nr. above.</span><button class="app-primary-button" id="priorityIntakeSubmitBtn" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg><span>Save Priority Work</span></button></footer>
               </form>
             </div>
           </section>
@@ -1671,9 +1596,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.449">
+        <span class="footer-version-v0163" aria-label="Application version 0.469">
           <small>Version</small>
-          <strong>0.449</strong>
+          <strong>0.469</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -2003,6 +1928,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260826-v0.449"></script>
+  <script src="static/js/app.js?v=20260831-v0.469"></script>
 </body>
 </html>

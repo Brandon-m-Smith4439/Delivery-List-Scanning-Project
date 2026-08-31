@@ -9840,3 +9840,73 @@
   left: .1in !important;
   bottom: .04in !important;
 }
+
+/* ========================================================================== */
+/* v0.465 Exact preview geometry + Lookup-color glass selection               */
+/* ========================================================================== */
+/* The physical print uses Letter paper with a .4in @page margin. A 1px border
+   on the preview shell used to subtract two pixels from that printable width
+   and height, which made the landscape footer and narrow portrait Check column
+   differ slightly from paper. Use an outline so the visible page edge no longer
+   participates in the box model. */
+.print-preview-page-shell-v443 {
+  box-sizing: border-box !important;
+  width: 8.5in !important;
+  height: 11in !important;
+  padding: .4in !important;
+  border: 0 !important;
+  outline: 1px solid #aab5c2 !important;
+  outline-offset: -1px !important;
+}
+.print-preview-page-shell-v443.is-landscape {
+  width: 11in !important;
+  height: 8.5in !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: 10.2in !important;
+  min-height: 10.2in !important;
+}
+.print-preview-page-shell-v443.is-landscape > .delivery-print-sheet-v203.is-preview {
+  height: 7.7in !important;
+  min-height: 7.7in !important;
+}
+/* Mirror the printed Check-column rules explicitly in preview so the work-check
+   glyph never inherits modal/preview text sizing. */
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview th:nth-child(8),
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview td:nth-child(8),
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview .check-cell {
+  white-space: nowrap !important;
+  text-align: center !important;
+}
+.print-preview-page-shell-v443:not(.is-landscape) > .delivery-print-sheet-v203.is-preview th:nth-child(8) {
+  font-size: 11.5px !important;
+  padding-inline: 4px !important;
+}
+.print-preview-page-shell-v443:not(.is-landscape) > .delivery-print-sheet-v203.is-preview td:nth-child(8),
+.print-preview-page-shell-v443:not(.is-landscape) > .delivery-print-sheet-v203.is-preview .check-cell {
+  font-size: 12.25px !important;
+  padding-inline: 4px !important;
+}
+
+/* ========================================================================== */
+/* v0.467 Larger Print / Export filter-count numerals                         */
+/* ========================================================================== */
+.print-filter-chip-v197 b {
+  font-size: 12.5px !important;
+}
+
+/* ========================================================================== */
+/* v0.468 All Glass Types selected-label ownership                            */
+/* ========================================================================== */
+/* Print / Export loads after global styles, so own the visible label at the
+   final stylesheet layer. This keeps All Glass Types white like every other
+   selected All filter instead of inheriting the neutral black glass-chip ink. */
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > span,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > span {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  text-shadow: none !important;
+}

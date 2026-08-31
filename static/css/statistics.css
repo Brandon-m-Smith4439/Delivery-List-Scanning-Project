@@ -1708,9 +1708,11 @@
   reject-reason context. This avoids recreating the same totals in separate
   datasets and keeps the Statistics page readable for supervisors.
 */
-/* The custom calendar lives inside the navy command header. The header must
-   allow that anchored panel to extend below it instead of clipping the picker. */
-.statistics-command-header-v0258 {
+/* The maintained two-month calendar is shared by the analytics range control.
+   Its owning workspace must allow the anchored panel to extend over the chart. */
+.statistics-command-header-v0258,
+.statistics-analytics-workspace-v0258,
+.statistics-filter-deck-v0258 {
   overflow: visible;
 }
 
@@ -2426,4 +2428,585 @@
   .statistics-chart-kpis-v0258 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
+}
+
+/* ========================================================================== */
+/* v0.454 Statistics visual alignment, table-date focus, expanding bar chart  */
+/* ========================================================================== */
+/* Bring Statistics back into the same pale blue-gray workspace language used
+   by the other primary pages instead of giving it a separate dark command bar. */
+.statistics-command-header-v0258.app-page-header-v357 {
+  border-color: #c5d6e8 !important;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(68, 133, 194, .12), transparent 34%),
+    linear-gradient(135deg, #f9fcff 0%, #eef5fc 62%, #e8f1fa 100%) !important;
+  color: #12365f !important;
+  box-shadow: 0 10px 26px rgba(19, 57, 94, .08) !important;
+}
+.statistics-command-icon-v0258 {
+  border-color: #b9cfe4 !important;
+  background: linear-gradient(145deg, #e2effb, #cbdff2) !important;
+  color: #245f98 !important;
+  box-shadow: inset 0 1px 0 #fff, 0 6px 15px rgba(33, 86, 137, .10) !important;
+}
+.statistics-page-eyebrow-v0258,
+.statistics-command-copy-v0258 h1 {
+  color: #12365f !important;
+}
+.statistics-command-copy-v0258 > p {
+  color: #5f7288 !important;
+}
+.statistics-range-summary-v0258 b,
+.statistics-live-status-v0258 {
+  border-color: #c5d8e9 !important;
+  background: rgba(255,255,255,.78) !important;
+  color: #285679 !important;
+}
+.statistics-range-summary-v0258 span,
+.statistics-live-status-v0258 {
+  color: #60758b !important;
+}
+.statistics-page-actions-v0258 .statistics-control-label-v0258,
+.statistics-page-actions-v0258 .statistics-control-icon-v0258 {
+  color: #476886 !important;
+}
+.statistics-page-actions-v0258 .statistics-range-control-v0258 > select#overviewRangeSelect {
+  border-color: #aec4da !important;
+  background-color: #fff !important;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23345f84' d='m7.4 9.4 4.6 4.6 4.6-4.6L18 10.8l-6 6-6-6 1.4-1.4Z'/%3E%3C/svg%3E") !important;
+  color: #173d69 !important;
+  color-scheme: light !important;
+  box-shadow: inset 0 1px 2px rgba(8,38,90,.03), 0 4px 10px rgba(25,63,99,.05) !important;
+}
+.statistics-page-actions-v0258 .statistics-range-control-v0258 > select#overviewRangeSelect:hover,
+.statistics-page-actions-v0258 .statistics-range-control-v0258 > select#overviewRangeSelect:focus {
+  border-color: #4d83b6 !important;
+  background-color: #fff !important;
+  box-shadow: 0 0 0 3px rgba(57,120,177,.12) !important;
+}
+
+/* The bar view belongs to the page flow. Its height is calculated from every
+   visible row in app.js, so never create an internal vertical scroll region. */
+.statistics-chart-canvas-v0258 .statistics-chart-bar-viewport {
+  max-height: none !important;
+  overflow: visible !important;
+}
+.statistics-chart-canvas-v0258 .statistics-chart-bar-svg {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+}
+
+@media (max-width: 760px) {
+  .statistics-chart-canvas-v0258 .statistics-chart-bar-viewport {
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.455 Analytics calendar range + repaired visual ownership                */
+/* ========================================================================== */
+/* The range selector now belongs to the analytics toolbar and applies to Bar,
+   Line, Donut, and Table equally. The hidden legacy select remains only as the
+   state carrier used by existing report/date functions; operators interact with
+   the maintained two-month calendar directly. */
+.statistics-range-state-select-v455[hidden] {
+  display: none !important;
+}
+.statistics-chart-range-picker-v455 {
+  position: relative;
+  min-width: 238px;
+  display: grid;
+  gap: 4px;
+  align-self: end;
+}
+.statistics-chart-range-picker-v455 > .statistics-control-label-v0258 {
+  color: #445b75;
+  font-size: 11px;
+  font-weight: 900;
+}
+.statistics-chart-range-button-v455 {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #aebfd2;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #fff 0%, #f4f8fc 100%);
+  color: #173d69;
+  padding: 5px 9px;
+  text-align: left;
+  box-shadow: inset 0 1px 0 #fff, 0 3px 9px rgba(25,63,99,.05);
+  cursor: pointer;
+}
+.statistics-chart-range-button-v455:hover,
+.statistics-chart-range-button-v455:focus-visible,
+.statistics-chart-range-button-v455[aria-expanded="true"] {
+  outline: none;
+  border-color: #4f83b4;
+  background: #f7fbff;
+  box-shadow: 0 0 0 3px rgba(57,120,177,.12);
+}
+.statistics-chart-range-icon-v455 {
+  width: 28px;
+  height: 28px;
+  display: block;
+  border-radius: 8px;
+  background: #dceaf7;
+  color: #245f98;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2h2v2h6V2h2v2h3v18H4V4h3V2Zm11 8H6v10h12V10ZM6 6v2h12V6H6Z'/%3E%3C/svg%3E") center / 17px 17px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2h2v2h6V2h2v2h3v18H4V4h3V2Zm11 8H6v10h12V10ZM6 6v2h12V6H6Z'/%3E%3C/svg%3E") center / 17px 17px no-repeat;
+}
+.statistics-chart-range-copy-v455 {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.statistics-chart-range-copy-v455 small {
+  color: #71849a;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.statistics-chart-range-copy-v455 strong {
+  min-width: 0;
+  color: #12365f;
+  font-size: 11.5px;
+  font-weight: 950;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.statistics-chart-range-action-v455 {
+  color: #2d679b;
+  font-size: 9px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+.statistics-chart-range-picker-v455 .statistics-date-calendar-v0262 {
+  top: calc(100% + 8px) !important;
+  left: 0 !important;
+  right: auto !important;
+}
+/* Header actions are now only Refresh + PDF; the reporting calendar lives with
+   the chart controls rather than consuming command-header width. */
+.statistics-page-actions-v0258 {
+  min-width: 0 !important;
+  grid-template-columns: repeat(2, auto) !important;
+  justify-content: end;
+}
+/* Make room for Data + Date Range before the smaller chart controls. */
+.statistics-filter-deck-v0258 {
+  grid-template-columns:
+    minmax(205px, 1.28fr)
+    minmax(238px, 1.18fr)
+    minmax(104px, .62fr)
+    minmax(104px, .58fr)
+    minmax(96px, .52fr)
+    minmax(160px, .86fr)
+    minmax(154px, .68fr)
+    auto;
+}
+@media (max-width: 1320px) {
+  .statistics-chart-range-picker-v455 {
+    min-width: 0;
+    grid-column: span 2;
+  }
+}
+@media (max-width: 900px) {
+  .statistics-chart-range-picker-v455 .statistics-date-calendar-v0262 {
+    position: fixed !important;
+    inset: 72px 10px auto !important;
+    width: auto !important;
+  }
+}
+@media (max-width: 700px) {
+  .statistics-page-actions-v0258 {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .statistics-chart-range-picker-v455 {
+    grid-column: auto;
+  }
+  .statistics-chart-range-action-v455 {
+    display: none;
+  }
+}
+
+/* ========================================================================== */
+/* v0.456 Statistics visual polish and shared workspace geometry              */
+/* ========================================================================== */
+.statistics-page-v0258 {
+  --statistics-navy: #073866;
+  --statistics-navy-strong: #05284d;
+  --statistics-blue: #176fc1;
+  --statistics-blue-soft: #eaf5ff;
+  --statistics-line: #bfd3e8;
+  --statistics-muted: #526b84;
+  --pie-1: #1769e0;
+  --pie-2: #00a6a6;
+  --pie-3: #5b56e8;
+  --pie-4: #f0a400;
+  --pie-5: #4285c5;
+  --pie-6: #8a4fd0;
+  --pie-7: #1fa35b;
+  --pie-8: #e35b3f;
+  --pie-9: #00a0c7;
+  --pie-10: #d86f18;
+  gap: 14px;
+  background:
+    radial-gradient(circle at 95% 1%, rgba(35, 123, 204, .12), transparent 29%),
+    radial-gradient(circle at 8% 82%, rgba(31, 163, 91, .055), transparent 28%),
+    linear-gradient(180deg, #f7fbff 0%, #edf4fb 100%);
+}
+
+/* Match the maintained 116px page-header contract and add the same open-circle
+   decoration used by Home/Racks/Admin. */
+.statistics-command-header-v0258.app-page-header-v357 {
+  position: relative !important;
+  height: 116px !important;
+  min-height: 116px !important;
+  padding: 14px 24px 14px 30px !important;
+  gap: 18px !important;
+  overflow: hidden !important;
+  border-color: #bfd2e5 !important;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(23, 111, 193, .12), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f4f9fe 68%, #eaf3fb 100%) !important;
+  box-shadow: 0 12px 30px rgba(20, 48, 84, .08) !important;
+}
+.statistics-command-header-v0258.app-page-header-v357::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: linear-gradient(180deg, #2384d6, #15589f);
+}
+.statistics-command-header-v0258.app-page-header-v357::after {
+  content: "";
+  position: absolute;
+  right: -54px;
+  top: -82px;
+  width: 214px;
+  height: 214px;
+  border: 28px solid rgba(23, 55, 95, .052);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.statistics-command-header-v0258.app-page-header-v357 > * {
+  position: relative;
+  z-index: 1;
+}
+.statistics-command-identity-v0258 {
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 13px;
+}
+.statistics-command-icon-v0258 {
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 13px !important;
+  border-color: #9fc4e4 !important;
+  background: linear-gradient(145deg, #dff0ff, #b9daf5) !important;
+  color: #1769ad !important;
+  box-shadow: inset 0 1px 0 #fff, 0 6px 16px rgba(25, 94, 153, .14) !important;
+}
+.statistics-command-icon-v0258::before { inset: 12px !important; }
+.statistics-command-copy-v0258 { gap: 2px; }
+.statistics-command-copy-v0258 h1 {
+  color: #0b335f !important;
+  font-size: 31px !important;
+  line-height: 1 !important;
+}
+.statistics-command-copy-v0258 > p {
+  max-width: 720px !important;
+  color: #557089 !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+}
+.statistics-page-eyebrow-v0258 {
+  color: #236aa7 !important;
+  font-size: 9px !important;
+}
+.statistics-command-meta-v0258 {
+  gap: 5px 8px;
+  margin-top: 2px;
+}
+.statistics-range-summary-v0258 b,
+.statistics-live-status-v0258 {
+  min-height: 21px !important;
+  border-color: #bcd4e9 !important;
+  background: #f8fcff !important;
+  color: #245d8e !important;
+  font-size: 9px !important;
+}
+.statistics-range-summary-v0258 span { color: #58738c !important; font-size: 9px !important; }
+.statistics-page-actions-v0258 { gap: 7px !important; }
+.statistics-header-action-v0258 {
+  --app-primary-min-height: 36px;
+  --app-primary-padding: 7px 12px;
+  box-shadow: 0 6px 13px rgba(20, 91, 154, .16) !important;
+}
+
+/* Priority metrics are now the cards themselves, not cards inside another
+   framed section. Give the standalone row enough breathing room to read as a
+   first-class dashboard band. */
+.statistics-priority-grid-standalone-v456 {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.statistics-priority-card-v0258 {
+  --stat-accent: #1976d2;
+  --stat-soft: #eaf4ff;
+  min-height: 118px;
+  border-color: color-mix(in srgb, var(--stat-accent) 27%, #cbd9e7) !important;
+  border-top-width: 5px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--stat-accent) 12%, transparent), transparent 43%),
+    linear-gradient(180deg, #fff 0%, color-mix(in srgb, var(--stat-accent) 7%, #f8fbff) 100%) !important;
+  box-shadow: 0 10px 22px rgba(8, 38, 90, .08) !important;
+}
+.statistics-priority-card-v0258.is-open { --stat-accent: #e39a00; --stat-soft: #fff7df; }
+.statistics-priority-card-v0258.is-warning { --stat-accent: #e34835; --stat-soft: #fff0ed; }
+.statistics-priority-card-v0258.is-success { --stat-accent: #1f9a58; --stat-soft: #eaf9f0; }
+.statistics-priority-icon-v0258 {
+  border-color: color-mix(in srgb, var(--stat-accent) 46%, #fff) !important;
+  background: color-mix(in srgb, var(--stat-accent) 17%, #fff) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 5px 12px color-mix(in srgb, var(--stat-accent) 13%, transparent);
+}
+.statistics-priority-card-v0258 small { color: #405f7b; }
+.statistics-priority-card-v0258 strong { color: #0a315e; }
+.statistics-priority-card-v0258 p { color: #526b82; }
+.statistics-priority-progress-v0258 { background: #d9e6f1; }
+
+/* Stronger visual hierarchy through the analytics workspace. */
+.statistics-card-v0258 {
+  border-color: #bfd3e7;
+  background: rgba(255,255,255,.99);
+  box-shadow: 0 12px 28px rgba(8,38,90,.085);
+}
+.statistics-analytics-heading-v0258 {
+  border-bottom-color: #c6daec;
+  background:
+    radial-gradient(circle at 95% 0%, rgba(32, 128, 205, .10), transparent 31%),
+    linear-gradient(180deg, #ffffff 0%, #eff7fe 100%);
+}
+.statistics-analytics-title-v0258 > div > span { color: #1471ba; }
+.statistics-analytics-title-v0258 h2 { color: #09345f; }
+.statistics-section-icon-v0258 {
+  border-color: #a9c9e4;
+  background: linear-gradient(145deg, #e8f5ff, #cce7fa);
+  color: #176ba9;
+}
+.statistics-filter-deck-v0258 {
+  border-bottom-color: #c5d9eb;
+  background: linear-gradient(180deg, #f5faff 0%, #edf5fc 100%);
+}
+.statistics-control-label-v0258 {
+  color: #355a7c !important;
+  font-weight: 950 !important;
+}
+.statistics-control-icon-v0258 { color: #3479b3 !important; }
+
+/* All analytics selector bars share one 42px control height. */
+.statistics-filter-deck-v0258 .statistics-control-v0258 :is(select, input),
+.statistics-filter-deck-v0258 .statistics-control-v0258 .custom-select-trigger,
+.statistics-filter-deck-v0258 .statistics-chart-range-button-v455,
+.statistics-filter-deck-v0258 .statistics-remake-toggle-v0260,
+.statistics-filter-deck-v0258 .statistics-reset-button-v0258 {
+  box-sizing: border-box !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  border-radius: 9px !important;
+}
+.statistics-filter-deck-v0258 .statistics-control-v0258 :is(select, input),
+.statistics-filter-deck-v0258 .statistics-control-v0258 .custom-select-trigger {
+  border-color: #a9c2da;
+  background-color: #fff;
+  color: #123e6c;
+  box-shadow: inset 0 1px 2px rgba(8,38,90,.025), 0 3px 8px rgba(24,70,112,.045);
+}
+.statistics-chart-range-button-v455 {
+  border-color: #96b8d6 !important;
+  background: linear-gradient(180deg, #fff 0%, #edf7ff 100%) !important;
+}
+.statistics-chart-range-icon-v455 {
+  background: #cce7fb;
+  color: #176cac;
+}
+.statistics-chart-range-copy-v455 small { color: #50708d; }
+.statistics-chart-range-copy-v455 strong { color: #0d3c68; }
+.statistics-chart-range-action-v455 { color: #176cad; }
+.statistics-view-button-v0258 {
+  border-color: #a8c3dc;
+  color: #174c79;
+  box-shadow: 0 3px 8px rgba(25,69,111,.045);
+}
+.statistics-view-button-v0258:hover,
+.statistics-view-button-v0258:focus-visible {
+  border-color: #4a8bc4;
+  background: #eaf5ff;
+  color: #0d5f9e;
+}
+.statistics-chart-kpi-v0258 {
+  border-color: #bfd4e7 !important;
+  background: linear-gradient(180deg, #fff 0%, #f0f8ff 100%) !important;
+  box-shadow: 0 6px 15px rgba(19,65,106,.055);
+}
+.statistics-chart-kpi-icon-v0258 {
+  border-color: #a9cce7 !important;
+  background: #dff1ff !important;
+  color: #1471b7 !important;
+}
+.statistics-chart-result-bar-v0258 {
+  border-color: #b9d4e9 !important;
+  background: linear-gradient(90deg, #eaf6ff, #f7fbff) !important;
+  color: #285b82 !important;
+}
+.statistics-mini-card-v0258 {
+  border-color: #bfd4e7 !important;
+  background: linear-gradient(180deg, #fff 0%, #f5faff 100%) !important;
+  box-shadow: 0 9px 20px rgba(8,38,90,.07) !important;
+}
+.statistics-mini-card-v0258 > header {
+  border-bottom-color: #d2e2ef !important;
+  background: linear-gradient(180deg, #f9fcff, #edf6fd) !important;
+}
+
+@media (max-width: 980px) {
+  .statistics-command-header-v0258.app-page-header-v357 {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 18px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.457 Statistics toolbar balance and expanded header                      */
+/* ========================================================================== */
+.statistics-command-header-v0258.app-page-header-v357 {
+  height: 139px !important;
+  min-height: 139px !important;
+  padding: 20px 28px 20px 34px !important;
+}
+
+/* Use a flexible toolbar so Filter categories receives the most horizontal
+   room, Reset stays compact, and the row consumes the available width instead
+   of ending early with uneven fixed grid tracks. */
+.statistics-filter-deck-v0258 {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
+}
+.statistics-filter-deck-v0258 > .statistics-control-v0258 {
+  flex: 1 1 135px;
+  min-width: 120px;
+}
+.statistics-filter-deck-v0258 > .statistics-data-control-v0258 {
+  flex: 1.25 1 205px;
+}
+.statistics-filter-deck-v0258 > .statistics-chart-range-picker-v455 {
+  flex: 1.3 1 220px;
+  min-width: 205px;
+}
+.statistics-filter-deck-v0258 > .statistics-search-control-v0258 {
+  flex: 2.2 1 320px;
+  min-width: 280px;
+}
+.statistics-filter-deck-v0258 > .statistics-remake-toggle-v0262 {
+  flex: .9 1 165px;
+}
+.statistics-filter-deck-v0258 > .statistics-reset-button-v0258 {
+  flex: 0 0 76px;
+  width: 76px !important;
+  min-width: 76px !important;
+  padding-inline: 8px !important;
+}
+.statistics-filter-deck-v0258 > [hidden] {
+  display: none !important;
+}
+
+@media (max-width: 980px) {
+  .statistics-command-header-v0258.app-page-header-v357 {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 20px !important;
+  }
+  .statistics-filter-deck-v0258 > .statistics-search-control-v0258 {
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 700px) {
+  .statistics-filter-deck-v0258 {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .statistics-filter-deck-v0258 > * {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.458 Lookup-driven glass chart colors + slightly stronger page header    */
+/* ========================================================================== */
+/* Keep the Statistics header in the shared pale-blue family, but give it a
+   little more blue depth so it separates cleanly from the page canvas. */
+.statistics-command-header-v0258.app-page-header-v357 {
+  border-color: #a9c8e2 !important;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(24, 104, 178, .16), transparent 29%),
+    linear-gradient(135deg, #edf6fe 0%, #dfedf9 66%, #cfe4f5 100%) !important;
+  box-shadow: 0 12px 30px rgba(18, 65, 106, .105) !important;
+}
+
+/* Glass datasets provide --chart-color from the canonical Lookup Manager
+   profile. Bar/donut already consume it; line points and table swatches now do
+   the same so every Statistics view stays visually consistent. */
+.statistics-chart-line-point {
+  stroke: var(--chart-color, #174f87);
+}
+.statistics-chart-line-entry:hover .statistics-chart-line-point,
+.statistics-chart-line-entry:focus .statistics-chart-line-point,
+.statistics-chart-line-entry.is-selected .statistics-chart-line-point {
+  fill: var(--chart-color, #174f87);
+}
+.statistics-table-category-v0258 i {
+  background: var(--chart-color, #dceafa);
+  box-shadow: inset 0 0 0 1px rgba(13, 52, 88, .12);
+}
+.statistics-table-category-v0258 i::before {
+  background: rgba(255,255,255,.88);
+}
+
+
+/* ========================================================================== */
+/* v0.459 Stronger Statistics header + canonical glass-color surfaces         */
+/* ========================================================================== */
+/* Slightly deepen the existing pale-blue header without turning it into the
+   old navy banner; the shared header geometry remains unchanged. */
+.statistics-command-header-v0258.app-page-header-v357 {
+  border-color: #9fbed8 !important;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(18, 91, 156, .20), transparent 30%),
+    linear-gradient(135deg, #e7f2fb 0%, #d8e8f6 62%, #c2daee 100%) !important;
+  box-shadow: 0 12px 30px rgba(16, 61, 101, .12) !important;
+}
+
+/* Glass datasets inject --chart-color from the canonical Lookup Manager
+   profile. Keep every color-bearing Statistics surface tied to that value. */
+.statistics-chart-svg-legend-row i {
+  background: var(--chart-color, #dceafa) !important;
+  box-shadow: inset 0 0 0 1px rgba(10, 45, 75, .14);
+}
+.statistics-table-category-v0258 i {
+  background: var(--chart-color, #dceafa) !important;
 }

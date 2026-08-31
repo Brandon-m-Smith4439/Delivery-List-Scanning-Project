@@ -54,6 +54,45 @@ class PasswordCompatibilityTests(unittest.TestCase):
             self.assertTrue(verify_password("CorrectHorseBatteryStaple!", stored_hash))
             self.assertFalse(verify_password("wrong-password", stored_hash))
 
+    def test_user_profile_display_name_can_be_updated_with_access_save(self) -> None:
+        folder = ROOT / "_verification" / "user-display-name"
+        folder.mkdir(parents=True, exist_ok=True)
+        database_path = folder / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            config = replace(
+                load_config(ROOT),
+                root=folder,
+                data_dir=folder,
+                database_path=database_path,
+                temp_delivery_lists_dir=folder,
+                sample_path=ROOT / "data" / "sample-delivery-list.json",
+                environment="development",
+                default_admin_username="admin",
+                default_admin_password="OriginalPassword!",
+            )
+            store = SQLiteDeliveryStore(config)
+            store.initialize()
+
+            updated = store.update_user_roles(
+                "admin",
+                ["Admin"],
+                display_name="Indian Trail Floor Lead",
+                updated_by="admin",
+            )
+            admin = next(user for user in updated["users"] if user["username"] == "admin")
+
+            self.assertEqual(admin["displayName"], "Indian Trail Floor Lead")
+            self.assertEqual(updated["displayName"], "Indian Trail Floor Lead")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+
     def test_password_reset_then_login_works_without_hashlib_attribute(self) -> None:
         folder = ROOT / "_verification" / "auth-passwords"
         folder.mkdir(parents=True, exist_ok=True)

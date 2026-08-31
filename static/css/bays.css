@@ -28304,3 +28304,799 @@ body.bay-move-mode .bay-layout-drop-zone {
     transform: translate(-50%, -55%) !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.451 Transit endpoint alignment + rack loading/unloading                 */
+/* ========================================================================== */
+/* Keep the dual progress meter under the same 30px route endpoints where the
+   shuttle actually stops, instead of stretching the meter edge-to-edge. */
+.bay-workflow-row-full .transit-lane-polished .bay-dual-progress.is-transit-card {
+  width: calc(100% - 60px) !important;
+  max-width: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* v0.453: simplify the endpoint motion further and correct the direction.
+   The left endpoint shows blue glass moving from the left into the truck at
+   Outbound, and the right endpoint shows blue glass moving out to the right at
+   Inbound. */
+.transit-animation-truck .transit-rack-transfer {
+  position: absolute;
+  top: 11px;
+  z-index: 5;
+  width: 30px;
+  height: 24px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.transit-animation-truck .transit-rack-transfer::before,
+.transit-animation-truck .transit-rack-transfer::after {
+  content: none;
+}
+.transit-animation-truck .transit-rack-transfer > i {
+  display: block;
+  width: 7px;
+  height: 24px;
+  border: 1px solid #72add3;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #dff5ff 0%, #9bd5f2 100%);
+  box-shadow: inset 1px 0 rgba(255,255,255,.76), 0 2px 4px rgba(58, 126, 168, .18);
+}
+.transit-animation-truck .transit-rack-transfer > i:nth-child(2) {
+  opacity: .94;
+}
+.transit-animation-truck .transit-rack-transfer > i:nth-child(3) {
+  opacity: .86;
+}
+.transit-animation-truck .transit-rack-transfer-outbound {
+  left: 18px;
+  animation: bay-transit-glass-load-v453 14s linear infinite;
+}
+.transit-animation-truck .transit-rack-transfer-inbound {
+  right: 20px;
+  animation: bay-transit-glass-unload-v453 14s linear infinite;
+}
+
+@keyframes bay-transit-glass-unload-v453 {
+  0%, 29% { opacity: 0; transform: translateX(-10px) scaleY(.96); }
+  32% { opacity: .96; transform: translateX(-2px) scaleY(1); }
+  39% { opacity: 1; transform: translateX(15px) scaleY(1); }
+  45% { opacity: .82; transform: translateX(34px) scaleY(1); }
+  48%, 100% { opacity: 0; transform: translateX(46px) scaleY(.96); }
+}
+
+@keyframes bay-transit-glass-load-v453 {
+  0%, 78% { opacity: 0; transform: translateX(-12px) scaleY(.96); }
+  81% { opacity: .94; transform: translateX(-3px) scaleY(1); }
+  88% { opacity: 1; transform: translateX(18px) scaleY(1); }
+  94% { opacity: .82; transform: translateX(36px) scaleY(1); }
+  97%, 100% { opacity: 0; transform: translateX(46px) scaleY(.96); }
+}
+
+@media (max-width: 820px) {
+  .bay-workflow-row-full .transit-lane-polished .bay-dual-progress.is-transit-card {
+    width: calc(100% - 56px) !important;
+  }
+  .transit-animation-truck .transit-rack-transfer-outbound { left: 16px; }
+  .transit-animation-truck .transit-rack-transfer-inbound { right: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transit-animation-truck .transit-rack-transfer {
+    display: none !important;
+    animation: none !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.457 Bay Map sequential glass loading / unloading                        */
+/* ========================================================================== */
+/* Re-time the shuttle so each endpoint has a real work pause: load at the
+   Outbound/left stop before departure, flip at Indian Trail, unload from the
+   rear toward the right, then return. Only translucent blue glass is animated;
+   there is no rack/cart artwork competing with the truck. */
+.bay-workflow-row-full .transit-lane-polished .transit-moving-truck {
+  animation: bay-transit-shuttle-v457 16s linear infinite !important;
+}
+
+@keyframes bay-transit-shuttle-v457 {
+  0%, 15% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+  42% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+  44% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  61% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  88% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  90%, 100% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+}
+
+.transit-animation-truck .transit-rack-transfer {
+  top: 9px !important;
+  width: 58px !important;
+  height: 29px !important;
+  display: block !important;
+  opacity: 1 !important;
+  animation: none !important;
+  overflow: visible !important;
+}
+.transit-animation-truck .transit-rack-transfer-outbound {
+  left: 2px !important;
+  right: auto !important;
+}
+.transit-animation-truck .transit-rack-transfer-inbound {
+  right: 2px !important;
+  left: auto !important;
+}
+.transit-animation-truck .transit-rack-transfer > i {
+  --glass-pane-index-v457: 0;
+  position: absolute !important;
+  top: 1px !important;
+  left: calc(var(--glass-pane-index-v457) * 8px) !important;
+  width: 9px !important;
+  height: 27px !important;
+  display: block !important;
+  border: 1px solid rgba(72, 151, 200, .82) !important;
+  border-radius: 2px !important;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.78) 0 18%, transparent 18% 100%),
+    linear-gradient(180deg, #dff7ff 0%, #a7ddf6 54%, #82c7ec 100%) !important;
+  box-shadow:
+    inset -1px 0 rgba(47, 128, 181, .18),
+    0 2px 5px rgba(42, 114, 164, .20) !important;
+  opacity: 0;
+  transform-origin: center bottom;
+  will-change: transform, opacity;
+}
+.transit-animation-truck .transit-rack-transfer > i:nth-child(2) { --glass-pane-index-v457: 1; }
+.transit-animation-truck .transit-rack-transfer > i:nth-child(3) { --glass-pane-index-v457: 2; }
+.transit-animation-truck .transit-rack-transfer > i:nth-child(4) { --glass-pane-index-v457: 3; }
+
+.transit-animation-truck .transit-rack-transfer-outbound > i {
+  animation: bay-transit-glass-load-v457 16s linear infinite !important;
+  animation-delay: calc(var(--glass-pane-index-v457) * .11s) !important;
+}
+.transit-animation-truck .transit-rack-transfer-inbound > i {
+  animation: bay-transit-glass-unload-v457 16s linear infinite !important;
+  animation-delay: calc(var(--glass-pane-index-v457) * .11s) !important;
+}
+
+@keyframes bay-transit-glass-load-v457 {
+  0% {
+    opacity: 0;
+    transform: translateX(-30px) translateY(1px) scale(.96);
+  }
+  2% {
+    opacity: .96;
+    transform: translateX(-28px) translateY(0) scale(1);
+  }
+  6% {
+    opacity: 1;
+    transform: translateX(-13px) translateY(0) scale(1);
+  }
+  11% {
+    opacity: 1;
+    transform: translateX(7px) translateY(0) scale(.98);
+  }
+  14% {
+    opacity: .34;
+    transform: translateX(25px) translateY(0) scale(.90);
+  }
+  15.5%, 100% {
+    opacity: 0;
+    transform: translateX(31px) translateY(0) scale(.88);
+  }
+}
+
+@keyframes bay-transit-glass-unload-v457 {
+  0%, 44% {
+    opacity: 0;
+    transform: translateX(-19px) translateY(0) scale(.88);
+  }
+  46% {
+    opacity: .42;
+    transform: translateX(-14px) translateY(0) scale(.92);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(1px) translateY(0) scale(1);
+  }
+  56% {
+    opacity: 1;
+    transform: translateX(22px) translateY(0) scale(1);
+  }
+  60% {
+    opacity: .92;
+    transform: translateX(37px) translateY(1px) scale(.98);
+  }
+  62%, 100% {
+    opacity: 0;
+    transform: translateX(44px) translateY(1px) scale(.96);
+  }
+}
+
+@media (max-width: 820px) {
+  .transit-animation-truck .transit-rack-transfer {
+    width: 50px !important;
+    transform: scale(.88);
+    transform-origin: center;
+  }
+  .transit-animation-truck .transit-rack-transfer-outbound { left: 0 !important; }
+  .transit-animation-truck .transit-rack-transfer-inbound { right: 0 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transit-animation-truck .transit-rack-transfer,
+  .transit-animation-truck .transit-rack-transfer > i {
+    display: none !important;
+    animation: none !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.459 Proportional shuttle load, adaptive dwell, and outbound wait cloud  */
+/* ========================================================================== */
+/* The live in-transit piece quantity now controls three things together:
+   visible glass density, the load/unload sequencing pace, and total shuttle
+   cycle time. The percentage windows stay stable while cycle duration grows,
+   so heavier loads visibly remain at each dock longer. */
+.transit-animation-truck.has-transit-glass-v459 .transit-moving-truck {
+  animation: bay-transit-shuttle-v459 var(--transit-cycle-duration-v459, 16.7s) linear infinite !important;
+}
+
+@keyframes bay-transit-shuttle-v459 {
+  0%, 22% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+  42% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+  44% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  66% {
+    left: var(--transit-truck-right-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  86% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(-1);
+  }
+  88%, 100% {
+    left: var(--transit-truck-left-v447);
+    transform: translateY(-55%) scaleX(1);
+  }
+}
+
+/* One animated pane represents one physical in-transit piece for normal floor
+   loads. Larger stacks overlap progressively instead of widening the lane. */
+.transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer {
+  width: var(--glass-stack-width-v459, 58px) !important;
+}
+.transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer > i {
+  left: calc(var(--glass-pane-index-v459, 0) * var(--glass-pane-step-v459, 7px)) !important;
+  animation-duration: var(--transit-cycle-duration-v459, 16.7s) !important;
+  animation-delay: calc(var(--glass-pane-index-v459, 0) * var(--glass-pane-stagger-v459, .06s)) !important;
+  will-change: transform, opacity;
+}
+.transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer-outbound > i {
+  animation-name: bay-transit-glass-load-v459 !important;
+}
+.transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer-inbound > i {
+  animation-name: bay-transit-glass-unload-v459 !important;
+}
+
+@keyframes bay-transit-glass-load-v459 {
+  0% {
+    opacity: 0;
+    transform: translateX(-34px) translateY(1px) scale(.94);
+  }
+  2.2% {
+    opacity: .82;
+    transform: translateX(-29px) translateY(0) scale(.98);
+  }
+  7.4% {
+    opacity: 1;
+    transform: translateX(-11px) translateY(0) scale(1);
+  }
+  13.8% {
+    opacity: .98;
+    transform: translateX(11px) translateY(0) scale(.98);
+  }
+  18.2% {
+    opacity: .46;
+    transform: translateX(25px) translateY(0) scale(.92);
+  }
+  20.5%, 100% {
+    opacity: 0;
+    transform: translateX(34px) translateY(0) scale(.88);
+  }
+}
+
+@keyframes bay-transit-glass-unload-v459 {
+  0%, 45% {
+    opacity: 0;
+    transform: translateX(-20px) translateY(0) scale(.88);
+  }
+  47.5% {
+    opacity: .5;
+    transform: translateX(-13px) translateY(0) scale(.92);
+  }
+  52.5% {
+    opacity: 1;
+    transform: translateX(3px) translateY(0) scale(1);
+  }
+  58.5% {
+    opacity: 1;
+    transform: translateX(25px) translateY(0) scale(1);
+  }
+  63.5% {
+    opacity: .58;
+    transform: translateX(41px) translateY(1px) scale(.97);
+  }
+  65.5%, 100% {
+    opacity: 0;
+    transform: translateX(49px) translateY(1px) scale(.94);
+  }
+}
+
+/* With no in-transit glass, the truck remains parked at Outbound. The cloud is
+   deliberately separate from the truck motion so the three dots can read as a
+   simple left-to-right "waiting" sequence rather than a transport animation. */
+.transit-animation-truck .transit-wait-cloud-v459 {
+  display: none;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-moving-truck {
+  left: var(--transit-truck-left-v447) !important;
+  opacity: 1 !important;
+  animation: none !important;
+  transform: translateY(-55%) scaleX(1) !important;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-moving-truck::before,
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-moving-truck::after {
+  display: none !important;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459 {
+  position: absolute;
+  left: 18px;
+  top: -24px;
+  z-index: 7;
+  width: 48px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #9ebfd9;
+  border-radius: 999px;
+  background: rgba(251, 254, 255, .98);
+  box-shadow: 0 5px 13px rgba(26, 82, 125, .16);
+  animation: bay-transit-wait-cloud-v459 2.35s ease-in-out infinite;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459::before,
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459::after {
+  content: "";
+  position: absolute;
+  border: 1px solid #9ebfd9;
+  border-radius: 50%;
+  background: #fbfeff;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459::before {
+  left: 9px;
+  bottom: -7px;
+  width: 8px;
+  height: 8px;
+}
+.transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459::after {
+  left: 4px;
+  bottom: -12px;
+  width: 5px;
+  height: 5px;
+}
+.transit-wait-cloud-v459 > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #3d6f96;
+  opacity: .14;
+  transform: translateY(1px) scale(.68);
+  animation: bay-transit-wait-dot-v459 1.45s ease-in-out infinite;
+}
+.transit-wait-cloud-v459 > i:nth-child(2) { animation-delay: .28s; }
+.transit-wait-cloud-v459 > i:nth-child(3) { animation-delay: .56s; }
+
+@keyframes bay-transit-wait-dot-v459 {
+  0%, 16%, 72%, 100% { opacity: .14; transform: translateY(1px) scale(.68); }
+  34%, 54% { opacity: 1; transform: translateY(-1px) scale(1); }
+}
+@keyframes bay-transit-wait-cloud-v459 {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@media (max-width: 820px) {
+  .transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer {
+    max-width: 62px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer,
+  .transit-animation-truck.has-transit-glass-v459 .transit-rack-transfer > i {
+    display: none !important;
+    animation: none !important;
+  }
+  .transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459,
+  .transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459 > i {
+    animation: none !important;
+  }
+  .transit-animation-truck.is-waiting-for-glass-v459 .transit-wait-cloud-v459 > i {
+    opacity: .82;
+    transform: none;
+  }
+}
+
+/* Let the thought cloud rise above the historical route-animation viewport. */
+.bay-workflow-row-full .transit-lane-polished .transit-animation.transit-animation-truck.is-waiting-for-glass-v459 {
+  overflow: visible !important;
+}
+
+/* ========================================================================== */
+/* v0.467 Individual pane loading + exact truck departure timing              */
+/* ========================================================================== */
+/* v0.459 established load-aware quantities and the zero-load waiting cloud.
+   v0.467 moves positive-load timing to Web Animations so the truck can wait
+   for the actual last pane plus a fixed two-second dwell before departure. */
+.transit-animation-truck.has-transit-glass-v467 .transit-moving-truck,
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer,
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer > i {
+  animation: none !important;
+}
+
+/* Glass must travel behind the truck, never across its roof/cab. The truck
+   remains one paint layer above every pane and physically occludes it. */
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer {
+  z-index: 3 !important;
+  top: 11px !important;
+  width: var(--glass-stack-width-v459, 24px) !important;
+  height: 25px !important;
+  display: block !important;
+  overflow: visible !important;
+  opacity: 1 !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-moving-truck {
+  z-index: 6 !important;
+  opacity: 1 !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer > i {
+  position: absolute !important;
+  top: 0 !important;
+  left: calc(var(--glass-pane-index-v467, 0) * var(--glass-pane-step-v459, 1px)) !important;
+  width: 7px !important;
+  height: 24px !important;
+  display: block !important;
+  border: 1px solid rgba(80, 153, 198, .72) !important;
+  border-radius: 2px !important;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.65) 0 20%, transparent 20% 72%, rgba(255,255,255,.28) 72% 100%),
+    linear-gradient(180deg, #dff5ff 0%, #9bd5f2 100%) !important;
+  box-shadow: 0 2px 4px rgba(52, 119, 162, .18) !important;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* The loading stack sits immediately left of the rear cargo door; JavaScript
+   fine-tunes its pixel position from the measured truck/lane geometry. */
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-outbound {
+  right: auto !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-inbound {
+  left: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer,
+  .transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer > i {
+    display: none !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.469 Unified Priority Work intake                                       */
+/* ========================================================================== */
+/* Rush, Remake, and combined Rush+Remake now share one intake surface.       */
+#sdiPanel .priority-work-type-v469 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#sdiPanel .priority-work-type-v469 label.is-both {
+  --priority-type-accent-v469: #5a3fa3;
+}
+#sdiPanel .priority-work-type-v469 label.is-both:has(input:checked) {
+  border-color: #7660b6;
+  background: linear-gradient(180deg, #f6f2ff 0%, #eee7ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(90, 63, 163, .12), 0 5px 14px rgba(46, 31, 91, .08);
+}
+#sdiPanel .priority-work-type-v469 label.is-both:has(input:checked) b {
+  color: #4c348e;
+}
+#sdiPanel .priority-work-unified-v469 {
+  display: block;
+}
+#sdiPanel .priority-work-grid-v469 {
+  grid-template-columns: minmax(0, 1.04fr) minmax(360px, .96fr);
+  align-items: stretch;
+}
+#sdiPanel .priority-work-target-card-v469,
+#sdiPanel .priority-work-communication-card-v469 {
+  min-width: 0;
+}
+#sdiPanel .priority-work-lookup-field-v469 input,
+#sdiPanel .priority-work-date-field-v469 input {
+  min-height: 42px;
+}
+#sdiPanel .priority-work-lookup-status-v469 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #cdd9e7;
+  border-radius: 11px;
+  background: #f6f9fc;
+  padding: 9px 10px;
+  color: #4e647d;
+}
+#sdiPanel .priority-work-lookup-status-v469 > div > strong,
+#sdiPanel .priority-work-lookup-status-v469 > div > small {
+  display: block;
+}
+#sdiPanel .priority-work-lookup-status-v469 > div > strong {
+  color: #183d68;
+  font-size: 12px;
+  font-weight: 950;
+}
+#sdiPanel .priority-work-lookup-status-v469 > div > small {
+  margin-top: 2px;
+  color: #687b91;
+  font-size: 10px;
+  line-height: 1.3;
+  font-weight: 750;
+}
+#sdiPanel .priority-work-lookup-icon-v469 {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #e7eef6;
+}
+#sdiPanel .priority-work-lookup-icon-v469::before {
+  content: "?";
+  color: #4c6785;
+  font-size: 15px;
+  font-weight: 1000;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-loading .priority-work-lookup-icon-v469::before {
+  content: "...";
+  letter-spacing: -2px;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-found {
+  grid-template-columns: 34px minmax(180px, 1fr) auto;
+  border-color: #8fc2a0;
+  background: linear-gradient(180deg, #f2fbf5, #e9f8ee);
+}
+#sdiPanel .priority-work-lookup-status-v469.is-found .priority-work-lookup-icon-v469 {
+  background: #d8f2e0;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-found .priority-work-lookup-icon-v469::before {
+  content: "✓";
+  color: #217441;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-waiting {
+  border-color: #e3c47d;
+  background: linear-gradient(180deg, #fffaf0, #fff4dc);
+}
+#sdiPanel .priority-work-lookup-status-v469.is-waiting .priority-work-lookup-icon-v469 {
+  background: #ffedbf;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-waiting .priority-work-lookup-icon-v469::before {
+  content: "⌛";
+  color: #8a6209;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-error {
+  border-color: #e6a7ae;
+  background: #fff4f5;
+}
+#sdiPanel .priority-work-lookup-status-v469.is-error .priority-work-lookup-icon-v469::before {
+  content: "!";
+  color: #ad293a;
+}
+#sdiPanel .priority-work-lookup-facts-v469 {
+  display: grid !important;
+  grid-template-columns: repeat(4, auto);
+  gap: 5px;
+}
+#sdiPanel .priority-work-lookup-facts-v469 > span {
+  min-width: 58px;
+  display: grid;
+  gap: 1px;
+  border-left: 1px solid rgba(52, 105, 72, .16);
+  padding-left: 8px;
+}
+#sdiPanel .priority-work-lookup-facts-v469 b {
+  color: #174f2b;
+  font-size: 11px;
+  font-weight: 950;
+}
+#sdiPanel .priority-work-lookup-facts-v469 small {
+  color: #647d6d;
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+#sdiPanel .priority-work-print-actions-v469 {
+  border: 1px solid #d5dfeb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff, #f1f6fb);
+  padding: 10px;
+}
+#sdiPanel .priority-work-print-actions-v469 > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+#sdiPanel .priority-work-print-actions-v469 > header small,
+#sdiPanel .priority-work-print-actions-v469 > header strong,
+#sdiPanel .priority-work-print-actions-v469 > header span {
+  display: block;
+}
+#sdiPanel .priority-work-print-actions-v469 > header small {
+  color: #58718c;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+#sdiPanel .priority-work-print-actions-v469 > header strong {
+  color: #163a65;
+  font-size: 12px;
+  font-weight: 950;
+}
+#sdiPanel .priority-work-print-actions-v469 > header span {
+  max-width: 230px;
+  color: #718397;
+  font-size: 9px;
+  line-height: 1.25;
+  text-align: right;
+}
+#sdiPanel .priority-work-print-actions-v469 > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+#sdiPanel .priority-work-print-actions-v469 button {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 7px;
+  border: 1px solid #b8c9db;
+  border-radius: 9px;
+  background: #fff;
+  padding: 6px 8px;
+  color: #173d69;
+  text-align: left;
+  cursor: pointer;
+}
+#sdiPanel .priority-work-print-actions-v469 button:hover,
+#sdiPanel .priority-work-print-actions-v469 button:focus-visible {
+  border-color: #4e7ead;
+  background: #edf5ff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(36, 91, 151, .10);
+}
+#sdiPanel .priority-work-print-icon-v469 {
+  grid-row: 1 / 3;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: #dfeaf5;
+  position: relative;
+}
+#sdiPanel .priority-work-print-icon-v469::before {
+  content: "";
+  position: absolute;
+  inset: 5px 6px;
+  border: 2px solid currentColor;
+  border-top-width: 5px;
+  border-radius: 2px;
+  opacity: .75;
+}
+#sdiPanel .priority-work-print-actions-v469 button b {
+  align-self: end;
+  font-size: 10px;
+  font-weight: 950;
+}
+#sdiPanel .priority-work-print-actions-v469 button small {
+  align-self: start;
+  color: #718397;
+  font-size: 8px;
+  font-weight: 800;
+}
+#sdiPanel .priority-work-next-v469 ol {
+  margin-bottom: 0;
+}
+#sdiPanel .priority-work-submit-v469 {
+  align-items: center;
+}
+#sdiPanel .priority-work-submit-v469 > span {
+  max-width: 68%;
+}
+#sdiPanel .priority-work-section-v347.is-both > header {
+  border-color: #7760b8;
+  background: linear-gradient(180deg, #f7f4ff, #efe9ff);
+}
+#sdiPanel .priority-work-request-card-v348.is-both {
+  border-left-color: #6c50ad;
+}
+#sdiPanel .priority-work-legacy-rush-v469 header > div > small {
+  color: #8b5a08;
+}
+
+@media (max-width: 980px) {
+  #sdiPanel .priority-work-grid-v469 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #sdiPanel .priority-work-lookup-status-v469.is-found {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+  #sdiPanel .priority-work-lookup-facts-v469 {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 680px) {
+  #sdiPanel .priority-work-type-v469,
+  #sdiPanel .priority-work-print-actions-v469 > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #sdiPanel .priority-work-lookup-facts-v469 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #sdiPanel .priority-work-submit-v469 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #sdiPanel .priority-work-submit-v469 > span {
+    max-width: none;
+  }
+}
