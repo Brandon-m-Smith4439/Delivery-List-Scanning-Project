@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/home.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/print.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260831-v0.469">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260831-v0.469">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/home.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/print.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260901-v0.472">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260901-v0.472">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -354,6 +354,7 @@
                 </optgroup>
                 <optgroup label="Production mix">
                   <option value="glass" selected>Glass type quantity</option>
+                  <option value="glass-sizes">Common glass sizes</option>
                 </optgroup>
                 <optgroup label="Breakage &amp; rejects">
                   <option value="breakage-machines">Machine breakage overview</option>
@@ -416,6 +417,11 @@
                 </footer>
               </div>
             </div>
+            <label id="statisticsGlassSizeControl" class="statistics-control-v0258 statistics-glass-size-control-v470" hidden>
+              <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-data" aria-hidden="true"></i>Glass type</span>
+              <select id="statsGlassSizeTypeSelect" aria-label="Glass type for common-size statistics"></select>
+            </label>
+
             <label id="statisticsBreakageMeasureControl" class="statistics-control-v0258 statistics-breakage-measure-control-v0262" hidden>
               <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-measure" aria-hidden="true"></i>Chart unit</span>
               <select id="statsBreakageMeasureSelect" aria-label="Breakage chart unit">
@@ -497,11 +503,13 @@
                 <summary aria-label="Open delivery-list filters">
                   <span class="filter-icon" aria-hidden="true"></span>
                   <span class="scan-filter-summary-label">Filters</span>
-                  <span class="scan-filter-glance" aria-label="Priority filter summary">
+                  <span class="scan-filter-glance" aria-label="Filter status summary">
+                    <!-- v0.470: fixed compact order keeps the highest-risk status first. -->
+                    <span class="scan-filter-glance-badge is-error" id="scanFilterErrorBadge" title="Scan errors"><i>Err</i><b>0</b></span>
+                    <span class="scan-filter-glance-badge is-updated" id="scanFilterUpdatedBadge" title="New or updated pieces"><i>New</i><b>0</b></span>
+                    <span class="scan-filter-glance-badge is-reject" id="scanFilterRejectBadge" title="Internal reject pieces"><i>IR</i><b>0</b></span>
                     <span class="scan-filter-glance-badge is-remake" id="scanFilterRemakeBadge" title="Remake pieces"><i>RM</i><b>0</b></span>
                     <span class="scan-filter-glance-badge is-rush" id="scanFilterRushBadge" title="Rush pieces"><i>R</i><b>0</b></span>
-                    <span class="scan-filter-glance-badge is-updated" id="scanFilterUpdatedBadge" title="New or updated pieces"><i>NEW</i><b>0</b></span>
-                    <span class="scan-filter-glance-badge is-reject" id="scanFilterRejectBadge" title="Internal reject pieces"><i>IR</i><b>0</b></span>
                   </span>
                   <strong class="scan-filter-priority-state is-clear" id="scanFilterPriorityState" aria-label="No open remakes or rushes" hidden>&#10003;</strong>
                 </summary>
@@ -969,6 +977,15 @@
           <div id="bayFlowPanel" class="bay-route-flow bay-route-flow-v2"></div>
         </section>
 
+        <section class="bay-tool-card-grid-v470" id="bayActionButtons" aria-label="Indian Trail bay tools" data-portable-aria-v355="{receivingSite} bay tools">
+          <button type="button" class="bay-tool-card-v470" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon bay-action-icon-v338 old" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5l3.4 2.1M5.8 5.8 4 4"></path></svg></span><span><strong>Old Bays</strong><small>Review aging bay orders</small></span><span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
+          <button type="button" class="bay-tool-card-v470" data-bay-action="sdi" data-permission-any="manage_rush_work"><span class="bay-action-icon bay-action-icon-v338 sdi" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m13.2 2.8-7 10h5.2l-.7 8.4 7.1-10.8h-5.1z"></path></svg></span><span><strong>Priority Work</strong><small>Rush and remake requests</small></span></button>
+          <button type="button" class="bay-tool-card-v470" data-bay-action="item-management" data-permission-any="assign_bay_items,move_bay_items,clear_bay_items"><span class="bay-action-icon bay-action-icon-v338 manage" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h7v5H4zM13 6.5h7v5h-7zM4 13.5h7v5H4zM13 13.5h7v5h-7z"></path></svg></span><span><strong>Manage Items</strong><small>Move and clear bay contents</small></span></button>
+          <button type="button" class="bay-tool-card-v470" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 bay-edit" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 5h10v10H4zM7.5 8.5h3M7.5 11.5h3M13.7 18.3l5.9-5.9 2 2-5.9 5.9-3 .9z"></path></svg></span><span><strong>Edit Bays</strong><small>Names, groups, and rules</small></span></button>
+          <button type="button" class="bay-tool-card-v470" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 layout" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m3.5 6 5-2.2 7 2.2 5-2.2v14.3l-5 2.1-7-2.1-5 2.1zM8.5 3.8v14.3M15.5 6v14.2"></path><circle cx="12" cy="10.5" r="1.7"></circle></svg></span><span><strong>Edit Map</strong><small>Rearrange physical bay map</small></span></button>
+          <button type="button" class="bay-tool-card-v470 is-hardware" data-bay-action="hardware" data-permission-any="global_search"><span class="bay-action-icon bay-action-icon-v338 hardware-v470" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16v12H4zM8 7V4h8v3M8 12h8M10 15h4"></path></svg></span><span><strong>Hardware</strong><small>Find order hardware lists</small></span></button>
+        </section>
+
         <section class="bay-layout-manager bay-layout-manager-simple" id="bayLayoutManager" hidden>
           <div class="bay-layout-simple-head">
             <div>
@@ -1053,14 +1070,6 @@
           </div>
 
           <div class="bay-right-rail">
-            <div class="bay-action-buttons bay-action-buttons-v2 bay-action-buttons-v150" id="bayActionButtons" aria-label="Indian Trail bay actions" data-portable-aria-v355="{receivingSite} bay actions">
-              <button type="button" data-bay-action="old-bays" data-permission-any="view_bays"><span class="bay-action-icon bay-action-icon-v338 old" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5l3.4 2.1M5.8 5.8 4 4"></path></svg></span>Old Bays<span class="old-bay-attention-count" id="oldBayAttentionCount" hidden aria-label="0 old orders need review">0</span></button>
-              <button type="button" data-bay-action="sdi" data-permission-any="manage_rush_work"><span class="bay-action-icon bay-action-icon-v338 sdi" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m13.2 2.8-7 10h5.2l-.7 8.4 7.1-10.8h-5.1z"></path></svg></span>Rush</button>
-              <button type="button" data-bay-action="item-management" data-permission-any="assign_bay_items,move_bay_items,clear_bay_items"><span class="bay-action-icon bay-action-icon-v338 manage" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h7v5H4zM13 6.5h7v5h-7zM4 13.5h7v5H4zM13 13.5h7v5h-7z"></path></svg></span>Manage Items</button>
-              <button type="button" data-bay-action="bay-editor" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 bay-edit" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 5h10v10H4zM7.5 8.5h3M7.5 11.5h3M13.7 18.3l5.9-5.9 2 2-5.9 5.9-3 .9z"></path></svg></span>Edit Bays</button>
-              <button type="button" data-bay-action="layout" data-permission-any="manage_bay_layout"><span class="bay-action-icon bay-action-icon-v338 layout" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m3.5 6 5-2.2 7 2.2 5-2.2v14.3l-5 2.1-7-2.1-5 2.1zM8.5 3.8v14.3M15.5 6v14.2"></path><circle cx="12" cy="10.5" r="1.7"></circle></svg></span>Edit Map</button>
-            </div>
-
             <div class="bay-scanner-sticky-anchor-v155" id="bayScannerStickyAnchor">
               <aside class="scanner-panel bay-scanner-panel bay-scanner-panel-v150 bay-scanner-sticky-panel-v155" id="bayScannerPanel" aria-label="Indian Trail bay scanner" data-portable-aria-v355="{receivingSite} bay scanner">
                 <header class="bay-scanner-header-v150">
@@ -1328,9 +1337,9 @@
         <section class="sdi-panel modal-panel sdi-panel-v182" id="sdiPanel" hidden>
           <div class="section-heading sdi-heading-v182 sdi-heading-v346">
             <div>
-              <small>Unified order entry priority intake</small>
-              <h2>Priority Work</h2>
-              <span class="bay-scanner-subtitle">Create and manage Rush and Remake priority work from one workflow.</span>
+              <small>Priority work</small>
+              <h2>Rush &amp; Remake</h2>
+              <span class="bay-scanner-subtitle">Create, print, and track priority work.</span>
             </div>
             <button id="sdiCloseBtn" class="modal-close-x gui-close-button" type="button" aria-label="Close Priority Work window">×</button>
           </div>
@@ -1353,35 +1362,35 @@
               <form id="priorityIntakeForm" class="priority-intake-form-v346 priority-work-form-v469">
                 <div class="priority-intake-grid-v346 priority-work-grid-v469">
                   <section class="priority-intake-entry-card-v346 priority-work-target-card-v469">
-                    <div class="priority-intake-card-heading-v346"><span>1</span><div><strong>Find or wait for the order</strong><small>The same workflow handles imported and not-yet-imported work.</small></div></div>
-                    <label class="priority-work-lookup-field-v469"><span>Job Nr. / SO / Order Nr.</span><input id="priorityIntakeJob" type="text" autocomplete="off" placeholder="Search Job Nr., SO, or Order Nr..." required><small>If the order already exists, it can be updated immediately. Otherwise the scanner waits for the matching import.</small></label>
+                    <div class="priority-intake-card-heading-v346"><span>1</span><div><strong>Order</strong><small>Imported work applies now; future work waits.</small></div></div>
+                    <label class="priority-work-lookup-field-v469"><span>Job Nr. / SO / Order Nr.</span><input id="priorityIntakeJob" type="text" autocomplete="off" placeholder="Search Job Nr., SO, or Order Nr..." required></label>
                     <div id="priorityIntakeLookupStatus" class="priority-work-lookup-status-v469 is-idle" aria-live="polite">
                       <span class="priority-work-lookup-icon-v469" aria-hidden="true"></span>
-                      <div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>The scanner will check active delivery lists automatically.</small></div>
+                      <div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>Active lists are checked automatically.</small></div>
                     </div>
-                    <label class="priority-work-date-field-v469"><span>Priority Delivery Date</span><input id="priorityIntakeDeliveryDate" type="date"><small>Keep the imported date or choose a new delivery date. For work that has not arrived yet, this date will be applied when it imports.</small></label>
-                    <label class="priority-intake-choice-field-v347"><span>Reason</span><select id="priorityIntakeReason" required><option value="">Choose a reason...</option></select><input id="priorityIntakeReasonCustom" type="text" autocomplete="off" placeholder="Add custom reason" hidden><small>Missing Glass is now a reason here instead of a separate request type.</small></label>
-                    <label class="priority-intake-choice-field-v347"><span>Person responsible</span><select id="priorityIntakeResponsible" required><option value="">Choose a person...</option></select><input id="priorityIntakeResponsibleCustom" type="text" autocomplete="off" placeholder="Add custom person / team" hidden><small>Accountability stays attached to the request and its imported order.</small></label>
+                    <label class="priority-work-date-field-v469"><span>Priority Delivery Date</span><input id="priorityIntakeDeliveryDate" type="date"><small>Optional — leave blank to keep the imported date.</small></label>
+                    <label class="priority-intake-choice-field-v347"><span>Reason</span><select id="priorityIntakeReason" required><option value="">Choose a reason...</option></select><input id="priorityIntakeReasonCustom" type="text" autocomplete="off" placeholder="Add custom reason" hidden></label>
+                    <label class="priority-intake-choice-field-v347"><span>Person responsible</span><select id="priorityIntakeResponsible" required><option value="">Choose a person...</option></select><input id="priorityIntakeResponsibleCustom" type="text" autocomplete="off" placeholder="Add custom person / team" hidden></label>
                   </section>
 
                   <section class="priority-intake-email-card-v346 priority-work-communication-card-v469">
-                    <div class="priority-intake-card-heading-v346"><span>2</span><div><strong>Communication &amp; paperwork</strong><small>Notify the team and print the shop paperwork you need.</small></div></div>
+                    <div class="priority-intake-card-heading-v346"><span>2</span><div><strong>Email &amp; Print</strong></div></div>
                     <label><span>Email action</span><select id="priorityIntakeEmailMode"><option value="draft">Create draft in my email app</option><option value="system">Send from system</option><option value="none">No email</option></select></label>
-                    <div id="priorityIntakeRecipientsField" class="priority-email-recipient-field-v347"><span>Recipients from scanner users</span><div id="priorityIntakeRecipientUsers" class="priority-user-recipient-grid-v347"><small>Loading users with saved email addresses...</small></div><label><span>Additional email addresses</span><input id="priorityIntakeRecipients" type="text" autocomplete="off" placeholder="Optional: name@bldr.com; another@bldr.com"></label><small>Draft mode may be opened with no recipients so you can address it directly in Outlook or your default mail app.</small></div>
+                    <div id="priorityIntakeRecipientsField" class="priority-email-recipient-field-v347"><span>Recipients</span><div id="priorityIntakeRecipientUsers" class="priority-user-recipient-grid-v347"><small>Loading users...</small></div><label><span>Additional addresses</span><input id="priorityIntakeRecipients" type="text" autocomplete="off" placeholder="Optional: name@bldr.com"></label></div>
                     <div class="priority-intake-email-status-v346" id="priorityIntakeEmailHint"><strong>User email draft</strong><span>Opens a prepared message in your default mail application for you to review and send.</span></div>
                     <section class="priority-work-print-actions-v469" aria-label="Priority work printouts">
-                      <header><div><small>SHOP PAPERWORK</small><strong>Print a work sheet at any time</strong></div><span>Uses the current form and imported-order details when available.</span></header>
+                      <header><div><small>SHOP PAPERWORK</small><strong>Print Work Sheet</strong></div></header>
                       <div>
                         <button type="button" id="priorityIntakePrintRushBtn" data-priority-print-kind="rush"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Rush</b><small>Printout</small></button>
                         <button type="button" id="priorityIntakePrintRemakeBtn" data-priority-print-kind="remake"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Remake</b><small>Printout</small></button>
                         <button type="button" id="priorityIntakePrintMissingBtn" data-priority-print-kind="missing"><span class="priority-work-print-icon-v469" aria-hidden="true"></span><b>Missing Glass</b><small>Printout</small></button>
                       </div>
                     </section>
-                    <div class="priority-intake-match-note-v346 priority-work-next-v469"><strong>What happens when you save</strong><ol><li>If the order is already imported, the selected Rush / Remake handling is applied across its stage copies now.</li><li>If it is not imported, the request waits and matches the future A+W import.</li><li>A selected delivery-date change follows the Priority Work.</li><li>Missing Glass is recorded through the Reason field rather than a separate workflow.</li></ol></div>
+                    <div class="priority-intake-match-note-v346 priority-work-next-v469"><strong>Save once.</strong><span>Imported work updates now; otherwise it waits for the matching import.</span></div>
                   </section>
                 </div>
 
-                <footer class="priority-intake-submit-row-v346 priority-work-submit-v469"><span id="priorityIntakeSubmitLead"><b>Checking imported work is automatic.</b> Enter the Job Nr. / SO / Order Nr. above.</span><button class="app-primary-button" id="priorityIntakeSubmitBtn" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg><span>Save Priority Work</span></button></footer>
+                <footer class="priority-intake-submit-row-v346 priority-work-submit-v469"><span id="priorityIntakeSubmitLead">Enter an order and save.</span><button class="app-primary-button" id="priorityIntakeSubmitBtn" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg><span>Save Priority Work</span></button></footer>
               </form>
             </div>
           </section>
@@ -1551,6 +1560,17 @@
             </div>
           </section>
 
+          <section class="panel admin-compact-panel admin-dashboard-card production-files-overview-card-v472" data-permission-any="manage_production_files">
+            <div class="section-heading">
+              <h2>Machine &amp; Production Files</h2>
+              <button class="link-button" type="button" data-admin-modal="productionFiles" data-admin-gui-launch>Edit machine settings</button>
+            </div>
+            <div id="productionFilesOverview" class="compact-list production-files-overview-v472">
+              <div><strong>Denver &amp; Waterjet</strong><span>Sketch assignment and completed-file evidence.</span></div>
+              <div><strong>Background index</strong><span>Production shares refresh without blocking scans.</span></div>
+            </div>
+          </section>
+
 
           <section class="panel admin-compact-panel admin-dashboard-card" data-permission-any="manage_reject_settings">
             <div class="section-heading">
@@ -1596,9 +1616,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.469">
+        <span class="footer-version-v0163" aria-label="Application version 0.472">
           <small>Version</small>
-          <strong>0.469</strong>
+          <strong>0.472</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -1928,6 +1948,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260831-v0.469"></script>
+  <script src="static/js/app.js?v=20260901-v0.472"></script>
 </body>
 </html>

@@ -43,6 +43,7 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
 from backend.config import AppConfig
+from backend.production_files import ProductionFileService
 from database.azure_compat import AzureSqlConnection, connect_azure_sql
 from database.migrations import (
     MIGRATIONS,
@@ -126,6 +127,7 @@ PERMISSIONS = [
     "manage_route_rules",
     "manage_customer_emails",
     "manage_lookup_values",
+    "manage_production_files",
     "manage_automation",
     "manage_cross_date_scanning",
 
@@ -203,6 +205,7 @@ PERMISSION_BACKFILL_SOURCES = {
     "manage_cross_date_scanning": ("edit_delivery_list_items",),
     "manage_user_assignments": ("manage_roles",),
     "manage_customer_emails": ("manage_route_rules",),
+    "manage_production_files": ("manage_lookup_values",),
     "manage_bay_scanner_rules": ("manage_bay_layout",),
     "manage_bay_auto_assigner": ("manage_bay_layout",),
 }
@@ -497,6 +500,7 @@ DEFAULT_BAY_AUTO_ASSIGN_SETTINGS = {
 DEFAULT_RACK_DESTINATION_OVERRIDE_MINUTES = 15
 RACK_DESTINATION_OVERRIDE_METADATA_KEY = "rack_destination_override_minutes"
 RACK_SET_VISUALS_METADATA_KEY = "rack_set_visuals_v1"
+PRODUCTION_FILE_SETTINGS_METADATA_KEY = "production_file_settings_v1"
 RACK_SET_VISUAL_ICONS = {
     "rack", "truck", "steel", "wood", "aluminum", "coral", "lr", "rr",
     "showers", "mirror", "framed-mirror", "bfs-mirror", "crl", "spacer",
@@ -2598,6 +2602,39 @@ class BaseDeliveryStore:
             con.commit()
         return {"ok": True, "notificationId": clean_id}
 
+    def fabrication_scan_preflight(self, list_id: str, barcode: str, *, is_manual: bool = False) -> dict[str, Any] | None:
+        """Check fabrication evidence before opening the scanner write transaction.
+
+        Network-share discovery can be slower on the first cached lookup. Keeping it
+        outside ``BEGIN IMMEDIATE`` prevents one unavailable share from holding the
+        SQLite write lock while other scanners are working. Ambiguous sketches and
+        unavailable shares intentionally remain non-blocking.
+        """
+        service = getattr(self, "production_files", None)
+        if service is None or not service.enabled or not service.enforce_staging:
+            return None
+        with self.connect() as con:
+            list_row = con.execute("SELECT stage, scanner FROM delivery_lists WHERE id = ?", (list_id,)).fetchone()
+            if not list_row or scan_stage_category(list_row["stage"], list_row["scanner"]) != "staged":
+                return None
+            rows = con.execute(
+                "SELECT * FROM line_items WHERE list_id = ? AND COALESCE(is_deleted, 0) = 0",
+                (list_id,),
+            ).fetchall()
+            row, _canonical, _reason = self.recover_scan(barcode, rows, strict_order_item=is_manual)
+            if row is None:
+                return None
+            identity = {
+                "lineItemId": str(row["id"] or ""),
+                "order": str(row["order_no"] or ""),
+                "item": str(row["item_no"] or ""),
+                "job": str(row["job"] or ""),
+            }
+        status = service.fabrication_status(
+            identity["order"], identity["item"], identity["job"], refresh_missing=True
+        )
+        return {**identity, **status}
+
     def record_scan(self, scan_request: dict[str, Any]) -> dict[str, Any]:
         """Purpose: Process scan for the delivery-list scanner workflow.
 
@@ -4559,6 +4596,76 @@ class BaseDeliveryStore:
         # v0.425 compatibility anchor: return cleaned_results[:20]
         return self.attach_priority_search_annotations(cleaned_results)[:20]
 
+    def get_order_detail(self, order_no: str, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return one order grouped by physical item with all active stage copies.
+
+        The Order GUI uses this focused payload instead of reusing the much larger
+        delivery-list response. Stage copies are retained as history, while each
+        physical source item appears once in the main item list.
+        """
+        clean_order = str(order_no or "").strip()
+        if not clean_order:
+            raise ValueError("Order number is required")
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT li.*, dl.label AS delivery_list_label, dl.delivery_date, dl.stage, dl.scanner, dl.status AS list_status
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.status = 'active'
+                  AND COALESCE(li.is_deleted, 0) = 0
+                  AND li.order_no = ?
+                ORDER BY dl.delivery_date DESC, CAST(li.item_no AS INTEGER), dl.id
+                """,
+                (clean_order,),
+            ).fetchall()
+        if user is not None:
+            rows = [row for row in rows if user_can_access_stage(user, row["stage"], row["scanner"])]
+        if not rows:
+            raise ValueError(f"Order {clean_order} was not found in active delivery lists")
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            source_id = str(row["source_id"] or "").strip()
+            item_no = str(row["item_no"] or "").strip()
+            key = source_id or f"{clean_order}:{item_no}:{row['job'] or ''}"
+            item = grouped.setdefault(key, {
+                "sourceId": source_id, "order": clean_order, "item": item_no,
+                "job": str(row["job"] or ""), "product": str(row["product"] or ""),
+                "dimensions": str(row["dimensions"] or ""), "customer": str(row["customer"] or ""),
+                "route": str(row["route"] or ""), "qty": int(row["qty"] or 0),
+                "processState": str(row["process_state"] or ""), "queueState": str(row["queue_state"] or ""),
+                "stages": [],
+            })
+            item["qty"] = max(int(item.get("qty") or 0), int(row["qty"] or 0))
+            for field, column in (("job", "job"), ("product", "product"), ("dimensions", "dimensions"), ("customer", "customer"), ("route", "route")):
+                if not item.get(field) and row[column]:
+                    item[field] = str(row[column] or "")
+            item["stages"].append({
+                "listId": str(row["list_id"] or ""),
+                "deliveryList": str(row["delivery_list_label"] or ""),
+                "deliveryDate": str(row["delivery_date"] or ""),
+                "stage": str(row["stage"] or ""),
+                "scanner": str(row["scanner"] or ""),
+                "scanned": int(row["scanned_qty"] or 0),
+                "qty": int(row["qty"] or 0),
+            })
+        items = sorted(grouped.values(), key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")))
+        first = items[0]
+        service = getattr(self, "production_files", None)
+        if service is not None:
+            for item in items:
+                item["productionFiles"] = service.item_assets(clean_order, item.get("item"), item.get("job"))
+        return {
+            "order": clean_order,
+            "customer": first.get("customer") or "",
+            "job": first.get("job") or "",
+            "route": first.get("route") or "",
+            "items": items,
+            "orderProductionFiles": service.order_assets(clean_order, first.get("job")) if service is not None else {"hardware": [], "sketches": []},
+            "productionFileAvailability": service.availability() if service is not None else {},
+        }
+
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Purpose: Update line item for the delivery-list scanner workflow.
 
@@ -5998,6 +6105,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         self.config = config
         self.database_path = Path(config.database_path)
         self.sample_path = Path(config.sample_path)
+        # v0.470: production-share indexing is lazy/TTL-cached; constructing the
+        # store never touches the I: drive and remains safe when shares are offline.
+        self.production_files = ProductionFileService(config)
         self._last_bay_event_cleanup_monotonic = 0.0
 
     def connect(self) -> sqlite3.Connection:
@@ -6062,6 +6172,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.refresh_stage_definition_cache()
             self.cleanup_old_bay_events(force=True)
             self.write_superseded_order_exclusion_file()
+            with self.connect() as con:
+                self.production_files.configure(self.production_file_settings_con(con))
         except Exception as exc:
             suffix = f" Verified backup preserved at {backup_path}." if backup_path else ""
             raise MigrationError(f"Database initialization failed.{suffix}") from exc
@@ -6132,6 +6244,102 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             """,
             (key, value, now_iso()),
         )
+
+    def _normalize_production_file_settings(self, data: dict[str, Any] | None) -> dict[str, Any]:
+        defaults = self.production_files.settings_snapshot()
+        values = data if isinstance(data, dict) else {}
+        roots = values.get("roots") if isinstance(values.get("roots"), dict) else {}
+        default_roots = defaults["roots"]
+
+        def boolean_value(name: str, default: bool) -> bool:
+            value = values.get(name, default)
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "on"}
+            return bool(value)
+
+        try:
+            cache_minutes = int(values.get("cacheMinutes", defaults["cacheMinutes"]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Production file cache minutes must be a whole number") from exc
+        if not 1 <= cache_minutes <= 1440:
+            raise ValueError("Production file cache minutes must be between 1 and 1440")
+
+        terms = values.get("machineTerms") if isinstance(values.get("machineTerms"), dict) else {}
+
+        def normalized_terms(machine: str) -> list[str]:
+            raw = terms.get(machine, defaults["machineTerms"][machine])
+            if isinstance(raw, str):
+                raw = re.split(r"[,;\n]+", raw)
+            cleaned = [str(term or "").strip().upper() for term in (raw or []) if str(term or "").strip()]
+            return list(dict.fromkeys(cleaned)) or list(defaults["machineTerms"][machine])
+
+        return {
+            "enabled": boolean_value("enabled", bool(defaults["enabled"])),
+            "enforceStaging": boolean_value("enforceStaging", bool(defaults["enforceStaging"])),
+            "cacheMinutes": cache_minutes,
+            "roots": {
+                "hardware": str(roots.get("hardware") or default_roots["hardware"]).strip(),
+                "sketches": str(roots.get("sketches") or default_roots["sketches"]).strip(),
+                "programs": str(roots.get("programs") or default_roots["programs"]).strip(),
+                "completedWaterjet": str(roots.get("completedWaterjet") or default_roots["completedWaterjet"]).strip(),
+            },
+            "machineTerms": {
+                "denver": normalized_terms("denver"),
+                "waterjet": normalized_terms("waterjet"),
+            },
+        }
+
+    def production_file_settings_con(self, con: Any) -> dict[str, Any]:
+        raw = self.system_metadata_value(con, PRODUCTION_FILE_SETTINGS_METADATA_KEY)
+        try:
+            payload = json.loads(raw) if raw else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        return self._normalize_production_file_settings(payload if isinstance(payload, dict) else {})
+
+    def get_production_file_settings(self) -> dict[str, Any]:
+        with self.connect() as con:
+            settings = self.production_file_settings_con(con)
+        self.production_files.configure(settings)
+        return {
+            **settings,
+            "availability": self.production_files.availability(),
+            "index": self.production_files.index_status(),
+        }
+
+    def update_production_file_settings(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        settings = self._normalize_production_file_settings(data)
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            self.set_system_metadata_value(
+                con,
+                PRODUCTION_FILE_SETTINGS_METADATA_KEY,
+                json.dumps(settings, sort_keys=True, separators=(",", ":")),
+            )
+            self.insert_audit(
+                con,
+                "production_file_settings",
+                "global",
+                "update_production_file_settings",
+                user,
+                "",
+                "",
+                settings,
+            )
+            con.commit()
+        self.production_files.configure(settings)
+        if settings["enabled"]:
+            self.production_files.refresh_async()
+        return self.get_production_file_settings()
+
+    def refresh_production_file_index(self) -> dict[str, Any]:
+        settings = self.get_production_file_settings()
+        if settings["enabled"]:
+            self.production_files.refresh_async()
+        return {
+            **settings,
+            "message": "Production file refresh started" if settings["enabled"] else "Production file integration is disabled",
+        }
 
     def rack_set_visuals(self, con: Any) -> dict[str, dict[str, str]]:
         """Return admin-selected rack-set icon/color preferences from existing metadata."""
@@ -15102,6 +15310,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if rack_code:
             return self.scan_rack_outbound(scan_request, rack_code)
 
+        fabrication_preflight = self.fabrication_scan_preflight(list_id, barcode, is_manual=is_manual)
+
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rows = con.execute(
@@ -15148,6 +15358,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.insert_audit(con, "line_item", row["id"], "duplicate_scan", user, station, "Quantity already scanned", {"barcode": barcode})
                 con.commit()
                 return self._get_payload(con, list_id, last)
+
+            if (
+                fabrication_preflight
+                and str(fabrication_preflight.get("lineItemId") or "") == str(row["id"] or "")
+                and fabrication_preflight.get("blockStaging")
+            ):
+                machine = str(fabrication_preflight.get("machine") or "the assigned fabrication machine")
+                message = "Fabrication required before Staging"
+                reason = f"This item is assigned to {machine}, but no completed fabrication evidence was found. Send it to {machine} before scanning it into Staging."
+                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "error", message, reason)
+                self.insert_audit(
+                    con, "line_item", row["id"], "staging_fabrication_blocked", user, station, reason,
+                    {
+                        "barcode": barcode,
+                        "machine": machine,
+                        "order": row["order_no"],
+                        "item": row["item_no"],
+                        "fabrication": fabrication_preflight,
+                    },
+                )
+                con.commit()
+                payload = self._get_payload(con, list_id, last)
+                payload["fabricationGate"] = fabrication_preflight
+                payload["fabricationGate"]["message"] = reason
+                return payload
 
             remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
             scan_qty = min(requested_scan_qty, remaining_qty)
@@ -17672,6 +17907,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         external_remakes = empty_breakage_bucket()
         production_glass: dict[str, dict[str, Any]] = {}
         external_by_glass: dict[str, dict[str, Any]] = {}
+        glass_size_frequency: dict[str, dict[str, dict[str, int]]] = {}
+
+        def statistics_dimension_label(value: Any) -> str:
+            """Canonicalize width/height orientation for size-frequency reporting.
+
+            A 28 x 79 1/2 lite and a rotated 79 1/2 x 28 lite are the same
+            physical glass size. Preserve the source's readable fractional text,
+            but place the shorter numeric dimension first so their counts combine.
+            """
+            text = re.sub(r"\s+", " ", str(value or "").strip())
+            if not text:
+                return "Unknown size"
+            match = re.search(r"(.+?)\s*[xX×]\s*(.+)", text)
+            if not match:
+                return text
+
+            left = match.group(1).strip()
+            right = match.group(2).strip()
+
+            def dimension_sort_value(part: str) -> float:
+                cleaned = re.sub(r"(?<=\d)-(?=\d+\s*/\s*\d+)", " ", str(part or ""))
+                cleaned = cleaned.replace('"', " ").replace("inches", " ").replace("inch", " ").replace("in", " ")
+                numeric = re.search(r"\d+(?:\.\d+)?(?:\s+\d+\s*/\s*\d+)?|\d+\s*/\s*\d+", cleaned, re.IGNORECASE)
+                if not numeric:
+                    return 0.0
+                return parse_dimension_number(re.sub(r"\s*/\s*", "/", numeric.group(0)))
+
+            left_value = dimension_sort_value(left)
+            right_value = dimension_sort_value(right)
+            if left_value > 0 and right_value > 0 and left_value > right_value:
+                left, right = right, left
+            return f"{left} × {right}"
 
         for item in physical_items.values():
             qty = max(int(item.get("qty") or 0), 0)
@@ -17682,6 +17949,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             glass_bucket = production_glass.setdefault(glass_label, empty_breakage_bucket())
             add_breakage(glass_bucket, qty, sqft, rate)
+            size_label = statistics_dimension_label(item.get("dimensions"))
+            size_bucket = glass_size_frequency.setdefault(glass_label, {}).setdefault(size_label, {"pieces": 0, "rowCount": 0})
+            size_bucket["pieces"] += qty
+            size_bucket["rowCount"] += 1
 
             if item.get("isRemake"):
                 add_breakage(external_remakes, qty, sqft, rate)
@@ -17885,6 +18156,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
             if int(bucket.get("pieces") or 0) > 0
         ]
+        glass_size_frequency_by_type = []
+        for glass_type, sizes in sorted(
+            glass_size_frequency.items(),
+            key=lambda entry: (-sum(int(value.get("pieces") or 0) for value in entry[1].values()), entry[0].lower()),
+        ):
+            size_rows = [
+                {"dimensions": dimensions, "pieces": int(values.get("pieces") or 0), "rowCount": int(values.get("rowCount") or 0)}
+                for dimensions, values in sizes.items()
+                if int(values.get("pieces") or 0) > 0
+            ]
+            size_rows.sort(key=lambda row: (-int(row["pieces"]), -int(row["rowCount"]), str(row["dimensions"]).lower()))
+            total_pieces = sum(int(row["pieces"]) for row in size_rows)
+            for row in size_rows:
+                row["sharePercent"] = round((int(row["pieces"]) / total_pieces * 100.0), 2) if total_pieces else 0.0
+            glass_size_frequency_by_type.append({
+                "glassType": glass_type,
+                "totalPieces": total_pieces,
+                "mostCommonSize": size_rows[0] if size_rows else None,
+                "sizes": size_rows,
+            })
 
         return {
             "dateFrom": date_from,
@@ -17904,6 +18195,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "userActionCount": user_actions,
             "sdiCount": sdi_count,
             "glassQuantityByType": glass_quantity_by_type,
+            "glassSizeFrequencyByType": glass_size_frequency_by_type,
             "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
             "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
             "monthlyRemakeMonth": current_month.strftime("%B %Y"),
@@ -19454,8 +19746,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             old_rack_id = item["rack_id"]
             source = con.execute("SELECT rack_code, status FROM racks WHERE id = ?", (old_rack_id,)).fetchone()
             source_rack_code = str(source["rack_code"] or "") if source else ""
-            if source and str(source["status"] or "").strip().lower() == "in transit":
-                raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+            if source:
+                source_status = re.sub(r"[\s_-]+", "", str(source["status"] or "Open")).lower()
+                if source_status in {"intransit", "ontheway"}:
+                    raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+                if source_status in {"closed", "complete", "completed"}:
+                    raise ValueError("Mark the source rack Incomplete before moving its contents")
             self.validate_rack_destination_for_item(con, target, line_item)
             con.execute("UPDATE rack_items SET rack_id = ?, reason = 'Moved between racks' WHERE id = ?", (target["id"], rack_item_id))
             self.refresh_rack_destination(con, old_rack_id)
@@ -19497,8 +19793,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.execute("BEGIN IMMEDIATE")
             source = self.get_rack_by_code(con, source_code)
             target = self.get_rack_by_code(con, target_code)
-            if str(source["status"] or "").strip().lower() == "in transit":
+            source_status = re.sub(r"[\s_-]+", "", str(source["status"] or "Open")).lower()
+            if source_status in {"intransit", "ontheway"}:
                 raise ValueError("Return or mark the source rack Not On The Way before moving its contents")
+            if source_status in {"closed", "complete", "completed"}:
+                raise ValueError("Mark the source rack Incomplete before moving its contents")
             target_status = str(target["status"] or "Open").strip().lower()
             if target_status != "open":
                 raise ValueError("Choose an open destination rack before moving contents")
@@ -19655,8 +19954,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchone()
             if not item:
                 raise ValueError("Rack item not found")
-            if str(item["rack_status"] or "").strip().lower() == "in transit":
+            rack_status = re.sub(r"[\s_-]+", "", str(item["rack_status"] or "Open")).lower()
+            if rack_status in {"intransit", "ontheway"}:
                 raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
+            if rack_status in {"closed", "complete", "completed"}:
+                raise ValueError("Mark the rack Incomplete before removing its contents")
             con.execute(
                 "UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Individually cleared from rack' WHERE id = ?",
                 (user, now_iso(), rack_item_id),
@@ -19685,8 +19987,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             rack = self.get_rack_by_code(con, rack_code)
-            if str(rack["status"] or "").strip().lower() == "in transit":
+            rack_status = re.sub(r"[\s_-]+", "", str(rack["status"] or "Open")).lower()
+            if rack_status in {"intransit", "ontheway"}:
                 raise ValueError("Return or mark the rack Not On The Way before clearing its contents")
+            if rack_status in {"closed", "complete", "completed"}:
+                raise ValueError("Mark the rack Incomplete before removing its contents")
             con.execute("UPDATE rack_items SET status = 'Removed', removed_by = ?, removed_at = ?, reason = 'Rack cleared' WHERE rack_id = ? AND status = 'Active'", (user, now_iso(), rack["id"]))
             con.execute("UPDATE racks SET status = 'Open', destination = '', completed_at = '', departed_at = '', returned_at = ?, updated_at = ? WHERE id = ?", (now_iso(), now_iso(), rack["id"]))
             self.insert_audit(con, "rack", rack["rack_code"], "clear_rack", user, "", "", {})
@@ -24194,6 +24499,7 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
         self.config = config
         self.database_path = Path(config.database_path)
         self.sample_path = Path(config.sample_path)
+        self.production_files = ProductionFileService(config)
         self.connection_string = str(config.database_connection_string or "").strip()
         self._last_bay_event_cleanup_monotonic = 0.0
 
@@ -24241,6 +24547,8 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
         self.refresh_stage_definition_cache()
         self.cleanup_old_bay_events(force=True)
         self.write_superseded_order_exclusion_file()
+        with self.connect() as con:
+            self.production_files.configure(self.production_file_settings_con(con))
 
     def health(self) -> dict[str, Any]:
         """Purpose: Run the health workflow for the delivery-list scanner.

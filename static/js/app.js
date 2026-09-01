@@ -100,6 +100,7 @@ const state = {
   search: "",
   globalSearchLastQuery: "",
   globalSearchLastResults: [],
+  globalSearchRequestId: 0,
   pageIndex: 1,
   // v0.467: show more delivery-list rows by default; operators can still reduce it.
   pageSize: 50,
@@ -110,6 +111,8 @@ const state = {
   homePageSize: 25,
   expandedDeliveryDate: "",
   collapsedGlassTypes: new Set(),
+  collapsedScanOrders: new Set(),
+  scanOrderToggleTimer: null,
   baySearch: "",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
@@ -214,6 +217,15 @@ const state = {
   bayScannerRulesActiveTab: "rules",
   scanPageSettingsActiveTab: "crossDate",
   crossDateScanSettings: { mode: "auto_unique", pastDays: 7, futureDays: 30 },
+  productionFileSettings: {
+    enabled: true,
+    enforceStaging: true,
+    cacheMinutes: 5,
+    roots: { hardware: "", sketches: "", programs: "", completedWaterjet: "" },
+    machineTerms: { denver: ["DENVER", "DENVER CNC"], waterjet: ["WATER JET", "WATERJET", "WJ"] },
+    availability: {},
+    index: { refreshing: [], counts: {}, indexedAt: 0 },
+  },
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -284,6 +296,10 @@ const state = {
   rushRedirectInProgress: false,
   lastScan: null,
   homeReportSummary: null,
+  // v0.471: keep one report request in flight at a time. Statistics can be
+  // opened while the startup report is still loading, so the UI needs an
+  // explicit loading state instead of briefly presenting an empty selector.
+  homeReportSummaryLoading: false,
   // v0.260: Statistics opens glass-first with a compact top-10 donut.
   // The external-remake toggle is intentionally independent so machine
   // accountability never silently attributes customer/external remakes.
@@ -297,6 +313,7 @@ const state = {
   // v0.262: breakage charts use one combined dataset and switch the charted
   // unit without forcing users through duplicate piece/SQFT/cost datasets.
   statisticsBreakageMeasure: "sqft",
+  statisticsGlassSizeType: "",
   // v0.455: one calendar range owns the entire analytics workspace regardless
   // of whether the data is shown as a bar, line, donut, or table.
   statisticsCustomDateFrom: "",
@@ -1003,6 +1020,8 @@ const els = {
   statsChartFilterInput: document.getElementById("statsChartFilterInput"),
   statisticsChartRangeButton: document.getElementById("statisticsChartRangeButton"),
   statisticsChartRangeText: document.getElementById("statisticsChartRangeText"),
+  statisticsGlassSizeControl: document.getElementById("statisticsGlassSizeControl"),
+  statsGlassSizeTypeSelect: document.getElementById("statsGlassSizeTypeSelect"),
   statisticsBreakageMeasureControl: document.getElementById("statisticsBreakageMeasureControl"),
   statsBreakageMeasureSelect: document.getElementById("statsBreakageMeasureSelect"),
   statisticsExternalRemakesControl: document.getElementById("statisticsExternalRemakesControl"),
@@ -1092,6 +1111,7 @@ const els = {
   totalItemsText: document.getElementById("totalItemsText"),
   scanFilterDrawer: document.getElementById("scanFilterDrawer"),
   scanFilterPriorityState: document.getElementById("scanFilterPriorityState"),
+  scanFilterErrorBadge: document.getElementById("scanFilterErrorBadge"),
   scanFilterRemakeBadge: document.getElementById("scanFilterRemakeBadge"),
   scanFilterRushBadge: document.getElementById("scanFilterRushBadge"),
   scanFilterUpdatedBadge: document.getElementById("scanFilterUpdatedBadge"),
@@ -5628,6 +5648,22 @@ function customSelectSelectedText(select) {
   return option?.dataset.selectedLabel?.trim() || option?.textContent?.trim() || select.getAttribute("placeholder") || "Choose an option";
 }
 
+/**
+ * v0.471: Return a lightweight signature for the option set currently owned by
+ * a native select. Dynamic selects can receive their options after their custom
+ * menu has already opened; tracking the option set lets that open menu refresh
+ * immediately instead of remaining stuck on an earlier empty snapshot.
+ */
+function customSelectOptionSignature(select) {
+  return [...(select?.options || [])].map((option, index) => [
+    index,
+    option.value,
+    option.textContent?.trim() || "",
+    option.disabled ? "1" : "0",
+    option.hidden ? "1" : "0",
+  ].join(":")) .join("|");
+}
+
 function customSelectUpdateIndicatorTitle(select, option, indicatorCount) {
   const countText = indicatorCount || "Unreviewed";
   const lineText = indicatorCount === 1 ? "line" : "lines";
@@ -5648,6 +5684,21 @@ function syncCustomSelect(select) {
   const trigger = shell?.querySelector(":scope > .custom-select-trigger");
   const value = trigger?.querySelector(".custom-select-value");
   if (!shell || !trigger || !value) return;
+
+  // v0.471: custom menus are portaled to <body> and normally render their
+  // option rows only when opened. If a backend response fills a select while
+  // its menu is already open (Statistics common glass sizes is one example),
+  // rebuild the visible rows in place and preserve any active menu search.
+  if (customSelectUi.openSelect === select && customSelectUi.menu) {
+    const signature = customSelectOptionSignature(select);
+    if (customSelectUi.menu.dataset.optionSignatureV471 !== signature) {
+      const optionsHost = customSelectUi.menu.querySelector(".custom-select-options");
+      const query = customSelectUi.menu.querySelector(".custom-select-search input")?.value || "";
+      if (optionsHost) renderCustomSelectOptions(select, optionsHost, query);
+      customSelectUi.menu.dataset.optionSignatureV471 = signature;
+      positionCustomSelectMenu();
+    }
+  }
 
   const option = select.selectedOptions?.[0] || select.options?.[select.selectedIndex];
   const disabled = Boolean(select.disabled);
@@ -6099,6 +6150,7 @@ function openCustomSelect(select) {
 
   trigger.setAttribute("aria-controls", menu.id);
   renderCustomSelectOptions(select, optionsHost);
+  menu.dataset.optionSignatureV471 = customSelectOptionSignature(select);
   syncCustomSelect(select);
   positionCustomSelectMenu();
 
@@ -9669,6 +9721,7 @@ function renderCounts() {
     button.classList.toggle("is-clear", !internalRejectCount);
   });
   if (els.countUpdated) els.countUpdated.textContent = `${updatedCount}`;
+  updateScanFilterGlanceBadge(els.scanFilterErrorBadge, stats.errorCount, "scan errors");
   updateScanFilterGlanceBadge(els.scanFilterRemakeBadge, remakeAll, "remake pieces");
   updateScanFilterGlanceBadge(els.scanFilterRushBadge, rushAll, "rush pieces");
   updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new-order pieces");
@@ -9677,6 +9730,7 @@ function renderCounts() {
 
   document.querySelectorAll('[data-filter="errors"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(stats.errorCount));
+    button.classList.toggle("is-error-active-v470", Boolean(stats.errorCount));
   });
 
   if (els.countIndianTrailRoute) els.countIndianTrailRoute.textContent = `${routeCounts["indian-trail-route"]}`;
@@ -10229,7 +10283,7 @@ function renderItemRow(item) {
   const priorityRibbon = priorityItemRibbonV441(item, { targetReference: false });
   const rowIdentityAttribute = movedOutByPriorityDate
     ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"`
-    : `data-id="${escapeHtml(item.id)}"`;
+    : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}"`;
 
   return `
     ${priorityRibbon}
@@ -10246,6 +10300,36 @@ function renderItemRow(item) {
       <td class="location-cell">${locationHtml}</td>
       <td>${processPillMarkupV447(item, processClass, processText)}</td>
     </tr>`;
+}
+
+function renderScanOrderGroupsV472(items = []) {
+  const groups = new Map();
+  for (const item of items) {
+    const order = String(item?.order || "Unassigned").trim() || "Unassigned";
+    if (!groups.has(order)) groups.set(order, []);
+    groups.get(order).push(item);
+  }
+  return [...groups.entries()].map(([order, orderItems]) => {
+    const first = orderItems[0] || {};
+    const totalQty = orderItems.reduce((sum, item) => sum + Math.max(Number(item.qty || 0), 0), 0);
+    const scannedQty = orderItems.reduce((sum, item) => sum + Math.min(Math.max(Number(item.scanned || 0), 0), Math.max(Number(item.qty || 0), 0)), 0);
+    const collapsed = state.collapsedScanOrders.has(order);
+    const attention = orderItems.filter((item) => isNewOrUpdatedItem(item) || isRemakeItem(item) || isRushItem(item) || Number(item.internalRejectCount || 0) > 0).length;
+    return `
+      <tr class="scan-order-group-row-v472 ${collapsed ? "is-collapsed" : ""}" data-order-v470="${escapeHtml(order)}">
+        <td colspan="10">
+          <button type="button" data-toggle-scan-order-v472="${escapeHtml(order)}" aria-expanded="${collapsed ? "false" : "true"}">
+            <span class="scan-order-chevron-v472" aria-hidden="true"></span>
+            <span class="scan-order-identity-v472"><small>Order Nr.</small><strong>${escapeHtml(order)}</strong></span>
+            <span class="scan-order-job-v472"><small>Job Nr.</small><b>${escapeHtml(first.job || "Not provided")}</b></span>
+            <span class="scan-order-customer-v472"><small>Customer</small><b>${escapeHtml(first.customer || "Not provided")}</b></span>
+            ${attention ? `<mark class="scan-order-attention-v472">${escapeHtml(attention)} attention</mark>` : ""}
+            <span class="scan-order-progress-v472"><b>${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)}</b><small>pieces scanned</small></span>
+          </button>
+        </td>
+      </tr>
+      ${collapsed ? "" : orderItems.map(renderItemRow).join("")}`;
+  }).join("");
 }
 
 /**
@@ -10280,7 +10364,7 @@ function renderTable() {
             </button>
           </td>
         </tr>
-        ${collapsed ? "" : groupItems.map(renderItemRow).join("")}
+        ${collapsed ? "" : renderScanOrderGroupsV472(groupItems)}
       `;
     })
     .join("");
@@ -11120,10 +11204,12 @@ function renderRacksPage() {
     const rackGlassLabel = glassTypeLabel(item);
     const itemLabel = `${item.order}-${item.item}`;
     const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
-    const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
-    const blockedReason = sourceOnTheWay
-      ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
-      : "";
+    const sourceState = String(sourceRack?.status || "").trim().toLowerCase();
+    const blockedReason = sourceState === "closed"
+      ? `${rackOptionLabel(sourceRack)} is Complete. Mark it Incomplete before moving or removing rack contents.`
+      : sourceState === "in transit"
+        ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+        : "";
     const moveBlockedAttrs = blockedReason
       ? `aria-disabled="true" data-blocked-reason="${escapeHtml(blockedReason)}" title="${escapeHtml(blockedReason)}"`
       : `title="Move piece"`;
@@ -11233,9 +11319,11 @@ function renderRacksPage() {
     const rackHasMoveOpen = (rack.items || []).some((item) => String(item.rackItemId || "") === state.rackMoveItemId);
     const rackOpen = state.expandedRackCodes.has(rack.code) || rackHasMoveOpen;
 
-    const rackBlockedReason = isInTransit
-      ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.`
-      : "";
+    const rackBlockedReason = isComplete
+      ? `${rackOptionLabel(rack)} is Complete. Mark it Incomplete before removing rack contents.`
+      : isInTransit
+        ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before clearing its contents.`
+        : "";
     const rackClearAttrs = rackBlockedReason
       ? `aria-disabled="true" data-blocked-reason="${escapeHtml(rackBlockedReason)}" title="${escapeHtml(rackBlockedReason)}"`
       : `title="Clear rack"`;
@@ -12303,7 +12391,7 @@ function renderMobileCards() {
           : "";
         return `
           ${mobilePriorityRibbon}
-          <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassToneAttributes(glassLabel)} ${movedOutByPriorityDate ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"` : `data-id="${escapeHtml(item.id)}"`} data-scan-state="${escapeHtml(status)}">
+          <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassToneAttributes(glassLabel)} ${movedOutByPriorityDate ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"` : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}"`} data-scan-state="${escapeHtml(status)}">
             <header class="mobile-card-heading">
               <span class="mobile-card-job"><small>Job Nr.</small><b>${escapeHtml(item.job || item.product || "Not provided")}</b></span>
               <span class="mobile-card-scan-state ${escapeHtml(status)}" aria-label="${escapeHtml(`${scanStateLabel}: ${scanned} of ${quantity} pieces scanned`)}">
@@ -14160,6 +14248,28 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
     };
   }
 
+  if (metric === "glass-sizes") {
+    const rows = Array.isArray(report.glassSizeFrequencyByType) ? report.glassSizeFrequencyByType : [];
+    const availableTypes = rows.filter((row) => Array.isArray(row.sizes) && row.sizes.length);
+    const selected = availableTypes.find((row) => row.glassType === state.statisticsGlassSizeType) || availableTypes[0] || null;
+    if (selected && state.statisticsGlassSizeType !== selected.glassType) state.statisticsGlassSizeType = selected.glassType || "";
+    const glassColorMap = buildGlassVisualColorMap(selected ? [selected.glassType] : []);
+    return {
+      metric,
+      icon: "glass",
+      title: selected ? `Most common sizes · ${selected.glassType}` : "Most common glass sizes",
+      subtitle: selected ? `Piece frequency for ${selected.glassType} in the selected reporting range.` : "Choose a glass type to compare its most frequently produced dimensions.",
+      suffix: " pcs",
+      allowDonut: false,
+      entries: (selected?.sizes || []).map((row) => ({
+        label: row.dimensions || "Unknown size",
+        value: Number(row.pieces || 0),
+        color: statisticsGlassColorV459(selected.glassType, glassColorMap),
+        detail: `${Number(row.pieces || 0)} pieces · ${Number(row.sharePercent || 0).toFixed(1)}% of ${selected.glassType} · ${Number(row.rowCount || 0)} line${Number(row.rowCount || 0) === 1 ? "" : "s"}`,
+      })),
+    };
+  }
+
   if (metric === "glass") {
     const glassRows = glassQuantitiesForStatistics(overviewLists);
     const glassColorMap = buildGlassVisualColorMap(glassRows.map((row) => row.label));
@@ -14847,13 +14957,40 @@ function renderStatisticsAnalytics() {
   if (els.statsChartSortSelect) els.statsChartSortSelect.value = state.homeChartSort;
   if (els.statsChartLimitSelect) els.statsChartLimitSelect.value = state.homeChartLimit;
   if (els.statsChartFilterInput && els.statsChartFilterInput.value !== state.homeChartQuery) els.statsChartFilterInput.value = state.homeChartQuery;
+  const glassSizeVisible = state.homeChartMetric === "glass-sizes";
+  if (els.statisticsGlassSizeControl) els.statisticsGlassSizeControl.hidden = !glassSizeVisible;
+  if (els.statsGlassSizeTypeSelect) {
+    const sizeTypes = (state.homeReportSummary?.glassSizeFrequencyByType || []).filter((row) => Array.isArray(row.sizes) && row.sizes.length);
+    if (!state.statisticsGlassSizeType || !sizeTypes.some((row) => row.glassType === state.statisticsGlassSizeType)) {
+      state.statisticsGlassSizeType = sizeTypes[0]?.glassType || "";
+    }
+
+    // v0.471: never leave the dynamic custom select with a zero-option menu.
+    // While the report is loading it presents a disabled loading row; a real
+    // empty range presents an explicit no-data row. Once report data arrives,
+    // the shared custom-select refresh above replaces an already-open menu too.
+    const statusText = state.homeReportSummaryLoading
+      ? "Loading glass types…"
+      : "No glass-size data in this range";
+    const signature = sizeTypes.length
+      ? sizeTypes.map((row) => `${row.glassType}:${row.totalPieces || 0}`).join("|")
+      : `status:${statusText}`;
+    if (els.statsGlassSizeTypeSelect.dataset.signatureV471 !== signature) {
+      els.statsGlassSizeTypeSelect.innerHTML = sizeTypes.length
+        ? sizeTypes.map((row) => `<option value="${escapeHtml(row.glassType)}">${escapeHtml(row.glassType)} · ${escapeHtml(row.totalPieces || 0)} pcs</option>`).join("")
+        : `<option value="">${escapeHtml(statusText)}</option>`;
+      els.statsGlassSizeTypeSelect.dataset.signatureV471 = signature;
+    }
+    els.statsGlassSizeTypeSelect.disabled = !sizeTypes.length;
+    els.statsGlassSizeTypeSelect.value = sizeTypes.length ? state.statisticsGlassSizeType : "";
+  }
   const breakageMeasureVisible = ["breakage-machines", "breakage-glass"].includes(state.homeChartMetric);
   const externalRemakesVisible = ["breakage-machines", "breakage-glass", "breakage-rate"].includes(state.homeChartMetric);
   if (els.statisticsBreakageMeasureControl) els.statisticsBreakageMeasureControl.hidden = !breakageMeasureVisible;
   if (els.statsBreakageMeasureSelect) els.statsBreakageMeasureSelect.value = state.statisticsBreakageMeasure;
   if (els.statisticsExternalRemakesControl) els.statisticsExternalRemakesControl.hidden = !externalRemakesVisible;
   if (els.statsIncludeExternalRemakes) els.statsIncludeExternalRemakes.checked = Boolean(state.statisticsIncludeExternalRemakes);
-  [els.statsChartMetricSelect, els.statsBreakageMeasureSelect, els.statsChartSortSelect, els.statsChartLimitSelect].forEach((select) => {
+  [els.statsChartMetricSelect, els.statsGlassSizeTypeSelect, els.statsBreakageMeasureSelect, els.statsChartSortSelect, els.statsChartLimitSelect].forEach((select) => {
     if (select) syncCustomSelect(select);
   });
   syncStatisticsChartRangeControlV455();
@@ -15081,14 +15218,22 @@ function renderHomeStatistics(overviewLists, overview) {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 async function loadHomeReportSummary() {
-  if (!state.backend || !hasPermission("view_reports")) return;
+  if (!state.backend || !hasPermission("view_reports")) return state.homeReportSummary;
+  if (state.homeReportSummaryLoading) return state.homeReportSummary;
+
+  state.homeReportSummaryLoading = true;
+  if (state.page === "statistics") renderStatisticsAnalytics();
   try {
     state.homeReportSummary = await fetchJson(`/api/reports/summary${homeReportDateParams()}`);
-    if (state.page === "statistics") renderStatisticsPage();
+    return state.homeReportSummary;
   } catch {
     // Report details enrich the Statistics page. Keep the core page usable
-    // even when a user lacks report access or the report query fails.
+    // even when report access fails, and allow page entry/Refresh to retry.
     state.homeReportSummary = null;
+    return null;
+  } finally {
+    state.homeReportSummaryLoading = false;
+    if (state.page === "statistics") renderStatisticsPage();
   }
 }
 
@@ -15804,6 +15949,7 @@ function showPage(page) {
     "view_admin", "reset_delivery_lists", "import_delivery_lists", "edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items", "delete_delivery_lists",
     "review_superseded_orders", "manage_users", "manage_user_access", "manage_user_assignments", "manage_roles", "view_sessions",
     "manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation",
+    "manage_production_files",
     "manage_cross_date_scanning", "manage_reject_settings", "manage_bay_layout", "manage_bay_scanner_rules",
     "manage_bay_auto_assigner", "manage_racks",
   ])) page = "home";
@@ -15842,7 +15988,14 @@ function showPage(page) {
   updateModalScrollLock();
   requestAnimationFrame(() => updateModalScrollLock());
   if (page === "home") renderHome();
-  if (page === "statistics") renderStatisticsPage();
+  if (page === "statistics") {
+    renderStatisticsPage();
+    // v0.471: the startup report query is intentionally asynchronous. If a
+    // user reaches Statistics before it completes (or after a transient report
+    // failure), page entry now guarantees a retry instead of leaving report-only
+    // controls such as Common glass sizes empty.
+    if (!state.homeReportSummary) void loadHomeReportSummary();
+  }
   if (page === "scan") renderScanPage();
   if (page === "racks") {
     refreshRacksPage().catch((error) => showInlineError(error.message, true));
@@ -17745,6 +17898,7 @@ function printCurrentPageManaged() {
 async function runGlobalSearch() {
   if (!hasPermission("global_search")) return [];
   const query = els.headerGlobalSearchInput?.value.trim() || "";
+  const requestId = ++state.globalSearchRequestId;
   if (query.length < 2) {
     state.globalSearchLastQuery = "";
     state.globalSearchLastResults = [];
@@ -17756,6 +17910,9 @@ async function runGlobalSearch() {
     ensureGlassVisualLookupLibrary().catch(() => []),
   ]);
   const results = payload.results || [];
+  if (requestId !== state.globalSearchRequestId || query !== (els.headerGlobalSearchInput?.value.trim() || "")) {
+    return [];
+  }
   state.globalSearchLastQuery = query;
   state.globalSearchLastResults = results;
   renderGlobalSearchResults(results);
@@ -17996,7 +18153,10 @@ function renderGlobalSearchResults(results) {
         const scanMarkup = result.lastScanTime
           ? `<span class="global-result-stage-scan-divider-v440" aria-hidden="true">•</span><span class="global-result-scan-timing-v447 ${searchScanTimingV447.late ? "is-late-v447" : "is-on-time-v447"}">${globalSearchIconV433("scan")}<b class="global-result-inline-label-v427 global-result-scanned-label-v440">${escapeHtml(searchScanTimingV447.label)}</b> <time class="global-result-stage-scan-time-v440" datetime="${escapeHtml(result.lastScanTime)}">${escapeHtml(globalSearchScanDateTimeV439(result.lastScanTime))}</time></span>`
           : "";
-        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Stage:</b> ${globalSearchStatusBadges(result)}${scanMarkup}</span>`;
+        const fabricationMarkupV470 = result.fabrication?.machine
+          ? `<span class="global-result-fabrication-v470 ${result.fabrication.fabricated === true ? "is-fabricated" : result.fabrication.fabricated === false ? "is-missing" : "is-unknown"}">${escapeHtml(result.fabrication.label || result.fabrication.machine)}</span>`
+          : "";
+        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Stage:</b> ${globalSearchStatusBadges(result)}${scanMarkup}${fabricationMarkupV470}</span>`;
 
         return `
         <button type="button" ${openAttrs} class="global-result-card-v425 global-result-line-v426 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"}" style="${escapeHtml(resultStyle)}">
@@ -18150,7 +18310,10 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   const leftTruckLeft = sideGap;
   const rightTruckLeft = Math.max(sideGap, laneWidth - truckWidth - sideGap);
   const stackWidth = Number(profile.stackWidth || 20);
-  const outboundLeft = Math.max(0, leftTruckLeft - stackWidth - 4);
+  // v0.470: Outbound glass waits on the *front/right* side of the parked
+  // truck, then enters the cargo body right-to-left. The glass layer itself
+  // remains above the dotted route but below the truck via bays.css.
+  const outboundLeft = Math.min(Math.max(0, laneWidth - stackWidth), leftTruckLeft + truckWidth + 7);
   const inboundRight = Math.max(1, sideGap - stackWidth - 2);
   if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
   if (inboundTransfer) inboundTransfer.style.setProperty("right", `${inboundRight}px`, "important");
@@ -18185,15 +18348,16 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
     const startMs = index * paneStaggerMs;
     const endMs = startMs + paneMotionMs;
     const paneLeft = outboundLeft + (index * paneStep);
-    // Move far enough into the cargo body that the pane is fully hidden behind
-    // the truck before opacity is dropped; z-index handles the physical occlusion.
-    const targetDx = Math.max(18, (leftTruckLeft + 25) - paneLeft);
+    // Target the rear half of the cargo body. Because the waiting stack begins
+    // to the truck's right, this is always negative/right-to-left motion.
+    const cargoTargetX = leftTruckLeft + Math.min(31, Math.max(21, truckWidth * .30));
+    const targetDx = Math.min(-18, cargoTargetX - paneLeft);
     pane.animate([
       { offset: 0, opacity: 1, transform: "translateX(0)" },
       { offset: offset(startMs), opacity: 1, transform: "translateX(0)" },
       { offset: offset(Math.max(startMs, endMs - 70)), opacity: 1, transform: `translateX(${targetDx}px)` },
-      { offset: offset(endMs), opacity: 0, transform: `translateX(${targetDx + 5}px)` },
-      { offset: 1, opacity: 0, transform: `translateX(${targetDx + 5}px)` },
+      { offset: offset(endMs), opacity: 0, transform: `translateX(${targetDx - 5}px)` },
+      { offset: 1, opacity: 0, transform: `translateX(${targetDx - 5}px)` },
     ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
   });
 
@@ -18206,6 +18370,10 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
     const startDx = insideRearX - finalPaneLeft;
     pane.animate([
       { offset: 0, opacity: 0, transform: `translateX(${startDx}px)` },
+      // Hold fully invisible until the truck has actually arrived and flipped.
+      // Without this duplicate keyframe, Web Animations interpolates opacity
+      // from cycle start and makes Inbound glass faintly appear too early.
+      { offset: offset(Math.max(0, startMs - 2)), opacity: 0, transform: `translateX(${startDx}px)` },
       { offset: offset(startMs), opacity: 1, transform: `translateX(${startDx}px)` },
       { offset: offset(endMs), opacity: 1, transform: "translateX(0)" },
       { offset: offset(returnDepartMs), opacity: 1, transform: "translateX(0)" },
@@ -22384,14 +22552,14 @@ function updatePriorityIntakeEmailMode() {
   if (!els.priorityIntakeEmailHint) return;
   const transport = state.sdiWorkspace?.emailTransport || {};
   if (mode === "draft") {
-    els.priorityIntakeEmailHint.innerHTML = `<strong>Draft in your email app</strong><span>The scanner writes the subject and message, then opens your default mail application for you to choose the From account, adjust recipients, and send.</span>`;
+    els.priorityIntakeEmailHint.innerHTML = `<strong>Email draft</strong><span>Opens a prepared message for review.</span>`;
     return;
   }
   if (mode === "none") {
-    els.priorityIntakeEmailHint.innerHTML = `<strong>No email</strong><span>The request is still saved, matched, and audited without creating a message.</span>`;
+    els.priorityIntakeEmailHint.innerHTML = `<strong>No email</strong><span>Priority work is still saved and audited.</span>`;
     return;
   }
-  els.priorityIntakeEmailHint.innerHTML = `<strong>${escapeHtml(transport.transportLabel || "System email")}</strong><span>${transport.configured ? `Sends immediately from <b>${escapeHtml(transport.from || "the configured scanner mailbox")}</b>.` : "The scanner email transport is not configured, so system sending may fall back to an auditable draft state."}</span>`;
+  els.priorityIntakeEmailHint.innerHTML = `<strong>${escapeHtml(transport.transportLabel || "System email")}</strong><span>${transport.configured ? "Sends immediately." : "Email transport is not configured; a draft may be saved instead."}</span>`;
 }
 
 
@@ -22403,8 +22571,8 @@ function renderPriorityWorkLookupStatus() {
   els.priorityIntakeLookupStatus.className = "priority-work-lookup-status-v469";
   if (!query) {
     els.priorityIntakeLookupStatus.classList.add("is-idle");
-    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>The scanner will check active delivery lists automatically.</small></div>`;
-    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Checking imported work is automatic.</b> Enter the Job Nr. / SO / Order Nr. above.`;
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Enter a Job Nr., SO, or Order Nr.</strong><small>Active lists are checked automatically.</small></div>`;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.textContent = "Enter an order and save.";
     const button = document.getElementById("priorityIntakeSubmitBtn");
     if (button?.querySelector("span")) button.querySelector("span").textContent = state.priorityIntakeEditingRequestId ? "Save Changes" : "Save Priority Work";
     return;
@@ -22426,15 +22594,15 @@ function renderPriorityWorkLookupStatus() {
     const date = lookup.effectiveDeliveryDate || lookup.deliveryDate || "";
     els.priorityIntakeLookupStatus.innerHTML = `
       <span class="priority-work-lookup-icon-v469" aria-hidden="true"></span>
-      <div class="priority-work-lookup-copy-v469"><strong>Imported order found — apply now</strong><small>${escapeHtml(lookup.job || query)}${lookup.customer ? ` · ${escapeHtml(lookup.customer)}` : ""}</small></div>
-      <div class="priority-work-lookup-facts-v469"><span><b>${escapeHtml(orders)}</b><small>Order Nr.</small></span><span><b>${escapeHtml(lookup.pieceQty || 0)}</b><small>Pieces</small></span><span><b>${escapeHtml(lookup.stageCount || 0)}</b><small>Stages</small></span><span><b>${escapeHtml(date ? formatDisplayDate(date) : "-")}</b><small>Delivery</small></span></div>`;
+      <div class="priority-work-lookup-copy-v469"><strong>Imported — applies now</strong><small>${escapeHtml(lookup.job || query)}${lookup.customer ? ` · ${escapeHtml(lookup.customer)}` : ""}</small></div>
+      <div class="priority-work-lookup-facts-v469"><span><b>${escapeHtml(orders)}</b><small>Order</small></span><span><b>${escapeHtml(lookup.pieceQty || 0)}</b><small>Pieces</small></span><span><b>${escapeHtml(date ? formatDisplayDate(date) : "-")}</b><small>Delivery</small></span></div>`;
     if (!state.priorityWorkDeliveryDateTouched && els.priorityIntakeDeliveryDate && date) els.priorityIntakeDeliveryDate.value = date;
-    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Already imported.</b> Saving will apply ${escapeHtml(priorityIntakeType())} across every matching stage copy now.`;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.textContent = `${priorityIntakeType()} will apply now.`;
     if (button?.querySelector("span")) button.querySelector("span").textContent = "Apply Priority Work";
   } else {
     els.priorityIntakeLookupStatus.classList.add("is-waiting");
-    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Not imported yet — request will wait</strong><small>${escapeHtml(query)} will be checked against future A+W imports automatically.</small></div>`;
-    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.innerHTML = `<b>Not imported yet.</b> Saving will queue this request and apply it automatically when the matching work arrives.`;
+    els.priorityIntakeLookupStatus.innerHTML = `<span class="priority-work-lookup-icon-v469" aria-hidden="true"></span><div><strong>Not imported — will wait</strong><small>${escapeHtml(query)}</small></div>`;
+    if (els.priorityIntakeSubmitLead) els.priorityIntakeSubmitLead.textContent = "Save to apply on the future import.";
     if (button?.querySelector("span")) button.querySelector("span").textContent = state.priorityIntakeEditingRequestId ? "Save Changes" : "Save & Wait for Import";
   }
 }
@@ -22494,11 +22662,12 @@ function printPriorityWorkSheet(kind = "rush", request = null) {
   const typeLabel = priorityWorkPrintTypeLabel(printKind);
   const title = `${typeLabel.toUpperCase()} WORK SHEET`;
   const rows = items.length ? items.map((item) => `<tr><td>${escapeHtml(item.order || "-")}</td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.product || "-")}</td><td>${escapeHtml(item.dimensions || "-")}</td><td>${escapeHtml(item.qty || 0)}</td><td></td></tr>`).join("") : `<tr><td colspan="6" class="blank-row">Order details will populate after import.</td></tr>`;
-  const win = window.open("", "_blank", "noopener,noreferrer,width=1050,height=820");
+  const win = window.open("about:blank", "priorityWorkPrintV470", "popup=yes,width=1050,height=820,resizable=yes,scrollbars=yes");
   if (!win) {
     showInlineError("Allow popups to print Priority Work paperwork.", false);
     return;
   }
+  try { win.opener = null; } catch (_error) {}
   win.document.open();
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(typeLabel)} Priority Work</title><style>
     @page{size:letter portrait;margin:.45in}*{box-sizing:border-box}body{margin:0;color:#102d4f;font-family:Arial,sans-serif;background:#fff}.sheet{border:2px solid #173e75;padding:18px}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:4px solid ${printKind === "remake" ? "#161b24" : printKind === "missing" ? "#dc5b20" : "#d82332"};padding-bottom:12px}.head small{font-size:10px;font-weight:900;letter-spacing:.14em}.head h1{margin:3px 0 0;font-size:27px}.head b{align-self:center;border:1px solid #b8c8d9;border-radius:8px;padding:8px 12px;font-size:12px}.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:14px 0}.fact{border:1px solid #cbd8e5;border-radius:8px;padding:9px}.fact small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.fact strong{display:block;margin-top:3px;font-size:13px}.reason{border:1px solid #cbd8e5;border-radius:8px;padding:10px;margin-bottom:12px}.reason small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase}.reason strong{display:block;margin-top:4px;min-height:32px;font-size:14px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aebdcb;padding:6px;text-align:left}th{background:#edf3f9;font-size:8px;text-transform:uppercase}.blank-row{height:80px;color:#7b8997;text-align:center}.notes{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.line{height:38px;border-bottom:1px solid #50677e;padding-top:20px;font-size:9px}.footer{display:flex;justify-content:space-between;margin-top:15px;color:#6c7f91;font-size:8px}.toolbar{margin:0 0 12px}.toolbar button{border:0;border-radius:7px;background:#0b447e;color:#fff;padding:9px 15px;font-weight:800}@media print{.toolbar{display:none}.sheet{border:0;padding:0}}</style></head><body><div class="toolbar"><button onclick="window.print()">Print ${escapeHtml(typeLabel)} Sheet</button></div><main class="sheet"><header class="head"><div><small>DELIVERY LIST SCANNER · PRIORITY WORK</small><h1>${escapeHtml(title)}</h1></div><b>${escapeHtml(lookup.found || request?.status === "matched" ? "IMPORTED" : "WAITING FOR IMPORT")}</b></header><section class="facts"><div class="fact"><small>Job Nr. / SO / Order</small><strong>${escapeHtml(job || "-")}</strong></div><div class="fact"><small>Priority Handling</small><strong>${escapeHtml(handling)}</strong></div><div class="fact"><small>Customer</small><strong>${escapeHtml(customer || "-")}</strong></div><div class="fact"><small>Order Nr.</small><strong>${escapeHtml(orders.join(", ") || "-")}</strong></div><div class="fact"><small>Priority Delivery Date</small><strong>${escapeHtml(deliveryDate ? formatDisplayDate(deliveryDate) : "Keep imported date")}</strong></div><div class="fact"><small>Person Responsible</small><strong>${escapeHtml(responsible || "-")}</strong></div></section><section class="reason"><small>Reason</small><strong>${escapeHtml(reason || (printKind === "missing" ? "Missing Glass" : "-"))}</strong></section><table><thead><tr><th>Order</th><th>Item</th><th>Glass</th><th>Dimensions</th><th>Qty</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table><section class="notes"><div class="line">Shop notes</div><div class="line">Completed / verified by</div></section><footer class="footer"><span>Printed ${escapeHtml(new Date().toLocaleString())}</span><span>${escapeHtml(typeLabel)} Priority Work</span></footer></main><script>setTimeout(()=>window.print(),150);<\/script></body></html>`);
@@ -22540,16 +22709,13 @@ function renderPriorityIntakeRequests() {
   els.priorityIntakeList.innerHTML = filtered.map((request) => {
     const matched = String(request.status || "") === "matched";
     const type = String(request.priorityType || "Rush");
-    const emailStatus = String(request.emailStatus || "not_requested").replaceAll("_", " ");
     const matchedOrders = (request.matchedOrders || []).join(", ");
     return `<article class="priority-intake-request-v346 is-${escapeHtml(type.toLowerCase())} ${matched ? "is-matched" : "is-pending"}">
       <header><span class="priority-intake-request-icon-v346" aria-hidden="true">${type === "Remake" ? "RM" : "!"}</span><div><small>${escapeHtml(type)} request</small><strong>${escapeHtml(request.jobNumber || "Job not supplied")}</strong></div><b class="priority-intake-status-v346">${escapeHtml(priorityIntakeStatusLabel(request))}</b></header>
       <div class="priority-intake-request-facts-v346">
         <span><small>Reason</small><strong>${escapeHtml(request.reason || "-")}</strong></span>
         <span><small>Responsible</small><strong>${escapeHtml(request.responsible || "-")}</strong></span>
-        <span><small>Submitted by</small><strong>${escapeHtml(request.createdBy || "-")}</strong></span>
-        <span><small>Email</small><strong>${escapeHtml(emailStatus)}</strong></span>
-        ${matched ? `<span><small>Matched Job</small><strong>${escapeHtml(request.matchedJob || request.jobNumber || "-")}</strong></span><span><small>Delivery date</small><strong>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</strong></span><span><small>Orders</small><strong>${escapeHtml(matchedOrders || "-")}</strong></span><span><small>Matched pieces</small><strong>${escapeHtml(request.matchedPieceQty || 0)}</strong></span>` : ""}
+        ${matched ? `<span><small>Delivery</small><strong>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</strong></span><span><small>Orders</small><strong>${escapeHtml(matchedOrders || "-")}</strong></span><span><small>Pieces</small><strong>${escapeHtml(request.matchedPieceQty || 0)}</strong></span>` : ""}
       </div>
       <footer><span>${matched ? `Matched ${escapeHtml(formatDateTime(request.matchedAt))}` : `Queued ${escapeHtml(formatDateTime(request.createdAt))}`}</span><button type="button" class="priority-intake-cancel-v346" data-priority-intake-cancel="${escapeHtml(request.requestId)}">${matched ? "Close tracking" : "Cancel request"}</button></footer>
     </article>`;
@@ -22987,19 +23153,18 @@ function renderSdiCurrentList() {
     const matched = String(request.status || "pending") === "matched";
     const items = Array.isArray(request.matchedItems) ? request.matchedItems : [];
     const customer = request.matchedCustomer || items.find((item) => item.customer)?.customer || "";
-    const route = request.matchedRoute || items.find((item) => item.route)?.route || "";
     const orders = [...new Set(items.map((item) => item.order).filter(Boolean).concat(request.matchedOrders || []))];
     const label = kind === "both" ? "Rush + Remake" : kind === "remake" ? "Remake" : "Rush";
     const icon = kind === "both" ? "R+" : kind === "remake" ? "RM" : "!";
     const printKind = kind === "remake" ? "remake" : "rush";
-    const itemRows = items.length ? `<div class="priority-work-request-items-v348">${items.map((item) => `<span><b>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</b><small class="glass-tone-inline" ${glassToneAttributes(item.product || "Glass")}>${escapeHtml(item.product || "Glass")} · ${escapeHtml(item.dimensions || "-")} · ${escapeHtml(item.qty || 0)} pcs</small><small>${escapeHtml(item.route || "No route")} · ${escapeHtml(item.stage || "No stage")}${item.processState ? ` · ${escapeHtml(item.processState)}` : ""}${item.deliveryDate ? ` · ${escapeHtml(formatDisplayDate(item.deliveryDate))}` : ""}</small></span>`).join("")}</div>` : "";
+    const itemRows = items.length ? `<div class="priority-work-request-items-v348">${items.map((item) => `<span><b>Order ${escapeHtml(item.order || "-")} · Item ${escapeHtml(item.item || "-")}</b><small class="glass-tone-inline" ${glassToneAttributes(item.product || "Glass")}>${escapeHtml(item.product || "Glass")} · ${escapeHtml(item.dimensions || "-")} · ${escapeHtml(item.qty || 0)} pcs</small></span>`).join("")}</div>` : "";
     return `<article class="priority-work-request-card-v347 priority-work-request-card-v348 is-${kind} ${matched ? "is-matched" : "is-pending"}">
       <span class="priority-work-card-icon-v347" aria-hidden="true">${icon}</span>
       <div class="priority-work-card-copy-v347"><small>${escapeHtml(label)}</small><strong>${escapeHtml(request.jobNumber || "Job Nr. pending")}</strong>${customer ? `<span>${escapeHtml(customer)}</span>` : ""}</div>
       <div class="priority-work-card-meta-v347"><b>${escapeHtml(priorityIntakeStatusLabel(request))}</b><span>${escapeHtml(request.reason || "No reason")}</span><small>${escapeHtml(request.responsible || "No responsible person")}</small></div>
-      <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Route</small><b>${escapeHtml(route || "-")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : request.requestedDeliveryDate ? formatDisplayDate(request.requestedDeliveryDate) : "Keep imported date")}</b></span><span><small>Email</small><b>${escapeHtml(String(request.emailStatus || "not requested").replaceAll("_", " "))}</b></span></div>
+      <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : request.requestedDeliveryDate ? formatDisplayDate(request.requestedDeliveryDate) : "Keep imported date")}</b></span></div>
       ${itemRows}
-      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(request.createdBy || "")} · ${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="${printKind}">Print</button>${/missing\s*glass/i.test(String(request.reason || "")) ? `<button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="missing">Missing Glass Sheet</button>` : ""}<button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
+      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="${printKind}">Print</button>${/missing\s*glass/i.test(String(request.reason || "")) ? `<button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="missing">Missing Glass Sheet</button>` : ""}<button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
     </article>`;
   }).join("");
 
@@ -23023,7 +23188,7 @@ function renderSdiCurrentList() {
   const sectionVisible = (kind) => typeFilter === "all" || typeFilter === kind;
   els.sdiCurrentList.innerHTML = `
     <section class="priority-work-hero-v347 priority-work-hero-v348 priority-work-hero-v469">
-      <div><strong>Work Center</strong><span>Rush, Remake, and combined priority work in one queue.</span></div>
+      <div><strong>Work Center</strong></div>
       <div class="priority-work-stat-grid-v347"><button type="button" data-sdi-current-type="rush"><b>${rushRequests.length + legacyRushItems.length}</b><span>Rush</span></button><button type="button" data-sdi-current-type="remake"><b>${remakeRequests.length}</b><span>Remake</span></button><button type="button" data-sdi-current-type="both"><b>${bothRequests.length}</b><span>Rush + Remake</span></button></div>
     </section>
     <div class="priority-work-toolbar-v347">
@@ -23217,6 +23382,248 @@ async function submitSdi(mark = true, options = {}) {
   return result;
 }
 
+
+function productionAssetUrlV470(assetId) {
+  return `/api/production-files/asset?id=${encodeURIComponent(String(assetId || ""))}`;
+}
+
+function productionAssetActionsHtmlV470(asset = {}, kind = "") {
+  const id = escapeHtml(asset.id || "");
+  const name = escapeHtml(asset.name || "Production file");
+  if (!id) return "";
+  if (kind === "program") {
+    return `<button type="button" class="production-file-action-v470 is-open" data-production-open-asset-v470="${id}" title="Open ${name}">Open Program</button>`;
+  }
+  return `<button type="button" class="production-file-action-v470" data-production-preview-asset-v470="${id}" title="Preview ${name}">Preview</button><button type="button" class="production-file-action-v470 is-print" data-production-print-asset-v470="${id}" title="Print ${name}">Print</button>`;
+}
+
+function productionFileRowsHtmlV470(files = [], kind = "") {
+  const rows = Array.isArray(files) ? files : [];
+  if (!rows.length) return `<div class="production-file-empty-v470">No matching ${escapeHtml(kind || "production")} files found.</div>`;
+  return rows.map((asset) => `<article class="production-file-row-v470"><div><strong>${escapeHtml(asset.name || "Production file")}</strong><small>${escapeHtml(asset.relativePath || "")}</small></div><span>${productionAssetActionsHtmlV470(asset, kind)}</span></article>`).join("");
+}
+
+function ensureProductionExplorerModalV470() {
+  let panel = document.getElementById("productionExplorerPanelV470");
+  if (panel) return panel;
+  const backdrop = document.createElement("div");
+  backdrop.id = "productionExplorerBackdropV470";
+  backdrop.className = "modal-backdrop production-explorer-backdrop-v470";
+  backdrop.hidden = true;
+  const section = document.createElement("section");
+  section.id = "productionExplorerPanelV470";
+  section.className = "modal-panel production-explorer-panel-v470";
+  section.hidden = true;
+  section.setAttribute("role", "dialog");
+  section.setAttribute("aria-modal", "true");
+  section.setAttribute("aria-labelledby", "productionExplorerTitleV470");
+  section.innerHTML = `
+    <header class="production-explorer-header-v470">
+      <div><small id="productionExplorerEyebrowV470">Production Files</small><h2 id="productionExplorerTitleV470">Order Details</h2><p id="productionExplorerDescriptionV470">Hardware, sketches, programs, and fabrication status.</p></div>
+      <button type="button" class="gui-close-button" data-production-explorer-close-v470 aria-label="Close production file window">×</button>
+    </header>
+    <div id="productionExplorerSearchV470" class="production-explorer-search-v470" hidden>
+      <label><span>Find an order or hardware list</span><input id="productionExplorerSearchInputV470" type="search" autocomplete="off" placeholder="Order, Job Nr., customer, item, size, hardware file..."></label>
+      <button type="button" class="app-primary-button" data-production-hardware-search-v470>Search</button>
+    </div>
+    <div id="productionExplorerBodyV470" class="production-explorer-body-v470"></div>`;
+  document.body.append(backdrop, section);
+  backdrop.addEventListener("click", closeProductionExplorerV470);
+  return section;
+}
+
+function closeProductionExplorerV470() {
+  const panel = document.getElementById("productionExplorerPanelV470");
+  const backdrop = document.getElementById("productionExplorerBackdropV470");
+  if (panel) panel.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+function showProductionExplorerV470({ mode = "order", title = "Order Details", description = "Hardware, sketches, programs, and fabrication status." } = {}) {
+  const panel = ensureProductionExplorerModalV470();
+  const backdrop = document.getElementById("productionExplorerBackdropV470");
+  const search = document.getElementById("productionExplorerSearchV470");
+  const titleNode = document.getElementById("productionExplorerTitleV470");
+  const descriptionNode = document.getElementById("productionExplorerDescriptionV470");
+  if (titleNode) titleNode.textContent = title;
+  if (descriptionNode) descriptionNode.textContent = description;
+  if (search) search.hidden = mode !== "hardware";
+  panel.dataset.mode = mode;
+  panel.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+  return panel;
+}
+
+function fabricationStatusHtmlV470(status = {}) {
+  if (!status || !status.machine) return `<span class="production-fab-status-v470 is-neutral">No Denver/Waterjet assignment detected</span>`;
+  const stateClass = status.fabricated === true ? "is-complete" : status.fabricated === false ? "is-missing" : "is-unknown";
+  const override = Boolean(status.machineOverride && status.assignedMachine && status.actualMachine);
+  const title = override ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}` : (status.label || status.machine);
+  return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(status.label || status.machine)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
+}
+
+function renderOrderDetailV470(payload = {}) {
+  const body = document.getElementById("productionExplorerBodyV470");
+  if (!body) return;
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const orderFiles = payload.orderProductionFiles || { hardware: [], sketches: [] };
+  body.innerHTML = `
+    <section class="production-order-summary-v470">
+      <span><small>Order</small><strong>${escapeHtml(payload.order || "-")}</strong></span>
+      <span><small>Job Nr.</small><strong>${escapeHtml(payload.job || "-")}</strong></span>
+      <span><small>Customer</small><strong>${escapeHtml(payload.customer || "-")}</strong></span>
+      <span><small>Route</small><strong>${escapeHtml(payload.route || "-")}</strong></span>
+      <span><small>Items</small><strong>${escapeHtml(items.length)}</strong></span>
+    </section>
+    <section class="production-order-files-v472">
+      <header><div><small>Whole order</small><strong>Order production files</strong><span>Preview or print the complete order sketch before opening an individual item.</span></div></header>
+      <div>
+        <details class="production-file-group-v470" ${(orderFiles.sketches || []).length ? "open" : ""}><summary><span>Whole-order sketches</span><b>${escapeHtml((orderFiles.sketches || []).length)}</b></summary>${productionFileRowsHtmlV470(orderFiles.sketches, "sketch")}</details>
+        <details class="production-file-group-v470"><summary><span>Hardware lists</span><b>${escapeHtml((orderFiles.hardware || []).length)}</b></summary>${productionFileRowsHtmlV470(orderFiles.hardware, "hardware")}</details>
+      </div>
+    </section>
+    <div class="production-order-items-v470">
+      ${items.map((item) => {
+        const files = item.productionFiles || {};
+        const fabrication = files.fabrication || {};
+        return `<article class="production-order-item-v470">
+          <header><div><small>Item ${escapeHtml(item.item || "-")} · ${escapeHtml(item.job || payload.job || "")}</small><strong>${escapeHtml(item.product || "Glass")}</strong><span>${escapeHtml(item.dimensions || "Size not listed")} · Qty ${escapeHtml(item.qty || 0)}</span></div>${fabricationStatusHtmlV470(fabrication)}</header>
+          <div class="production-item-meta-v470"><span><b>Process</b>${escapeHtml(item.processState || "-")}</span><span><b>Queue</b>${escapeHtml(item.queueState || "-")}</span><span><b>Route</b>${escapeHtml(item.route || payload.route || "-")}</span></div>
+          <section class="production-stage-track-v470"><h4>Workflow stages</h4><div>${(item.stages || []).map((stage) => `<span><b>${escapeHtml(stage.stage || stage.deliveryList || "Stage")}</b><small>${escapeHtml(formatNumericDeliveryDate(stage.deliveryDate) || stage.deliveryDate || "")} · ${escapeHtml(stage.scanned || 0)}/${escapeHtml(stage.qty || item.qty || 0)} scanned</small></span>`).join("") || "<em>No active stage copies.</em>"}</div></section>
+          <details class="production-file-group-v470" ${(files.hardware || []).length ? "open" : ""}><summary><span>Hardware Lists</span><b>${escapeHtml((files.hardware || []).length)}</b></summary>${productionFileRowsHtmlV470(files.hardware, "hardware")}</details>
+          <details class="production-file-group-v470"><summary><span>Sketches</span><b>${escapeHtml((files.sketches || []).length)}</b></summary>${productionFileRowsHtmlV470(files.sketches, "sketch")}</details>
+          <details class="production-file-group-v470"><summary><span>Programs</span><b>${escapeHtml((files.programs || []).length)}</b></summary>${productionFileRowsHtmlV470(files.programs, "program")}</details>
+        </article>`;
+      }).join("") || `<div class="production-file-empty-v470">No active items found for this order.</div>`}
+    </div>`;
+}
+
+async function openOrderDetailV470(orderNo, options = {}) {
+  const order = String(orderNo || "").trim();
+  if (!order) return;
+  showProductionExplorerV470({ mode: options.mode || "order", title: `Order ${order}`, description: "Item details, production files, and fabrication state." });
+  const body = document.getElementById("productionExplorerBodyV470");
+  if (body) body.innerHTML = `<div class="production-explorer-loading-v470">Loading order ${escapeHtml(order)}...</div>`;
+  try {
+    const payload = await fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}`);
+    renderOrderDetailV470(payload);
+  } catch (error) {
+    if (body) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Order details could not be loaded.")}</div>`;
+  }
+}
+
+async function searchHardwareExplorerV470(queryValue = "") {
+  const input = document.getElementById("productionExplorerSearchInputV470");
+  const query = String(queryValue || input?.value || "").trim();
+  const body = document.getElementById("productionExplorerBodyV470");
+  if (!body) return;
+  if (query.length < 2) {
+    body.innerHTML = `<div class="production-file-empty-v470">Enter at least two characters to search orders and hardware lists.</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="production-explorer-loading-v470">Searching production records...</div>`;
+  const [orderRequest, hardwareRequest] = await Promise.allSettled([
+    fetchJson(`/api/search?q=${encodeURIComponent(query)}`),
+    fetchJson(`/api/production-files/hardware?q=${encodeURIComponent(query)}`),
+  ]);
+  const orderResults = orderRequest.status === "fulfilled" ? (orderRequest.value.results || []) : [];
+  const hardwareResults = hardwareRequest.status === "fulfilled" ? (hardwareRequest.value.results || []) : [];
+  const orderMap = new Map();
+  orderResults.forEach((result) => {
+    const order = String(result.order || "").trim();
+    if (order && !orderMap.has(order)) orderMap.set(order, result);
+  });
+  body.innerHTML = `
+    <section class="production-hardware-results-v470">
+      <header><strong>Matching Orders</strong><span>${escapeHtml(orderMap.size)}</span></header>
+      <div>${[...orderMap.entries()].map(([order, result]) => `<button type="button" class="production-order-result-v470" data-production-order-v470="${escapeHtml(order)}"><span><small>Order ${escapeHtml(order)} · Job ${escapeHtml(result.job || "-")}</small><strong>${escapeHtml(result.customer || "Customer not listed")}</strong></span><span>${escapeHtml(result.dimensions || result.product || "Open order")}</span></button>`).join("") || `<div class="production-file-empty-v470">No active order matched this search.</div>`}</div>
+      <header><strong>Hardware Files</strong><span>${escapeHtml(hardwareResults.length)}</span></header>
+      <div>${productionFileRowsHtmlV470(hardwareResults, "hardware")}</div>
+    </section>`;
+}
+
+function openHardwareExplorerV470() {
+  showProductionExplorerV470({ mode: "hardware", title: "Hardware", description: "Search any order detail or hardware filename, then open the matching order." });
+  const body = document.getElementById("productionExplorerBodyV470");
+  if (body) body.innerHTML = `<div class="production-file-empty-v470">Search by order, Job Nr., customer, item, size, glass type, or hardware filename.</div>`;
+  const input = document.getElementById("productionExplorerSearchInputV470");
+  if (input) { input.value = ""; window.setTimeout(() => input.focus(), 0); }
+}
+
+async function openProductionProgramV470(assetId) {
+  const result = await fetchJson("/api/production-files/open", { method: "POST", body: JSON.stringify({ assetId }) });
+  if (result.opened) {
+    showFloatingNotice(result.message || "Program opened.", "success");
+    return;
+  }
+  // Development/non-Windows hosts cannot launch the associated application;
+  // opening the asset itself still provides a useful fallback for review.
+  const popup = window.open(productionAssetUrlV470(assetId), "_blank");
+  if (!popup) showInlineError(result.message || "Allow popups to open this production file.", false);
+}
+
+function printProductionAssetV470(assetId) {
+  const url = productionAssetUrlV470(assetId);
+  const popup = window.open(url, "productionFilePrintV470", "popup=yes,width=1100,height=820,resizable=yes,scrollbars=yes");
+  if (!popup) {
+    showInlineError("Allow popups to print this production file.", false);
+    return;
+  }
+  // Same-origin images/text can print automatically; browser PDF viewers may
+  // require the operator to use their visible Print control, which remains open.
+  try { popup.addEventListener("load", () => { try { popup.print(); } catch (_error) {} }, { once: true }); } catch (_error) {}
+}
+
+// v0.470 production-file controls are delegated because the Order/Hardware GUI
+// is intentionally created only when requested, keeping initial page weight low.
+document.addEventListener("dblclick", (event) => {
+  const row = event.target.closest("#listRows tr[data-order-v470], #mobileListCards [data-order-v470]");
+  const orderGroupToggle = event.target.closest("[data-toggle-scan-order-v472]");
+  if (!row || (!orderGroupToggle && event.target.closest("button, input, select, textarea, a, .line-rack-location-control, .line-bay-location-control-v449"))) return;
+  const order = String(row.dataset.orderV470 || "").trim();
+  if (!order) return;
+  if (orderGroupToggle) window.clearTimeout(state.scanOrderToggleTimer);
+  event.preventDefault();
+  openOrderDetailV470(order).catch((error) => showInlineError(error.message, true));
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-production-explorer-close-v470]")) {
+    closeProductionExplorerV470();
+    return;
+  }
+  if (event.target.closest("[data-production-hardware-search-v470]")) {
+    searchHardwareExplorerV470().catch((error) => showInlineError(error.message, true));
+    return;
+  }
+  const orderButton = event.target.closest("[data-production-order-v470]");
+  if (orderButton) {
+    openOrderDetailV470(orderButton.dataset.productionOrderV470 || "", { mode: "hardware" }).catch((error) => showInlineError(error.message, true));
+    return;
+  }
+  const preview = event.target.closest("[data-production-preview-asset-v470]");
+  if (preview) {
+    const popup = window.open(productionAssetUrlV470(preview.dataset.productionPreviewAssetV470 || ""), "_blank");
+    if (!popup) showInlineError("Allow popups to preview this production file.", false);
+    return;
+  }
+  const print = event.target.closest("[data-production-print-asset-v470]");
+  if (print) {
+    printProductionAssetV470(print.dataset.productionPrintAssetV470 || "");
+    return;
+  }
+  const openProgram = event.target.closest("[data-production-open-asset-v470]");
+  if (openProgram) {
+    openProductionProgramV470(openProgram.dataset.productionOpenAssetV470 || "").catch((error) => showInlineError(error.message, true));
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.target?.id !== "productionExplorerSearchInputV470") return;
+  event.preventDefault();
+  searchHardwareExplorerV470().catch((error) => showInlineError(error.message, true));
+});
+
 /**
  * Purpose: Run the run bay action workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -23256,6 +23663,10 @@ async function runBayAction(action) {
   if (action === "old-bays") {
     const orders = await loadStaleBayOrders(true);
     openStaleBayPanel(orders);
+    return;
+  }
+  if (action === "hardware") {
+    openHardwareExplorerV470();
     return;
   }
   const bay = requireSelectedBay();
@@ -26122,8 +26533,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260831-v0.469", window.location.href).href,
-    new URL("static/css/print.css?v=20260831-v0.469", window.location.href).href,
+    new URL("static/css/styles.css?v=20260831-v0.471", window.location.href).href,
+    new URL("static/css/print.css?v=20260831-v0.471", window.location.href).href,
   ];
 }
 
@@ -26807,7 +27218,8 @@ async function refreshAdminPage() {
   requests.push(hasPermission("manage_bay_auto_assigner") ? fetchJson("/api/admin/bay-auto-assigner") : Promise.resolve(null));
   requests.push(hasPermission("manage_cross_date_scanning") ? fetchJson("/api/admin/cross-date-scan-settings") : Promise.resolve(null));
   requests.push(hasAnyPermission(["manage_roles", "manage_user_assignments", "manage_users"]) ? fetchJson("/api/admin/roles") : Promise.resolve(null));
-  const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, crossDateScanSettings, roles] = await Promise.all(requests);
+  requests.push(hasPermission("manage_production_files") ? fetchJson("/api/admin/production-files") : Promise.resolve(null));
+  const [summary, users, sessions, customerRules, customerEmails, bayScannerRules, bayAutoAssignSettings, crossDateScanSettings, roles, productionFileSettings] = await Promise.all(requests);
   if (summary) {
     state.adminSummary = summary;
     state.supersededReviewSummary = {
@@ -26840,6 +27252,7 @@ async function refreshAdminPage() {
   state.crossDateScanSettings = crossDateScanSettings || state.crossDateScanSettings;
   state.adminRoles = roles?.roles || state.adminRoles || [];
   state.allPermissions = roles?.permissions || state.allPermissions || [];
+  state.productionFileSettings = productionFileSettings || state.productionFileSettings;
   renderAdminUsers();
   renderAdminStations();
   renderManualEditStageOptions();
@@ -26848,6 +27261,7 @@ async function refreshAdminPage() {
   renderBayScannerRuleOverview();
   renderBayAutoAssignOverview();
   renderCrossDateScanOverview();
+  renderProductionFilesOverviewV472();
   renderActiveSessions();
 }
 
@@ -28849,6 +29263,14 @@ const ADMIN_MODAL_PROFILES = {
     status: "Scanner behavior",
     group: "configuration",
   },
+  productionFiles: {
+    title: "Machine & Production Files",
+    eyebrow: "Fabrication Configuration",
+    description: "Configure production shares, machine matching, and the Staging fabrication safety check.",
+    context: "Production file index",
+    status: "Background indexed",
+    group: "configuration",
+  },
   bayAutoAssigner: {
     title: "Bay Auto Assigner",
     eyebrow: "Bay Operations",
@@ -29122,6 +29544,7 @@ function openAdminModal(kind, options = null) {
   if (kind === "lookups") {
     syncLookupManagerFormGuidance();
     filterLookupManagerLibrary(state.lookupManagerSearch || "");
+    enhanceLookupManagerWorkflowV470();
   }
   if (kind === "users") {
     wireUserManagerControls();
@@ -29248,6 +29671,9 @@ function adminModalContent(kind) {
   }
   if (kind === "crossDateScanning") {
     return crossDateScanSettingsModalHtml();
+  }
+  if (kind === "productionFiles") {
+    return productionFileSettingsModalHtmlV472();
   }
   if (kind === "bayAutoAssigner") {
     return bayAutoAssignerModalHtml();
@@ -29481,8 +29907,8 @@ function lookupRowHtmlV347(meta, item, visualColorMap = null) {
                ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
       </div>
       <div class="lookup-row-actions-v346">
-        <button type="button" class="lookup-use-button" data-lookup-use-type="${escapeHtml(meta.type)}" data-lookup-use-value="${escapeHtml(item.value || "")}">${lookupActionIconHtmlV346("edit")}<span>Use / edit</span></button>
-        <button type="button" class="lookup-delete-button-v346" data-remove-lookup-type="${escapeHtml(meta.type)}" data-remove-lookup-value="${escapeHtml(item.value || "")}" data-remove-lookup-label="${escapeHtml(item.label || item.value || "")}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>
+        <button type="button" class="icon-only icon-pencil" data-lookup-use-type="${escapeHtml(meta.type)}" data-lookup-use-value="${escapeHtml(item.value || "")}" title="Edit ${escapeHtml(item.label || item.value || "lookup value")}" aria-label="Edit ${escapeHtml(item.label || item.value || "lookup value")}"></button>
+        <button type="button" class="icon-only icon-trash danger" data-remove-lookup-type="${escapeHtml(meta.type)}" data-remove-lookup-value="${escapeHtml(item.value || "")}" data-remove-lookup-label="${escapeHtml(item.label || item.value || "")}" title="Remove ${escapeHtml(item.label || item.value || "lookup value")}" aria-label="Remove ${escapeHtml(item.label || item.value || "lookup value")}"></button>
       </div>
     </article>`;
 }
@@ -29546,13 +29972,18 @@ function stationLookupManagerHtmlV346() {
     <section class="lookup-config-editor-v346">
       <header>${lookupLibraryIconHtml("station")}<div><strong>Add a physical work station</strong><p>A Station is a scan/work area, not a workflow step. Stations are stable identities: add the real internal station once, then use its Display Name for company/location-specific wording without changing scan attribution or access rules.</p></div></header>
       <div class="station-add-row station-add-row-v346"><input id="newStationInputModal" type="text" autocomplete="off" placeholder="Example: receiving-scanner-2"><button id="addStationBtnModal" class="app-primary-button" type="button">${lookupActionIconHtmlV346("add")}<span>Add Station</span></button></div>
+      <form class="station-alias-editor-v470" id="stationAliasEditorV470" hidden>
+        <label><span>Display name</span><input id="stationAliasInputV470" type="text" autocomplete="off"><small id="stationAliasInternalV470"></small></label>
+        <input id="stationAliasInternalInputV470" type="hidden">
+        <button type="submit" class="icon-only icon-save" title="Save station display name" aria-label="Save station display name"></button>
+      </form>
       <aside class="portable-architecture-note-v355"><strong>Portable by design</strong><span>The internal station value stays stable. The Display Name is what operators see, so a future site can show “Dock 4” while the existing backend station identity remains unchanged.</span></aside>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346">
       <header>${lookupLibraryIconHtml("station")}<div><h3>Station library</h3><p>Change operator-facing station wording without renaming the underlying station record. New stations can still be added when a facility genuinely needs another scan/work identity.</p></div><strong>${escapeHtml(rows.length)}</strong></header>
       <div class="lookup-row-list">${rows.length ? rows.map((item) => {
         const displayName = stationDisplayLabelV355(item.value);
-        return `<article class="lookup-row station-lookup-row-v346 station-alias-row-v355"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(displayName)}</strong><em class="lookup-source-badge ${item.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(item.source)}</em></span><span class="station-internal-id-v355"><b>Internal station</b><code>${escapeHtml(item.value)}</code></span><label><span>Display name</span><input data-station-alias-v355="${escapeHtml(item.value)}" type="text" value="${escapeHtml(displayName)}" aria-label="Display name for ${escapeHtml(item.value)}"></label></div><div class="lookup-row-actions-v346"><button type="button" class="lookup-use-button" data-save-station-alias-v355="${escapeHtml(item.value)}">${lookupActionIconHtmlV346("save")}<span>Save</span></button>${DEFAULT_STATIONS.includes(item.value) ? `<span class="lookup-protected-note-v346">Stable</span>` : `<button type="button" class="lookup-delete-button-v346" data-remove-station="${escapeHtml(item.value)}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>`}</div></article>`;
+        return `<article class="lookup-row station-lookup-row-v346 station-alias-row-v355"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(displayName)}</strong><em class="lookup-source-badge ${item.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(item.source)}</em></span><span class="station-internal-id-v355"><b>Internal station</b><code>${escapeHtml(item.value)}</code></span><small class="station-alias-edit-value-v470">Display name: ${escapeHtml(displayName)}</small></div><div class="lookup-row-actions-v346"><button type="button" class="icon-only icon-pencil" data-edit-station-alias-v470="${escapeHtml(item.value)}" title="Edit ${escapeHtml(displayName)}" aria-label="Edit display name for ${escapeHtml(item.value)}"></button>${DEFAULT_STATIONS.includes(item.value) ? `<span class="lookup-protected-note-v346">Stable</span>` : `<button type="button" class="icon-only icon-trash danger" data-remove-station="${escapeHtml(item.value)}" title="Remove ${escapeHtml(displayName)}" aria-label="Remove ${escapeHtml(displayName)}"></button>`}</div></article>`;
       }).join("") : `<div class="lookup-empty-state"><strong>No stations configured</strong><span>Add the first station above.</span></div>`}</div>
     </section>
   </div>`;
@@ -29602,12 +30033,12 @@ function stageDefinitionManagerHtmlV346() {
         <label><span>Internal station binding</span><select id="stageDefinitionScannerV346">${stageStationOptionsV355(DEFAULT_STATIONS[0])}</select><small>Choose the stable station used for scan attribution and access. Change its operator-facing wording in the Stations tab instead of renaming this binding.</small></label>
         <label><span>Route code</span><input id="stageDefinitionRouteV346" type="text" autocomplete="off" placeholder="Optional; required for Custom Route"><small>Use the stable route code. Change the visible route wording in the Routes tab.</small></label>
         <aside class="stage-preset-note-v346"><strong>Portable workflow rule</strong><span>Keys, behavior presets, station bindings, and route codes are engine contracts. Display names and aliases are presentation. Keeping those layers separate makes location/company changes safe.</span></aside>
-        <footer><button type="button" class="secondary lookup-clear-button-v346" data-stage-definition-clear-v346>${lookupActionIconHtmlV346("clear")}<span>Clear</span></button><button type="submit" class="app-primary-button">${lookupActionIconHtmlV346("save")}<span>Save Stage</span></button></footer>
+        <footer><button type="button" class="secondary lookup-clear-button-v346" data-stage-definition-clear-v346>${lookupActionIconHtmlV346("clear")}<span>Clear</span></button><button type="submit" class="icon-only icon-save" title="Save stage" aria-label="Save stage"></button></footer>
       </form>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346">
       <header>${lookupLibraryIconHtml("stage_definition")}<div><h3>Stage library</h3><p>Operator wording is shown first; stable behavior and bindings remain visible as reference so administrators know what will actually run.</p></div><strong>${escapeHtml(stages.length)}</strong></header>
-      <div class="lookup-row-list">${stages.length ? stages.map((stage) => `<article class="lookup-row stage-definition-row-v346"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(stage.displayName || stage.label || stage.key)}</strong><em class="lookup-source-badge ${stage.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(stage.source || "default")}</em></span><span><b>Behavior:</b> ${escapeHtml(stagePresetDisplayLabelV355(stage.preset))}</span><small><b>Station:</b> ${escapeHtml(stationDisplayLabelV355(stage.scanner || ""))}${stage.scanner ? ` <code>${escapeHtml(stage.scanner)}</code>` : ""}${stage.routeCode ? ` · <b>Route:</b> ${escapeHtml(configuredRouteLabelV355(stage.routeCode, stage.routeCode))} <code>${escapeHtml(stage.routeCode)}</code>` : ""}</small></div><div class="lookup-row-actions-v346"><button type="button" class="lookup-use-button" data-stage-use-key-v346="${escapeHtml(stage.key || stage.value || "")}">${lookupActionIconHtmlV346("edit")}<span>Edit</span></button><button type="button" class="lookup-delete-button-v346" data-remove-lookup-type="stage_definition" data-remove-lookup-value="${escapeHtml(stage.key || stage.value || "")}" data-remove-lookup-label="${escapeHtml(stage.displayName || stage.label || stage.key || "")}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button></div></article>`).join("") : `<div class="lookup-empty-state"><strong>No active stage definitions</strong><span>Create a stage above or restore a built-in stage with its original key.</span></div>`}</div>
+      <div class="lookup-row-list">${stages.length ? stages.map((stage) => `<article class="lookup-row stage-definition-row-v346"><div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(stage.displayName || stage.label || stage.key)}</strong><em class="lookup-source-badge ${stage.source === "manual" ? "is-manual" : "is-discovered"}">${escapeHtml(stage.source || "default")}</em></span><span><b>Behavior:</b> ${escapeHtml(stagePresetDisplayLabelV355(stage.preset))}</span><small><b>Station:</b> ${escapeHtml(stationDisplayLabelV355(stage.scanner || ""))}${stage.scanner ? ` <code>${escapeHtml(stage.scanner)}</code>` : ""}${stage.routeCode ? ` · <b>Route:</b> ${escapeHtml(configuredRouteLabelV355(stage.routeCode, stage.routeCode))} <code>${escapeHtml(stage.routeCode)}</code>` : ""}</small></div><div class="lookup-row-actions-v346"><button type="button" class="icon-only icon-pencil" data-stage-use-key-v346="${escapeHtml(stage.key || stage.value || "")}" title="Edit ${escapeHtml(stage.displayName || stage.label || stage.key || "stage")}" aria-label="Edit ${escapeHtml(stage.displayName || stage.label || stage.key || "stage")}"></button><button type="button" class="icon-only icon-trash danger" data-remove-lookup-type="stage_definition" data-remove-lookup-value="${escapeHtml(stage.key || stage.value || "")}" data-remove-lookup-label="${escapeHtml(stage.displayName || stage.label || stage.key || "")}" title="Remove ${escapeHtml(stage.displayName || stage.label || stage.key || "stage")}" aria-label="Remove ${escapeHtml(stage.displayName || stage.label || stage.key || "stage")}"></button></div></article>`).join("") : `<div class="lookup-empty-state"><strong>No active stage definitions</strong><span>Create a stage above or restore a built-in stage with its original key.</span></div>`}</div>
     </section>
   </div>`;
 }
@@ -29632,7 +30063,7 @@ function presentationProfileManagerHtmlV355() {
         <label><span>Support / report email</span><input id="presentationSupportEmailV355" type="email" maxlength="160" value="${escapeHtml(labels.supportEmail || "")}" placeholder="support@example.com"><small>Used by the Report Bugs link. Leave blank to hide that link.</small></label>
         <label class="presentation-brand-choice-v355"><span>Installed logo</span><span class="presentation-checkbox-row-v355"><input id="presentationUseInstalledLogoV355" type="checkbox" ${labels.useDefaultBrandLogo !== false ? "checked" : ""}><b>Use installed logo asset</b></span><small>Turn this off when the installed image belongs to another company. The shell will use clean company initials and text branding instead.</small></label>
         <aside class="stage-preset-note-v346"><strong>Where location wording comes from</strong><span>Use Stations for physical-area display aliases, Stages for workflow-step names, and Routes for destination names. This Presentation tab owns company/application branding and shell identity only.</span></aside>
-        <footer><button type="submit" class="app-primary-button">${lookupActionIconHtmlV346("save")}<span>Save Presentation</span></button></footer>
+        <footer><button type="submit" class="icon-only icon-save" title="Save presentation settings" aria-label="Save presentation settings"></button></footer>
       </form>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346 portable-workflow-preview-v355">
@@ -29828,8 +30259,8 @@ function glassProfileRowHtmlV349(profile, colorMap) {
       ${selectionMode
         ? `<div class="glass-combine-row-state-v361"><strong>${escapeHtml(stateStrong)}</strong><small>${escapeHtml(stateSmall)}</small></div>`
         : `<div class="lookup-row-actions-v346">
-            <button type="button" class="lookup-use-button" data-glass-profile-edit-v349="${escapeHtml(profile.value)}">${lookupActionIconHtmlV346("edit")}<span>Edit settings</span></button>
-            <button type="button" class="lookup-delete-button-v346" data-glass-profile-remove-v349="${escapeHtml(profile.value)}" data-glass-profile-label-v349="${escapeHtml(profile.label || profile.value)}">${lookupActionIconHtmlV346("delete")}<span>Remove</span></button>
+            <button type="button" class="icon-only icon-pencil" data-glass-profile-edit-v349="${escapeHtml(profile.value)}" title="Edit ${escapeHtml(profile.label || profile.value)}" aria-label="Edit ${escapeHtml(profile.label || profile.value)}"></button>
+            <button type="button" class="icon-only icon-trash danger" data-glass-profile-remove-v349="${escapeHtml(profile.value)}" data-glass-profile-label-v349="${escapeHtml(profile.label || profile.value)}" title="Remove ${escapeHtml(profile.label || profile.value)}" aria-label="Remove ${escapeHtml(profile.label || profile.value)}"></button>
           </div>`}
     </article>`;
 }
@@ -29901,7 +30332,7 @@ function glassProfileManagerHtmlV349() {
               ${lookupPreviewIconHtmlV346()}
               <div><small>Glass profile preview</small><strong data-glass-profile-preview-label-v349>New Glass Type</strong><span><b>Cost:</b> <em data-glass-profile-preview-cost-v349>Not configured</em></span><p><span class="glass-profile-preview-swatch-v349" data-glass-profile-preview-swatch-v349 style="--lookup-glass-color:${escapeHtml(defaultColor)}"></span><span data-glass-profile-preview-color-v349>${escapeHtml(defaultColor)}</span></p></div>
             </aside>
-            <footer class="lookup-form-actions"><button type="button" class="secondary" data-glass-profile-clear-v349>Clear form</button><button type="submit">Save glass settings</button></footer>
+            <footer class="lookup-form-actions"><button type="button" class="secondary" data-glass-profile-clear-v349>Clear form</button><button type="submit" class="icon-only icon-save" title="Save glass settings" aria-label="Save glass settings"></button></footer>
           </form>
         </section>
         <section class="lookup-manager-list lookup-library glass-profile-library-v349 glass-profile-library-v350">
@@ -29963,7 +30394,7 @@ function editGlassProfileV349(value) {
   if (costInput) costInput.value = profile.rate === null || profile.rate === undefined ? "" : String(profile.rate);
   if (colorInput) colorInput.value = normalizeGlassVisualColor(profile.color) || glassVisualColor(profile.value);
   syncGlassProfilePreviewV349();
-  valueInput?.focus();
+  openLookupEditorV470({ focusSelector: "#glassProfileValueV349" });
   valueInput?.select();
 }
 
@@ -30251,7 +30682,7 @@ function lookupManagerModalHtml() {
 
             <footer class="lookup-form-actions">
               <button type="button" class="secondary" data-lookup-clear-form>Clear form</button>
-              <button type="submit">${isGlassCost ? "Save glass cost" : isGlassColor ? "Save glass color" : "Save lookup"}</button>
+              <button type="submit" class="icon-only icon-save" title="Save lookup" aria-label="Save lookup"></button>
             </footer>
           </form>
         </section>
@@ -30302,14 +30733,107 @@ function syncLookupManagerFormGuidance() {
  * Effects: Replaces the Lookup Manager modal body and reapplies language/form guidance.
  * Flow: Confirms the correct modal is open, writes the maintained HTML once, then restores translation and contextual field behavior.
  */
+function closeLookupEditorV470() {
+  document.querySelector(".lookup-editor-backdrop-v470")?.remove();
+  document.querySelector(".lookup-editor-surface-v470.is-editor-open-v470")?.classList.remove("is-editor-open-v470");
+}
+
+/**
+ * v0.470 opens the existing Lookup editor as a focused secondary GUI instead
+ * of permanently reserving the left side of every library. Keeping the real
+ * form in place preserves all maintained save handlers and validation.
+ */
+function openLookupEditorV470({ focusSelector = "" } = {}) {
+  const editor = document.querySelector("#adminModalBody .lookup-editor-surface-v470");
+  if (!editor) return;
+  closeLookupEditorV470();
+  const backdrop = document.createElement("button");
+  backdrop.type = "button";
+  backdrop.className = "lookup-editor-backdrop-v470";
+  backdrop.dataset.lookupEditorCloseV470 = "true";
+  backdrop.setAttribute("aria-label", "Close lookup editor");
+  // Keep the backdrop inside #adminModalBody, the same stacking context as the
+  // focused editor. #adminModalBody is itself a z-index layer, so appending the
+  // backdrop directly to #adminModal would necessarily place it above the whole
+  // body (including the editor) and blur the foreground GUI as well.
+  const backdropHost = document.getElementById("adminModalBody") || document.getElementById("adminModal") || document.body;
+  backdropHost.appendChild(backdrop);
+  editor.classList.add("is-editor-open-v470");
+  const focusTarget = focusSelector ? editor.querySelector(focusSelector) : editor.querySelector("input:not([type=hidden]), select, textarea, button:not(.lookup-editor-close-v470)");
+  window.setTimeout(() => focusTarget?.focus(), 0);
+}
+
+function enhanceLookupManagerWorkflowV470() {
+  const shell = document.querySelector("#adminModalBody .lookup-manager-shell");
+  if (!shell) return;
+  shell.classList.add("lookup-manager-v470");
+  const editor = shell.querySelector(":scope > .lookup-config-editor-v346, .lookup-manager-workspace > .lookup-editor-card, .lookup-manager-workspace > .lookup-config-editor-v346");
+  if (editor) {
+    editor.classList.add("lookup-editor-surface-v470");
+    if (!editor.querySelector("[data-lookup-editor-close-v470]")) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "gui-close-button lookup-editor-close-v470";
+      close.dataset.lookupEditorCloseV470 = "true";
+      close.setAttribute("aria-label", "Close lookup editor");
+      close.textContent = "×";
+      editor.appendChild(close);
+    }
+  }
+
+  const libraryHeader = shell.querySelector(".lookup-manager-list > header");
+  if (libraryHeader && !libraryHeader.querySelector("[data-lookup-add-v470]")) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "app-primary-button lookup-add-new-v470";
+    add.dataset.lookupAddV470 = "true";
+    add.innerHTML = '<span class="icon-plus" aria-hidden="true"></span><span>Add New</span>';
+    add.title = state.lookupManagerActiveType === "presentation" ? "Open presentation settings" : "Add a new library value";
+    libraryHeader.appendChild(add);
+  }
+}
+
+function openNewLookupEditorV470() {
+  const type = state.lookupManagerActiveType || "glass_profile";
+  if (type === "glass_profile") clearGlassProfileFormV349();
+  else if (type === "stage_definition") clearStageDefinitionFormV346();
+  else if (type === "station") {
+    const station = document.getElementById("newStationInputModal");
+    if (station) station.value = "";
+    const aliasEditor = document.getElementById("stationAliasEditorV470");
+    if (aliasEditor) aliasEditor.hidden = true;
+  } else if (type !== "presentation") clearLookupManagerForm();
+  const focusSelector = type === "glass_profile" ? "#glassProfileValueV349" : type === "stage_definition" ? "#stageDefinitionKeyV346" : type === "station" ? "#newStationInputModal" : type === "presentation" ? "#presentationCompanyNameV355" : "#lookupValueInput";
+  openLookupEditorV470({ focusSelector });
+}
+
+function editStationAliasV470(internalStation) {
+  const internalName = String(internalStation || "").trim();
+  if (!internalName) return;
+  const input = document.getElementById("stationAliasInputV470");
+  const internalInput = document.getElementById("stationAliasInternalInputV470");
+  const internalNote = document.getElementById("stationAliasInternalV470");
+  const aliasEditor = document.getElementById("stationAliasEditorV470");
+  if (!input || !internalInput || !aliasEditor) return;
+  input.value = stationDisplayLabelV355(internalName);
+  input.dataset.stationAliasV355 = internalName;
+  internalInput.value = internalName;
+  if (internalNote) internalNote.textContent = `Internal station: ${internalName}`;
+  aliasEditor.hidden = false;
+  openLookupEditorV470({ focusSelector: "#stationAliasInputV470" });
+  input.select();
+}
+
 function renderLookupManagerModal() {
   if (!els.adminModalBody || els.adminModal?.dataset.kind !== "lookups") return;
+  closeLookupEditorV470();
   els.adminModalBody.innerHTML = lookupManagerModalHtml();
   applyLanguageToRoot(els.adminModalBody);
   if (state.lookupManagerActiveType === "glass_profile") syncGlassProfilePreviewV349();
   else syncLookupManagerFormGuidance();
   filterLookupManagerLibrary(state.lookupManagerSearch || "");
   configureAdminModalSectionTabsV345("lookups");
+  enhanceLookupManagerWorkflowV470();
 }
 
 /**
@@ -30337,7 +30861,7 @@ function useLookupInEditor(type, value) {
   if (costInput) costInput.value = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate)) ? String(item.rate) : "";
   if (colorInput) colorInput.value = normalizeGlassVisualColor(item.color) || glassVisualColor(item.value || item.label);
   syncLookupManagerFormGuidance();
-  valueInput?.focus();
+  openLookupEditorV470({ focusSelector: "#lookupValueInput" });
   valueInput?.select();
 }
 
@@ -30510,7 +31034,7 @@ function useStageDefinitionInEditorV346(key) {
   if (scanner) scanner.value = stage.scanner || "";
   const route = document.getElementById("stageDefinitionRouteV346");
   if (route) route.value = stage.routeCode || "";
-  display?.focus();
+  openLookupEditorV470({ focusSelector: "#stageDefinitionDisplayV346" });
   display?.select();
 }
 
@@ -31196,6 +31720,7 @@ const PERMISSION_DESCRIPTIONS = {
   manage_lookup_values: "Maintain product, route, process, glass-cost, and glass-color lookup values.",
   manage_automation: "Configure, schedule, run, and troubleshoot automated delivery-list imports.",
   manage_cross_date_scanning: "Configure how scanning behaves when a unique order/item belongs to another active delivery date.",
+  manage_production_files: "Configure production-file folders, machine matching, background indexing, and the Staging fabrication check.",
   view_indian_trail: "Open Indian Trail receiving and in-transit tools.",
   receive_indian_trail: "Scan and receive glass at Indian Trail.",
   view_bays: "Open the Bay Map and view bay contents and history.",
@@ -31249,8 +31774,8 @@ const PERMISSION_CATEGORIES = [
   },
   {
     title: "Admin Configuration & Automation",
-    description: "Stations, routing, customer email rules, lookups, automated imports, and cross-date scanner behavior.",
-    permissions: ["manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation", "manage_cross_date_scanning"],
+    description: "Stations, routing, customer email rules, lookups, automated imports, scan behavior, and production-file detection.",
+    permissions: ["manage_stations", "manage_route_rules", "manage_customer_emails", "manage_lookup_values", "manage_automation", "manage_cross_date_scanning", "manage_production_files"],
   },
   {
     title: "Indian Trail & Bays",
@@ -33309,6 +33834,16 @@ function availableRoleNames() {
  */
 function userManagerActionButtonHtml({ tone = "secondary", attr = "", label = "", icon = "", disabled = false }) {
   const safeLabel = escapeHtml(label);
+  const sharedAction = icon === "icon-save-user"
+    ? "icon-only icon-save"
+    : icon === "icon-trash"
+      ? "icon-only icon-trash danger"
+      : icon === "icon-pencil"
+        ? "icon-only icon-pencil"
+        : "";
+  if (sharedAction) {
+    return `<button type="button" class="${sharedAction}" ${attr} ${disabled ? "disabled" : ""} aria-label="${safeLabel}" title="${safeLabel}"></button>`;
+  }
 
   return `
     <button
@@ -34198,8 +34733,8 @@ function renderAdminStationsList(editable = false, limit = 6) {
     .map((station) => `
       <div class="station-row">
         ${editable ? `<input data-station-name="${escapeHtml(station)}" type="text" value="${escapeHtml(station)}">` : `<strong>${escapeHtml(station)}</strong><span>Online</span>`}
-        ${editable && hasPermission("manage_stations") ? `<button type="button" data-rename-station="${escapeHtml(station)}">Save</button>` : ""}
-        ${editable && hasPermission("manage_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" data-remove-station="${escapeHtml(station)}">Remove</button>` : ""}
+        ${editable && hasPermission("manage_stations") ? `<button type="button" class="icon-only icon-save" data-rename-station="${escapeHtml(station)}" title="Save station" aria-label="Save ${escapeHtml(station)}"></button>` : ""}
+        ${editable && hasPermission("manage_stations") && !DEFAULT_STATIONS.includes(station) ? `<button type="button" class="icon-only icon-trash danger" data-remove-station="${escapeHtml(station)}" title="Remove station" aria-label="Remove ${escapeHtml(station)}"></button>` : ""}
       </div>
     `)
     .join("") || `<div class="admin-empty">No stations loaded.</div>`;
@@ -34421,8 +34956,8 @@ function customerRouteRuleRowHtmlV348(rule, editable = false) {
       ${
         editable
           ? `<div class="customer-route-row-actions customer-route-row-actions-v346">
-              <button type="button" class="customer-route-action-v346 is-save" data-save-customer-route-rule="${escapeHtml(rule.id)}" title="Save route" aria-label="Save route"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 16h8"/></svg></button>
-              <button type="button" class="customer-route-action-v346 is-delete" data-remove-customer-route-rule="${escapeHtml(rule.id)}" title="Delete route" aria-label="Delete route"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10l-1 11H8zM9 8V5h6v3M5 8h14M10 11v5M14 11v5"/></svg></button>
+              <button type="button" class="icon-only icon-save" data-save-customer-route-rule="${escapeHtml(rule.id)}" title="Save route" aria-label="Save route"></button>
+              <button type="button" class="icon-only icon-trash danger" data-remove-customer-route-rule="${escapeHtml(rule.id)}" title="Delete route" aria-label="Delete route"></button>
             </div>`
           : ""
       }
@@ -34739,7 +35274,7 @@ function crossDateSettingsTabHtmlV350() {
           </div>
         </section>
 
-        <div class="cross-date-settings-actions cross-date-settings-actions-v346"><button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Cross-Date Settings</span></button></div>
+        <div class="cross-date-settings-actions cross-date-settings-actions-v346"><button type="submit" class="icon-only icon-save" title="Save Cross-Date Settings" aria-label="Save Cross-Date Settings"></button></div>
       </form>
     </div>`;
 }
@@ -34763,7 +35298,7 @@ function mixedDestinationSettingsHtmlV350() {
             <small>Enter 1–120 minutes.</small>
           </label>
           <aside class="mixed-destination-note-v351"><span aria-hidden="true">i</span><div><strong>What this changes</strong><p>Only the temporary Bay Map mixed-destination approval window. It does not change route assignment, rack status, or normal scan validation.</p></div></aside>
-          <footer><button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Mixed Destination</span></button></footer>
+          <footer><button type="submit" class="icon-only icon-save" title="Save Mixed Destination" aria-label="Save Mixed Destination"></button></footer>
         </form>
       </section>
     </div>`;
@@ -34797,6 +35332,112 @@ async function saveCrossDateScanSettings() {
   renderCrossDateScanOverview();
   renderScanPageSettingsModalV350();
   showSaveConfirmation("Cross-delivery-date scan settings were saved.");
+}
+
+function productionFileSettingsModalHtmlV472() {
+  const settings = state.productionFileSettings || {};
+  const roots = settings.roots || {};
+  const terms = settings.machineTerms || {};
+  const availability = settings.availability || {};
+  const index = settings.index || {};
+  const statusRow = (kind, label) => {
+    const available = Boolean(availability[kind]);
+    const refreshing = (index.refreshing || []).includes(kind);
+    return `<span class="production-index-status-v472 ${available ? "is-ready" : "is-offline"}"><i aria-hidden="true"></i><b>${escapeHtml(label)}</b><small>${refreshing ? "Refreshing" : available ? `${Number(index.counts?.[kind] || 0).toLocaleString()} files` : "Unavailable"}</small></span>`;
+  };
+  const indexedAt = Number(index.indexedAt || 0);
+  return `
+    <div class="production-settings-shell-v472">
+      <section class="production-settings-summary-v472">
+        <div><small>Production evidence</small><strong>Sketch assignment, actual-machine detection, and Staging safety</strong><span>Network folders are indexed in the background so Smart Search and scanning never wait on a full share traversal.</span></div>
+        <div class="production-index-grid-v472">
+          ${statusRow("hardware", "Hardware")}${statusRow("sketch", "Sketches")}${statusRow("program", "Denver")}${statusRow("completed_wj", "Waterjet")}
+        </div>
+        <small class="production-index-time-v472">${indexedAt ? `Last indexed ${escapeHtml(new Date(indexedAt * 1000).toLocaleString(appLocale()))}` : "No completed background index yet"}</small>
+      </section>
+      <form id="productionFileSettingsFormV472" class="production-settings-form-v472">
+        <section class="production-settings-card-v472 is-controls">
+          <header><div><strong>Workflow controls</strong><span>Disable the integration without deleting settings, or temporarily make fabrication status informational.</span></div></header>
+          <label class="production-toggle-v472"><input id="productionFilesEnabledV472" type="checkbox" ${settings.enabled !== false ? "checked" : ""}><span><b>Enable production file integration</b><small>Hardware, sketches, programs, and completion evidence are available in the app.</small></span></label>
+          <label class="production-toggle-v472"><input id="productionEnforceStagingV472" type="checkbox" ${settings.enforceStaging !== false ? "checked" : ""}><span><b>Block Staging when assigned fabrication is missing</b><small>Unavailable or ambiguous shares remain nonblocking.</small></span></label>
+          <label class="production-cache-field-v472"><span>Background refresh interval</span><div><input id="productionCacheMinutesV472" type="number" min="1" max="1440" step="1" value="${escapeHtml(settings.cacheMinutes || 5)}"><b>minutes</b></div></label>
+        </section>
+        <section class="production-settings-card-v472 is-paths">
+          <header><div><strong>Production folders</strong><span>Use local, mapped-drive, or UNC paths maintained by the plant.</span></div></header>
+          <label><span>Hardware Lists</span><input id="productionHardwarePathV472" type="text" autocomplete="off" value="${escapeHtml(roots.hardware || "")}"></label>
+          <label><span>Sketches</span><input id="productionSketchPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.sketches || "")}"></label>
+          <label><span>Denver Programs</span><input id="productionProgramPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.programs || "")}"></label>
+          <label><span>Completed Waterjet</span><input id="productionWaterjetPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.completedWaterjet || "")}"></label>
+        </section>
+        <section class="production-settings-card-v472 is-machines">
+          <header><div><strong>Machine detection terms</strong><span>Comma-separated terms found in sketches. Actual EGL or Completed WJ evidence overrides the sketch assignment.</span></div></header>
+          <label><span>Denver terms</span><textarea id="productionDenverTermsV472" rows="3">${escapeHtml((terms.denver || []).join(", "))}</textarea></label>
+          <label><span>Waterjet terms</span><textarea id="productionWaterjetTermsV472" rows="3">${escapeHtml((terms.waterjet || []).join(", "))}</textarea></label>
+        </section>
+        <footer class="production-settings-actions-v472">
+          <button type="button" class="secondary" data-production-index-refresh-v472>Refresh index</button>
+          <button type="submit" class="icon-only icon-save" title="Save Machine Settings" aria-label="Save Machine Settings"></button>
+        </footer>
+      </form>
+    </div>`;
+}
+
+function renderProductionFilesOverviewV472() {
+  const target = document.getElementById("productionFilesOverview");
+  if (!target) return;
+  const settings = state.productionFileSettings || {};
+  const counts = settings.index?.counts || {};
+  const totalFiles = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  const ready = Object.values(settings.availability || {}).filter(Boolean).length;
+  target.innerHTML = `
+    <div><strong>${settings.enabled === false ? "Integration paused" : `${ready}/4 sources available`}</strong><span>${Number(totalFiles).toLocaleString()} indexed production files.</span></div>
+    <div><strong>Staging gate ${settings.enforceStaging === false ? "informational" : "enforced"}</strong><span>Evidence can correct a sketch's assigned machine.</span></div>`;
+}
+
+async function refreshProductionFileSettingsV472(openModal = false) {
+  const payload = await fetchJson("/api/admin/production-files");
+  state.productionFileSettings = payload || state.productionFileSettings;
+  renderProductionFilesOverviewV472();
+  if (openModal && els.adminModal?.dataset.kind === "productionFiles" && els.adminModalBody) {
+    els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
+    applyLanguageToRoot(els.adminModalBody);
+  }
+  return payload;
+}
+
+async function saveProductionFileSettingsV472() {
+  const splitTerms = (value) => String(value || "").split(/[,;\n]+/).map((term) => term.trim()).filter(Boolean);
+  const payload = {
+    enabled: Boolean(document.getElementById("productionFilesEnabledV472")?.checked),
+    enforceStaging: Boolean(document.getElementById("productionEnforceStagingV472")?.checked),
+    cacheMinutes: Number(document.getElementById("productionCacheMinutesV472")?.value || 5),
+    roots: {
+      hardware: document.getElementById("productionHardwarePathV472")?.value.trim() || "",
+      sketches: document.getElementById("productionSketchPathV472")?.value.trim() || "",
+      programs: document.getElementById("productionProgramPathV472")?.value.trim() || "",
+      completedWaterjet: document.getElementById("productionWaterjetPathV472")?.value.trim() || "",
+    },
+    machineTerms: {
+      denver: splitTerms(document.getElementById("productionDenverTermsV472")?.value),
+      waterjet: splitTerms(document.getElementById("productionWaterjetTermsV472")?.value),
+    },
+  };
+  state.productionFileSettings = await fetchJson("/api/admin/production-files", { method: "POST", body: JSON.stringify(payload) });
+  renderProductionFilesOverviewV472();
+  if (els.adminModalBody) els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
+  showSaveConfirmation("Machine and production file settings were saved. Background refresh started.");
+}
+
+async function refreshProductionFileIndexV472(button) {
+  if (button) button.disabled = true;
+  try {
+    state.productionFileSettings = await fetchJson("/api/admin/production-files/refresh", { method: "POST", body: "{}" });
+    renderProductionFilesOverviewV472();
+    if (els.adminModalBody) els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
+    showSaveConfirmation(state.productionFileSettings.message || "Production file refresh started.");
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
 }
 
 function bayAutoAssignerModalHtml() {
@@ -34881,7 +35522,7 @@ function bayAutoAssignerModalHtml() {
 
         <div class="bay-auto-actions bay-auto-actions-v352">
           <span>These settings affect future Outbound preassignment only. Existing bay assignments and historical records are never rewritten.</span>
-          <button type="submit" class="app-primary-button"><span class="lookup-row-action-icon-v346 is-save" aria-hidden="true"></span><span>Save Auto Assignment</span></button>
+          <button type="submit" class="icon-only icon-save" title="Save Auto Assignment" aria-label="Save Auto Assignment"></button>
         </div>
       </form>
     </div>
@@ -34953,7 +35594,7 @@ function bayScannerRulesModalHtml() {
       <header><span class="bay-scanner-rule-icon-v349" aria-hidden="true">${kind === "manual" ? '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM7 10h5M7 14h8"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 5v14M7 5v14M11 5v14M14 5v14M19 5v14"/></svg>'}</span><div><small>${kind === "manual" ? "Remembered input" : "Barcode format"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div><b>${escapeHtml(rules.length)}</b></header>
       ${formHtml}
       <div class="bay-scanner-rule-list-v349">
-        ${rules.length ? rules.map((rule) => `<article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(kind === "manual" ? `${rule.matchType}${rule.label ? ` · ${rule.label}` : ""}` : (rule.label || "Accepted bay barcode"))}</span></div><button class="bay-scanner-rule-remove-v349" type="button" ${kind === "manual" ? `data-remove-bay-manual-rule="${escapeHtml(rule.id)}"` : `data-remove-bay-barcode-rule="${escapeHtml(rule.id)}"`} aria-label="Remove rule"><span class="icon-trash" aria-hidden="true"></span><b>Remove</b></button></article>`).join("") : `<div class="admin-empty">No ${escapeHtml(kind === "manual" ? "remembered inputs" : "extra barcode formats")} yet.</div>`}
+        ${rules.length ? rules.map((rule) => `<article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(kind === "manual" ? `${rule.matchType}${rule.label ? ` · ${rule.label}` : ""}` : (rule.label || "Accepted bay barcode"))}</span></div><button class="icon-only icon-trash danger bay-scanner-rule-remove-v349" type="button" ${kind === "manual" ? `data-remove-bay-manual-rule="${escapeHtml(rule.id)}"` : `data-remove-bay-barcode-rule="${escapeHtml(rule.id)}"`} title="Remove rule" aria-label="Remove rule"></button></article>`).join("") : `<div class="admin-empty">No ${escapeHtml(kind === "manual" ? "remembered inputs" : "extra barcode formats")} yet.</div>`}
       </div>
     </section>`;
 
@@ -35167,7 +35808,7 @@ function customerEmailRulesModalHtml() {
         <button type="submit" class="app-primary-button"><span class="customer-email-action-icon-v343 is-add" aria-hidden="true"></span><span>Add CC</span></button>
       </form>
       <div class="customer-email-cc-list-v343">
-        ${cc.length ? cc.map((row) => `<span><i class="customer-email-mini-mail-v343" aria-hidden="true"></i><b>${escapeHtml(row.email)}</b><button type="button" data-remove-customer-email-cc="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.email)}" title="Remove CC">×</button></span>`).join("") : `<em>No global CC addresses configured.</em>`}
+        ${cc.length ? cc.map((row) => `<span><i class="customer-email-mini-mail-v343" aria-hidden="true"></i><b>${escapeHtml(row.email)}</b><button type="button" class="icon-only icon-trash danger" data-remove-customer-email-cc="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.email)}" title="Remove CC"></button></span>`).join("") : `<em>No global CC addresses configured.</em>`}
       </div>
     </section>`;
 
@@ -35184,7 +35825,7 @@ function customerEmailRulesModalHtml() {
             <label><span>Customer match text <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="customerEmailPatternInput" type="text" autocomplete="off" placeholder="Example: LENNAR HOMES" required></label>
             <label><span>Email address <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="customerEmailAddressInput" type="email" autocomplete="off" placeholder="customer@example.com" required></label>
             <div class="customer-email-editor-actions-v343">
-              <button id="customerEmailSubmitBtn" class="app-primary-button customer-email-save-v343" type="submit"><span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Add Customer Rule</span></button>
+              <button id="customerEmailSubmitBtn" class="app-primary-button customer-email-save-v343" type="submit">Add Customer Rule</button>
             </div>
             <p id="customerEmailEditorHintV343">Customer match is fuzzy and case-insensitive. Use the most specific customer wording available.</p>
           </form>
@@ -35299,7 +35940,12 @@ function clearCustomerEmailEditor() {
   const idInput = document.getElementById("customerEmailEditIdInput");
   if (idInput) idInput.value = "";
   const submitButton = document.getElementById("customerEmailSubmitBtn");
-  if (submitButton) submitButton.innerHTML = `<span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Add Customer Rule</span>`;
+  if (submitButton) {
+    submitButton.className = "app-primary-button customer-email-save-v343";
+    submitButton.innerHTML = "Add Customer Rule";
+    submitButton.title = "Add Customer Rule";
+    submitButton.setAttribute("aria-label", "Add Customer Rule");
+  }
   const hint = document.getElementById("customerEmailEditorHintV343");
   if (hint) hint.textContent = "Customer match is fuzzy and case-insensitive. Use the most specific customer wording available.";
   document.getElementById("customerEmailPatternInput")?.focus();
@@ -35527,7 +36173,12 @@ function startCustomerEmailEdit(id) {
   if (idInput) idInput.value = contact.id;
   if (patternInput) patternInput.value = contact.customerPattern || "";
   if (emailInput) emailInput.value = contact.email || "";
-  if (submitButton) submitButton.innerHTML = `<span class="customer-email-action-icon-v343 is-save" aria-hidden="true"></span><span>Save Customer Rule</span>`;
+  if (submitButton) {
+    submitButton.className = "icon-only icon-save";
+    submitButton.innerHTML = "";
+    submitButton.title = "Save Customer Rule";
+    submitButton.setAttribute("aria-label", "Save Customer Rule");
+  }
   const hint = document.getElementById("customerEmailEditorHintV343");
   if (hint) hint.textContent = `Editing ${contact.customerPattern}. Save to update this rule or Cancel to leave it unchanged.`;
   patternInput?.focus();
@@ -37046,10 +37697,12 @@ function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewC
   const itemLabel = `${item.order}-${item.item}`;
   const rackGlassLabel = glassTypeLabel(item);
   const sourceRack = state.racks.find((rack) => String(rack.code) === String(currentRackCode));
-  const sourceOnTheWay = String(sourceRack?.status || "").trim().toLowerCase() === "in transit";
-  const sourceBlockedReason = sourceOnTheWay
-    ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
-    : "";
+  const sourceState = String(sourceRack?.status || "").trim().toLowerCase();
+  const sourceBlockedReason = sourceState === "closed"
+    ? `${rackOptionLabel(sourceRack)} is Complete. Mark it Incomplete before moving or removing rack contents.`
+    : sourceState === "in transit"
+      ? `${rackOptionLabel(sourceRack)} is On the Way. Mark it Not On The Way or Returned before moving or clearing its contents.`
+      : "";
   const blockedAttrs = sourceBlockedReason
     ? `class="icon-only icon-move rack-scope-move-button is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
     : `class="icon-only icon-move rack-scope-move-button" title="Move item"`;
@@ -37111,12 +37764,13 @@ function rackModalHeaderActionsHtml(rack) {
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
   const printLabel = isTruck ? "Print Truck Packing Slip" : "Print Packing Slip";
-  const sourceOnTheWay = statusLower === "in transit";
-  const moveBlockedReason = sourceOnTheWay
-    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
-    : !transferOptions
-      ? "No open destination racks are available for this transfer."
-      : "";
+  const moveBlockedReason = statusLower === "closed"
+    ? `${rackOptionLabel(rack)} is Complete. Mark it Incomplete before moving its contents.`
+    : statusLower === "in transit"
+      ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+      : !transferOptions
+        ? "No open destination racks are available for this transfer."
+        : "";
   const moveBlockedAttrs = moveBlockedReason
     ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"`
     : `title="Move all rack contents"`;
@@ -37141,12 +37795,14 @@ function rackDetailsModalHtml(rack) {
   const items = rack.items || [];
   const canTransfer = hasPermission("transfer_rack_contents") || hasPermission("manage_racks");
   const transferOptions = rackTransferOptions(rack.code);
-  const sourceOnTheWay = String(rack.status || "").trim().toLowerCase() === "in transit";
-  const moveBlockedReason = sourceOnTheWay
-    ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
-    : !transferOptions
-      ? "No open destination racks are available for this transfer."
-      : "";
+  const rackState = String(rack.status || "").trim().toLowerCase();
+  const moveBlockedReason = rackState === "closed"
+    ? `${rackOptionLabel(rack)} is Complete. Mark it Incomplete before moving its contents.`
+    : rackState === "in transit"
+      ? `${rackOptionLabel(rack)} is On the Way. Mark it Not On The Way or Returned before moving its contents.`
+      : !transferOptions
+        ? "No open destination racks are available for this transfer."
+        : "";
   const dateGroups = new Map();
   for (const item of items) {
     const key = String(item.deliveryDate || "No delivery date");
@@ -38587,8 +39243,8 @@ function rejectSettingsModalHtml() {
             <span class="reject-catalog-row-number-v347">${escapeHtml(index + 1)}</span>
             <div><strong>${escapeHtml(row.label)}</strong><small>Available immediately in Add Internal Reject</small></div>
             <div class="reject-catalog-row-actions-v349">
-              <button class="reject-catalog-edit-v349 reject-catalog-icon-action-v350 is-edit" type="button" data-reject-catalog-edit="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" data-reject-catalog-label="${escapeHtml(row.label)}" aria-label="Edit ${escapeHtml(row.label)}" title="Edit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 16-1 4 4-1L18 9l-3-3Z"/><path d="m13.5 7.5 3 3"/></svg></button>
-              <button class="reject-catalog-remove-v347 reject-catalog-icon-action-v350 is-delete" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Delete ${escapeHtml(row.label)}" title="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"/></svg></button>
+              <button class="icon-only icon-pencil" type="button" data-reject-catalog-edit="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" data-reject-catalog-label="${escapeHtml(row.label)}" aria-label="Edit ${escapeHtml(row.label)}" title="Edit ${escapeHtml(row.label)}"></button>
+              <button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Delete ${escapeHtml(row.label)}" title="Delete ${escapeHtml(row.label)}"></button>
             </div>
           </article>`).join("") || `<div class="admin-empty reject-settings-empty-v347">No active ${escapeHtml(kind)} values.</div>`}
       </div>
@@ -40350,6 +41006,14 @@ function wireEvents() {
     if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
+    if (state.homeChartMetric === "glass-sizes" && !(state.homeReportSummary?.glassSizeFrequencyByType || []).length) {
+      void loadHomeReportSummary();
+    }
+  });
+  els.statsGlassSizeTypeSelect?.addEventListener("change", () => {
+    state.statisticsGlassSizeType = els.statsGlassSizeTypeSelect.value || "";
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
   });
   els.statsBreakageMeasureSelect?.addEventListener("change", () => {
     state.statisticsBreakageMeasure = els.statsBreakageMeasureSelect.value || "sqft";
@@ -40378,6 +41042,7 @@ function wireEvents() {
     state.homeChartSelectedLabel = "";
     state.statisticsIncludeExternalRemakes = false;
     state.statisticsBreakageMeasure = "sqft";
+    state.statisticsGlassSizeType = "";
     renderStatisticsPage();
   });
   els.statsIncludeExternalRemakes?.addEventListener("change", () => {
@@ -41186,6 +41851,12 @@ function wireEvents() {
       saveRackInlineEdit().catch((error) => showInlineError(error.message, true));
       return;
     }
+    if (event.target.closest("#stationAliasEditorV470")) {
+      event.preventDefault();
+      const internalName = document.getElementById("stationAliasInternalInputV470")?.value || "";
+      saveStationAliasV355(internalName).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     if (event.target.closest("#glassProfileFormV349")) {
       event.preventDefault();
       saveGlassProfileV349().catch((error) => showInlineError(error.message, true));
@@ -41245,6 +41916,11 @@ function wireEvents() {
     if (event.target.closest("#crossDateScanSettingsForm")) {
       event.preventDefault();
       saveCrossDateScanSettings().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    if (event.target.closest("#productionFileSettingsFormV472")) {
+      event.preventDefault();
+      saveProductionFileSettingsV472().catch((error) => showInlineError(error.message, true));
       return;
     }
   });
@@ -42173,6 +42849,22 @@ function wireEvents() {
     }
 
 
+    if (event.target.closest("[data-lookup-editor-close-v470], [data-lookup-editor-close-v470=\"true\"]")) {
+      closeLookupEditorV470();
+      return;
+    }
+
+    if (event.target.closest("[data-lookup-add-v470]")) {
+      openNewLookupEditorV470();
+      return;
+    }
+
+    const stationAliasEditV470 = event.target.closest("[data-edit-station-alias-v470]");
+    if (stationAliasEditV470) {
+      editStationAliasV470(stationAliasEditV470.dataset.editStationAliasV470 || "");
+      return;
+    }
+
     const glassProfileEditButtonV349 = event.target.closest("[data-glass-profile-edit-v349]");
     if (glassProfileEditButtonV349) {
       editGlassProfileV349(glassProfileEditButtonV349.dataset.glassProfileEditV349 || "");
@@ -42306,6 +42998,10 @@ function wireEvents() {
       } else if (modalKind === "supersededOrders") {
         loadSupersededOrderReviews()
           .then(() => openAdminModal("supersededOrders"))
+          .catch((error) => showInlineError(error.message, true));
+      } else if (modalKind === "productionFiles") {
+        refreshProductionFileSettingsV472(false)
+          .then(() => openAdminModal("productionFiles"))
           .catch((error) => showInlineError(error.message, true));
       } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
         // v0.339: open immediately and request only the visible three-week Admin
@@ -42444,6 +43140,12 @@ function wireEvents() {
     if (adminModalSectionButton && els.adminModal?.contains(adminModalSectionButton)) {
       event.preventDefault();
       setAdminModalSection(adminModalSectionButton.dataset.adminModalSection || "workspace");
+      return;
+    }
+    const productionIndexRefreshButtonV472 = event.target.closest("[data-production-index-refresh-v472]");
+    if (productionIndexRefreshButtonV472) {
+      event.preventDefault();
+      refreshProductionFileIndexV472(productionIndexRefreshButtonV472).catch((error) => showInlineError(error.message, true));
       return;
     }
 
@@ -42747,6 +43449,19 @@ function wireEvents() {
       if (isCollapsed) state.collapsedGlassTypes.delete(label);
       else state.collapsedGlassTypes.add(label);
       renderScanPage();
+      return;
+    }
+    const scanOrderToggleV472 = event.target.closest("[data-toggle-scan-order-v472]");
+    if (scanOrderToggleV472) {
+      const order = String(scanOrderToggleV472.dataset.toggleScanOrderV472 || "").trim();
+      window.clearTimeout(state.scanOrderToggleTimer);
+      state.scanOrderToggleTimer = window.setTimeout(() => {
+        const isCollapsed = state.collapsedScanOrders.has(order);
+        void playAppSound(isCollapsed ? "collapse_open" : "collapse_close");
+        if (isCollapsed) state.collapsedScanOrders.delete(order);
+        else state.collapsedScanOrders.add(order);
+        renderScanPage();
+      }, 220);
       return;
     }
     if (event.target === els.scanBayOverrideClearBtn) {

@@ -22,6 +22,7 @@ tmp*/
 *.zip
 *.log
 *.tmp
+data/production-file-index.json
 
 # SQLite runtime sidecars
 *.db-wal

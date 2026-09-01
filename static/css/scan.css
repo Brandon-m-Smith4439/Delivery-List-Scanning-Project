@@ -6001,3 +6001,158 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   border-left-color: #7a2737;
   background: #fbf3f5;
 }
+
+/* ========================================================================== */
+/* v0.470 Scan table proportions, error signal, rack transit color            */
+/* ========================================================================== */
+/* Order and Item keep enough room for their full headers/production values;
+   reclaimed width goes to Job Nr., which is the more variable identifier. */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 20.3% !important; }
+.scan-page .delivery-table th:nth-child(2),
+.scan-page .delivery-table td:nth-child(2) { width: 7.8% !important; min-width: 72px !important; padding-inline: 8px !important; }
+.scan-page .delivery-table th:nth-child(3),
+.scan-page .delivery-table td:nth-child(3) { width: 4.9% !important; min-width: 46px !important; padding-inline: 8px !important; }
+
+.scan-filter-glance-badge.is-error.has-items {
+  border-color: #d32f42 !important;
+  background: #d32f42 !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 2px rgba(211,47,66,.13), 0 5px 12px rgba(166,31,48,.18) !important;
+}
+.scan-filter-glance-badge.is-error.has-items :is(i,b) { color: #fff !important; }
+.scan-filter-options .tab[data-filter="errors"].is-error-active-v470 {
+  border-color: #d32f42 !important;
+  background: #fff0f2 !important;
+  color: #a91f32 !important;
+  box-shadow: inset 3px 0 0 #d32f42 !important;
+}
+.scan-filter-options .tab[data-filter="errors"].is-error-active-v470 span {
+  background: #d32f42 !important;
+  color: #fff !important;
+}
+/* On-the-way must read unmistakably blue, rather than inheriting an individual
+   rack palette that can make the lifecycle state look neutral. */
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way > .location-rack-cell-v349 {
+  border-color: #79a9e7 !important;
+  background: linear-gradient(90deg, #e6f1ff 0%, #f0f6ff 100%) !important;
+  box-shadow: inset 4px 0 0 #2f73c8 !important;
+}
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way .location-badge.rack,
+.scan-page .delivery-table .location-rack-state-stack-v448.is-on-the-way .line-rack-location-display-v350 {
+  color: #164f94 !important;
+  opacity: .76 !important;
+}
+/* The active delivery date is the primary scan-page context and should not read
+   like supporting body copy. */
+.scan-page #pageTitle { font-size: clamp(30px, 2.25vw, 40px) !important; line-height: 1.08 !important; }
+
+.global-result-fabrication-v470 {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: 5px;
+  padding: 2px 6px;
+  border: 1px solid #b8c7d8;
+  border-radius: 999px;
+  font-size: 9px !important;
+  font-weight: 850;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.global-result-fabrication-v470.is-fabricated { border-color: #8fc7a0; background: #edf8f0; color: #23723a; }
+.global-result-fabrication-v470.is-missing { border-color: #e5a6ad; background: #fff0f2; color: #a82234; }
+.global-result-fabrication-v470.is-unknown { border-color: #c6d1dd; background: #f5f7fa; color: #5d6d7e; }
+/* v0.472 Order grouping inside maintained glass-type sections -------------- */
+.scan-order-group-row-v472 > td {
+  padding: 0 !important;
+  border-top: 1px solid rgba(24, 58, 97, 0.12);
+  background: rgba(241, 246, 252, 0.94);
+}
+
+.scan-order-group-row-v472 button {
+  display: grid;
+  grid-template-columns: 18px minmax(100px, 0.55fr) minmax(180px, 1.2fr) minmax(170px, 1fr) auto minmax(105px, 0.55fr);
+  gap: 10px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 49px;
+  padding: 7px 12px;
+  border: 0;
+  border-left: 3px solid #2f70bd;
+  border-radius: 0;
+  background: transparent;
+  color: #142a49;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scan-order-group-row-v472 button:hover,
+.scan-order-group-row-v472 button:focus-visible {
+  background: #eaf2fc;
+}
+
+.scan-order-group-row-v472 button:focus-visible {
+  outline: 2px solid #176ee8;
+  outline-offset: -2px;
+}
+
+.scan-order-group-row-v472 :is(.scan-order-identity-v472, .scan-order-job-v472, .scan-order-customer-v472, .scan-order-progress-v472) {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.scan-order-group-row-v472 small {
+  color: #64758d;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scan-order-group-row-v472 :is(strong, b) {
+  overflow: hidden;
+  color: #132947;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-order-chevron-v472 {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #2f70bd;
+  border-bottom: 2px solid #2f70bd;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 130ms ease;
+}
+
+.scan-order-group-row-v472.is-collapsed .scan-order-chevron-v472 {
+  transform: rotate(-45deg) translateX(-1px);
+}
+
+.scan-order-attention-v472 {
+  border: 1px solid #efc078;
+  border-radius: 999px;
+  background: #fff4df;
+  color: #8a4d00;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.scan-order-progress-v472 {
+  justify-items: end;
+}
+
+@media (max-width: 1180px) {
+  .scan-order-group-row-v472 button {
+    grid-template-columns: 18px minmax(90px, 0.5fr) minmax(150px, 1fr) minmax(140px, 0.9fr) minmax(95px, 0.5fr);
+  }
+
+  .scan-order-attention-v472 {
+    display: none;
+  }
+}

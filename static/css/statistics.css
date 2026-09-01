@@ -3010,3 +3010,13 @@
 .statistics-table-category-v0258 i {
   background: var(--chart-color, #dceafa) !important;
 }
+
+/* ========================================================================== */
+/* v0.470 Common glass-size selector                                          */
+/* ========================================================================== */
+.statistics-glass-size-control-v470 {
+  min-width: min(320px, 100%) !important;
+}
+.statistics-glass-size-control-v470 select {
+  width: 100% !important;
+}

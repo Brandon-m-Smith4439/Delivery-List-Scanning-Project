@@ -10,6 +10,7 @@ from pathlib import Path
 
 from backend.config import load_config
 from backend.store import SQLiteDeliveryStore, canonical_clear_glass_label, glass_cost_profile, glass_profile_identity_key, rack_barcode_text
+from backend.production_files import ProductionFileService
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1491,6 +1492,265 @@ class ImportConsistencyTests(unittest.TestCase):
                     candidate.unlink()
             if verification_root.exists():
                 shutil.rmtree(verification_root)
+
+
+
+    def test_v0470_production_fabrication_is_item_specific_and_blocks_staging_until_complete(self) -> None:
+        """Denver/Waterjet evidence must match the exact item before Staging can proceed."""
+        verification_root = ROOT / "_verification_v0470_fabrication"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        database_path = verification_root / "scanner.db"
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as connection:
+                store.seed_racks(connection)
+                connection.commit()
+
+            config = replace(
+                store.config,
+                hardware_lists_dir=hardware_dir,
+                sketches_dir=sketches_dir,
+                programs_dir=programs_dir,
+                completed_wj_dir=completed_wj_dir,
+            )
+            store.production_files = ProductionFileService(config)
+
+            item = imported_item("279470", "1", 1, "v0470-fabrication:1")
+            item["job"] = "88279470 FAB TEST"
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-19", "items": [item]},
+                "fileName": "Delivery List 10-19-2026.xlsx",
+                "user": "admin",
+            })
+            (sketches_dir / "279470-001 Sketch.txt").write_text("Assigned Machine: Denver CNC", encoding="utf-8")
+            (sketches_dir / "279470-002 Sketch.txt").write_text("Assigned Machine: WATER JET", encoding="utf-8")
+            # Wrong-item Denver evidence must never satisfy item 001.
+            (programs_dir / "279470-002.egl").write_text("wrong item", encoding="utf-8")
+            store.production_files = ProductionFileService(config)
+            item_files = store.production_files.item_assets("279470", "001", "88279470 FAB TEST")
+            self.assertEqual([row["name"] for row in item_files["sketches"]], ["279470-001 Sketch.txt"])
+            self.assertEqual(item_files["programs"], [])
+
+            blocked = store.record_scan({
+                "listId": "2026-10-19-staging-airport",
+                "barcode": item["barcode"],
+                "user": "admin",
+                "station": "Airport Rd",
+            })
+            self.assertTrue(blocked["fabricationGate"]["blockStaging"])
+            self.assertEqual(blocked["fabricationGate"]["machine"], "Denver CNC")
+            self.assertIn("Fabrication required", blocked["lastScan"]["message"])
+            with store.connect() as connection:
+                staged_line = connection.execute(
+                    "SELECT id, scanned_qty FROM line_items WHERE list_id = ? AND order_no = ? LIMIT 1",
+                    ("2026-10-19-staging-airport", "279470"),
+                ).fetchone()
+                self.assertIsNotNone(staged_line)
+                self.assertEqual(int(staged_line["scanned_qty"] or 0), 0)
+                rack = connection.execute(
+                    "SELECT rack_code FROM racks WHERE active = 1 AND LOWER(status) = 'open' ORDER BY id LIMIT 1"
+                ).fetchone()
+                self.assertIsNotNone(rack)
+                rack_code = str(rack["rack_code"])
+
+            (programs_dir / "279470-001.egl").write_text("fabricated", encoding="utf-8")
+            # Keep the same service instance: the retry path must refresh only
+            # the previously-missing evidence share instead of waiting for TTL.
+            scanned = store.record_scan({
+                "listId": "2026-10-19-staging-airport",
+                "barcode": item["barcode"],
+                "rackCode": rack_code,
+                "user": "admin",
+                "station": "Airport Rd",
+            })
+            self.assertNotIn("fabricationGate", scanned)
+            with store.connect() as connection:
+                staged_line = connection.execute(
+                    "SELECT id, scanned_qty FROM line_items WHERE list_id = ? AND order_no = ? LIMIT 1",
+                    ("2026-10-19-staging-airport", "279470"),
+                ).fetchone()
+                self.assertEqual(int(staged_line["scanned_qty"] or 0), 1)
+                rack_item = connection.execute(
+                    "SELECT ri.id FROM rack_items ri JOIN racks r ON r.id = ri.rack_id WHERE r.rack_code = ? AND ri.status = 'Active' LIMIT 1",
+                    (rack_code,),
+                ).fetchone()
+                self.assertIsNotNone(rack_item)
+                rack_item_id = int(rack_item["id"])
+
+            store.complete_rack({"rackCode": rack_code}, "admin")
+            with self.assertRaisesRegex(ValueError, "Incomplete"):
+                store.clear_rack_item({"rackItemId": rack_item_id}, "admin")
+            with self.assertRaisesRegex(ValueError, "Incomplete"):
+                store.clear_rack({"rackCode": rack_code}, "admin")
+            with store.connect() as connection:
+                target = connection.execute(
+                    "SELECT rack_code FROM racks WHERE active = 1 AND LOWER(status) = 'open' AND rack_code <> ? ORDER BY id LIMIT 1",
+                    (rack_code,),
+                ).fetchone()
+                self.assertIsNotNone(target)
+            with self.assertRaisesRegex(ValueError, "Incomplete"):
+                store.move_rack_item({"rackItemId": rack_item_id, "targetRackCode": str(target["rack_code"])}, "admin")
+
+            store.uncomplete_rack({"rackCode": rack_code}, "admin")
+            store.clear_rack_item({"rackItemId": rack_item_id}, "admin")
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0470_statistics_common_size_combines_rotated_dimensions(self) -> None:
+        """Size frequency treats width/height rotation as the same physical lite."""
+        verification_root = ROOT / "_verification_v0470_statistics_sizes"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            first = imported_item("279472", "1", 2, "v0470-size:1")
+            second = imported_item("279472", "2", 3, "v0470-size:2")
+            first["dimensions"] = '28" x 79 1/2"'
+            second["dimensions"] = '79 1/2" x 28"'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-20", "items": [first, second]},
+                "fileName": "Delivery List 10-20-2026.xlsx",
+                "user": "admin",
+            })
+
+            report = store.reports_summary({"dateFrom": "2026-10-20", "dateTo": "2026-10-20"})
+            glass_row = next(
+                row for row in report["glassSizeFrequencyByType"]
+                if "Clear Tempered" in str(row.get("glassType") or "")
+            )
+            self.assertEqual(glass_row["totalPieces"], 5)
+            self.assertEqual(len(glass_row["sizes"]), 1)
+            self.assertEqual(glass_row["sizes"][0]["dimensions"], '28" × 79 1/2"')
+            self.assertEqual(glass_row["sizes"][0]["pieces"], 5)
+            self.assertEqual(glass_row["mostCommonSize"]["pieces"], 5)
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0470_waterjet_and_unavailable_share_safety(self) -> None:
+        """Waterjet completion is recognized while unavailable shares never create false scan blocks."""
+        verification_root = ROOT / "_verification_v0470_waterjet"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            config = replace(
+                load_config(ROOT),
+                hardware_lists_dir=hardware_dir,
+                sketches_dir=sketches_dir,
+                programs_dir=programs_dir,
+                completed_wj_dir=completed_wj_dir,
+            )
+            (sketches_dir / "279471-001 Sketch.txt").write_text("Assigned machine: WATER JET", encoding="utf-8")
+            service = ProductionFileService(config)
+            missing = service.fabrication_status("279471", "001", "88279471")
+            self.assertEqual(missing["machine"], "Waterjet")
+            self.assertTrue(missing["blockStaging"])
+
+            (completed_wj_dir / "279471-001 Complete.dxf").write_text("complete", encoding="utf-8")
+            service = ProductionFileService(config)
+            complete = service.fabrication_status("279471", "001", "88279471")
+            self.assertTrue(complete["fabricated"])
+            self.assertFalse(complete["blockStaging"])
+
+            missing_root = verification_root / "Disconnected Completed WJ"
+            disconnected_config = replace(config, completed_wj_dir=missing_root)
+            disconnected = ProductionFileService(disconnected_config).fabrication_status("279471", "001", "88279471")
+            self.assertEqual(disconnected["machine"], "Waterjet")
+            self.assertIsNone(disconnected["fabricated"])
+            self.assertFalse(disconnected["enforceable"])
+            self.assertFalse(disconnected["blockStaging"])
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0472_machine_evidence_overrides_sketch_and_settings_persist(self) -> None:
+        """Admin settings persist, while completed evidence owns the actual machine."""
+        verification_root = ROOT / "_verification_v0472_production_settings"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            saved = store.update_production_file_settings(
+                {
+                    "enabled": True,
+                    "enforceStaging": True,
+                    "cacheMinutes": 7,
+                    "roots": {
+                        "hardware": str(hardware_dir),
+                        "sketches": str(sketches_dir),
+                        "programs": str(programs_dir),
+                        "completedWaterjet": str(completed_wj_dir),
+                    },
+                    "machineTerms": {
+                        "denver": ["DENVER", "DENVER CNC"],
+                        "waterjet": ["WATER JET", "WATERJET", "WJ"],
+                    },
+                },
+                "admin",
+            )
+            self.assertEqual(saved["cacheMinutes"], 7)
+            self.assertEqual(saved["roots"]["programs"], str(programs_dir))
+
+            (sketches_dir / "279473-001 Sketch.txt").write_text(
+                "Assigned machine: WATER JET", encoding="utf-8"
+            )
+            (programs_dir / "279473-001.egl").write_text("Denver completion", encoding="utf-8")
+            store.production_files = ProductionFileService(store.config)
+            store.production_files.configure(store.get_production_file_settings())
+            fast_status = store.production_files.fabrication_status(
+                "279473", "001", "88279473", allow_content_read=False
+            )
+            self.assertEqual(fast_status["assignedMachine"], "Waterjet")
+            self.assertEqual(fast_status["actualMachine"], "Denver CNC")
+            status = store.production_files.fabrication_status("279473", "001", "88279473")
+            self.assertEqual(status["assignedMachine"], "Waterjet")
+            self.assertEqual(status["actualMachine"], "Denver CNC")
+            self.assertTrue(status["machineOverride"])
+            self.assertTrue(status["fabricated"])
+            self.assertFalse(status["blockStaging"])
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0472_network_asset_lookup_never_walks_share_on_request_thread(self) -> None:
+        """Mapped production drives schedule refresh and return the cached view immediately."""
+        config = replace(
+            load_config(ROOT),
+            hardware_lists_dir=Path("I:/Production/Hardware"),
+            sketches_dir=Path("I:/Production/Sketches"),
+            programs_dir=Path("I:/Production/Programs"),
+            completed_wj_dir=Path("I:/Production/Completed WJ"),
+        )
+        service = ProductionFileService(config)
+        scheduled: list[list[str] | None] = []
+        service.refresh_async = lambda kinds=None: scheduled.append(kinds)  # type: ignore[method-assign]
+        service._walk_root = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("request thread walked share"))  # type: ignore[method-assign]
+        self.assertEqual(service.assets("sketch"), [])
+        self.assertEqual(scheduled, [["sketch"]])
 
 
     def test_v0469_unified_priority_work_applies_existing_and_waits_for_future_import(self) -> None:

@@ -16,6 +16,7 @@ import json
 import html
 import gzip
 import io
+import mimetypes
 import os
 import re
 import secrets
@@ -74,6 +75,7 @@ ADMIN_DASHBOARD_PERMISSIONS = (
     "manage_route_rules",
     "manage_customer_emails",
     "manage_lookup_values",
+    "manage_production_files",
     "manage_automation",
     "manage_cross_date_scanning",
     "manage_reject_settings",
@@ -99,6 +101,7 @@ ACTION_HISTORY_CONTEXT_PERMISSIONS = {
     "customerRoutes": ("manage_route_rules",),
     "customerEmails": ("manage_customer_emails",),
     "lookups": ("manage_lookup_values",),
+    "productionFiles": ("manage_production_files",),
     "rejectSettings": ("manage_reject_settings",),
     "bayScannerRules": ("manage_bay_scanner_rules", "manage_bay_auto_assigner"),
     "crossDateScanning": ("manage_cross_date_scanning", "manage_bay_scanner_rules"),
@@ -1695,6 +1698,37 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_production_asset(self, asset_id: str, *, download: bool = False) -> None:
+        """Stream one allow-listed production-share asset without exposing a raw path."""
+        service = getattr(STORE, "production_files", None)
+        asset = service.resolve_asset(asset_id) if service is not None else None
+        if not asset:
+            self.send_json({"error": "Production file was not found or is no longer available."}, HTTPStatus.NOT_FOUND)
+            return
+        try:
+            size = asset.path.stat().st_size
+            body = asset.path.open("rb")
+        except OSError as exc:
+            self.send_json({"error": f"Unable to read production file: {exc}"}, HTTPStatus.NOT_FOUND)
+            return
+        content_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
+        disposition = "attachment" if download else "inline"
+        safe_name = asset.name.replace('"', "'")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'{disposition}; filename="{safe_name}"')
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(size))
+        self.end_headers()
+        try:
+            while True:
+                chunk = body.read(256 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        finally:
+            body.close()
+
     def send_html(self, markup: str, status: HTTPStatus = HTTPStatus.OK) -> None:
         """Purpose: Send HTML for the delivery-list scanner workflow.
 
@@ -2158,6 +2192,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.get_bay_auto_assign_settings())
             return
 
+        if parsed.path == "/api/admin/production-files":
+            if not self.require_permission("manage_production_files"):
+                return
+            self.send_json(STORE.get_production_file_settings())
+            return
+
         if parsed.path == "/api/glass-type-colors":
             # v0.379: Glass colors are presentation metadata, not an admin-only secret.
             # Every authenticated operator needs the same Lookup Manager palette so
@@ -2289,7 +2329,53 @@ class Handler(SimpleHTTPRequestHandler):
             if not user:
                 return
             query = parse_qs(parsed.query).get("q", [""])[0]
-            self.send_json({"results": STORE.global_search(query, user)})
+            results = STORE.global_search(query, user)
+            # v0.470: fabrication state is appended only to the already-capped
+            # search result set. The production file service is TTL-cached, so
+            # this does not rescan network shares for every keystroke.
+            service = getattr(STORE, "production_files", None)
+            if service is not None and str(query or "").strip():
+                for result in results:
+                    status = service.fabrication_status(
+                        result.get("order"),
+                        result.get("item"),
+                        result.get("job"),
+                        allow_content_read=False,
+                    )
+                    if status.get("machine"):
+                        result["fabrication"] = status
+            self.send_json({"results": results})
+            return
+
+        if parsed.path == "/api/orders/detail":
+            user = self.require_permission("global_search")
+            if not user:
+                return
+            order_no = parse_qs(parsed.query).get("order", [""])[0]
+            try:
+                self.send_json(STORE.get_order_detail(order_no, user))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+            return
+
+        if parsed.path == "/api/production-files/hardware":
+            if not self.require_permission("global_search"):
+                return
+            query = parse_qs(parsed.query).get("q", [""])[0]
+            service = getattr(STORE, "production_files", None)
+            self.send_json({
+                "results": service.search_hardware(query) if service is not None else [],
+                "availability": service.availability() if service is not None else {},
+            })
+            return
+
+        if parsed.path == "/api/production-files/asset":
+            if not self.require_permission("global_search"):
+                return
+            params = parse_qs(parsed.query)
+            asset_id = params.get("id", [""])[0]
+            download = str(params.get("download", ["0"])[0]).lower() in {"1", "true", "yes"}
+            self.send_production_asset(asset_id, download=download)
             return
 
         if parsed.path == "/api/reports/summary":
@@ -2792,6 +2878,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(OPERATIONS.record_packing_print(data, user["username"]))
                 return
 
+            if parsed.path == "/api/production-files/open":
+                if not self.require_permission("global_search"):
+                    return
+                service = getattr(STORE, "production_files", None)
+                if service is None:
+                    self.send_json({"error": "Production file integration is unavailable."}, HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
+                try:
+                    self.send_json(service.open_asset(str(data.get("assetId") or "")))
+                except FileNotFoundError as exc:
+                    self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
+
             if parsed.path == "/api/scans":
                 user = self.require_permission("scan_delivery_lists")
                 if not user:
@@ -3076,6 +3175,19 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_cross_date_scan_settings(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/production-files":
+                user = self.require_permission("manage_production_files")
+                if not user:
+                    return
+                self.send_json(STORE.update_production_file_settings(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/production-files/refresh":
+                if not self.require_permission("manage_production_files"):
+                    return
+                self.send_json(STORE.refresh_production_file_index())
                 return
 
             if parsed.path == "/api/admin/bay-scanner-rules/manual":
@@ -3530,6 +3642,9 @@ def main() -> int:
     print("Initializing Delivery List Scanner database...", flush=True)
     STORE.initialize()
     print("Database initialization complete.", flush=True)
+    production_files = getattr(STORE, "production_files", None)
+    if production_files is not None:
+        production_files.refresh_async()
     start_daily_import_scheduler()
     print(f"Binding web server to {CONFIG.host}:{CONFIG.port}...", flush=True)
     server = ThreadingHTTPServer((CONFIG.host, CONFIG.port), Handler)

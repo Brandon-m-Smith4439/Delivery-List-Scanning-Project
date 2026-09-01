@@ -451,11 +451,12 @@ body :is(
 }
 
 /* ========================================================================== */
-/* v0.468 Shared save / delete icon action profile                            */
+/* v0.470 Shared edit / save / delete icon action profile                            */
 /* ========================================================================== */
-/* Save and trash icon buttons now share one late-loaded owner so individual
+/* Edit, save, and trash icon buttons now share one late-loaded owner so individual
    Admin/Rack legacy hover rules cannot repaint one control white or otherwise
    drift away from the maintained action language. */
+button.icon-only.icon-pencil,
 button.icon-only.icon-save,
 button.icon-only.icon-trash {
   width: 34px !important;
@@ -467,6 +468,19 @@ button.icon-only.icon-trash {
   padding: 0 !important;
   border-radius: 8px !important;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease !important;
+}
+button.icon-only.icon-pencil {
+  border-color: #b9cee4 !important;
+  background: #fff !important;
+  color: #155caa !important;
+}
+button.icon-only.icon-pencil:hover:not(:disabled):not(.is-blocked),
+button.icon-only.icon-pencil:focus-visible:not(:disabled):not(.is-blocked) {
+  border-color: #155caa !important;
+  background: #155caa !important;
+  color: #fff !important;
+  box-shadow: 0 7px 15px rgba(21, 92, 170, .18) !important;
+  transform: translateY(-1px) !important;
 }
 button.icon-only.icon-save {
   border-color: #123f72 !important;
@@ -494,7 +508,163 @@ button.icon-only.icon-trash:focus-visible:not(:disabled):not(.is-blocked) {
   box-shadow: 0 7px 15px rgba(169, 36, 52, .18) !important;
   transform: translateY(-1px) !important;
 }
-button.icon-only:is(.icon-save, .icon-trash):active:not(:disabled):not(.is-blocked) {
+button.icon-only:is(.icon-pencil, .icon-save, .icon-trash):active:not(:disabled):not(.is-blocked) {
   transform: translateY(0) !important;
   box-shadow: none !important;
+}
+
+/* ========================================================================== */
+/* v0.470 Order / production file explorer                                    */
+/* ========================================================================== */
+.production-explorer-backdrop-v470 { z-index: 12040 !important; }
+.production-explorer-panel-v470 {
+  position: fixed !important;
+  z-index: 12041 !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(1120px, calc(100vw - 46px)) !important;
+  max-height: min(90vh, 940px) !important;
+  overflow: hidden !important;
+  display: grid !important;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border-radius: 18px !important;
+}
+.production-explorer-panel-v470[hidden] { display: none !important; }
+.production-explorer-header-v470 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #d8e4ef;
+  background: linear-gradient(135deg, #f7fbff, #eef5fb);
+}
+.production-explorer-header-v470 > div { display: grid; gap: 3px; }
+.production-explorer-header-v470 small { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #63809b; }
+.production-explorer-header-v470 h2 { margin: 0; font-size: 25px; color: #173b5e; }
+.production-explorer-header-v470 p { margin: 0; color: #657b8f; }
+.production-explorer-search-v470 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px 22px;
+  border-bottom: 1px solid #e2eaf1;
+  background: #fff;
+}
+.production-explorer-search-v470[hidden] { display: none !important; }
+.production-explorer-search-v470 label { display: grid; gap: 6px; }
+.production-explorer-search-v470 label > span { font-weight: 800; color: #284b6a; }
+.production-explorer-search-v470 input { min-height: 42px; width: 100%; }
+.production-explorer-body-v470 { overflow: auto; padding: 18px 22px 24px; background: #f4f7fa; }
+.production-explorer-loading-v470,
+.production-file-empty-v470 { padding: 18px; border: 1px dashed #c7d5e2; border-radius: 10px; background: #fff; color: #61778c; }
+.production-file-empty-v470.is-error { border-color: #e6b7bd; color: #a22434; background: #fff7f8; }
+.production-order-summary-v470 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.6fr 1fr .65fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.production-order-summary-v470 > span { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid #d8e3ed; border-radius: 9px; background: #fff; }
+.production-order-summary-v470 small { color: #73879a; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.production-order-summary-v470 strong { color: #183d60; font-size: 14px; }
+.production-order-items-v470 { display: grid; gap: 12px; }
+.production-order-item-v470 { padding: 15px; border: 1px solid #d8e3ed; border-radius: 12px; background: #fff; box-shadow: 0 3px 9px rgba(34, 63, 89, .05); }
+.production-order-item-v470 > header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding-bottom: 11px; border-bottom: 1px solid #e7edf3; }
+.production-order-item-v470 > header > div { display: grid; gap: 2px; }
+.production-order-item-v470 > header small { color: #687e92; }
+.production-order-item-v470 > header strong { color: #163d63; font-size: 17px; }
+.production-order-item-v470 > header span { color: #536b81; }
+.production-fab-status-v470 { flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 900; }
+.production-fab-status-v470.is-complete { background: #e8f6ed; color: #176238; }
+.production-fab-status-v470.is-missing { background: #fff0f1; color: #a21f31; }
+.production-fab-status-v470.is-unknown { background: #fff7dd; color: #805a00; }
+.production-fab-status-v470.is-neutral { background: #eef3f7; color: #5e7387; }
+.production-item-meta-v470 { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 0; color: #566d82; }
+.production-item-meta-v470 span { display: inline-flex; gap: 6px; }
+.production-item-meta-v470 b { color: #284b6c; }
+.production-stage-track-v470 { padding: 8px 0 12px; }
+.production-stage-track-v470 h4 { margin: 0 0 7px; font-size: 12px; color: #244a6c; }
+.production-stage-track-v470 > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.production-stage-track-v470 > div > span { display: grid; gap: 1px; padding: 6px 8px; border-radius: 7px; background: #edf4fa; color: #2b5375; }
+.production-stage-track-v470 > div > span small { font-size: 10px; color: #657e94; }
+.production-file-group-v470 { margin-top: 7px; border: 1px solid #dde6ee; border-radius: 9px; overflow: hidden; }
+.production-file-group-v470 summary { display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; cursor: pointer; font-weight: 850; color: #284c6c; background: #f8fafc; }
+.production-file-group-v470 summary b { min-width: 24px; text-align: center; border-radius: 999px; background: #e7eef5; }
+.production-file-row-v470 { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 11px; border-top: 1px solid #e7edf3; }
+.production-file-row-v470 > div { min-width: 0; display: grid; gap: 2px; }
+.production-file-row-v470 strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #24496a; }
+.production-file-row-v470 small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #74889a; }
+.production-file-row-v470 > span { display: flex; gap: 6px; flex: 0 0 auto; }
+.production-file-action-v470 { min-height: 30px !important; padding: 5px 9px !important; border-radius: 7px !important; font-size: 11px !important; }
+.production-file-action-v470.is-open { background: #174f85 !important; color: #fff !important; }
+.production-hardware-results-v470 { display: grid; gap: 9px; }
+.production-hardware-results-v470 > header { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; color: #244a6c; }
+.production-hardware-results-v470 > header span { padding: 2px 7px; border-radius: 999px; background: #dfeaf4; font-weight: 800; }
+.production-order-result-v470 { width: 100%; display: flex !important; justify-content: space-between; gap: 14px; align-items: center; text-align: left; padding: 10px 12px !important; margin-bottom: 6px; border: 1px solid #d8e3ed !important; background: #fff !important; color: #244a6b !important; }
+.production-order-result-v470 > span:first-child { display: grid; gap: 2px; }
+.production-order-result-v470:hover { border-color: #7ea9d1 !important; background: #f5f9fd !important; }
+@media (max-width: 780px) {
+  .production-order-summary-v470 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .production-explorer-search-v470 { grid-template-columns: 1fr; }
+  .production-order-item-v470 > header { display: grid; }
+}
+/* v0.472 Order-level production files and machine evidence ---------------- */
+.production-order-files-v472 {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.62fr) minmax(0, 1.38fr);
+  gap: 12px;
+  align-items: start;
+  padding: 13px;
+  border: 1px solid #cfddec;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.production-order-files-v472 > header div {
+  display: grid;
+  gap: 3px;
+}
+
+.production-order-files-v472 > header small {
+  color: #146c7a;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.production-order-files-v472 > header strong {
+  color: #132947;
+}
+
+.production-order-files-v472 > header span {
+  color: #64758d;
+  font-size: 12px;
+}
+
+.production-order-files-v472 > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.production-fab-status-v470.is-machine-override-v472 {
+  display: grid;
+  gap: 2px;
+  border-style: double;
+}
+
+.production-fab-status-v470.is-machine-override-v472 small {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+@media (max-width: 760px) {
+  .production-order-files-v472,
+  .production-order-files-v472 > div {
+    grid-template-columns: 1fr;
+  }
 }

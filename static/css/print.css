@@ -9910,3 +9910,15 @@
   -webkit-text-fill-color: #fff !important;
   text-shadow: none !important;
 }
+
+/* ========================================================================== */
+/* v0.470 All Glass Types selected count                                      */
+/* ========================================================================== */
+/* The numeric badge is a sibling of the selected label, so own it explicitly
+   at the final Print/Export layer just like the label itself. */
+#globalPrintModal #printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > b,
+#printOptionsGlassType .print-filter-chip-v197.is-glass-all:has(input:checked) > b {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  border-color: rgba(255,255,255,.38) !important;
+}

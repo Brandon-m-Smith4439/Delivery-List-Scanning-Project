@@ -1,15 +1,56 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.469**. SQLite remains the active/default backend.
+Current maintained release: **v0.472**. SQLite remains the active/default backend.
 
-v0.469 consolidates Rush and Remake intake into one Priority Work workflow that can act immediately on imported jobs or wait for future imports, supports Rush + Remake together, folds Missing Glass into maintained reasons, and adds printable Rush/Remake/Missing Glass paperwork.
+v0.472 finishes the production-file workflow without putting network-share traversal on scanner or Smart Search request threads. It adds persisted machine/file settings, actual-machine evidence overrides, order-centered Scan review, and whole-order production-file access while preserving the v0.471 Statistics selector fix.
 
-## Install v0.469
+## Install v0.472
 
-1. Stop the scanner server.
-2. Copy the v0.469 changed files over the matching paths in your current project.
-3. Start the server and hard-refresh the browser (`Ctrl+F5`).
-4. No database reset or migration is required; SQLite schema remains version 11.
+1. Stop the Delivery List Scanner server.
+2. Copy the v0.472 changed files over the matching paths in your current project.
+3. Start the server again so the backend/frontend release are both v0.472.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.472 cache keys are used.
+
+SQLite schema remains **version 11**. No migration or database reset is required.
+
+## v0.472 highlights
+
+- Moved production-share discovery to a persisted background index. Scanner transactions and Smart Search return from cached metadata instead of recursively walking mapped or UNC shares.
+- Added **Machine & Production Files** settings for share roots, machine terms, refresh interval, integration enablement, and the Staging fabrication gate. The new permission is available in Role Manager and Admin remains the non-lockout recovery role.
+- Treats Sketch machine assignment and completion evidence separately: a WJ-assigned item with an exact `.egl` reports Denver completion, while a Denver-assigned item found in Completed WJ reports Waterjet completion.
+- Keeps unavailable evidence shares fail-safe and nonblocking. A Staging rejection occurs only for an exact, confidently assigned item whose relevant completion share is available and lacks matching evidence.
+- Groups Scan table work by Order within the maintained glass-type sections. Each order header shows Job Nr., customer, attention count, and scanned piece progress; double-click opens the existing Order Details workflow.
+- Expanded Order Details with whole-order sketch/hardware access while retaining exact item sketches, programs, fabrication status, and synchronized stage progress.
+- Fixed stale Smart Search responses so an older network response cannot replace results for the operator's newer query.
+- Added focused regressions for cross-machine evidence, settings persistence, nonblocking network indexing, Admin permissions, and the v0.472 UI contract.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.472** while keeping SQLite schema version **11** unchanged.
+
+## v0.471 highlights
+
+- Fixed the Statistics **Common glass sizes** glass-type selector opening with an empty custom menu when report options arrived after the menu had already been opened.
+- Dynamic custom selects now detect option-set changes and rebuild an already-open body-portal menu in place while preserving any active option search.
+- Common glass sizes shows **Loading glass types…** while its report query is in flight and **No glass-size data in this range** for a genuinely empty reporting range instead of presenting a blank control.
+- Entering Statistics now retries the report query when report-only data is missing; choosing Common glass sizes also triggers that recovery path when needed.
+- Verified the maintained report backend against the supplied production database: populated glass-size frequency data is returned for active reporting ranges, and the existing rotated-dimension normalization regression remains green.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.471** while keeping SQLite schema version **11** unchanged.
+
+## v0.470 highlights
+
+- Corrected the Bay Map shuttle layering/timing: Outbound panes now load **right-to-left**, above the dotted route but behind the truck; Indian Trail panes stay invisible until the truck has arrived and turned for unloading.
+- Finished Print / Export **All Glass Types** selected-state contrast by forcing both the label and numeric count to white.
+- Standardized Settings/Admin edit, save, and delete controls on the shared pencil/save/trash icon owner and ensured Delivery List Management exposes the shared pencil action immediately before each stage Reset control.
+- Reworked Lookup Manager so the library uses the full modal width. **Add New** and row Edit actions open the maintained form as a focused secondary GUI instead of permanently occupying the left side; the foreground editor remains crisp while its library backdrop is subdued.
+- Fixed Priority Work print-window handling for Rush, Remake, and Missing Glass sheets and reduced repeated explanatory/detail text in intake and Work Center while preserving the unified v0.469 behavior.
+- Added **Common glass sizes** to Statistics. Operators select a glass type and can rank its most frequent dimensions by physical pieces within the active reporting range.
+- Rebalanced Scan table widths so Job Nr. receives more space while Order Nr. and Item remain compact but large enough for their headers/normal production values.
+- Made completed racks read-only for contents at both browser and backend layers. Move/remove/clear actions require the rack to be marked **Incomplete** first.
+- Moved Bay Map secondary actions into clickable cards below In Transit and added a **Hardware** card with order/hardware search.
+- Added a Scan-row double-click **Order Details** GUI with grouped order/item/stage information plus matching Hardware Lists, Sketches, Programs, preview/print actions, and Windows program launching.
+- Added cached production-share discovery for `Hardware Lists`, `Sketches`, `Programs`, and `Completed WJ`. Sketch text/filenames are used conservatively to identify Denver CNC or Waterjet assignments; `.egl` is exact-item Denver evidence and matching Completed WJ files are Waterjet evidence.
+- Added a fail-safe pre-Staging fabrication check. A confidently assigned Denver/Waterjet item is blocked and logged as an Error only when the matching evidence folder is available and exact-item completion evidence is missing. Unavailable shares or ambiguous/image-only sketches remain non-blocking. Fabrication state is also appended to Smart Search stage status.
+- Reorganized the compact Scan filter glance to **Err / New / IR / RM / R**, lights Errors red when present, makes ON THE WAY rack locations blue, and enlarges the active Delivery List date title.
+- Added regression coverage for exact-item Denver evidence, Waterjet completion, disconnected-share safety, completed-rack content locks, and the maintained unified Priority Work flow.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.470** while keeping SQLite schema version **11** unchanged. No migration or database reset is required.
 
 ## v0.469 highlights
 

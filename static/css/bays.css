@@ -29100,3 +29100,62 @@ body.bay-move-mode .bay-layout-drop-zone {
     max-width: none;
   }
 }
+
+/* ========================================================================== */
+/* v0.470 Bay Map shuttle layer/order correction                              */
+/* ========================================================================== */
+/* Glass is intentionally the highest non-truck moving layer: it travels over
+   the dotted route line and route nodes, but the truck body still occludes it
+   while the pane enters/leaves the cargo box. */
+.transit-animation-truck.has-transit-glass-v467 .transit-route-line {
+  z-index: 1 !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-route-node {
+  z-index: 2 !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer {
+  z-index: 5 !important;
+}
+.transit-animation-truck.has-transit-glass-v467 .transit-moving-truck {
+  z-index: 6 !important;
+}
+
+/* ========================================================================== */
+/* v0.470 Bay tool cards                                                      */
+/* ========================================================================== */
+/* Secondary bay workflows live directly below the in-transit visualization so
+   the map rail stays focused on scanning and bay contents. */
+.bay-tool-card-grid-v470 {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.bay-tool-card-v470 {
+  min-height: 72px;
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px !important;
+  text-align: left;
+  border: 1px solid #d4e0eb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  color: #173652 !important;
+  box-shadow: 0 4px 12px rgba(24, 58, 88, .07);
+}
+.bay-tool-card-v470:hover,
+.bay-tool-card-v470:focus-visible {
+  border-color: #78a7d5 !important;
+  background: #f5f9fd !important;
+  box-shadow: 0 8px 18px rgba(24, 79, 128, .12);
+  transform: translateY(-1px);
+}
+.bay-tool-card-v470 > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.bay-tool-card-v470 strong { font-size: 14px; color: #143b62; }
+.bay-tool-card-v470 small { font-size: 11px; color: #6b8094; line-height: 1.25; }
+.bay-tool-card-v470 .bay-action-icon { width: 34px; height: 34px; margin: 0; }
+.bay-tool-card-v470 .hardware-v470 { color: #155caa; background: #e8f2fd; }
+@media (max-width: 1320px) { .bay-tool-card-grid-v470 { grid-template-columns: repeat(3, minmax(180px, 1fr)); } }
+@media (max-width: 760px) { .bay-tool-card-grid-v470 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

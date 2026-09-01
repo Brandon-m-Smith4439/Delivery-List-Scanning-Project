@@ -21576,3 +21576,298 @@ button.custom-select-trigger:hover:not(:disabled),
 .manual-edit-card.is-whole-list-v468 .manual-edit-card-stage strong {
   color: #184f85;
 }
+
+/* ========================================================================== */
+/* v0.470 Lookup Manager focused editor workflow                              */
+/* ========================================================================== */
+/* Library content owns the full modal width. Editors remain in the DOM so the
+   maintained save handlers keep their existing IDs, but they surface as a
+   focused GUI only when Add New or Edit is requested. */
+.lookup-manager-shell.lookup-manager-v470 .lookup-manager-workspace {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.lookup-manager-shell.lookup-manager-v470 > .lookup-config-editor-v346,
+.lookup-manager-shell.lookup-manager-v470 .lookup-manager-workspace > :is(.lookup-editor-card, .lookup-config-editor-v346) {
+  display: none !important;
+}
+.lookup-manager-shell.lookup-manager-v470 .lookup-editor-surface-v470.is-editor-open-v470 {
+  display: block !important;
+  position: fixed !important;
+  inset: 50% auto auto 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(760px, calc(100vw - 48px)) !important;
+  max-height: min(82vh, 860px) !important;
+  overflow: auto !important;
+  z-index: 12021 !important;
+  margin: 0 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 26px 70px rgba(13, 38, 66, .28) !important;
+}
+.lookup-editor-backdrop-v470 {
+  position: fixed;
+  inset: 0;
+  z-index: 12020;
+  background: rgba(12, 31, 52, .46);
+  backdrop-filter: blur(2px);
+}
+.lookup-editor-close-v470 {
+  position: absolute !important;
+  top: 14px !important;
+  right: 14px !important;
+  z-index: 2;
+}
+.lookup-manager-shell.lookup-manager-v470 .lookup-manager-list {
+  width: 100% !important;
+  max-width: none !important;
+}
+.lookup-manager-shell.lookup-manager-v470 .lookup-manager-list > header {
+  position: relative;
+}
+.lookup-add-new-v470 {
+  margin-left: auto !important;
+  flex: 0 0 auto !important;
+}
+.lookup-row-actions-v346 .icon-only {
+  flex: 0 0 34px !important;
+}
+.station-alias-row-v355 .station-alias-edit-value-v470 {
+  color: #536b83;
+  font-size: 12px;
+}
+.station-alias-editor-v470 {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.station-alias-editor-v470[hidden] { display: none !important; }
+
+/* Settings modal action icons use the shared owner rather than feature-local
+   edit/save/delete drawings. */
+.reject-catalog-row-actions-v349 button,
+.bay-scanner-rule-list-v349 button.bay-scanner-rule-remove-v349 {
+  font-size: 0 !important;
+}
+/* v0.472 Machine and production-file settings ----------------------------- */
+.production-files-overview-v472 > div:first-child strong {
+  color: #0f6d57;
+}
+
+.production-settings-shell-v472 {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.production-settings-summary-v472,
+.production-settings-card-v472 {
+  border: 1px solid #d8e2ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.production-settings-summary-v472 {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(420px, 1.45fr);
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  box-shadow: inset 4px 0 0 #087f8c;
+}
+
+.production-settings-summary-v472 > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.production-settings-summary-v472 > div:first-child small,
+.production-settings-card-v472 header span,
+.production-index-status-v472 small,
+.production-index-time-v472,
+.production-toggle-v472 small {
+  color: #617087;
+  font-size: 12px;
+}
+
+.production-settings-summary-v472 > div:first-child > small:first-child {
+  color: #087f8c;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.production-settings-summary-v472 strong {
+  color: #102243;
+}
+
+.production-index-grid-v472 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.production-index-status-v472 {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 2px 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #dbe4ef;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.production-index-status-v472 i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a5afbe;
+}
+
+.production-index-status-v472.is-ready i {
+  background: #229654;
+  box-shadow: 0 0 0 3px #dff3e5;
+}
+
+.production-index-status-v472.is-offline i {
+  background: #c74444;
+}
+
+.production-index-status-v472 b,
+.production-index-status-v472 small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.production-index-status-v472 small {
+  grid-column: 2;
+}
+
+.production-index-time-v472 {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.production-settings-form-v472 {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(380px, 1.4fr);
+  gap: 12px;
+}
+
+.production-settings-card-v472 {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  padding: 15px;
+}
+
+.production-settings-card-v472.is-machines {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.production-settings-card-v472.is-machines header {
+  grid-column: 1 / -1;
+}
+
+.production-settings-card-v472 header div,
+.production-settings-card-v472 label {
+  display: grid;
+  gap: 5px;
+}
+
+.production-settings-card-v472 label > span,
+.production-cache-field-v472 > span {
+  color: #263a59;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.production-settings-card-v472 :where(input[type="text"], input[type="number"], textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #c9d5e5;
+  border-radius: 6px;
+  background: #fff;
+  color: #102243;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.production-settings-card-v472 textarea {
+  resize: vertical;
+}
+
+.production-settings-card-v472 :where(input, textarea):focus {
+  border-color: #176ee8;
+  outline: 2px solid #dce9ff;
+  outline-offset: 1px;
+}
+
+.production-toggle-v472 {
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  align-items: start;
+  gap: 9px !important;
+  padding: 10px;
+  border: 1px solid #e0e7f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.production-toggle-v472 input {
+  margin-top: 2px;
+}
+
+.production-toggle-v472 span {
+  display: grid;
+  gap: 2px;
+}
+
+.production-cache-field-v472 > div {
+  display: grid;
+  grid-template-columns: minmax(72px, 110px) auto;
+  gap: 7px;
+  align-items: center;
+}
+
+.production-cache-field-v472 b {
+  color: #617087;
+  font-size: 12px;
+}
+
+.production-settings-actions-v472 {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .production-settings-summary-v472,
+  .production-settings-form-v472 {
+    grid-template-columns: 1fr;
+  }
+
+  .production-index-time-v472,
+  .production-settings-card-v472.is-machines {
+    grid-column: 1;
+  }
+
+  .production-index-time-v472 {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 620px) {
+  .production-index-grid-v472,
+  .production-settings-card-v472.is-machines {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .production-settings-card-v472.is-machines header {
+    grid-column: 1 / -1;
+  }
+}
