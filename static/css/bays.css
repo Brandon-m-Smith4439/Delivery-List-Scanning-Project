@@ -29181,3 +29181,15 @@ body.bay-move-mode .bay-layout-drop-zone {
 .transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-inbound {
   right:auto!important;
 }
+
+/* ========================================================================== */
+/* v0.478 Bay Map icon cleanup + edge-to-truck pane staging                   */
+/* ========================================================================== */
+/* Prevent obsolete decorative icon layers from painting over the maintained
+   directional Outbound/Inbound glyphs. */
+.bay-flow-side-card .flow-card-icon::after,
+.bay-flow-side-card .flow-card-icon > i { content: none !important; display: none !important; }
+.bay-flow-side-card .flow-card-icon.outbound { color: #b97900 !important; }
+.bay-flow-side-card .flow-card-icon.inbound { color: #268642 !important; }
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-outbound,
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-inbound { overflow: visible !important; }

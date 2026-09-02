@@ -9275,8 +9275,19 @@ function scanProgressPairV475(item = {}) {
 
   if (category === "staged") {
     if (!fabrication && scanned <= 0) {
+      const fabricationStatus = cachedFabricationStatusV474(item);
+      // v0.478: once production hydration confirms the item has no machine or
+      // fabrication assignment, identify that state explicitly instead of
+      // implying that a fabrication scan is still expected.
+      const noFabricationRequired = fabricationStatus && !compactMachineLabelV475(
+        fabricationStatus.actualMachine || fabricationStatus.machine || fabricationStatus.assignedMachine || "",
+      ) && !fabricationStatus.sketchMatched;
       return {
-        previous: { label: "Not Scanned", scanned: 0, qty, complete: false, tone: "not-scanned" },
+        previous: {
+          label: noFabricationRequired ? "No Fab" : "Not Scanned",
+          scanned: 0, qty, complete: false,
+          tone: noFabricationRequired ? "no-fab-v478" : "not-scanned",
+        },
         next: current,
       };
     }
@@ -9300,7 +9311,8 @@ function progressStepHtmlV475(step, role = "") {
   const scanned = Math.max(0, Number(step.scanned || 0));
   const qty = Math.max(0, Number(step.qty || 0));
   const stateClass = step.complete ? "is-complete-v475" : role === "previous" ? "is-prior-pending-v475" : "is-next-v475";
-  return `<span class="scan-progress-step-v475 ${stateClass}" style="--progress-step-color:${escapeHtml(progressStageColorV476(step.label || "Progress"))}"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
+  const toneClass = step.tone === "no-fab-v478" ? "is-no-fab-v478" : "";
+  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass}" style="--progress-step-color:${escapeHtml(progressStageColorV476(step.label || "Progress"))}"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
 }
 
 function scanProgressMarkupV475(item = {}) {
@@ -18530,8 +18542,8 @@ function renderGlobalSearchResults(results) {
               ${stageScanMarkup}
             </span>
             <span class="global-result-actions-v474 global-result-actions-v475">
-              <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">Scan Page</button>
-              <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>Order Details</button>
+              <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">${globalSearchIconV433("scan")}<span>Scan Page</span></button>
+              <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>${globalSearchIconV433("cube")}<span>Order Details</span></button>
             </span>
           </span>
         </article>
@@ -18666,11 +18678,11 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   // v0.470: Outbound glass waits on the *front/right* side of the parked
   // truck, then enters the cargo body right-to-left. The glass layer itself
   // remains above the dotted route but below the truck via bays.css.
-  const outboundLeft = Math.min(Math.max(0, laneWidth - stackWidth), leftTruckLeft + truckWidth + 7);
+  const outboundLeft = 1; // v0.478: stage Outbound glass from the far-left edge of the transit lane.
   // v0.474 mirrors the endpoint geometry: Outbound glass waits to the
   // right of the left truck; after arrival at Indian Trail the unloading
   // stack sits to the left of the flipped right-side truck.
-  const inboundLeft = Math.max(1, rightTruckLeft - stackWidth - 7);
+  const inboundLeft = Math.max(1, laneWidth - stackWidth - 1); // v0.478: unload toward the far-right edge.
   if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
   if (inboundTransfer) inboundTransfer.style.setProperty("left", `${inboundLeft}px`, "important");
 
@@ -18701,13 +18713,15 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
 
   const paneStep = Number(profile.paneStep || 0);
   outboundPanes.forEach((pane, index) => {
-    const startMs = index * paneStaggerMs;
+    const sequenceIndex = Math.max(0, outboundPanes.length - 1 - index);
+    const startMs = sequenceIndex * paneStaggerMs;
     const endMs = startMs + paneMotionMs;
     const paneLeft = outboundLeft + (index * paneStep);
-    // Target the rear half of the cargo body. Because the waiting stack begins
-    // to the truck's right, this is always negative/right-to-left motion.
+    // v0.478: load left-to-right into the rear of the parked Outbound truck.
+    // The right-most staged pane moves first so the visible stack collapses
+    // naturally toward the truck instead of jumping from the near edge.
     const cargoTargetX = leftTruckLeft + Math.min(31, Math.max(21, truckWidth * .30));
-    const targetDx = Math.min(-18, cargoTargetX - paneLeft);
+    const targetDx = Math.max(18, cargoTargetX - paneLeft);
     pane.animate([
       { offset: 0, opacity: 1, transform: "translateX(0)" },
       { offset: offset(startMs), opacity: 1, transform: "translateX(0)" },
@@ -18718,7 +18732,8 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   });
 
   inboundPanes.forEach((pane, index) => {
-    const startMs = inboundReadyMs + (index * paneStaggerMs);
+    const sequenceIndex = Math.max(0, inboundPanes.length - 1 - index);
+    const startMs = inboundReadyMs + (sequenceIndex * paneStaggerMs);
     const endMs = startMs + paneMotionMs;
     const finalPaneLeft = inboundLeft + (index * paneStep);
     const insideRearX = rightTruckLeft + truckWidth - 24;
@@ -23750,7 +23765,7 @@ function productionAssetActionsHtmlV470(asset = {}, kind = "") {
   const pageAttr = pageNumber ? ` data-production-page-v474="${escapeHtml(pageNumber)}"` : "";
   if (!id) return "";
   if (kind === "program") {
-    return `<button type="button" class="app-primary-button production-file-action-v470" data-production-open-asset-v470="${id}" title="Open ${name}">Open Program</button>`;
+    return `<button type="button" class="app-primary-button production-file-action-v470" data-production-open-asset-v470="${id}" title="Open ${name}">${globalSearchIconV433("denver")}<span>Open Program</span></button>`;
   }
   const previewLabel = kind === "sketch" ? "Open Sketch" : "Open";
   const printLabel = kind === "sketch" ? "Print Sketch" : "Print";
@@ -23844,9 +23859,10 @@ function productionSketchVisualV476(sketches = [], itemLabel = "") {
     return `<div class="production-sketch-visual-v476 is-empty"><span>${globalSearchIconV433("staging")}</span><strong>No sketch page</strong><small>${escapeHtml(itemLabel || "This item")} was not found in a recent order sketch.</small></div>`;
   }
   const page = Math.max(0, Number(sketch.pageNumber || 0));
-  const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
-  return `<div class="production-sketch-visual-v476">
-    <iframe loading="lazy" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
+  const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`;
+  return `<div class="production-sketch-visual-v476 production-sketch-visual-v478">
+    <button type="button" class="production-sketch-maximize-v478" data-production-maximize-sketch-v478 aria-label="Maximize sketch" title="Maximize sketch"><span aria-hidden="true"></span></button>
+    <iframe loading="lazy" scrolling="no" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
     <span class="production-sketch-caption-v476"><b>${escapeHtml(sketch.itemMarker || itemLabel || "Sketch")}</b>${page ? `<small>Page ${escapeHtml(page)}</small>` : ""}</span>
   </div>`;
 }
@@ -23906,11 +23922,11 @@ function productionItemActionsV476(files = {}, orderFiles = {}) {
   if (sketch?.id) {
     const page = Math.max(0, Number(sketch.pageNumber || 0));
     const pageAttr = page ? ` data-production-page-v474="${escapeHtml(page)}"` : "";
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Open Sketch</button>`);
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-print-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Print Sketch</button>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>${globalSearchIconV433("staging")}<span>Open Sketch</span></button>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-print-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>${globalSearchIconV433("cube")}<span>Print Sketch</span></button>`);
   }
-  if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-open-asset-v470="${escapeHtml(program.id)}">Open Program</button>`);
-  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">Hardware</button>`);
+  if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-open-asset-v470="${escapeHtml(program.id)}">${globalSearchIconV433("denver")}<span>Open Program</span></button>`);
+  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">${globalSearchIconV433("cube")}<span>Hardware</span></button>`);
   return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
 }
 
@@ -23929,8 +23945,8 @@ function renderOrderDetailV470(payload = {}) {
   const orderSketch = (orderFiles.sketches || [])[0];
   const orderHardware = (orderFiles.hardware || [])[0];
   const orderButtons = [
-    orderSketch?.id ? `<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(orderSketch.id)}">Open Order Sketch</button>` : "",
-    orderHardware?.id ? `<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(orderHardware.id)}">Open Hardware</button>` : "",
+    orderSketch?.id ? `<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(orderSketch.id)}">${globalSearchIconV433("staging")}<span>Open Order Sketch</span></button>` : "",
+    orderHardware?.id ? `<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(orderHardware.id)}">${globalSearchIconV433("cube")}<span>Open Hardware</span></button>` : "",
   ].filter(Boolean).join("");
 
   body.innerHTML = `
@@ -27030,8 +27046,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260901-v0.477", window.location.href).href,
-    new URL("static/css/print.css?v=20260901-v0.477", window.location.href).href,
+    new URL("static/css/styles.css?v=20260902-v0.478", window.location.href).href,
+    new URL("static/css/print.css?v=20260902-v0.478", window.location.href).href,
   ];
 }
 
@@ -35871,7 +35887,7 @@ function productionFileSettingsModalHtmlV472() {
     const availabilityError = String(index.errors?.[kind] || "").trim();
     const rootPath = String(rootForKindV474[kind] || "").trim();
     const resolvedPath = String(index.resolvedRoots?.[kind] || "").trim();
-    const resolvedNote = resolvedPath && resolvedPath !== rootPath ? `Resolved: ${resolvedPath}` : "";
+    const resolvedNote = ""; // v0.478: path fallback is stable; no longer expose the temporary resolution diagnostic.
     const detail = refreshing
       ? (available ? "Refreshing recent file metadata" : "Checking folder")
       : available
@@ -43887,6 +43903,19 @@ function wireEvents() {
     const closeTransitButton = event.target.closest("[data-close-transit-manifest]");
     if (closeTransitButton) {
       closeInTransitManifest();
+      return;
+    }
+
+    const maximizeSketchButtonV478 = event.target.closest("[data-production-maximize-sketch-v478]");
+    if (maximizeSketchButtonV478) {
+      const visual = maximizeSketchButtonV478.closest(".production-sketch-visual-v478");
+      if (visual) {
+        const maximize = !visual.classList.contains("is-maximized-v478");
+        document.querySelectorAll(".production-sketch-visual-v478.is-maximized-v478").forEach((node) => node.classList.remove("is-maximized-v478"));
+        visual.classList.toggle("is-maximized-v478", maximize);
+        maximizeSketchButtonV478.setAttribute("aria-label", maximize ? "Restore sketch" : "Maximize sketch");
+        maximizeSketchButtonV478.setAttribute("title", maximize ? "Restore sketch" : "Maximize sketch");
+      }
       return;
     }
 

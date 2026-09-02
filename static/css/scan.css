@@ -6293,3 +6293,29 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   .mobile-order-group-header-v477 .scan-order-group-count-v477 { margin-left:auto; }
   .mobile-order-group-header-v477 .scan-order-detail-button-v477 { margin-left:0; }
 }
+
+/* ========================================================================== */
+/* v0.478 subtle order grouping + explicit no-fabrication state               */
+/* ========================================================================== */
+.scan-order-group-v477 > td {
+  padding: 1px 6px !important;
+  background: #f7f9fb !important;
+  border-top-color: #e0e7ed !important;
+}
+.scan-order-group-v477 > td > div,
+.mobile-order-group-header-v477 { gap: 5px !important; min-height: 18px !important; }
+.scan-order-group-copy-v477 { gap: 4px !important; }
+.scan-order-group-copy-v477 small { font-size: 6.5px !important; letter-spacing: .07em !important; }
+.scan-order-group-copy-v477 strong { font-size: 9px !important; }
+.scan-order-group-copy-v477 em { max-width: 285px !important; font-size: 7.5px !important; font-weight: 700 !important; }
+.scan-order-group-count-v477 { font-size: 7.5px !important; }
+.scan-order-detail-button-v477 { min-height: 17px !important; padding: 1px 6px !important; font-size: 7px !important; border-radius: 4px !important; }
+.scan-progress-step-v475.is-no-fab-v478 {
+  min-height: 21px !important;
+  border-color: #d4d9de !important;
+  background: #f3f5f6 !important;
+  box-shadow: inset 3px 0 0 #a5adb5 !important;
+  color: #7c858e !important;
+}
+.scan-progress-step-v475.is-no-fab-v478 b { font-size: 8px !important; font-weight: 750 !important; }
+.scan-progress-step-v475.is-no-fab-v478 strong { display: none !important; }

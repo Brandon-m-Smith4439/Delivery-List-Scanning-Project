@@ -1013,3 +1013,41 @@ body button.app-primary-button.production-detail-action-v476.is-secondary { back
 @media (prefers-reduced-motion: reduce) {
   .production-order-item-v476.is-focused-v477 { animation:none; box-shadow:0 0 0 4px rgba(30,134,211,.25) !important; }
 }
+
+/* ========================================================================== */
+/* v0.478 compact sketch viewer, maximized review, and icon-bearing actions   */
+/* ========================================================================== */
+.production-order-item-v476 { grid-template-columns: minmax(235px, 270px) minmax(0,1fr) !important; }
+.production-item-sketch-v476,
+.production-sketch-visual-v476,
+.production-sketch-visual-v476 iframe { min-height: 210px !important; height: 210px !important; }
+.production-sketch-visual-v478 { position: relative; overflow: hidden !important; }
+.production-sketch-visual-v478 iframe { width: 100% !important; overflow: hidden !important; border: 0 !important; }
+.production-sketch-maximize-v478 {
+  position: absolute; top: 8px; right: 8px; z-index: 4;
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border: 1px solid #abc4d8; border-radius: 7px; background: rgba(255,255,255,.95);
+  color: #245f8e; box-shadow: 0 3px 9px rgba(24,67,102,.16); cursor: pointer;
+}
+.production-sketch-maximize-v478 span { width: 13px; height: 13px; border: 2px solid currentColor; border-radius: 2px; }
+.production-sketch-visual-v478.is-maximized-v478 {
+  position: fixed !important; inset: 5vh 4vw !important; z-index: 10050 !important;
+  width: 92vw !important; height: 90vh !important; min-height: 0 !important;
+  border: 1px solid #9db7cc; border-radius: 12px; background: #fff;
+  box-shadow: 0 26px 80px rgba(7,31,52,.32); overflow: hidden !important;
+}
+.production-sketch-visual-v478.is-maximized-v478 iframe { height: 100% !important; min-height: 0 !important; }
+.production-sketch-visual-v478.is-maximized-v478 .production-sketch-maximize-v478 span { border-width: 0; position: relative; }
+.production-sketch-visual-v478.is-maximized-v478 .production-sketch-maximize-v478 span::before,
+.production-sketch-visual-v478.is-maximized-v478 .production-sketch-maximize-v478 span::after { content:""; position:absolute; inset:5px -1px auto; height:2px; background:currentColor; transform:rotate(45deg); }
+.production-sketch-visual-v478.is-maximized-v478 .production-sketch-maximize-v478 span::after { transform:rotate(-45deg); }
+.production-detail-action-v476,
+.global-result-action-v475 { display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 6px !important; }
+.production-detail-action-v476 .global-result-chip-icon-v433,
+.global-result-action-v475 .global-result-chip-icon-v433 { width: 14px !important; height: 14px !important; flex: 0 0 14px !important; }
+@media (max-width: 900px) {
+  .production-order-item-v476 { grid-template-columns:1fr !important; }
+  .production-item-sketch-v476,
+  .production-sketch-visual-v476,
+  .production-sketch-visual-v476 iframe { min-height:200px !important; height:200px !important; }
+}

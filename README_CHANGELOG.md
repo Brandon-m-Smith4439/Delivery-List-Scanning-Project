@@ -1,3 +1,14 @@
+## v0.478 - Compact Scan Grouping, Sketch Review, and Transit Motion Polish
+
+- Reduced the Scan page order-group ribbon to a much subtler separator with smaller typography, counts, and action sizing while retaining the existing order grouping behavior.
+- Distinguished genuine no-fabrication items from unscanned fabrication work: once production hydration confirms no machine/sketch fabrication assignment, Scan progress displays a compact gray **No Fab** state without a misleading 0/quantity counter.
+- Removed the temporary `Resolved: ...Completed WJ` diagnostic line from Production File settings now that mapped-drive/UNC resolution is stable; path fallback remains active internally.
+- Reduced the default Order Details sketch pane, changed PDF framing to page-fit with scrollbars suppressed, and added a maximize/restore control that expands the selected sketch into a large fixed review surface.
+- Added compact visual icons to shared blue Order Details production-file actions and to Smart Search **Scan Page** / **Order Details** buttons for faster recognition.
+- Cleaned obsolete Bay Map icon overlay layers and set maintained Outbound/Inbound directional glyph colors explicitly.
+- Corrected the load-aware Bay Map transit choreography: Outbound glass is staged from the far-left edge and the right-most pane loads first into the truck; after arrival, Inbound unloading starts from the right-most pane and finishes at the far-right edge.
+- Added/updated static regression coverage for the v0.478 UI contract and advanced browser cache references plus `APPLICATION_VERSION` to **v0.478**. SQLite schema remains **version 11**.
+
 ## v0.477 - Clear Workflow States, Order Grouping, and Faster Sketch Review
 
 - Standardized progress meaning across Scan, Smart Search, and Order Details: incomplete fabrication is neutral gray, pending scanner stages retain their configured stage color, and all completed steps are green.

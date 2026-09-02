@@ -1,28 +1,28 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.477**. SQLite remains the active/default backend.
+Current maintained release: **v0.478**. SQLite remains the active/default backend.
 
-v0.477 makes production progress unambiguous, groups Scan rows subtly by order, opens Order Details on the exact double-clicked item, and accelerates sketch visibility with progressive hydration plus a safe exact-page cache.
+v0.478 tightens Scan order grouping, distinguishes items with no fabrication work, streamlines sketch review with a compact/maximized viewer, adds action icons, and corrects Bay Map visual/animation details.
 
-## Install v0.477
+## Install v0.478
 
 1. Stop the Delivery List Scanner server.
-2. Copy the v0.477 changed files over the matching paths in your current project.
-3. Start the server again so the backend/frontend release are both v0.477.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.477 cache keys are used.
+2. Copy the v0.478 changed files over the matching paths in your current project.
+3. Start the server again so the backend/frontend release are both v0.478.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.478 cache keys are used.
 
 SQLite schema remains **version 11**. No migration or database reset is required.
 
-## v0.477 highlights
+## v0.478 highlights
 
-- Made workflow states explicit across Scan, Smart Search, and Order Details: unfinished Denver/Waterjet fabrication is gray, pending scanner stages keep their maintained stage color, and every completed step is green.
-- Added subtle order grouping to desktop and mobile Scan results, including a compact **View order details** action without changing the delivery-list page-size contract.
-- Double-clicking a Scan item opens Order Details at that exact item and briefly highlights it. Order progress is now sorted as fabrication, Staging, Outbound, then the route destination.
-- Enlarged exact-item sketch previews and changed fabrication wording so required work without evidence reads **Not Fabricated**, while untouched non-fabricated work reads **Not Scanned**.
-- Split background fabrication hydration into small sequential batches so visible rows update sooner without increasing concurrent network/PDF load.
-- Persisted only exact sketch-page matches already requested by an operator. This improves repeat/restart performance without crawling PDF content during background indexing.
-- Enlarged Smart Search actions and added focused regression coverage for order grouping, workflow state styling, item targeting, and persistent sketch-page assignments.
-- Advanced browser cache references and `APPLICATION_VERSION` to **v0.477**. SQLite schema remains **version 11**; no migration or database reset is required.
+- Reduced Scan-page order grouping to a subtle, low-height separator while preserving order identity, counts, and the Order Details shortcut.
+- Items confirmed by production hydration to have no fabrication assignment now show a small gray **No Fab** state instead of **Not Scanned** in Scan progress.
+- Removed the temporary resolved Waterjet-folder diagnostic text while preserving the working resolved-path fallback internally.
+- Reduced the default Order Details sketch footprint, fit sketch pages without the embedded scrollbar, and added a dedicated maximize/restore control for large review.
+- Added consistent icons to shared blue Order Details file actions and Smart Search **Scan Page** / **Order Details** actions.
+- Removed obsolete Bay Map icon overlay layers and retained the maintained colored directional stage icons.
+- Reworked the in-transit glass animation so Outbound panes originate at the left edge, load starting with the right-most pane into the truck, and Inbound panes unload starting with the right-most pane toward the right edge.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.478**. SQLite schema remains **version 11**; no migration or database reset is required.
 
 ## v0.476 highlights
 
