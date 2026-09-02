@@ -29159,3 +29159,25 @@ body.bay-move-mode .bay-layout-drop-zone {
 .bay-tool-card-v470 .hardware-v470 { color: #155caa; background: #e8f2fd; }
 @media (max-width: 1320px) { .bay-tool-card-grid-v470 { grid-template-columns: repeat(3, minmax(180px, 1fr)); } }
 @media (max-width: 760px) { .bay-tool-card-grid-v470 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ========================================================================== */
+/* v0.474 Bay tool accents + mirrored Indian Trail unload stack               */
+/* ========================================================================== */
+/* Current cards intentionally keep one shared geometry, while each workflow
+   regains the recognizable accent/icon treatment operators used previously. */
+.bay-tool-card-v470 { --bay-tool-accent-v474:#2e74b3; --bay-tool-soft-v474:#e9f3fc; --bay-tool-border-v474:#b9d4ec; border-color:var(--bay-tool-border-v474)!important; }
+.bay-tool-card-v470[data-bay-action="old-bays"] { --bay-tool-accent-v474:#5b7186; --bay-tool-soft-v474:#eef2f5; --bay-tool-border-v474:#c8d2db; }
+.bay-tool-card-v470[data-bay-action="sdi"] { --bay-tool-accent-v474:#b43745; --bay-tool-soft-v474:#fff0f2; --bay-tool-border-v474:#efc0c6; }
+.bay-tool-card-v470[data-bay-action="item-management"] { --bay-tool-accent-v474:#2372b8; --bay-tool-soft-v474:#eaf4fd; --bay-tool-border-v474:#b9d8f2; }
+.bay-tool-card-v470[data-bay-action="bay-editor"] { --bay-tool-accent-v474:#7252a6; --bay-tool-soft-v474:#f2eef9; --bay-tool-border-v474:#d3c7e7; }
+.bay-tool-card-v470[data-bay-action="layout"] { --bay-tool-accent-v474:#258078; --bay-tool-soft-v474:#e9f7f5; --bay-tool-border-v474:#b7dfdb; }
+.bay-tool-card-v470[data-bay-action="hardware"] { --bay-tool-accent-v474:#b66a19; --bay-tool-soft-v474:#fff3e4; --bay-tool-border-v474:#edc99c; }
+.bay-tool-card-v470 .bay-action-icon { color:var(--bay-tool-accent-v474)!important; background:var(--bay-tool-soft-v474)!important; border:1px solid color-mix(in srgb, var(--bay-tool-accent-v474) 22%, transparent)!important; }
+.bay-tool-card-v470:hover,.bay-tool-card-v470:focus-visible { border-color:var(--bay-tool-accent-v474)!important; background:linear-gradient(180deg,#fff,var(--bay-tool-soft-v474))!important; }
+.bay-tool-card-v470:hover strong,.bay-tool-card-v470:focus-visible strong { color:var(--bay-tool-accent-v474)!important; }
+
+/* The Indian Trail unload is the spatial mirror of the Outbound stack: it
+   appears only after arrival and resolves immediately left of the flipped truck. */
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-inbound {
+  right:auto!important;
+}

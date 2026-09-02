@@ -1,17 +1,75 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.472**. SQLite remains the active/default backend.
+Current maintained release: **v0.477**. SQLite remains the active/default backend.
 
-v0.472 finishes the production-file workflow without putting network-share traversal on scanner or Smart Search request threads. It adds persisted machine/file settings, actual-machine evidence overrides, order-centered Scan review, and whole-order production-file access while preserving the v0.471 Statistics selector fix.
+v0.477 makes production progress unambiguous, groups Scan rows subtly by order, opens Order Details on the exact double-clicked item, and accelerates sketch visibility with progressive hydration plus a safe exact-page cache.
 
-## Install v0.472
+## Install v0.477
 
 1. Stop the Delivery List Scanner server.
-2. Copy the v0.472 changed files over the matching paths in your current project.
-3. Start the server again so the backend/frontend release are both v0.472.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.472 cache keys are used.
+2. Copy the v0.477 changed files over the matching paths in your current project.
+3. Start the server again so the backend/frontend release are both v0.477.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.477 cache keys are used.
 
 SQLite schema remains **version 11**. No migration or database reset is required.
+
+## v0.477 highlights
+
+- Made workflow states explicit across Scan, Smart Search, and Order Details: unfinished Denver/Waterjet fabrication is gray, pending scanner stages keep their maintained stage color, and every completed step is green.
+- Added subtle order grouping to desktop and mobile Scan results, including a compact **View order details** action without changing the delivery-list page-size contract.
+- Double-clicking a Scan item opens Order Details at that exact item and briefly highlights it. Order progress is now sorted as fabrication, Staging, Outbound, then the route destination.
+- Enlarged exact-item sketch previews and changed fabrication wording so required work without evidence reads **Not Fabricated**, while untouched non-fabricated work reads **Not Scanned**.
+- Split background fabrication hydration into small sequential batches so visible rows update sooner without increasing concurrent network/PDF load.
+- Persisted only exact sketch-page matches already requested by an operator. This improves repeat/restart performance without crawling PDF content during background indexing.
+- Enlarged Smart Search actions and added focused regression coverage for order grouping, workflow state styling, item targeting, and persistent sketch-page assignments.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.477**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.476 highlights
+
+- Corrected the plant Waterjet folder default to `Completed  WJ` (two spaces) and added whitespace/case-tolerant sibling resolution so an older saved `Completed WJ` path can still resolve to the actual folder. Settings shows the resolved path when it differs from the configured value.
+- Simplified Order Details into one order summary plus visual item cards. Each item can display its exact matched sketch page directly in the card, with focused **Open Sketch**, **Print Sketch**, **Open Program**, and **Hardware** actions instead of nested preview-heavy file groups.
+- Enlarged Scan Progress text/counts and colored each manufacturing/scanner checkpoint by its actual workflow stage. Denver and Waterjet now have their own configurable colors.
+- Added a dedicated **Machines & Colors** tab to Machine & Production Files. Denver/Waterjet colors persist in the existing system metadata and are shared by Scan, Smart Search, and Order Details without a schema migration.
+- Rebuilt Smart Search Progress as a left-to-right colored gradient between the previous/completed checkpoint and the next required checkpoint. Denver and Waterjet use dedicated icons and their configured machine colors.
+- Reworked Lookup Manager ownership so every library tab consumes the full modal content width. The active Add/Edit form is temporarily mounted as a top-level modal with a true full-screen gray backdrop, eliminating the hover/stacking flash and preventing the underlying tabs/library from staying visually active.
+- Preserved the recent production-file indexing boundary, exact `Order.Item` sketch-page assignment, `Order + two-digit Item` program matching, `.egl` Denver evidence, `.nce` Waterjet evidence, Statistics range ownership, and synchronized-stage de-duplication from v0.475.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.476**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.475 highlights
+
+- Smart Search actions now use the shared compact blue-button component and sit unobtrusively at the lower-right of each result.
+- Smart Search replaces the former Stage line with compact workflow progress such as `Denver 1/1 → Staged 0/1`, using synchronized stage-copy quantities supplied by the backend.
+- Scan Progress now uses two compact checkpoints: the last completed/current manufacturing or scanner step above the next required step, with completed progress green and the next stage blue.
+- Order Details has a full visual redesign matching maintained page headers, including the left blue accent rail, open-circle decoration, cleaner order metrics, polished item cards, compact workflow chips, and shared blue Preview / Print / Open Program actions.
+- Production-share diagnostics now distinguish a missing child folder on a reachable mapped drive from a truly disconnected mapped drive. This is especially useful when only `Completed WJ` fails while sibling `I:` folders remain available.
+- Added regression coverage for synchronized Smart Search progress and mapped-drive child-folder diagnosis.
+- Print/preview windows now request the v0.475 stylesheet cache keys as well, preventing a refreshed main page from opening a stale v0.474 print surface.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.475**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.474 highlights
+
+- Production-share refresh is now **metadata-only**. Recent Sketch PDFs are no longer opened/read during the background folder index; exact page text is parsed lazily only for the requested order and then cached. This prevents a large Sketches folder from keeping Settings in a perpetual refresh state and reduces application-wide I/O pressure.
+- Sketches follow the production drawing contract shown by the maintained examples: a sketch PDF is order-level, while each page is resolved by its center `Order.Item` marker (for example `238245.2`). `WJ` on that same page assigns Waterjet; `DENVER 1`/configured Denver terms assign Denver. Pages without a machine marker remain informational rather than being guessed.
+- Program files match the production naming convention `Order + two-digit Item` (for example order `238001`, item 1 -> `23800101`). Exact-item `.egl` proves Denver fabrication and exact-item `.nce` proves Waterjet fabrication; when both evidence types exist, the newest exact-item completion evidence is treated as the actual machine result.
+- Machine & Production Files now shows the **full unavailable/error message and configured path** instead of truncating Waterjet/mapped-drive diagnostics.
+- Order Details opens immediately from database data and hydrates network/PDF information afterward. It has a polished order summary, per-item workflow/file cards, exact sketch-page preview/print actions, item-specific Program access, and whole-order Hardware/Sketch access.
+- Smart Search returns database results without waiting on fabrication/PDF checks, then hydrates manufacturing state asynchronously. Every result has explicit **Go to Scan Page** and **Open Order Details** actions.
+- Scan row double-click is reliable even when the first click repaints selection. Before Staging, an exact sketch assignment with missing fabrication evidence displays a gray **Not Fabricated** Progress state; completed evidence can show the actual fabricated machine.
+- Restored distinct Bay Map action-card colors/icons, added a dedicated Hardware wrench treatment, and mirrored the Indian Trail pane stack/transfer geometry against the Outbound side while keeping panes hidden until truck arrival.
+- Repaired Lookup Manager focused-edit layering: the library/tabs dim and become inactive, while the editor stays foregrounded with its Close control fixed at the top-right across tabs.
+- Preserved v0.473 Statistics request/range ownership so stale reports cannot contaminate Common Glass Sizes or other metrics after a date-range change.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.474** while keeping SQLite schema version **11** unchanged.
+
+## v0.473 highlights
+
+- Column sorting on Scan now occurs **within each glass-type section**, so the maintained glass headers remain visible and glass types never collapse into one flat sorted table.
+- Removed the v0.472 order-group header rows from Scan while preserving double-click Order Details on individual order lines.
+- Production-file indexing now defaults to a configurable **7-day lookback** (1–365 days) and indexes only recent Hardware, Sketch, Program, Denver evidence, and Waterjet evidence instead of recursively cataloging the full history.
+- Old directory subtrees are pruned by modification time, and already-known recent directories are revisited. The network filesystem only enumerates immediate entries needed to identify recent work.
+- Machine & Production Files exposes the lookback setting, recent-file counts, and distinct checking/error states with UNC-path guidance for mapped-drive/session failures.
+- Denver completion requires an exact-item recent `.egl`; Waterjet completion requires an exact-item recent `.nce` from Completed WJ.
+- Restored the Statistics range-isolation protection so slower older requests cannot replace metrics for the currently selected range.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.473** while keeping SQLite schema version **11** unchanged.
 
 ## v0.472 highlights
 

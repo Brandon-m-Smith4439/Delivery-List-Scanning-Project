@@ -4496,6 +4496,10 @@ class BaseDeliveryStore:
                 "_preassignedBay": "",
                 "_rush": is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
                 "_remake": is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
+                # v0.475: Smart Search renders a compact completed -> next
+                # workflow pair. Keep one authoritative quantity per logical
+                # stage while the normal representative row remains unchanged.
+                "_progressStages": {},
             })
 
             priority_delivery_date = str(row_value(row, "priority_delivery_date", "") or "").strip()
@@ -4506,6 +4510,25 @@ class BaseDeliveryStore:
 
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
+            progress_key = kind if kind != "other" else f"other:{row['stage']}:{row['scanner']}"
+            progress_rows = result.setdefault("_progressStages", {})
+            progress_row = progress_rows.get(progress_key)
+            progress_qty = max(int(row["qty"] or 0), 0)
+            if progress_row is None:
+                progress_rows[progress_key] = {
+                    "kind": kind,
+                    "stage": str(row["stage"] or ""),
+                    "scanner": str(row["scanner"] or ""),
+                    "stagePreset": stage_logic_preset(row["stage"], row["scanner"]),
+                    "scanned": scanned,
+                    "qty": progress_qty,
+                    "lastScanTime": str(row["last_scan_time"] or ""),
+                }
+            else:
+                progress_row["scanned"] = max(int(progress_row.get("scanned") or 0), scanned)
+                progress_row["qty"] = max(int(progress_row.get("qty") or 0), progress_qty)
+                if str(row["last_scan_time"] or "") > str(progress_row.get("lastScanTime") or ""):
+                    progress_row["lastScanTime"] = str(row["last_scan_time"] or "")
             if row["rack_code"] and not result.get("_transportCode"):
                 result["_transportCode"] = row["rack_code"]
             if row["bay_code"]:
@@ -4582,6 +4605,11 @@ class BaseDeliveryStore:
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            progress_rank = {"staging": 10, "outbound": 20, "indian_trail": 30, "cpu": 30, "greenville": 30, "dtc": 30, "other": 40}
+            result["progressStages"] = sorted(
+                list((result.get("_progressStages") or {}).values()),
+                key=lambda stage: (progress_rank.get(str(stage.get("kind") or "other"), 40), str(stage.get("stage") or "")),
+            )
             result["rush"] = bool(result.get("_rush"))
             result["remake"] = bool(result.get("_remake"))
             result["navigationDeliveryListId"] = result.get("deliveryListId")
@@ -4596,7 +4624,7 @@ class BaseDeliveryStore:
         # v0.425 compatibility anchor: return cleaned_results[:20]
         return self.attach_priority_search_annotations(cleaned_results)[:20]
 
-    def get_order_detail(self, order_no: str, user: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_order_detail(self, order_no: str, user: dict[str, Any] | None = None, *, include_production: bool = True) -> dict[str, Any]:
         """Return one order grouped by physical item with all active stage copies.
 
         The Order GUI uses this focused payload instead of reusing the much larger
@@ -4653,7 +4681,7 @@ class BaseDeliveryStore:
         items = sorted(grouped.values(), key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")))
         first = items[0]
         service = getattr(self, "production_files", None)
-        if service is not None:
+        if include_production and service is not None:
             for item in items:
                 item["productionFiles"] = service.item_assets(clean_order, item.get("item"), item.get("job"))
         return {
@@ -4662,8 +4690,9 @@ class BaseDeliveryStore:
             "job": first.get("job") or "",
             "route": first.get("route") or "",
             "items": items,
-            "orderProductionFiles": service.order_assets(clean_order, first.get("job")) if service is not None else {"hardware": [], "sketches": []},
-            "productionFileAvailability": service.availability() if service is not None else {},
+            "productionLoaded": bool(include_production and service is not None),
+            "orderProductionFiles": service.order_assets(clean_order, first.get("job")) if include_production and service is not None else {"hardware": [], "sketches": []},
+            "productionFileAvailability": service.availability() if include_production and service is not None else {},
         }
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
@@ -6174,6 +6203,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.write_superseded_order_exclusion_file()
             with self.connect() as con:
                 self.production_files.configure(self.production_file_settings_con(con))
+            # v0.473: prime the recent production-file index at startup so the
+            # Settings availability cards do not wait for the first user lookup.
+            if self.production_files.enabled:
+                self.production_files.refresh_async()
         except Exception as exc:
             suffix = f" Verified backup preserved at {backup_path}." if backup_path else ""
             raise MigrationError(f"Database initialization failed.{suffix}") from exc
@@ -6264,7 +6297,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if not 1 <= cache_minutes <= 1440:
             raise ValueError("Production file cache minutes must be between 1 and 1440")
 
+        try:
+            lookback_days = int(values.get("lookbackDays", defaults.get("lookbackDays", 7)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Production file lookback days must be a whole number") from exc
+        if not 1 <= lookback_days <= 365:
+            raise ValueError("Production file lookback days must be between 1 and 365")
+
         terms = values.get("machineTerms") if isinstance(values.get("machineTerms"), dict) else {}
+        colors = values.get("machineColors") if isinstance(values.get("machineColors"), dict) else {}
+
+        def normalized_color(machine: str) -> str:
+            fallback = str((defaults.get("machineColors") or {}).get(machine) or ("#2563eb" if machine == "denver" else "#7c3aed"))
+            value = str(colors.get(machine) or fallback).strip()
+            return value if re.fullmatch(r"#[0-9A-Fa-f]{6}", value) else fallback
 
         def normalized_terms(machine: str) -> list[str]:
             raw = terms.get(machine, defaults["machineTerms"][machine])
@@ -6277,6 +6323,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "enabled": boolean_value("enabled", bool(defaults["enabled"])),
             "enforceStaging": boolean_value("enforceStaging", bool(defaults["enforceStaging"])),
             "cacheMinutes": cache_minutes,
+            "lookbackDays": lookback_days,
             "roots": {
                 "hardware": str(roots.get("hardware") or default_roots["hardware"]).strip(),
                 "sketches": str(roots.get("sketches") or default_roots["sketches"]).strip(),
@@ -6286,6 +6333,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "machineTerms": {
                 "denver": normalized_terms("denver"),
                 "waterjet": normalized_terms("waterjet"),
+            },
+            "machineColors": {
+                "denver": normalized_color("denver"),
+                "waterjet": normalized_color("waterjet"),
             },
         }
 
@@ -16586,18 +16637,27 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         )
         term_clauses: list[str] = []
         parameters: list[str] = []
+        has_priority_terms = len(sql_terms) != len(terms)
+        # Multi-word free-text searches may intentionally target a saved Rush/
+        # Remake reason or responsible name. Preserve that capability while
+        # keeping the overwhelmingly common single order/customer/size term on
+        # the faster active-row path.
+        include_audit_text = has_priority_terms or (len(sql_terms) > 1 and all(not term.isdigit() for term in sql_terms))
         for term in sql_terms:
             like = f"%{term}%"
             field_checks = [f"LOWER(COALESCE(CAST({column} AS TEXT), '')) LIKE ?" for column in searchable_columns]
-            # Priority reason/responsible text lives in the existing audit payload;
-            # search it here rather than duplicating that metadata on line_items.
-            field_checks.append("EXISTS (SELECT 1 FROM audit_events ae WHERE ae.entity_type = 'line_item' AND ae.entity_id = li.id AND LOWER(COALESCE(ae.reason, '') || ' ' || COALESCE(ae.payload_json, '')) LIKE ?)")
+            # v0.474: correlated audit text is omitted for ordinary single-term
+            # lookups so Smart Search can paint routine order searches sooner.
+            if include_audit_text:
+                field_checks.append("EXISTS (SELECT 1 FROM audit_events ae WHERE ae.entity_type = 'line_item' AND ae.entity_id = li.id AND LOWER(COALESCE(ae.reason, '') || ' ' || COALESCE(ae.payload_json, '')) LIKE ?)")
             term_clauses.append("(" + " OR ".join(field_checks) + ")")
             parameters.extend([like] * len(field_checks))
         candidate_predicate = " AND ".join(term_clauses) if term_clauses else "1 = 1"
-        # Include flagged rows as lightweight fallback candidates so operator-entered
-        # priority reasons/responsible names can also participate in multi-term search.
         priority_candidate = "(LOWER(COALESCE(li.process_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.process_state, '')) LIKE '%remake%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%remake%' OR EXISTS (SELECT 1 FROM audit_events pae WHERE pae.entity_type = 'line_item' AND pae.entity_id = li.id AND pae.action IN ('mark_rush_sdi','mark_remake_sdi')))"
+        # Only widen to all priority candidates when the operator actually asks
+        # for priority metadata. This removes the most expensive unrelated work
+        # from normal Smart Search while preserving Rush/Remake reason searches.
+        where_candidate = f"(({candidate_predicate}) OR {priority_candidate})" if has_priority_terms or not sql_terms or include_audit_text else f"({candidate_predicate})"
         candidate_limit = 5000 if not sql_terms else 1200
 
         with self.connect() as con:
@@ -16637,7 +16697,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
                 WHERE dl.status = 'active'
                   AND COALESCE(li.is_deleted, 0) = 0
-                  AND (({candidate_predicate}) OR {priority_candidate})
+                  AND {where_candidate}
                 ORDER BY dl.delivery_date DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
                 LIMIT {candidate_limit}
                 """,
@@ -16764,6 +16824,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "_preassignedBay": "",
                 "_rush": is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
                 "_remake": is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]}),
+                # v0.475: one synchronized progress row per logical stage for
+                # the compact Smart Search completed -> next presentation.
+                "_progressStages": {},
             })
 
             priority_delivery_date = str(row_value(row, "priority_delivery_date", "") or "").strip()
@@ -16774,6 +16837,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
+            progress_key = kind if kind != "other" else f"other:{row['stage']}:{row['scanner']}"
+            progress_rows = result.setdefault("_progressStages", {})
+            progress_row = progress_rows.get(progress_key)
+            progress_qty = max(int(row["qty"] or 0), 0)
+            if progress_row is None:
+                progress_rows[progress_key] = {
+                    "kind": kind,
+                    "stage": str(row["stage"] or ""),
+                    "scanner": str(row["scanner"] or ""),
+                    "stagePreset": stage_logic_preset(row["stage"], row["scanner"]),
+                    "scanned": scanned,
+                    "qty": progress_qty,
+                    "lastScanTime": str(row["last_scan_time"] or ""),
+                }
+            else:
+                progress_row["scanned"] = max(int(progress_row.get("scanned") or 0), scanned)
+                progress_row["qty"] = max(int(progress_row.get("qty") or 0), progress_qty)
+                if str(row["last_scan_time"] or "") > str(progress_row.get("lastScanTime") or ""):
+                    progress_row["lastScanTime"] = str(row["last_scan_time"] or "")
             if row["rack_code"] and not result.get("_transportCode"):
                 result["_transportCode"] = row["rack_code"]
             if row["bay_code"]:
@@ -16849,6 +16931,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             result["locationText"] = location
             result["stageLocations"] = [location]
+            progress_rank = {"staging": 10, "outbound": 20, "indian_trail": 30, "cpu": 30, "greenville": 30, "dtc": 30, "other": 40}
+            result["progressStages"] = sorted(
+                list((result.get("_progressStages") or {}).values()),
+                key=lambda stage: (progress_rank.get(str(stage.get("kind") or "other"), 40), str(stage.get("stage") or "")),
+            )
             result["rush"] = bool(result.get("_rush"))
             result["remake"] = bool(result.get("_remake"))
             result["navigationDeliveryListId"] = result.get("deliveryListId")

@@ -30044,3 +30044,137 @@ button[aria-disabled="true"][data-blocked-reason]:focus-visible {
   background: #fff !important;
   color: #10243a !important;
 }
+
+/* ========================================================================== */
+/* v0.474 Smart Search explicit actions                                       */
+/* ========================================================================== */
+.header-search-results .global-result-card-v474 {
+  cursor:default !important;
+}
+.header-search-results .global-result-card-v474:hover,
+.header-search-results .global-result-card-v474:focus-within {
+  transform:none !important;
+}
+.global-result-actions-v474 {
+  display:flex;
+  justify-content:flex-end;
+  gap:6px;
+  padding-top:5px;
+  border-top:1px solid rgba(73,105,132,.12);
+}
+.global-result-action-v474 {
+  min-height:27px !important;
+  padding:4px 9px !important;
+  border-radius:6px !important;
+  border:1px solid #bfd0df !important;
+  background:#f8fbfd !important;
+  color:#2f5776 !important;
+  font-size:10px !important;
+  font-weight:850 !important;
+  line-height:1.1 !important;
+  cursor:pointer !important;
+}
+.global-result-action-v474.is-details { border-color:#4c8fc3 !important; background:#edf6fd !important; color:#155b91 !important; }
+.global-result-action-v474:hover,.global-result-action-v474:focus-visible { border-color:#1e6ea9 !important; background:#e5f1fa !important; color:#114f7c !important; }
+
+
+/* ========================================================================== */
+/* v0.475 Smart Search compact shared actions                                 */
+/* ========================================================================== */
+.global-result-actions-v475 {
+  justify-self:end !important;
+  align-self:end !important;
+  width:auto !important;
+  margin-left:auto !important;
+  padding:3px 0 0 !important;
+  gap:5px !important;
+  border-top:0 !important;
+}
+body button.app-primary-button.global-result-action-v475 {
+  --app-primary-min-height: 21px;
+  --app-primary-padding: 2px 7px;
+  --app-primary-radius: 5px;
+  --app-primary-font-size: 8.5px;
+  --app-primary-gap: 3px;
+  min-width:0 !important;
+  white-space:nowrap !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.38), inset 0 -1px 0 rgba(5,32,62,.2), 0 2px 0 var(--shared-primary-edge), 0 4px 8px rgba(4,31,77,.17) !important;
+}
+.header-search-results .global-result-progress-v475 > strong {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:10px;
+  color:#234f73;
+}
+
+/* ========================================================================== */
+/* v0.476 Smart Search colored progress flow                                  */
+/* ========================================================================== */
+.header-search-results .global-result-progress-v476 {
+  gap: 5px !important;
+  min-width: 0;
+}
+.header-search-results .global-result-progress-flow-v476 {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--progress-left) 35%, #c7d4df);
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--progress-left) 20%, white) 0%,
+    color-mix(in srgb, var(--progress-left) 11%, white) 48%,
+    color-mix(in srgb, var(--progress-right) 11%, white) 52%,
+    color-mix(in srgb, var(--progress-right) 20%, white) 100%);
+  box-shadow: inset 3px 0 0 var(--progress-left), inset -3px 0 0 var(--progress-right);
+}
+.header-search-results .global-result-progress-step-v476 {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px 6px;
+  color: color-mix(in srgb, var(--step-color) 72%, #18334c);
+  white-space: nowrap;
+}
+.header-search-results .global-result-progress-step-v476 .global-result-chip-icon-v433 {
+  width: 13px !important;
+  height: 13px !important;
+  color: var(--step-color) !important;
+}
+.header-search-results .global-result-progress-step-v476 strong {
+  font-size: 9.5px !important;
+  font-weight: 900 !important;
+  color: inherit !important;
+}
+.header-search-results .global-result-progress-flow-v476 > i {
+  flex: 0 0 auto;
+  color: #718198;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+/* ========================================================================== */
+/* v0.477 Smart Search actions and explicit workflow states                    */
+/* ========================================================================== */
+body button.app-primary-button.global-result-action-v475 {
+  --app-primary-min-height: 29px;
+  --app-primary-padding: 5px 13px;
+  --app-primary-font-size: 10px;
+  width:112px !important;
+  min-width:112px !important;
+}
+.header-search-results .global-result-progress-step-v476.is-complete-v477 {
+  --step-color:#43a96b !important;
+  color:#24633e !important;
+}
+.header-search-results .global-result-progress-step-v476.is-fabrication-pending-v477 {
+  --step-color:#929da8 !important;
+  color:#56636f !important;
+}
+@media (max-width: 520px) {
+  body button.app-primary-button.global-result-action-v475 { width:104px !important; min-width:104px !important; }
+}

@@ -1,3 +1,71 @@
+## v0.477 - Clear Workflow States, Order Grouping, and Faster Sketch Review
+
+- Standardized progress meaning across Scan, Smart Search, and Order Details: incomplete fabrication is neutral gray, pending scanner stages retain their configured stage color, and all completed steps are green.
+- Added lightweight order headers to desktop and mobile Scan results with piece/item totals and a compact Order Details action.
+- Routed Scan double-clicks to the exact item inside Order Details, including smooth centering and a temporary visual highlight.
+- Ordered Order Details progress as fabrication, Staging, Outbound, then the applicable destination stage.
+- Enlarged embedded exact-page sketch previews and clarified untouched/fabrication states as **Not Scanned** and **Not Fabricated**.
+- Changed Scan/Smart Search fabrication hydration from one large blocking-result batch to progressive sequential chunks, improving first-result latency without increasing concurrent production-share pressure.
+- Persisted lazily discovered exact PDF page assignments in the existing production-file index. Background indexing remains metadata-only and production PDFs are never bulk-parsed at startup.
+- Enlarged the Smart Search action targets and tightened mobile Scan overflow ownership.
+- Added regression tests for persisted exact-page assignments and the v0.477 interaction/style contract.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.477**. SQLite schema remains **version 11**.
+
+## v0.476 - Visual Order Review, Machine Colors, and Waterjet Path Resolution
+
+- Corrected the default Completed Waterjet folder to the plant's actual `Completed  WJ` name and added unique sibling-folder resolution that collapses repeated whitespace/case for the final path component. Legacy one-space settings can therefore resolve without hiding the exact path being used.
+- Added resolved production-root diagnostics to Machine & Production Files so administrators can see when the configured path and real share path differ.
+- Kept production-share status request-safe: resolved folder aliases are learned and cached by background/local indexing, so simply opening Machine & Production Files does not probe a mapped network share on the HTTP request thread.
+- Rebuilt Order Details around operator-facing information: concise order summary, visual exact-item sketch page, large `Order.Item` identity, product/size/quantity, colored workflow progression, and focused Open Sketch / Print Sketch / Open Program / Hardware actions.
+- Replaced item-level Sketch Preview wording with **Open Sketch** while retaining exact-page printing.
+- Enlarged Scan Progress typography and applied maintained stage colors to each checkpoint. Denver and Waterjet colors are configurable rather than hard-coded.
+- Added a separate **Machines & Colors** tab to Machine & Production Files. Machine colors persist through the existing production-file settings metadata and require no schema change.
+- Rebuilt Smart Search Progress as a compact gradient from the previous/completed checkpoint color to the next required checkpoint color, with dedicated Denver and Waterjet icons.
+- Forced every Lookup Manager library tab to the full available content width and moved focused Add/Edit forms into a true top-level modal layer with a full-screen gray backdrop, removing the remaining hover/stacking flash and legacy two-column squeeze.
+- Added regression coverage for repeated-space Waterjet folder resolution and configurable machine colors while preserving existing recent-index, fabrication, Statistics, and workflow tests.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.476**. SQLite schema remains **version 11**.
+
+## v0.475 - Compact Workflow Progress and Polished Order Review
+
+- Reworked Smart Search actions onto the maintained shared blue-button component. **Scan Page** and **Order Details** are now very small controls anchored at the lower-right of each result instead of oversized feature-local buttons.
+- Replaced Smart Search's former Stage field with a compact **Progress** sequence backed by synchronized stage-copy quantities. Results can now read `Denver 1/1 → Staged 0/1`, `Staged 1/1 → Outbound 0/1`, and similar completed-to-next workflow transitions.
+- Rebuilt the Scan Progress cell as two compact checkpoints instead of one long text pill. Manufacturing status can sit above Staging, completed scanner progress is green, and the next required stage uses a compact blue pending treatment so values fit the maintained narrow column.
+- Completely refreshed Order Details to match the web application's visual language: maintained pale-blue header geometry, left accent rail, open-circle decoration, cleaner order metrics, compact item cards, workflow chips, and consistent shared blue Preview / Print / Open Program actions.
+- Corrected production-share diagnostics for the case where only `Completed WJ` is missing. A child `FileNotFoundError` now probes its parent/ancestor on Windows; when `I:\BAREFOOT-INSTALL\Glass Production` is reachable, Settings reports the missing child path instead of incorrectly blaming the entire mapped drive. A genuinely disconnected mapped drive still receives the UNC-path guidance.
+- Added physical stage-progress metadata to Smart Search without changing representative-row navigation or multiplying synchronized stage copies.
+- Added regression coverage for Smart Search stage-progress de-duplication and reachable-parent/missing-child production-share diagnostics.
+- Aligned the print-preview window's dynamic stylesheet cache keys with v0.475 so preview/print surfaces cannot retain v0.474 CSS after the main application is upgraded.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.475**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.474 - Fast Production Intelligence and Order Details
+
+- Changed the recent production-file index to metadata-only discovery. Background refresh no longer extracts text from every Sketch PDF; PDF page text is read lazily only when a specific order/item needs machine assignment and is cached by file modification time/order. This removes the primary cause of long-running Sketches refreshes and network-I/O contention.
+- Implemented the maintained sketch-page contract from production examples: order-level Sketch PDFs are split logically by the exact center `Order.Item` marker (`238245.1`, `.2`, `.3`, etc.). Machine text is accepted only from that same page (`WJ` for Waterjet and configured `DENVER` terms such as `DENVER 1` for Denver). Exact page numbers/markers are carried through Order Details for one-piece preview/printing.
+- Expanded item matching for Programs to the production `Order + two-digit Item` convention (`23800101`, `23800102`, ...), while retaining safe compatibility with older item naming. Exact-item `.egl` remains Denver completion evidence and `.nce` remains Waterjet completion evidence; if both exist, newest exact-item evidence determines the actual machine result.
+- Machine & Production Files now preserves and displays the complete source error plus the configured path, so mapped-drive/UNC failures such as Waterjet no longer end in an unreadable truncated status.
+- Reworked Order Details for fast first paint and clearer floor use. Database/order/stage information opens immediately, production-share information hydrates in a second request, recent order details are cached briefly, and the GUI now has a polished hero summary, per-item cards, manufacturing state, exact Sketch page preview/print, Program open, and shared Hardware/Sketch access.
+- Removed production-share/PDF work from the synchronous Smart Search request. Search results render from SQLite first and manufacturing statuses hydrate through one background batch request. Added explicit **Go to Scan Page** and **Open Order Details** buttons to every Smart Search result.
+- Fixed Scan row double-click reliability by preserving the first click identity across the selection repaint that previously destroyed the DOM node before a native `dblclick` could fire. The existing native double-click handler remains as a fallback.
+- Added pre-Staging manufacturing state to Scan Progress. A confidently matched sketch/item with missing completion evidence displays gray **Not Fabricated**; exact completion evidence can display the actual fabricated machine. Existing scanned-stage progress remains authoritative after scanning begins.
+- Restored visual identity to the Bay Map action cards (Old Bays, Priority Work, Manage Items, Edit Bays, Edit Map) and added a dedicated Hardware wrench icon/color. Mirrored the Indian Trail pane-stack endpoint against Outbound while preserving the rule that inbound glass is invisible until the truck arrives.
+- Repaired Lookup Manager focus/stacking across tabs. Opening Add/Edit dims and disables the underlying Lookup library/tabs, keeps the focused editor above them, and pins the Close control to the editor's top-right instead of allowing tab-specific layouts to push it to the bottom.
+- Preserved the v0.473 Statistics date-range request ownership and Common Glass Sizes safeguards.
+- Added regression coverage for multi-page sketch item/machine resolution, production program naming, metadata-only sketch indexing, asynchronous fabrication hydration, exact-page asset handling, Scan double-click behavior, and the v0.474 UI contract.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.474**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.473 - Recent Production Indexing, Statistics Safety, and Scan Grouping
+
+- Kept Scan grouped by glass type under every clickable column sort. Sorting now reorders rows inside each glass-type section instead of flattening the table and removing its glass headers.
+- Removed the temporary v0.472 order-group rows from the Scan content section while keeping individual-row double-click Order Details and the maintained glass-group collapse controls.
+- Reworked production-share indexing around a persisted, Admin-configurable recent working window. The default is **7 days** (allowed 1–365); files older than the cutoff are not indexed, and old directory subtrees are not recursively traversed.
+- Machine & Production Files now shows the recent-window setting and distinguishes **Checking folder** from a genuinely unavailable root. Share reachability is published before the slower recent-file index finishes, the browser polls the open GUI while a refresh is active, and genuine failures report **Access denied**, **Folder not found**, or a mapped-drive/session problem with a UNC-path hint.
+- Fixed mapped-drive classification so `I:/...` is recognized as a remote production root even in non-Windows regression environments, matching the production-host behavior. The recent production index is also primed at server startup.
+- Tightened fabrication evidence: Denver requires exact-item `.egl` evidence from Programs; Waterjet requires exact-item `.nce` evidence from Completed WJ. Other Completed WJ file types are ignored as completion proof.
+- Restored exact Statistics range ownership from the prior validated v0.472 line. Each report request is keyed/tokenized to its selected date range so an older response cannot populate Common Glass Sizes, glass mix, or other report-only metrics after the operator changes ranges.
+- Kept production files themselves on the network share. This revision continues to cache only lightweight file metadata/references locally rather than storing large sketches, hardware PDFs, or machine programs as database blobs.
+- Added focused regressions for the 7-day lookback, lookback expansion, `.nce` Waterjet evidence, mapped-drive request safety, and the maintained fabrication/Statistics workflows.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.473**. SQLite schema remains **version 11**; no migration or database reset is required.
+
 ## v0.472 - Background Production Indexing, Machine Settings, and Order Review
 
 - Replaced request-thread production-share traversal with a persisted, TTL-controlled background index. Mapped-drive and UNC folders refresh on daemon workers; scanner, Order Details, Hardware search, and Smart Search read cached metadata and remain responsive when a share is large or disconnected.

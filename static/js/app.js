@@ -101,6 +101,16 @@ const state = {
   globalSearchLastQuery: "",
   globalSearchLastResults: [],
   globalSearchRequestId: 0,
+  // v0.474: fabrication status hydrates asynchronously so neither Scan nor
+  // Smart Search waits on network-share/PDF work before painting results.
+  fabricationStatusCacheV474: new Map(),
+  fabricationStatusPendingV474: new Set(),
+  fabricationStatusBatchTokenV474: 0,
+  orderDetailCacheV474: new Map(),
+  orderDetailOpenOrderV474: "",
+  orderDetailFocusItemV477: "",
+  orderDetailFocusTimerV477: 0,
+  scanRowClickV474: { order: "", id: "", at: 0 },
   pageIndex: 1,
   // v0.467: show more delivery-list rows by default; operators can still reduce it.
   pageSize: 50,
@@ -111,8 +121,6 @@ const state = {
   homePageSize: 25,
   expandedDeliveryDate: "",
   collapsedGlassTypes: new Set(),
-  collapsedScanOrders: new Set(),
-  scanOrderToggleTimer: null,
   baySearch: "",
   bayStatusFilter: "all",
   bayCategoryFilter: "all",
@@ -221,11 +229,15 @@ const state = {
     enabled: true,
     enforceStaging: true,
     cacheMinutes: 5,
+    lookbackDays: 7,
     roots: { hardware: "", sketches: "", programs: "", completedWaterjet: "" },
     machineTerms: { denver: ["DENVER", "DENVER CNC"], waterjet: ["WATER JET", "WATERJET", "WJ"] },
+    machineColors: { denver: "#2563eb", waterjet: "#7c3aed" },
     availability: {},
-    index: { refreshing: [], counts: {}, indexedAt: 0 },
+    index: { refreshing: [], counts: {}, indexedAt: 0, lookbackDays: 7, errors: {} },
   },
+  productionFileSettingsPollTimer: null,
+  productionFileSettingsTabV476: "sources",
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -296,10 +308,13 @@ const state = {
   rushRedirectInProgress: false,
   lastScan: null,
   homeReportSummary: null,
-  // v0.471: keep one report request in flight at a time. Statistics can be
-  // opened while the startup report is still loading, so the UI needs an
-  // explicit loading state instead of briefly presenting an empty selector.
+  // v0.473 restores v0.472 range isolation on top of the new production-file
+  // baseline. Only a report for the exact active date range may feed Statistics.
   homeReportSummaryLoading: false,
+  homeReportSummaryRangeKey: "",
+  homeReportSummaryRequestKey: "",
+  homeReportSummaryRequestToken: 0,
+  homeReportSummaryPromise: null,
   // v0.260: Statistics opens glass-first with a compact top-10 donut.
   // The external-remake toggle is intentionally independent so machine
   // accountability never silently attributes customer/external remakes.
@@ -9100,14 +9115,16 @@ function groupItemsByGlass(items) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function getPagedItems() {
-  const rows = sortScanItems(filteredItems());
-  const groups = state.scanSortKey ? [] : groupItemsByGlass(rows);
+  const filtered = filteredItems();
+  const groups = groupItemsByGlass(filtered);
 
-  // A user-selected column sort is a true table-wide sort. The default view
-  // retains the familiar glass-type grouping when no explicit sort is active.
-  const orderedEntries = state.scanSortKey
-    ? rows.map((item) => ({ label: "", item, flat: true }))
-    : groups.flatMap((group) => group.items.map((item) => ({ label: group.label, item, flat: false })));
+  // v0.473: column sorting is intentionally scoped inside each glass-type
+  // section. Operators keep the maintained glass headers/separation while the
+  // selected column controls row order within every glass type.
+  const orderedEntries = groups.flatMap((group) =>
+    sortScanItems(group.items).map((item) => ({ label: group.label, item, flat: false })),
+  );
+  const rows = orderedEntries.map((entry) => entry.item);
 
   const totalPages = Math.max(1, Math.ceil(orderedEntries.length / state.pageSize));
   state.pageIndex = Math.min(Math.max(state.pageIndex, 1), totalPages);
@@ -9118,15 +9135,10 @@ function getPagedItems() {
   const pageGroups = [];
   for (const entry of pageEntries) {
     const lastGroup = pageGroups[pageGroups.length - 1];
-
-    if (lastGroup && lastGroup.label === entry.label && Boolean(lastGroup.flat) === Boolean(entry.flat)) {
+    if (lastGroup && lastGroup.label === entry.label) {
       lastGroup.items.push(entry.item);
     } else {
-      pageGroups.push({
-        label: entry.label,
-        flat: Boolean(entry.flat),
-        items: [entry.item],
-      });
+      pageGroups.push({ label: entry.label, flat: false, items: [entry.item] });
     }
   }
 
@@ -9156,6 +9168,150 @@ function stageVerb() {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function fabricationStatusKeyV474(order = "", item = "", job = "") {
+  return [order, item, job].map((value) => String(value || "").trim().toUpperCase()).join("|");
+}
+
+function cachedFabricationStatusV474(item = {}) {
+  return state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(item.order, item.item, item.job)) || null;
+}
+
+function compactMachineLabelV475(value = "") {
+  const machine = String(value || "").trim();
+  if (!machine) return "";
+  if (/water\s*jet|waterjet|\bwj\b/i.test(machine)) return "WaterJet";
+  if (/denver/i.test(machine)) return "Denver";
+  return machine.replace(/\s+CNC\b/i, "").trim() || machine;
+}
+
+function safeProgressColorV476(value = "", fallback = "#64748b") {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+function productionMachineColorV476(machine = "") {
+  const label = compactMachineLabelV475(machine).toLowerCase();
+  const colors = state.productionFileSettings?.machineColors || {};
+  if (label.includes("waterjet")) return safeProgressColorV476(colors.waterjet, "#7c3aed");
+  if (label.includes("denver")) return safeProgressColorV476(colors.denver, "#2563eb");
+  return "#64748b";
+}
+
+function progressStageColorV476(label = "") {
+  const signal = String(label || "").trim().toLowerCase();
+  if (signal.includes("not scanned") || signal.includes("not started")) return "#7b8796";
+  if (signal.includes("waterjet") || signal === "wj") return productionMachineColorV476("WaterJet");
+  if (signal.includes("denver")) return productionMachineColorV476("Denver");
+  if (signal.includes("not fabricated") || signal.includes("fabrication")) return "#7b8796";
+  if (signal.includes("staged") || signal.includes("staging")) return "#4d74e6";
+  if (signal.includes("outbound")) return "#d89a1f";
+  if (signal.includes("received") || signal.includes("inbound") || signal.includes("indian trail")) return "#41b979";
+  if (/\bcpu\b/.test(signal) || signal.includes("customer pickup")) return "#9b70dd";
+  if (signal.includes("greenville") || /\bgnv\b/.test(signal)) return "#43b4c8";
+  if (/\bdtc\b/.test(signal) || signal.includes("deliver to customer")) return "#e26da4";
+  return "#718096";
+}
+
+function progressStageIconKindV476(label = "") {
+  const signal = String(label || "").trim().toLowerCase();
+  if (signal.includes("waterjet") || signal === "wj") return "waterjet";
+  if (signal.includes("denver")) return "denver";
+  if (signal.includes("staged") || signal.includes("staging")) return "staging";
+  if (signal.includes("outbound")) return "outbound";
+  if (signal.includes("received") || signal.includes("inbound") || signal.includes("indian trail")) return "received";
+  if (/\bcpu\b/.test(signal)) return "cpu";
+  if (signal.includes("greenville") || /\bgnv\b/.test(signal)) return "greenville";
+  if (/\bdtc\b/.test(signal)) return "dtc";
+  return "clock";
+}
+
+function fabricationProgressPresentationV474(item = {}) {
+  const status = cachedFabricationStatusV474(item);
+  if (!status) return null;
+  const machine = compactMachineLabelV475(status.actualMachine || status.machine || status.assignedMachine || "");
+  if (!machine && !status.sketchMatched) return null;
+  if (status.fabricated === true && machine) {
+    return { text: `${machine} 1/1`, label: machine, scanned: 1, qty: 1, complete: true, className: "fabricated-v474" };
+  }
+  if (status.sketchMatched && status.fabricated === false) {
+    return { text: machine ? `${machine} 0/1` : "Not Fabricated", label: machine || "Fabrication", scanned: 0, qty: 1, complete: false, className: "not-fabricated-v474" };
+  }
+  if (status.sketchMatched && machine && status.fabricated == null) {
+    return { text: `${machine} 0/1`, label: machine, scanned: 0, qty: 1, complete: false, className: "fabrication-unknown-v474" };
+  }
+  return null;
+}
+
+function scanNextDestinationLabelV475(item = {}) {
+  const route = String(item.route || "").trim().toUpperCase();
+  const labels = workflowPresentationV355();
+  if (/\bCPU\b/.test(route)) return labels.cpuRoute || "CPU";
+  if (/\bDTC\b/.test(route)) return labels.dtcRoute || "DTC";
+  if (/\bGNV\b|GREENVILLE/.test(route)) return labels.gnvRoute || labels.branchStage || "Greenville";
+  if (/INDIAN\s*TRAIL|\bIT\b/.test(route)) return labels.receivingStage || labels.receivingSite || "Received";
+  return "";
+}
+
+/**
+ * v0.475 compact Scan progress: one completed/current checkpoint above the next
+ * required scanner stage. This keeps useful manufacturing context readable in
+ * the narrow Progress column without long prose strings.
+ */
+function scanProgressPairV475(item = {}) {
+  const qty = Math.max(0, Number(item.qty || 0));
+  const scanned = Math.min(Math.max(0, Number(item.scanned || 0)), qty || Number(item.scanned || 0));
+  const category = stageCategory(state.meta || {});
+  const labels = workflowPresentationV355();
+  const fabrication = fabricationProgressPresentationV474(item);
+  const currentLabel = {
+    staged: labels.stagingStage || "Staged",
+    outbound: labels.outboundStage || "Outbound",
+    received: labels.receivingStage || "Received",
+    pickup: labels.cpuRoute || "CPU",
+    greenville: labels.gnvRoute || labels.branchStage || "Greenville",
+    dtc: labels.dtcRoute || "DTC",
+  }[category] || stageVerb();
+  const current = { label: currentLabel, scanned, qty, complete: qty > 0 && scanned >= qty, tone: "current" };
+
+  if (category === "staged") {
+    if (!fabrication && scanned <= 0) {
+      return {
+        previous: { label: "Not Scanned", scanned: 0, qty, complete: false, tone: "not-scanned" },
+        next: current,
+      };
+    }
+    if (!current.complete) return { previous: fabrication, next: current };
+    return { previous: current, next: { label: labels.outboundStage || "Outbound", scanned: 0, qty, complete: false, tone: "next" } };
+  }
+  if (category === "outbound") {
+    if (!current.complete) return { previous: { label: labels.stagingStage || "Staged", scanned: qty, qty, complete: true, tone: "complete" }, next: current };
+    const destination = scanNextDestinationLabelV475(item);
+    return { previous: current, next: destination ? { label: destination, scanned: 0, qty, complete: false, tone: "next" } : null };
+  }
+  if (["received", "pickup", "greenville", "dtc"].includes(category)) {
+    if (!current.complete) return { previous: { label: labels.outboundStage || "Outbound", scanned: qty, qty, complete: true, tone: "complete" }, next: current };
+    return { previous: current, next: null };
+  }
+  return { previous: fabrication, next: current };
+}
+
+function progressStepHtmlV475(step, role = "") {
+  if (!step) return "";
+  const scanned = Math.max(0, Number(step.scanned || 0));
+  const qty = Math.max(0, Number(step.qty || 0));
+  const stateClass = step.complete ? "is-complete-v475" : role === "previous" ? "is-prior-pending-v475" : "is-next-v475";
+  return `<span class="scan-progress-step-v475 ${stateClass}" style="--progress-step-color:${escapeHtml(progressStageColorV476(step.label || "Progress"))}"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
+}
+
+function scanProgressMarkupV475(item = {}) {
+  const pair = scanProgressPairV475(item);
+  const left = pair.previous || pair.next || { label: "Progress" };
+  const right = pair.next || pair.previous || left;
+  const style = `--progress-left:${safeProgressColorV476(progressStageColorV476(left.label))};--progress-right:${safeProgressColorV476(progressStageColorV476(right.label))}`;
+  return `<span class="scan-progress-stack-v475 scan-progress-stack-v476" style="${escapeHtml(style)}">${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? `<i aria-hidden="true">→</i>` : ""}${progressStepHtmlV475(pair.next, "next")}</span>`;
+}
+
+/** Return the compact current scanner stage for legacy/mobile callers. */
 function renderProcessState(item) {
   return `${stageVerb()}: ${item.scanned}/${item.qty}`;
 }
@@ -10233,6 +10389,7 @@ function previewGlassVisualCssVariables(label, colorMap = null) {
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
 function renderItemRow(item) {
+  const orderContext = arguments[1] || {};
   const status = itemStatus(item);
   const glassLabel = glassTypeLabel(item);
   const glassTone = glassToneAttributes(glassLabel);
@@ -10256,6 +10413,7 @@ function renderItemRow(item) {
   const rowError = hasScanError(item);
   const processClass = rowError ? "error" : status;
   const processText = rowError ? item.errorReason || item.lastError || "Scan issue" : renderProcessState(item);
+  const progressMarkupV475 = rowError ? processPillMarkupV447(item, processClass, processText) : scanProgressMarkupV475(item);
   const displayQty = Math.max(0, Math.trunc(Number(item.qty || 0)));
   const scanTimePill = scanTimePillMarkupV447(item);
   const rejectReason = item.lastRejectReason || "Internal reject";
@@ -10283,12 +10441,16 @@ function renderItemRow(item) {
   const priorityRibbon = priorityItemRibbonV441(item, { targetReference: false });
   const rowIdentityAttribute = movedOutByPriorityDate
     ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"`
-    : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}"`;
+    : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}" data-item-v477="${escapeHtml(item.item || "")}"`;
+  const groupPositionClass = [
+    orderContext.first ? "is-order-first-v477" : "",
+    orderContext.last ? "is-order-last-v477" : "",
+  ].filter(Boolean).join(" ");
 
   return `
     ${priorityRibbon}
     ${rejectIncidentRow}
-    <tr class="glass-tone-row ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassTone} ${rowIdentityAttribute}>
+    <tr class="glass-tone-row scan-order-item-v477 ${groupPositionClass} ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassTone} ${rowIdentityAttribute}>
       <td class="job-cell-v157"><span class="job-copy-v157 glass-tone-inline" ${glassTone}><span class="job-title">${escapeHtml(item.product || item.job)}</span><span class="job-subtitle">${escapeHtml(item.job)}</span></span>${scanTimePill}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
@@ -10298,39 +10460,43 @@ function renderItemRow(item) {
       <td>${markers}</td>
       <td>${routeTag}</td>
       <td class="location-cell">${locationHtml}</td>
-      <td>${processPillMarkupV447(item, processClass, processText)}</td>
+      <td>${progressMarkupV475}</td>
     </tr>`;
 }
 
-function renderScanOrderGroupsV472(items = []) {
+function groupScanItemsByOrderV477(items = []) {
   const groups = new Map();
-  for (const item of items) {
-    const order = String(item?.order || "Unassigned").trim() || "Unassigned";
-    if (!groups.has(order)) groups.set(order, []);
-    groups.get(order).push(item);
+  for (const item of items || []) {
+    const order = String(item?.order || "").trim();
+    const key = order || `unassigned:${String(item?.id || groups.size)}`;
+    if (!groups.has(key)) groups.set(key, { order, items: [] });
+    groups.get(key).items.push(item);
   }
-  return [...groups.entries()].map(([order, orderItems]) => {
-    const first = orderItems[0] || {};
-    const totalQty = orderItems.reduce((sum, item) => sum + Math.max(Number(item.qty || 0), 0), 0);
-    const scannedQty = orderItems.reduce((sum, item) => sum + Math.min(Math.max(Number(item.scanned || 0), 0), Math.max(Number(item.qty || 0), 0)), 0);
-    const collapsed = state.collapsedScanOrders.has(order);
-    const attention = orderItems.filter((item) => isNewOrUpdatedItem(item) || isRemakeItem(item) || isRushItem(item) || Number(item.internalRejectCount || 0) > 0).length;
-    return `
-      <tr class="scan-order-group-row-v472 ${collapsed ? "is-collapsed" : ""}" data-order-v470="${escapeHtml(order)}">
-        <td colspan="10">
-          <button type="button" data-toggle-scan-order-v472="${escapeHtml(order)}" aria-expanded="${collapsed ? "false" : "true"}">
-            <span class="scan-order-chevron-v472" aria-hidden="true"></span>
-            <span class="scan-order-identity-v472"><small>Order Nr.</small><strong>${escapeHtml(order)}</strong></span>
-            <span class="scan-order-job-v472"><small>Job Nr.</small><b>${escapeHtml(first.job || "Not provided")}</b></span>
-            <span class="scan-order-customer-v472"><small>Customer</small><b>${escapeHtml(first.customer || "Not provided")}</b></span>
-            ${attention ? `<mark class="scan-order-attention-v472">${escapeHtml(attention)} attention</mark>` : ""}
-            <span class="scan-order-progress-v472"><b>${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)}</b><small>pieces scanned</small></span>
-          </button>
-        </td>
-      </tr>
-      ${collapsed ? "" : orderItems.map(renderItemRow).join("")}`;
+  return [...groups.values()];
+}
+
+function scanOrderGroupHeaderV477(group = {}, { mobile = false } = {}) {
+  const items = Array.isArray(group.items) ? group.items : [];
+  const first = items[0] || {};
+  const order = String(group.order || first.order || "").trim();
+  const pieces = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
+  const subtitle = [first.customer, first.job].filter(Boolean).join(" · ");
+  const content = `<span class="scan-order-group-copy-v477"><small>ORDER</small><strong>${escapeHtml(order || "Unassigned")}</strong>${subtitle ? `<em>${escapeHtml(subtitle)}</em>` : ""}</span><span class="scan-order-group-count-v477">${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"} · ${escapeHtml(pieces)} pc${pieces === 1 ? "" : "s"}</span>${order ? `<button type="button" class="scan-order-detail-button-v477" data-open-order-detail-v474="${escapeHtml(order)}">View order details</button>` : ""}`;
+  if (mobile) return `<header class="mobile-order-group-header-v477">${content}</header>`;
+  return `<tr class="scan-order-group-v477" data-order-group-v477="${escapeHtml(order)}"><td colspan="10"><div>${content}</div></td></tr>`;
+}
+
+function renderOrderGroupedRowsV477(items = []) {
+  return groupScanItemsByOrderV477(items).map((group) => {
+    const rows = group.items.map((item, index) => renderItemRow(item, {
+      first: index === 0,
+      last: index === group.items.length - 1,
+    })).join("");
+    return `${scanOrderGroupHeaderV477(group)}${rows}`;
   }).join("");
 }
+
+
 
 /**
  * Purpose: Render the render table workflow using the existing shared UI state.
@@ -10349,7 +10515,7 @@ function renderTable() {
   }
   els.listRows.innerHTML = rushMoveReferences + pageGroups
     .map(({ label, flat, items: groupItems }) => {
-      if (flat) return groupItems.map(renderItemRow).join("");
+      if (flat) return renderOrderGroupedRowsV477(groupItems);
       const totalQty = groupItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
       const scannedQty = groupItems.reduce((sum, item) => sum + Math.min(Number(item.scanned || 0), Number(item.qty || 0)), 0);
       const updatedCount = groupItems.filter(isNewOrUpdatedItem).length;
@@ -10364,7 +10530,7 @@ function renderTable() {
             </button>
           </td>
         </tr>
-        ${collapsed ? "" : renderScanOrderGroupsV472(groupItems)}
+        ${collapsed ? "" : renderOrderGroupedRowsV477(groupItems)}
       `;
     })
     .join("");
@@ -12367,51 +12533,54 @@ async function deleteRackSet(label) {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function renderMobileItemCardV477(item = {}) {
+  const status = itemStatus(item);
+  const selected = item.id === state.selectedId;
+  const scanned = Math.max(Number(item.scanned || 0), 0);
+  const quantity = Math.max(Number(item.qty || 0), 0);
+  const scanStateLabel = status === "complete" ? "Complete" : status === "partial" ? "Partially scanned" : "Not scanned";
+  const route = routeLabel(item) || "Indian Trail";
+  const glassLabel = glassTypeLabel(item);
+  const movedOutByPriorityDate = priorityDateMovedOutV441(item);
+  const mobilePriorityMeta = priorityBannerMetaV441(item);
+  const mobilePriorityRibbon = mobilePriorityMeta
+    ? `<div class="mobile-priority-ribbon-v441 is-${escapeHtml(mobilePriorityMeta.kind || "rush")}"><strong>${escapeHtml(mobilePriorityMeta.label || "Priority")}</strong><span>${escapeHtml(String(mobilePriorityMeta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, ""))}</span>${movedOutByPriorityDate ? `<em>Moved to ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate))}</em>` : ""}</div>`
+    : "";
+  const identity = movedOutByPriorityDate
+    ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"`
+    : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}" data-item-v477="${escapeHtml(item.item || "")}"`;
+  return `
+    ${mobilePriorityRibbon}
+    <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassToneAttributes(glassLabel)} ${identity} data-scan-state="${escapeHtml(status)}">
+      <header class="mobile-card-heading">
+        <span class="mobile-card-job"><small>Job Nr.</small><b>${escapeHtml(item.job || item.product || "Not provided")}</b></span>
+        <span class="mobile-card-scan-state ${escapeHtml(status)}" aria-label="${escapeHtml(`${scanStateLabel}: ${scanned} of ${quantity} pieces scanned`)}">
+          <i aria-hidden="true"></i><b>${escapeHtml(scanned)}/${escapeHtml(quantity)}</b><small>${escapeHtml(scanStateLabel)}</small>
+        </span>
+      </header>
+      <div class="mobile-card-fields">
+        <span><small>Order Nr.</small><b>${escapeHtml(item.order)}</b></span>
+        <span><small>Item Nr.</small><b>${escapeHtml(item.item)}</b></span>
+        <span><small>Quantity</small><b>${escapeHtml(quantity)}</b></span>
+        <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
+      </div>
+      <footer class="mobile-card-footer">
+        <span class="card-customer">${escapeHtml(item.customer || "No customer")}</span>
+        <span class="card-route">${escapeHtml(route)}</span>
+      </footer>
+    </article>`;
+}
+
 function renderMobileCards() {
   if (!els.mobileListCards) return;
   const { pageRows } = getPagedItems();
+  const groups = groupScanItemsByOrderV477(pageRows);
   els.mobileListCards.innerHTML = `
     <div class="section-heading">
       <h3>Delivery List</h3>
       <span>${state.items.length} items</span>
     </div>
-    ${pageRows
-      .map((item) => {
-        const status = itemStatus(item);
-        const selected = item.id === state.selectedId;
-        const scanned = Math.max(Number(item.scanned || 0), 0);
-        const quantity = Math.max(Number(item.qty || 0), 0);
-        const scanStateLabel = status === "complete" ? "Complete" : status === "partial" ? "Partially scanned" : "Not scanned";
-        const route = routeLabel(item) || "Indian Trail";
-        const glassLabel = glassTypeLabel(item);
-        const movedOutByPriorityDate = priorityDateMovedOutV441(item);
-        const mobilePriorityMeta = priorityBannerMetaV441(item);
-        const mobilePriorityRibbon = mobilePriorityMeta
-          ? `<div class="mobile-priority-ribbon-v441 is-${escapeHtml(mobilePriorityMeta.kind || "rush")}"><strong>${escapeHtml(mobilePriorityMeta.label || "Priority")}</strong><span>${escapeHtml(String(mobilePriorityMeta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, ""))}</span>${movedOutByPriorityDate ? `<em>Moved to ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate))}</em>` : ""}</div>`
-          : "";
-        return `
-          ${mobilePriorityRibbon}
-          <article class="mobile-list-card glass-tone-card ${selected ? "is-selected" : ""} is-${escapeHtml(status)} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""}" ${glassToneAttributes(glassLabel)} ${movedOutByPriorityDate ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"` : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}"`} data-scan-state="${escapeHtml(status)}">
-            <header class="mobile-card-heading">
-              <span class="mobile-card-job"><small>Job Nr.</small><b>${escapeHtml(item.job || item.product || "Not provided")}</b></span>
-              <span class="mobile-card-scan-state ${escapeHtml(status)}" aria-label="${escapeHtml(`${scanStateLabel}: ${scanned} of ${quantity} pieces scanned`)}">
-                <i aria-hidden="true"></i><b>${escapeHtml(scanned)}/${escapeHtml(quantity)}</b><small>${escapeHtml(scanStateLabel)}</small>
-              </span>
-            </header>
-            <div class="mobile-card-fields">
-              <span><small>Order Nr.</small><b>${escapeHtml(item.order)}</b></span>
-              <span><small>Item Nr.</small><b>${escapeHtml(item.item)}</b></span>
-              <span><small>Quantity</small><b>${escapeHtml(quantity)}</b></span>
-              <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
-            </div>
-            <footer class="mobile-card-footer">
-              <span class="card-customer">${escapeHtml(item.customer || "No customer")}</span>
-              <span class="card-route">${escapeHtml(route)}</span>
-            </footer>
-          </article>
-        `;
-      })
-      .join("")}
+    ${groups.map((group) => `<section class="mobile-order-group-v477">${scanOrderGroupHeaderV477(group, { mobile: true })}${group.items.map(renderMobileItemCardV477).join("")}</section>`).join("")}
   `;
   syncScanFilterButtons();
 }
@@ -13162,6 +13331,10 @@ function renderScanPage() {
   renderOutboundRackStatusTools();
   renderScanBayOverrideTools();
   applyPermissionUi();
+  // v0.474: paint the delivery list first, then hydrate only this page's
+  // fabrication metadata in one background request. Repaints are cache-backed.
+  const visibleItemsV474 = getPagedItems().pageRows || [];
+  hydrateFabricationStatusesV474(visibleItemsV474, { context: "scan" }).catch(() => {});
 }
 
 /** Coalesce rapid search and filter input into one Scan-page paint per frame. */
@@ -13733,6 +13906,19 @@ function homeReportDateParams() {
   return `?dateFrom=${encodeURIComponent(dateInputValue(start))}&dateTo=${encodeURIComponent(dateInputValue(end))}`;
 }
 
+/** Return the exact query key for the currently selected Statistics range. */
+function homeReportRangeKeyV472() {
+  return homeReportDateParams() || "all";
+}
+
+/** Return report-only data only when it belongs to the active range. */
+function activeHomeReportSummaryV472() {
+  return state.homeReportSummaryRangeKey === homeReportRangeKeyV472()
+    ? (state.homeReportSummary || null)
+    : null;
+}
+
+
 /** Open the Statistics chart-range calendar with the currently active dates preselected. */
 function openStatisticsDateCalendar() {
   const active = statisticsActiveRangeKeysV455();
@@ -13808,6 +13994,7 @@ function applyStatisticsCalendarRange() {
   state.overviewRange = "custom";
   state.homeChartSelectedLabel = "";
   state.homeReportSummary = null;
+  state.homeReportSummaryRangeKey = "";
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
   if (els.overviewRangeSelect) els.overviewRangeSelect.value = "custom";
   syncStatisticsChartRangeControlV455();
@@ -13822,7 +14009,7 @@ function applyStatisticsCalendarRange() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function reportActionCount(action) {
-  const report = state.homeReportSummary || {};
+  const report = activeHomeReportSummaryV472() || {};
   const counts = report.actionCounts || {};
   return Number(counts[action] || 0);
 }
@@ -13833,7 +14020,7 @@ function reportActionCount(action) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function glassQuantitiesForStatistics(overviewLists) {
-  const reportRows = state.homeReportSummary?.glassQuantityByType || [];
+  const reportRows = activeHomeReportSummaryV472()?.glassQuantityByType || [];
   if (reportRows.length) {
     return reportRows
       .map((row) => ({
@@ -13889,7 +14076,7 @@ function statisticsStageShortLabel(stageOrCategory) {
  * page can render safely in local/demo mode without inventing reject values.
  */
 function statisticsBreakagePayload() {
-  const breakage = state.homeReportSummary?.breakage;
+  const breakage = activeHomeReportSummaryV472()?.breakage;
   return breakage && typeof breakage === "object" ? breakage : {
     production: {},
     producedTotals: {},
@@ -14086,7 +14273,7 @@ function statisticsDateBuckets(overviewLists = []) {
  */
 function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureOverride = "") {
   const overviewLists = filterListsByOverviewRange(state.lists);
-  const report = state.homeReportSummary || {};
+  const report = activeHomeReportSummaryV472() || {};
   const dateBuckets = statisticsDateBuckets(overviewLists);
 
   if (metric === "delivery") {
@@ -14960,7 +15147,7 @@ function renderStatisticsAnalytics() {
   const glassSizeVisible = state.homeChartMetric === "glass-sizes";
   if (els.statisticsGlassSizeControl) els.statisticsGlassSizeControl.hidden = !glassSizeVisible;
   if (els.statsGlassSizeTypeSelect) {
-    const sizeTypes = (state.homeReportSummary?.glassSizeFrequencyByType || []).filter((row) => Array.isArray(row.sizes) && row.sizes.length);
+    const sizeTypes = (activeHomeReportSummaryV472()?.glassSizeFrequencyByType || []).filter((row) => Array.isArray(row.sizes) && row.sizes.length);
     if (!state.statisticsGlassSizeType || !sizeTypes.some((row) => row.glassType === state.statisticsGlassSizeType)) {
       state.statisticsGlassSizeType = sizeTypes[0]?.glassType || "";
     }
@@ -15087,7 +15274,7 @@ function renderStatisticsMiniCharts() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function selectedRangeRemakeStats(overviewLists = []) {
-  const report = state.homeReportSummary || {};
+  const report = activeHomeReportSummaryV472() || {};
   const backendQty = Number(report.rangeRemakeQty ?? report.remakeRangeQty ?? 0);
   const backendCount = Number(report.rangeRemakeCount ?? report.remakeRangeCount ?? 0);
 
@@ -15218,22 +15405,52 @@ function renderHomeStatistics(overviewLists, overview) {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 async function loadHomeReportSummary() {
-  if (!state.backend || !hasPermission("view_reports")) return state.homeReportSummary;
-  if (state.homeReportSummaryLoading) return state.homeReportSummary;
+  if (!state.backend || !hasPermission("view_reports")) return activeHomeReportSummaryV472();
 
+  const requestParams = homeReportDateParams();
+  const requestKey = requestParams || "all";
+  if (state.homeReportSummaryLoading
+      && state.homeReportSummaryRequestKey === requestKey
+      && state.homeReportSummaryPromise) {
+    return state.homeReportSummaryPromise;
+  }
+
+  // v0.473: different date ranges may load concurrently. The newest exact
+  // range owns the visible payload, so a slower stale request can never replace
+  // Common Glass Sizes or any other Statistics metric for the active range.
+  const requestToken = Number(state.homeReportSummaryRequestToken || 0) + 1;
+  state.homeReportSummaryRequestToken = requestToken;
+  state.homeReportSummaryRequestKey = requestKey;
   state.homeReportSummaryLoading = true;
   if (state.page === "statistics") renderStatisticsAnalytics();
+
+  const requestPromise = fetchJson(`/api/reports/summary${requestParams}`);
+  state.homeReportSummaryPromise = requestPromise;
   try {
-    state.homeReportSummary = await fetchJson(`/api/reports/summary${homeReportDateParams()}`);
-    return state.homeReportSummary;
+    const report = await requestPromise;
+    const stillCurrent = state.homeReportSummaryRequestToken === requestToken
+      && state.homeReportSummaryRequestKey === requestKey
+      && homeReportRangeKeyV472() === requestKey;
+    if (stillCurrent) {
+      state.homeReportSummary = report;
+      state.homeReportSummaryRangeKey = requestKey;
+    }
+    return report;
   } catch {
-    // Report details enrich the Statistics page. Keep the core page usable
-    // even when report access fails, and allow page entry/Refresh to retry.
-    state.homeReportSummary = null;
+    const stillCurrent = state.homeReportSummaryRequestToken === requestToken
+      && state.homeReportSummaryRequestKey === requestKey;
+    if (stillCurrent) {
+      state.homeReportSummary = null;
+      state.homeReportSummaryRangeKey = "";
+    }
     return null;
   } finally {
-    state.homeReportSummaryLoading = false;
-    if (state.page === "statistics") renderStatisticsPage();
+    if (state.homeReportSummaryRequestToken === requestToken
+        && state.homeReportSummaryRequestKey === requestKey) {
+      state.homeReportSummaryLoading = false;
+      state.homeReportSummaryPromise = null;
+      if (state.page === "statistics") renderStatisticsPage();
+    }
   }
 }
 
@@ -15246,7 +15463,7 @@ function openHomeStatisticsReport() {
   const overviewLists = filterListsByOverviewRange(state.lists);
   const overview = aggregateListStats(overviewLists);
   const stages = homeStageBreakdown(overviewLists);
-  const report = state.homeReportSummary || {};
+  const report = activeHomeReportSummaryV472() || {};
   const breakage = statisticsBreakagePayload();
   const breakageStats = selectedRangeBreakageStats();
   const generatedAt = new Date().toLocaleString(appLocale());
@@ -15994,7 +16211,7 @@ function showPage(page) {
     // user reaches Statistics before it completes (or after a transient report
     // failure), page entry now guarantees a retry instead of leaving report-only
     // controls such as Common glass sizes empty.
-    if (!state.homeReportSummary) void loadHomeReportSummary();
+    if (!activeHomeReportSummaryV472()) void loadHomeReportSummary();
   }
   if (page === "scan") renderScanPage();
   if (page === "racks") {
@@ -17895,6 +18112,63 @@ function printCurrentPageManaged() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = {}) {
+  if (!state.backend || !hasPermission("global_search")) return;
+  const candidates = [];
+  for (const row of rows || []) {
+    const order = String(row?.order || "").trim();
+    const item = String(row?.item || "").trim();
+    const job = String(row?.job || "").trim();
+    if (!order) continue;
+    const key = fabricationStatusKeyV474(order, item, job);
+    if (state.fabricationStatusCacheV474.has(key) || state.fabricationStatusPendingV474.has(key)) continue;
+    state.fabricationStatusPendingV474.add(key);
+    candidates.push({ key, order, item, job });
+    if (candidates.length >= 80) break;
+  }
+  if (!candidates.length) return;
+
+  ++state.fabricationStatusBatchTokenV474;
+  const repaint = () => {
+    if (context === "search") {
+      const query = String(state.globalSearchLastQuery || "").trim();
+      if (query && query === String(els.headerGlobalSearchInput?.value || "").trim()) {
+        state.globalSearchLastResults = state.globalSearchLastResults.map((row) => ({
+          ...row,
+          fabrication: state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(row.order, row.item, row.job)) || row.fabrication,
+        }));
+        renderGlobalSearchResults(state.globalSearchLastResults);
+      }
+    } else if (context === "scan" && state.page === "scan") {
+      scheduleScanRender();
+    }
+  };
+
+  // Smaller sequential requests publish the first machine result quickly while
+  // keeping PDF/network-share work bounded. Total work is unchanged and the
+  // scanner still paints before any production evidence is requested.
+  const chunkSize = 10;
+  for (let offset = 0; offset < candidates.length; offset += chunkSize) {
+    const chunk = candidates.slice(offset, offset + chunkSize);
+    try {
+      const payload = await fetchJson("/api/production-files/status-batch", {
+        method: "POST",
+        body: JSON.stringify({ items: chunk }),
+      });
+      for (const result of payload.results || []) {
+        const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job));
+        state.fabricationStatusCacheV474.set(key, result.status || {});
+      }
+    } catch (_error) {
+      // Production evidence is supplemental UI state. A temporarily unreachable
+      // share must not turn Scan/Search into an error path or block their paint.
+    } finally {
+      chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
+    }
+    repaint();
+  }
+}
+
 async function runGlobalSearch() {
   if (!hasPermission("global_search")) return [];
   const query = els.headerGlobalSearchInput?.value.trim() || "";
@@ -17916,6 +18190,9 @@ async function runGlobalSearch() {
   state.globalSearchLastQuery = query;
   state.globalSearchLastResults = results;
   renderGlobalSearchResults(results);
+  // v0.474: keep keystroke-to-result latency tied to SQLite only; fabrication
+  // evidence arrives as a single asynchronous batch after the cards are visible.
+  hydrateFabricationStatusesV474(results, { context: "search" }).catch(() => {});
   return results;
 }
 
@@ -18085,6 +18362,8 @@ function globalSearchIconV433(kind) {
     cpu: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Zm0 2.4c-4.1 0-7.4 2.1-7.4 4.8V20h14.8v-.8c0-2.7-3.3-4.8-7.4-4.8Z"/></svg>`,
     greenville: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 20V9.5L12 5l7.5 4.5V20M8 20v-5h8v5M7.5 12h.01M12 12h.01M16.5 12h.01" fill="none"/></svg>`,
     dtc: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 10.3 12 4l7.5 6.3V20h-5.4v-5.8H9.9V20H4.5v-9.7Z" fill="none"/></svg>`,
+    denver: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5V6.2h6.2c4.8 0 7.8 2.3 7.8 6.1 0 3.9-3 6.2-7.8 6.2H5Z" fill="none"/><path d="M9 9.2h2.2c2.4 0 3.7 1.1 3.7 3.1 0 2-1.3 3.1-3.7 3.1H9V9.2Z"/></svg>`,
+    waterjet: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2c2.6 3.4 5.1 6.2 5.1 9.8a5.1 5.1 0 1 1-10.2 0c0-3.6 2.5-6.4 5.1-9.8Z"/><path d="M9.2 15.2c.7 1.2 1.6 1.8 2.8 1.8" fill="none"/></svg>`,
     calendar: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16"/></svg>`,
     flag: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V4.2M6 5c4.3-2.3 7 2.1 12-1v9c-5 3.1-7.7-1.3-12 1"/></svg>`,
     route: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.2 11.1 15.1-6.4-6.4 15.1-2.2-6.5-6.5-2.2Z"/><path d="m10.8 13.2 3.8-3.8"/></svg>`,
@@ -18113,6 +18392,76 @@ function globalSearchPriorityFlagsV425(result) {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
+function globalSearchProgressStageLabelV475(stage = {}) {
+  const preset = stagePresetFromValuesV445(stage.stage || "", stage.scanner || "", stage.stagePreset || "");
+  const labels = workflowPresentationV355();
+  return {
+    airport_staging: labels.stagingStage || "Staged",
+    airport_outbound: labels.outboundStage || "Outbound",
+    indian_trail: labels.receivingStage || "Received",
+    cpu: labels.cpuRoute || "CPU",
+    greenville: labels.gnvRoute || labels.branchStage || "Greenville",
+    dtc: labels.dtcRoute || "DTC",
+  }[preset] || String(stage.stage || "Stage").trim() || "Stage";
+}
+
+function workflowProgressStageRankV477(stage = {}) {
+  const preset = stagePresetFromValuesV445(stage.stage || "", stage.scanner || "", stage.stagePreset || "");
+  return {
+    airport_staging: 10,
+    airport_outbound: 20,
+    indian_trail: 30,
+    greenville: 30,
+    cpu: 30,
+    dtc: 30,
+    custom_route: 30,
+  }[preset] ?? 40;
+}
+
+function globalSearchProgressPairV476(result = {}, fabrication = null) {
+  const rows = Array.isArray(result.progressStages) ? result.progressStages : [];
+  const stages = rows.map((stage, index) => {
+    const qty = Math.max(0, Number(stage.qty || result.qty || 0));
+    const scanned = Math.min(Math.max(0, Number(stage.scanned || 0)), qty || Number(stage.scanned || 0));
+    return { label: globalSearchProgressStageLabelV475(stage), scanned, qty, complete: qty > 0 && scanned >= qty, rank: workflowProgressStageRankV477(stage), index, kind: "stage" };
+  }).sort((left, right) => left.rank - right.rank || left.index - right.index);
+  const machine = compactMachineLabelV475(fabrication?.actualMachine || fabrication?.machine || fabrication?.assignedMachine || "");
+  if ((fabrication?.sketchMatched || machine) && machine) {
+    stages.unshift({ label: machine, scanned: fabrication?.fabricated === true ? 1 : 0, qty: 1, complete: fabrication?.fabricated === true, kind: "fabrication" });
+  }
+  if (!machine && !stages.some((stage) => stage.scanned > 0)) {
+    const next = stages[0] || null;
+    return { previous: { label: "Not Scanned", scanned: 0, qty: Math.max(1, Number(result.qty || 1)), complete: false, kind: "not-scanned" }, next };
+  }
+  if (!stages.length) return { previous: null, next: { label: "Not Scanned", scanned: 0, qty: Math.max(1, Number(result.qty || 1)), complete: false, kind: "not-scanned" } };
+  const firstIncomplete = stages.findIndex((stage) => !stage.complete);
+  if (firstIncomplete < 0) {
+    const tail = stages.slice(-2);
+    return { previous: tail.length > 1 ? tail[0] : null, next: tail[tail.length - 1] || null };
+  }
+  return { previous: firstIncomplete > 0 ? stages[firstIncomplete - 1] : null, next: stages[firstIncomplete] };
+}
+
+function globalSearchProgressTextV475(result = {}, fabrication = null) {
+  const pair = globalSearchProgressPairV476(result, fabrication);
+  return [pair.previous, pair.next].filter(Boolean).map((stage) => `${stage.label} ${stage.scanned}/${stage.qty}`).join(" → ") || "Not started";
+}
+
+function globalSearchProgressMarkupV476(result = {}, fabrication = null) {
+  const pair = globalSearchProgressPairV476(result, fabrication);
+  const left = pair.previous || pair.next || { label: "Not started", scanned: 0, qty: 1 };
+  const right = pair.next || pair.previous || left;
+  const leftColor = progressStageColorV476(left.label);
+  const rightColor = progressStageColorV476(right.label);
+  const step = (stage, role) => {
+    if (!stage) return "";
+    const icon = globalSearchIconV433(progressStageIconKindV476(stage.label));
+    const stateClass = stage.complete ? "is-complete-v477" : stage.kind === "fabrication" ? "is-fabrication-pending-v477" : "is-stage-pending-v477";
+    return `<span class="global-result-progress-step-v476 is-${role} ${stateClass}" style="--step-color:${escapeHtml(progressStageColorV476(stage.label))}">${icon}<strong>${escapeHtml(stage.label)} ${escapeHtml(stage.scanned)}/${escapeHtml(stage.qty)}</strong></span>`;
+  };
+  return `<span class="global-result-progress-flow-v476" style="--progress-left:${escapeHtml(leftColor)};--progress-right:${escapeHtml(rightColor)}">${step(pair.previous, "previous")}${pair.previous && pair.next ? `<i aria-hidden="true">→</i>` : ""}${step(pair.next, "next")}</span>`;
+}
+
 function renderGlobalSearchResults(results) {
   if (!els.headerGlobalSearchResults) return;
   if (!results.length) {
@@ -18153,13 +18502,13 @@ function renderGlobalSearchResults(results) {
         const scanMarkup = result.lastScanTime
           ? `<span class="global-result-stage-scan-divider-v440" aria-hidden="true">•</span><span class="global-result-scan-timing-v447 ${searchScanTimingV447.late ? "is-late-v447" : "is-on-time-v447"}">${globalSearchIconV433("scan")}<b class="global-result-inline-label-v427 global-result-scanned-label-v440">${escapeHtml(searchScanTimingV447.label)}</b> <time class="global-result-stage-scan-time-v440" datetime="${escapeHtml(result.lastScanTime)}">${escapeHtml(globalSearchScanDateTimeV439(result.lastScanTime))}</time></span>`
           : "";
-        const fabricationMarkupV470 = result.fabrication?.machine
-          ? `<span class="global-result-fabrication-v470 ${result.fabrication.fabricated === true ? "is-fabricated" : result.fabrication.fabricated === false ? "is-missing" : "is-unknown"}">${escapeHtml(result.fabrication.label || result.fabrication.machine)}</span>`
-          : "";
-        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Stage:</b> ${globalSearchStatusBadges(result)}${scanMarkup}${fabricationMarkupV470}</span>`;
+        const fabricationV474 = result.fabrication || state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(result.order, result.item, result.job));
+        const progressTextV475 = globalSearchProgressTextV475(result, fabricationV474);
+        const progressFlowV476 = globalSearchProgressMarkupV476(result, fabricationV474);
+        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440 global-result-progress-v475 global-result-progress-v476" title="Progress: ${escapeHtml(progressTextV475)}">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Progress:</b>${progressFlowV476}${scanMarkup}</span>`;
 
         return `
-        <button type="button" ${openAttrs} class="global-result-card-v425 global-result-line-v426 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"}" style="${escapeHtml(resultStyle)}">
+        <article class="global-result-card-v425 global-result-line-v426 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"} global-result-card-v474" style="${escapeHtml(resultStyle)}">
           <span class="global-result-leading-icon-v433 global-result-leading-stage-icon-v435" aria-hidden="true">${globalSearchIconV433(stageIconV435)}</span>
           <span class="global-result-content-v433">
             <span class="global-result-primary-v426 global-result-primary-v433">
@@ -18180,8 +18529,12 @@ function renderGlobalSearchResults(results) {
               ${routeMarkup}
               ${stageScanMarkup}
             </span>
+            <span class="global-result-actions-v474 global-result-actions-v475">
+              <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">Scan Page</button>
+              <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>Order Details</button>
+            </span>
           </span>
-        </button>
+        </article>
       `;
       },
     )
@@ -18314,9 +18667,12 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   // truck, then enters the cargo body right-to-left. The glass layer itself
   // remains above the dotted route but below the truck via bays.css.
   const outboundLeft = Math.min(Math.max(0, laneWidth - stackWidth), leftTruckLeft + truckWidth + 7);
-  const inboundRight = Math.max(1, sideGap - stackWidth - 2);
+  // v0.474 mirrors the endpoint geometry: Outbound glass waits to the
+  // right of the left truck; after arrival at Indian Trail the unloading
+  // stack sits to the left of the flipped right-side truck.
+  const inboundLeft = Math.max(1, rightTruckLeft - stackWidth - 7);
   if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
-  if (inboundTransfer) inboundTransfer.style.setProperty("right", `${inboundRight}px`, "important");
+  if (inboundTransfer) inboundTransfer.style.setProperty("left", `${inboundLeft}px`, "important");
 
   const cycleMs = Math.max(Number(profile.cycleSeconds || 1) * 1000, 1000);
   const loadMs = Number(profile.loadSeconds || 0) * 1000;
@@ -18364,8 +18720,7 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   inboundPanes.forEach((pane, index) => {
     const startMs = inboundReadyMs + (index * paneStaggerMs);
     const endMs = startMs + paneMotionMs;
-    const transferLeft = laneWidth - inboundRight - stackWidth;
-    const finalPaneLeft = transferLeft + (index * paneStep);
+    const finalPaneLeft = inboundLeft + (index * paneStep);
     const insideRearX = rightTruckLeft + truckWidth - 24;
     const startDx = insideRearX - finalPaneLeft;
     pane.animate([
@@ -23383,24 +23738,34 @@ async function submitSdi(mark = true, options = {}) {
 }
 
 
-function productionAssetUrlV470(assetId) {
-  return `/api/production-files/asset?id=${encodeURIComponent(String(assetId || ""))}`;
+function productionAssetUrlV470(assetId, pageNumber = 0) {
+  const base = `/api/production-files/asset?id=${encodeURIComponent(String(assetId || ""))}`;
+  return Number(pageNumber || 0) > 0 ? `${base}&page=${encodeURIComponent(Number(pageNumber))}` : base;
 }
 
 function productionAssetActionsHtmlV470(asset = {}, kind = "") {
   const id = escapeHtml(asset.id || "");
   const name = escapeHtml(asset.name || "Production file");
+  const pageNumber = Math.max(0, Number(asset.pageNumber || 0));
+  const pageAttr = pageNumber ? ` data-production-page-v474="${escapeHtml(pageNumber)}"` : "";
   if (!id) return "";
   if (kind === "program") {
-    return `<button type="button" class="production-file-action-v470 is-open" data-production-open-asset-v470="${id}" title="Open ${name}">Open Program</button>`;
+    return `<button type="button" class="app-primary-button production-file-action-v470" data-production-open-asset-v470="${id}" title="Open ${name}">Open Program</button>`;
   }
-  return `<button type="button" class="production-file-action-v470" data-production-preview-asset-v470="${id}" title="Preview ${name}">Preview</button><button type="button" class="production-file-action-v470 is-print" data-production-print-asset-v470="${id}" title="Print ${name}">Print</button>`;
+  const previewLabel = kind === "sketch" ? "Open Sketch" : "Open";
+  const printLabel = kind === "sketch" ? "Print Sketch" : "Print";
+  return `<button type="button" class="app-primary-button production-file-action-v470" data-production-preview-asset-v470="${id}"${pageAttr} title="${previewLabel} ${name}">${previewLabel}</button><button type="button" class="app-primary-button production-file-action-v470" data-production-print-asset-v470="${id}"${pageAttr} title="${printLabel} ${name}">${printLabel}</button>`;
 }
 
 function productionFileRowsHtmlV470(files = [], kind = "") {
   const rows = Array.isArray(files) ? files : [];
   if (!rows.length) return `<div class="production-file-empty-v470">No matching ${escapeHtml(kind || "production")} files found.</div>`;
-  return rows.map((asset) => `<article class="production-file-row-v470"><div><strong>${escapeHtml(asset.name || "Production file")}</strong><small>${escapeHtml(asset.relativePath || "")}</small></div><span>${productionAssetActionsHtmlV470(asset, kind)}</span></article>`).join("");
+  return rows.map((asset) => {
+    const pageMeta = Number(asset.pageNumber || 0) > 0
+      ? `<span class="production-file-page-v474">${escapeHtml(asset.itemMarker || "Item page")} · Page ${escapeHtml(asset.pageNumber)}${asset.machineHint ? ` · ${escapeHtml(asset.machineHint)}` : ""}</span>`
+      : "";
+    return `<article class="production-file-row-v470"><div><strong>${escapeHtml(asset.name || "Production file")}</strong><small>${escapeHtml(asset.relativePath || "")}</small>${pageMeta}</div><span>${productionAssetActionsHtmlV470(asset, kind)}</span></article>`;
+  }).join("");
 }
 
 function ensureProductionExplorerModalV470() {
@@ -23433,6 +23798,10 @@ function ensureProductionExplorerModalV470() {
 }
 
 function closeProductionExplorerV470() {
+  state.orderDetailOpenOrderV474 = "";
+  state.orderDetailFocusItemV477 = "";
+  if (state.orderDetailFocusTimerV477) window.clearTimeout(state.orderDetailFocusTimerV477);
+  state.orderDetailFocusTimerV477 = 0;
   const panel = document.getElementById("productionExplorerPanelV470");
   const backdrop = document.getElementById("productionExplorerBackdropV470");
   if (panel) panel.hidden = true;
@@ -23443,8 +23812,10 @@ function showProductionExplorerV470({ mode = "order", title = "Order Details", d
   const panel = ensureProductionExplorerModalV470();
   const backdrop = document.getElementById("productionExplorerBackdropV470");
   const search = document.getElementById("productionExplorerSearchV470");
+  const eyebrowNode = document.getElementById("productionExplorerEyebrowV470");
   const titleNode = document.getElementById("productionExplorerTitleV470");
   const descriptionNode = document.getElementById("productionExplorerDescriptionV470");
+  if (eyebrowNode) eyebrowNode.textContent = mode === "hardware" ? "Production Files" : "Order Details";
   if (titleNode) titleNode.textContent = title;
   if (descriptionNode) descriptionNode.textContent = description;
   if (search) search.hidden = mode !== "hardware";
@@ -23454,12 +23825,93 @@ function showProductionExplorerV470({ mode = "order", title = "Order Details", d
   return panel;
 }
 
-function fabricationStatusHtmlV470(status = {}) {
-  if (!status || !status.machine) return `<span class="production-fab-status-v470 is-neutral">No Denver/Waterjet assignment detected</span>`;
-  const stateClass = status.fabricated === true ? "is-complete" : status.fabricated === false ? "is-missing" : "is-unknown";
+function fabricationStatusHtmlV470(status = {}, item = {}) {
+  const hasScan = (item.stages || []).some((stage) => Number(stage?.scanned || 0) > 0);
+  if (!status || !status.machine) {
+    return `<span class="production-fab-status-v470 is-neutral">${hasScan ? "No fabrication required" : "Not Scanned"}</span>`;
+  }
+  const stateClass = status.fabricated === true ? "is-complete" : "is-missing";
   const override = Boolean(status.machineOverride && status.assignedMachine && status.actualMachine);
-  const title = override ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}` : (status.label || status.machine);
-  return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(status.label || status.machine)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
+  const missingLabel = `Not Fabricated - ${compactMachineLabelV475(status.assignedMachine || status.machine)}`;
+  const label = status.fabricated === true ? (status.label || `Fabricated - ${status.machine}`) : missingLabel;
+  const title = override ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}` : label;
+  return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(label)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
+}
+
+function productionSketchVisualV476(sketches = [], itemLabel = "") {
+  const sketch = (Array.isArray(sketches) ? sketches : []).find((asset) => asset?.id);
+  if (!sketch) {
+    return `<div class="production-sketch-visual-v476 is-empty"><span>${globalSearchIconV433("staging")}</span><strong>No sketch page</strong><small>${escapeHtml(itemLabel || "This item")} was not found in a recent order sketch.</small></div>`;
+  }
+  const page = Math.max(0, Number(sketch.pageNumber || 0));
+  const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+  return `<div class="production-sketch-visual-v476">
+    <iframe loading="lazy" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
+    <span class="production-sketch-caption-v476"><b>${escapeHtml(sketch.itemMarker || itemLabel || "Sketch")}</b>${page ? `<small>Page ${escapeHtml(page)}</small>` : ""}</span>
+  </div>`;
+}
+
+function orderDetailProgressV476(item = {}, fabrication = {}) {
+  const steps = [];
+  const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "");
+  if ((fabrication.sketchMatched || machine) && machine) {
+    steps.push({ label: machine, scanned: fabrication.fabricated === true ? 1 : 0, qty: 1, complete: fabrication.fabricated === true, kind: "fabrication", rank: 0 });
+  }
+  const orderedStages = (item.stages || []).map((stage, index) => ({ stage, index, rank: workflowProgressStageRankV477(stage) }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index);
+  for (const { stage, rank } of orderedStages) {
+    const label = globalSearchProgressStageLabelV475(stage);
+    const qty = Math.max(0, Number(stage.qty || item.qty || 0));
+    const scanned = Math.min(Math.max(0, Number(stage.scanned || 0)), qty || Number(stage.scanned || 0));
+    steps.push({ label, scanned, qty, complete: qty > 0 && scanned >= qty, kind: "stage", rank });
+  }
+  if (!steps.length) return `<span class="production-progress-empty-v476">Not Scanned</span>`;
+  return `<div class="production-item-progress-v476">${steps.map((step) => {
+    const stateClass = step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
+    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(progressStageColorV476(step.label))}">${globalSearchIconV433(progressStageIconKindV476(step.label))}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(step.scanned)}/${escapeHtml(step.qty)}</strong></span>`;
+  }).join('<i aria-hidden="true">→</i>')}</div>`;
+}
+
+function normalizedOrderDetailItemV477(value = "") {
+  const clean = String(value || "").trim();
+  const digits = clean.replace(/\D+/g, "");
+  return digits ? String(Number(digits)) : clean.toUpperCase();
+}
+
+function focusOrderDetailItemV477(itemNumber = "") {
+  const targetItem = normalizedOrderDetailItemV477(itemNumber);
+  if (!targetItem) return;
+  window.requestAnimationFrame(() => {
+    const target = [...document.querySelectorAll("[data-order-detail-item-v477]")]
+      .find((node) => normalizedOrderDetailItemV477(node.dataset.orderDetailItemV477) === targetItem);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.remove("is-focused-v477");
+    void target.offsetWidth;
+    target.classList.add("is-focused-v477");
+    if (state.orderDetailFocusTimerV477) window.clearTimeout(state.orderDetailFocusTimerV477);
+    state.orderDetailFocusTimerV477 = window.setTimeout(() => {
+      target.classList.remove("is-focused-v477");
+      state.orderDetailFocusItemV477 = "";
+      state.orderDetailFocusTimerV477 = 0;
+    }, 2800);
+  });
+}
+
+function productionItemActionsV476(files = {}, orderFiles = {}) {
+  const sketch = (files.sketches || [])[0];
+  const program = (files.programs || [])[0];
+  const hardware = (files.hardware || [])[0] || (orderFiles.hardware || [])[0];
+  const actions = [];
+  if (sketch?.id) {
+    const page = Math.max(0, Number(sketch.pageNumber || 0));
+    const pageAttr = page ? ` data-production-page-v474="${escapeHtml(page)}"` : "";
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Open Sketch</button>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-print-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Print Sketch</button>`);
+  }
+  if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-open-asset-v470="${escapeHtml(program.id)}">Open Program</button>`);
+  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">Hardware</button>`);
+  return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
 }
 
 function renderOrderDetailV470(payload = {}) {
@@ -23467,48 +23919,95 @@ function renderOrderDetailV470(payload = {}) {
   if (!body) return;
   const items = Array.isArray(payload.items) ? payload.items : [];
   const orderFiles = payload.orderProductionFiles || { hardware: [], sketches: [] };
+  const productionLoaded = payload.productionLoaded !== false;
+  const titleNode = document.getElementById("productionExplorerTitleV470");
+  const descriptionNode = document.getElementById("productionExplorerDescriptionV470");
+  if (titleNode) titleNode.textContent = `Order ${payload.order || "-"}`;
+  if (descriptionNode) descriptionNode.textContent = [payload.customer || "Customer not listed", payload.job ? `Job ${payload.job}` : "", payload.route ? `Route ${payload.route}` : ""].filter(Boolean).join(" · ");
+
+  const pieceTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
+  const orderSketch = (orderFiles.sketches || [])[0];
+  const orderHardware = (orderFiles.hardware || [])[0];
+  const orderButtons = [
+    orderSketch?.id ? `<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(orderSketch.id)}">Open Order Sketch</button>` : "",
+    orderHardware?.id ? `<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(orderHardware.id)}">Open Hardware</button>` : "",
+  ].filter(Boolean).join("");
+
   body.innerHTML = `
-    <section class="production-order-summary-v470">
-      <span><small>Order</small><strong>${escapeHtml(payload.order || "-")}</strong></span>
-      <span><small>Job Nr.</small><strong>${escapeHtml(payload.job || "-")}</strong></span>
-      <span><small>Customer</small><strong>${escapeHtml(payload.customer || "-")}</strong></span>
-      <span><small>Route</small><strong>${escapeHtml(payload.route || "-")}</strong></span>
-      <span><small>Items</small><strong>${escapeHtml(items.length)}</strong></span>
-    </section>
-    <section class="production-order-files-v472">
-      <header><div><small>Whole order</small><strong>Order production files</strong><span>Preview or print the complete order sketch before opening an individual item.</span></div></header>
-      <div>
-        <details class="production-file-group-v470" ${(orderFiles.sketches || []).length ? "open" : ""}><summary><span>Whole-order sketches</span><b>${escapeHtml((orderFiles.sketches || []).length)}</b></summary>${productionFileRowsHtmlV470(orderFiles.sketches, "sketch")}</details>
-        <details class="production-file-group-v470"><summary><span>Hardware lists</span><b>${escapeHtml((orderFiles.hardware || []).length)}</b></summary>${productionFileRowsHtmlV470(orderFiles.hardware, "hardware")}</details>
+    <div class="production-order-detail-v474 production-order-detail-v475 production-order-detail-v476">
+      <section class="production-order-summary-v476 production-order-toolbar-v476">
+        <div class="production-order-counts-v476"><strong>${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"}</strong><span>${escapeHtml(pieceTotal)} piece${pieceTotal === 1 ? "" : "s"} in this order</span></div>
+        <div class="production-order-actions-v476">${productionLoaded ? (orderButtons || `<span>No recent order-level files</span>`) : `<span>Loading production files…</span>`}</div>
+      </section>
+      <div class="production-order-items-v470 production-order-items-v474 production-order-items-v475 production-order-items-v476">
+        ${items.map((item) => {
+          const files = item.productionFiles || {};
+          const fabrication = files.fabrication || {};
+          const itemLabel = `${payload.order || item.order || ""}.${String(item.item || "").replace(/^0+/, "") || item.item || "-"}`;
+          return `<article class="production-order-item-v470 production-order-item-v474 production-order-item-v475 production-order-item-v476" data-order-detail-item-v477="${escapeHtml(item.item || "")}">
+            <div class="production-item-sketch-v476">${productionLoaded ? productionSketchVisualV476(files.sketches, itemLabel) : `<div class="production-sketch-visual-v476 is-loading"><i></i><span>Loading sketch…</span></div>`}</div>
+            <div class="production-item-main-v476">
+              <header>
+                <div><small>ITEM ${escapeHtml(item.item || "-")} · JOB ${escapeHtml(item.job || payload.job || "-")}</small><strong>${escapeHtml(itemLabel)}</strong><span>${escapeHtml(item.product || "Glass")}</span></div>
+                ${productionLoaded ? fabricationStatusHtmlV470(fabrication, item) : `<span class="production-fab-status-v470 is-neutral">Checking fabrication…</span>`}
+              </header>
+              <div class="production-item-facts-v476">
+                <span><small>Size</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
+                <span><small>Qty</small><b>${escapeHtml(item.qty || 0)}</b></span>
+                <span><small>Route</small><b>${escapeHtml(item.route || payload.route || "-")}</b></span>
+              </div>
+              <section class="production-progress-section-v476"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication)}</section>
+              <footer class="production-item-actions-v476">${productionLoaded ? productionItemActionsV476(files, orderFiles) : `<span>Loading files…</span>`}</footer>
+            </div>
+          </article>`;
+        }).join("") || `<div class="production-file-empty-v470">No active items found for this order.</div>`}
       </div>
-    </section>
-    <div class="production-order-items-v470">
-      ${items.map((item) => {
-        const files = item.productionFiles || {};
-        const fabrication = files.fabrication || {};
-        return `<article class="production-order-item-v470">
-          <header><div><small>Item ${escapeHtml(item.item || "-")} · ${escapeHtml(item.job || payload.job || "")}</small><strong>${escapeHtml(item.product || "Glass")}</strong><span>${escapeHtml(item.dimensions || "Size not listed")} · Qty ${escapeHtml(item.qty || 0)}</span></div>${fabricationStatusHtmlV470(fabrication)}</header>
-          <div class="production-item-meta-v470"><span><b>Process</b>${escapeHtml(item.processState || "-")}</span><span><b>Queue</b>${escapeHtml(item.queueState || "-")}</span><span><b>Route</b>${escapeHtml(item.route || payload.route || "-")}</span></div>
-          <section class="production-stage-track-v470"><h4>Workflow stages</h4><div>${(item.stages || []).map((stage) => `<span><b>${escapeHtml(stage.stage || stage.deliveryList || "Stage")}</b><small>${escapeHtml(formatNumericDeliveryDate(stage.deliveryDate) || stage.deliveryDate || "")} · ${escapeHtml(stage.scanned || 0)}/${escapeHtml(stage.qty || item.qty || 0)} scanned</small></span>`).join("") || "<em>No active stage copies.</em>"}</div></section>
-          <details class="production-file-group-v470" ${(files.hardware || []).length ? "open" : ""}><summary><span>Hardware Lists</span><b>${escapeHtml((files.hardware || []).length)}</b></summary>${productionFileRowsHtmlV470(files.hardware, "hardware")}</details>
-          <details class="production-file-group-v470"><summary><span>Sketches</span><b>${escapeHtml((files.sketches || []).length)}</b></summary>${productionFileRowsHtmlV470(files.sketches, "sketch")}</details>
-          <details class="production-file-group-v470"><summary><span>Programs</span><b>${escapeHtml((files.programs || []).length)}</b></summary>${productionFileRowsHtmlV470(files.programs, "program")}</details>
-        </article>`;
-      }).join("") || `<div class="production-file-empty-v470">No active items found for this order.</div>`}
     </div>`;
+  if (state.orderDetailFocusItemV477) focusOrderDetailItemV477(state.orderDetailFocusItemV477);
 }
 
 async function openOrderDetailV470(orderNo, options = {}) {
   const order = String(orderNo || "").trim();
   if (!order) return;
-  showProductionExplorerV470({ mode: options.mode || "order", title: `Order ${order}`, description: "Item details, production files, and fabrication state." });
+  state.orderDetailOpenOrderV474 = order;
+  state.orderDetailFocusItemV477 = String(options.focusItem || "").trim();
+  showProductionExplorerV470({ mode: options.mode || "order", title: `Order ${order}`, description: "Items, exact sketch pages, programs, hardware, and fabrication history." });
   const body = document.getElementById("productionExplorerBodyV470");
-  if (body) body.innerHTML = `<div class="production-explorer-loading-v470">Loading order ${escapeHtml(order)}...</div>`;
+  const cached = state.orderDetailCacheV474.get(order);
+  if (cached && Date.now() - Number(cached.at || 0) < 30000) {
+    renderOrderDetailV470(cached.payload);
+  } else if (body) {
+    body.innerHTML = `<div class="production-explorer-loading-v470">Loading order ${escapeHtml(order)}…</div>`;
+  }
+
+  // Start both requests together: the lightweight database-only payload paints
+  // first, while production-share/PDF work hydrates the already-visible GUI.
+  const corePromise = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=0`);
+  const productionPromise = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=1`);
   try {
-    const payload = await fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}`);
-    renderOrderDetailV470(payload);
+    const core = await corePromise;
+    if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
+      renderOrderDetailV470(core);
+    }
   } catch (error) {
-    if (body) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Order details could not be loaded.")}</div>`;
+    if (!cached && body) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Order details could not be loaded.")}</div>`;
+  }
+
+  try {
+    const full = await productionPromise;
+    state.orderDetailCacheV474.set(order, { at: Date.now(), payload: full });
+    for (const item of full.items || []) {
+      const status = item.productionFiles?.fabrication;
+      if (status) state.fabricationStatusCacheV474.set(fabricationStatusKeyV474(item.order || order, item.item, item.job), status);
+    }
+    if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
+      renderOrderDetailV470(full);
+    }
+  } catch (error) {
+    if (!cached && state.orderDetailOpenOrderV474 === order && body) {
+      const existing = body.querySelector(".production-order-detail-v474");
+      if (!existing) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Production files could not be loaded.")}</div>`;
+    }
   }
 }
 
@@ -23562,8 +24061,8 @@ async function openProductionProgramV470(assetId) {
   if (!popup) showInlineError(result.message || "Allow popups to open this production file.", false);
 }
 
-function printProductionAssetV470(assetId) {
-  const url = productionAssetUrlV470(assetId);
+function printProductionAssetV470(assetId, pageNumber = 0) {
+  const url = productionAssetUrlV470(assetId, pageNumber);
   const popup = window.open(url, "productionFilePrintV470", "popup=yes,width=1100,height=820,resizable=yes,scrollbars=yes");
   if (!popup) {
     showInlineError("Allow popups to print this production file.", false);
@@ -23578,13 +24077,11 @@ function printProductionAssetV470(assetId) {
 // is intentionally created only when requested, keeping initial page weight low.
 document.addEventListener("dblclick", (event) => {
   const row = event.target.closest("#listRows tr[data-order-v470], #mobileListCards [data-order-v470]");
-  const orderGroupToggle = event.target.closest("[data-toggle-scan-order-v472]");
-  if (!row || (!orderGroupToggle && event.target.closest("button, input, select, textarea, a, .line-rack-location-control, .line-bay-location-control-v449"))) return;
+  if (!row || event.target.closest("button, input, select, textarea, a, .line-rack-location-control, .line-bay-location-control-v449")) return;
   const order = String(row.dataset.orderV470 || "").trim();
   if (!order) return;
-  if (orderGroupToggle) window.clearTimeout(state.scanOrderToggleTimer);
   event.preventDefault();
-  openOrderDetailV470(order).catch((error) => showInlineError(error.message, true));
+  openOrderDetailV470(order, { focusItem: row.dataset.itemV477 || "" }).catch((error) => showInlineError(error.message, true));
 });
 
 document.addEventListener("click", (event) => {
@@ -23603,13 +24100,13 @@ document.addEventListener("click", (event) => {
   }
   const preview = event.target.closest("[data-production-preview-asset-v470]");
   if (preview) {
-    const popup = window.open(productionAssetUrlV470(preview.dataset.productionPreviewAssetV470 || ""), "_blank");
+    const popup = window.open(productionAssetUrlV470(preview.dataset.productionPreviewAssetV470 || "", Number(preview.dataset.productionPageV474 || 0)), "_blank");
     if (!popup) showInlineError("Allow popups to preview this production file.", false);
     return;
   }
   const print = event.target.closest("[data-production-print-asset-v470]");
   if (print) {
-    printProductionAssetV470(print.dataset.productionPrintAssetV470 || "");
+    printProductionAssetV470(print.dataset.productionPrintAssetV470 || "", Number(print.dataset.productionPageV474 || 0));
     return;
   }
   const openProgram = event.target.closest("[data-production-open-asset-v470]");
@@ -26533,8 +27030,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260831-v0.471", window.location.href).href,
-    new URL("static/css/print.css?v=20260831-v0.471", window.location.href).href,
+    new URL("static/css/styles.css?v=20260901-v0.477", window.location.href).href,
+    new URL("static/css/print.css?v=20260901-v0.477", window.location.href).href,
   ];
 }
 
@@ -30735,7 +31232,20 @@ function syncLookupManagerFormGuidance() {
  */
 function closeLookupEditorV470() {
   document.querySelector(".lookup-editor-backdrop-v470")?.remove();
-  document.querySelector(".lookup-editor-surface-v470.is-editor-open-v470")?.classList.remove("is-editor-open-v470");
+  document.querySelector(".lookup-editor-backdrop-v476")?.remove();
+  const modalShell = document.querySelector(".lookup-editor-modal-shell-v476");
+  const editor = modalShell?.querySelector(".lookup-editor-surface-v470.is-editor-open-v470")
+    || document.querySelector(".lookup-editor-surface-v470.is-editor-open-v470");
+  const slot = document.querySelector("[data-lookup-editor-slot-v476]");
+  if (editor) editor.classList.remove("is-editor-open-v470");
+  // v0.476: restore the real form to its original Lookup shell before any
+  // re-render. A lightweight top-level shell mirrors the original Lookup
+  // modifier classes so tab-specific editor styling is retained while open.
+  if (editor && slot?.parentNode) slot.parentNode.insertBefore(editor, slot);
+  slot?.remove();
+  modalShell?.remove();
+  document.body.classList.remove("is-lookup-editor-open-v476");
+  document.getElementById("adminModal")?.classList.remove("is-lookup-editor-open-v474");
 }
 
 /**
@@ -30747,17 +31257,29 @@ function openLookupEditorV470({ focusSelector = "" } = {}) {
   const editor = document.querySelector("#adminModalBody .lookup-editor-surface-v470");
   if (!editor) return;
   closeLookupEditorV470();
+
+  const slot = document.createElement("span");
+  slot.hidden = true;
+  slot.dataset.lookupEditorSlotV476 = "true";
+  editor.parentNode?.insertBefore(slot, editor);
+
   const backdrop = document.createElement("button");
   backdrop.type = "button";
-  backdrop.className = "lookup-editor-backdrop-v470";
+  backdrop.className = "lookup-editor-backdrop-v476";
   backdrop.dataset.lookupEditorCloseV470 = "true";
   backdrop.setAttribute("aria-label", "Close lookup editor");
-  // Keep the backdrop inside #adminModalBody, the same stacking context as the
-  // focused editor. #adminModalBody is itself a z-index layer, so appending the
-  // backdrop directly to #adminModal would necessarily place it above the whole
-  // body (including the editor) and blur the foreground GUI as well.
-  const backdropHost = document.getElementById("adminModalBody") || document.getElementById("adminModal") || document.body;
-  backdropHost.appendChild(backdrop);
+
+  const sourceShell = editor.closest(".lookup-manager-shell");
+  const modalShell = document.createElement("div");
+  modalShell.className = "lookup-editor-modal-shell-v476";
+  sourceShell?.classList.forEach((className) => {
+    if (className !== "lookup-manager-shell") modalShell.classList.add(className);
+  });
+  document.body.appendChild(backdrop);
+  document.body.appendChild(modalShell);
+  modalShell.appendChild(editor);
+  document.body.classList.add("is-lookup-editor-open-v476");
+  document.getElementById("adminModal")?.classList.add("is-lookup-editor-open-v474");
   editor.classList.add("is-editor-open-v470");
   const focusTarget = focusSelector ? editor.querySelector(focusSelector) : editor.querySelector("input:not([type=hidden]), select, textarea, button:not(.lookup-editor-close-v470)");
   window.setTimeout(() => focusTarget?.focus(), 0);
@@ -35338,41 +35860,63 @@ function productionFileSettingsModalHtmlV472() {
   const settings = state.productionFileSettings || {};
   const roots = settings.roots || {};
   const terms = settings.machineTerms || {};
+  const machineColors = settings.machineColors || { denver: "#2563eb", waterjet: "#7c3aed" };
   const availability = settings.availability || {};
   const index = settings.index || {};
+  const rootForKindV474 = { hardware: roots.hardware, sketch: roots.sketches, program: roots.programs, completed_wj: roots.completedWaterjet };
   const statusRow = (kind, label) => {
     const available = Boolean(availability[kind]);
     const refreshing = (index.refreshing || []).includes(kind);
-    return `<span class="production-index-status-v472 ${available ? "is-ready" : "is-offline"}"><i aria-hidden="true"></i><b>${escapeHtml(label)}</b><small>${refreshing ? "Refreshing" : available ? `${Number(index.counts?.[kind] || 0).toLocaleString()} files` : "Unavailable"}</small></span>`;
+    const tone = available ? "is-ready" : refreshing ? "is-checking" : "is-offline";
+    const availabilityError = String(index.errors?.[kind] || "").trim();
+    const rootPath = String(rootForKindV474[kind] || "").trim();
+    const resolvedPath = String(index.resolvedRoots?.[kind] || "").trim();
+    const resolvedNote = resolvedPath && resolvedPath !== rootPath ? `Resolved: ${resolvedPath}` : "";
+    const detail = refreshing
+      ? (available ? "Refreshing recent file metadata" : "Checking folder")
+      : available
+        ? `${Number(index.counts?.[kind] || 0).toLocaleString()} recent files`
+        : availabilityError
+          ? `Unavailable · ${availabilityError}`
+          : "Unavailable";
+    const title = [label, detail, rootPath, resolvedNote].filter(Boolean).join(" · ");
+    return `<span class="production-index-status-v472 ${tone}" title="${escapeHtml(title)}"><i aria-hidden="true"></i><span class="production-index-status-copy-v474"><b>${escapeHtml(label)}</b><small>${escapeHtml(detail)}</small>${rootPath ? `<em>${escapeHtml(rootPath)}</em>` : ""}${resolvedNote ? `<em class="is-resolved-v476">${escapeHtml(resolvedNote)}</em>` : ""}</span></span>`;
   };
   const indexedAt = Number(index.indexedAt || 0);
   return `
     <div class="production-settings-shell-v472">
       <section class="production-settings-summary-v472">
-        <div><small>Production evidence</small><strong>Sketch assignment, actual-machine detection, and Staging safety</strong><span>Network folders are indexed in the background so Smart Search and scanning never wait on a full share traversal.</span></div>
+        <div><small>Production evidence</small><strong>Sketch assignment, actual-machine detection, and Staging safety</strong><span>Only the configured recent working window is indexed; old directory trees are skipped instead of recursively walking the full production shares.</span></div>
         <div class="production-index-grid-v472">
           ${statusRow("hardware", "Hardware")}${statusRow("sketch", "Sketches")}${statusRow("program", "Denver")}${statusRow("completed_wj", "Waterjet")}
         </div>
-        <small class="production-index-time-v472">${indexedAt ? `Last indexed ${escapeHtml(new Date(indexedAt * 1000).toLocaleString(appLocale()))}` : "No completed background index yet"}</small>
+        <small class="production-index-time-v472">${indexedAt ? `Last indexed ${escapeHtml(new Date(indexedAt * 1000).toLocaleString(appLocale()))}` : "No completed background index yet"} · ${escapeHtml(settings.lookbackDays || index.lookbackDays || 7)}-day lookback</small>
       </section>
-      <form id="productionFileSettingsFormV472" class="production-settings-form-v472">
-        <section class="production-settings-card-v472 is-controls">
+      <nav class="production-settings-tabs-v476" aria-label="Machine and production file settings sections">
+        <button type="button" class="${state.productionFileSettingsTabV476 === "sources" ? "is-active" : ""}" data-production-settings-tab-v476="sources">Sources & Index</button>
+        <button type="button" class="${state.productionFileSettingsTabV476 === "machines" ? "is-active" : ""}" data-production-settings-tab-v476="machines">Machines & Colors</button>
+      </nav>
+      <form id="productionFileSettingsFormV472" class="production-settings-form-v472" data-production-settings-active-v476="${escapeHtml(state.productionFileSettingsTabV476 || "sources")}">
+        <section class="production-settings-card-v472 is-controls" data-production-settings-pane-v476="sources">
           <header><div><strong>Workflow controls</strong><span>Disable the integration without deleting settings, or temporarily make fabrication status informational.</span></div></header>
           <label class="production-toggle-v472"><input id="productionFilesEnabledV472" type="checkbox" ${settings.enabled !== false ? "checked" : ""}><span><b>Enable production file integration</b><small>Hardware, sketches, programs, and completion evidence are available in the app.</small></span></label>
           <label class="production-toggle-v472"><input id="productionEnforceStagingV472" type="checkbox" ${settings.enforceStaging !== false ? "checked" : ""}><span><b>Block Staging when assigned fabrication is missing</b><small>Unavailable or ambiguous shares remain nonblocking.</small></span></label>
           <label class="production-cache-field-v472"><span>Background refresh interval</span><div><input id="productionCacheMinutesV472" type="number" min="1" max="1440" step="1" value="${escapeHtml(settings.cacheMinutes || 5)}"><b>minutes</b></div></label>
+          <label class="production-cache-field-v472"><span>File lookback window</span><div><input id="productionLookbackDaysV473" type="number" min="1" max="365" step="1" value="${escapeHtml(settings.lookbackDays || 7)}"><b>days</b></div><small>Hardware, sketches, programs, Denver .egl evidence, and Waterjet .nce evidence older than this window are not indexed.</small></label>
         </section>
-        <section class="production-settings-card-v472 is-paths">
+        <section class="production-settings-card-v472 is-paths" data-production-settings-pane-v476="sources">
           <header><div><strong>Production folders</strong><span>Use local, mapped-drive, or UNC paths maintained by the plant.</span></div></header>
           <label><span>Hardware Lists</span><input id="productionHardwarePathV472" type="text" autocomplete="off" value="${escapeHtml(roots.hardware || "")}"></label>
           <label><span>Sketches</span><input id="productionSketchPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.sketches || "")}"></label>
           <label><span>Denver Programs</span><input id="productionProgramPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.programs || "")}"></label>
           <label><span>Completed Waterjet</span><input id="productionWaterjetPathV472" type="text" autocomplete="off" value="${escapeHtml(roots.completedWaterjet || "")}"></label>
         </section>
-        <section class="production-settings-card-v472 is-machines">
-          <header><div><strong>Machine detection terms</strong><span>Comma-separated terms found in sketches. Actual EGL or Completed WJ evidence overrides the sketch assignment.</span></div></header>
+        <section class="production-settings-card-v472 is-machines production-machine-visuals-v476" data-production-settings-pane-v476="machines">
+          <header><div><strong>Machine detection & colors</strong><span>Machine terms identify assignments in sketch pages. Colors are shared by Scan Progress, Smart Search, and Order Details.</span></div></header>
           <label><span>Denver terms</span><textarea id="productionDenverTermsV472" rows="3">${escapeHtml((terms.denver || []).join(", "))}</textarea></label>
           <label><span>Waterjet terms</span><textarea id="productionWaterjetTermsV472" rows="3">${escapeHtml((terms.waterjet || []).join(", "))}</textarea></label>
+          <label class="production-machine-color-v476"><span>Denver color</span><div><input id="productionDenverColorV476" type="color" value="${escapeHtml(safeProgressColorV476(machineColors.denver, "#2563eb"))}"><b>Denver</b></div></label>
+          <label class="production-machine-color-v476"><span>Waterjet color</span><div><input id="productionWaterjetColorV476" type="color" value="${escapeHtml(safeProgressColorV476(machineColors.waterjet, "#7c3aed"))}"><b>WaterJet</b></div></label>
         </section>
         <footer class="production-settings-actions-v472">
           <button type="button" class="secondary" data-production-index-refresh-v472>Refresh index</button>
@@ -35390,8 +35934,18 @@ function renderProductionFilesOverviewV472() {
   const totalFiles = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
   const ready = Object.values(settings.availability || {}).filter(Boolean).length;
   target.innerHTML = `
-    <div><strong>${settings.enabled === false ? "Integration paused" : `${ready}/4 sources available`}</strong><span>${Number(totalFiles).toLocaleString()} indexed production files.</span></div>
+    <div><strong>${settings.enabled === false ? "Integration paused" : `${ready}/4 sources available`}</strong><span>${Number(totalFiles).toLocaleString()} files indexed from the last ${escapeHtml(settings.lookbackDays || 7)} day${Number(settings.lookbackDays || 7) === 1 ? "" : "s"}.</span></div>
     <div><strong>Staging gate ${settings.enforceStaging === false ? "informational" : "enforced"}</strong><span>Evidence can correct a sketch's assigned machine.</span></div>`;
+}
+
+function scheduleProductionFileSettingsPollV473() {
+  window.clearTimeout(state.productionFileSettingsPollTimer);
+  state.productionFileSettingsPollTimer = null;
+  const refreshing = state.productionFileSettings?.index?.refreshing || [];
+  if (!refreshing.length || els.adminModal?.dataset.kind !== "productionFiles") return;
+  state.productionFileSettingsPollTimer = window.setTimeout(() => {
+    refreshProductionFileSettingsV472(true).catch(() => {});
+  }, 1200);
 }
 
 async function refreshProductionFileSettingsV472(openModal = false) {
@@ -35402,6 +35956,7 @@ async function refreshProductionFileSettingsV472(openModal = false) {
     els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
     applyLanguageToRoot(els.adminModalBody);
   }
+  scheduleProductionFileSettingsPollV473();
   return payload;
 }
 
@@ -35411,6 +35966,7 @@ async function saveProductionFileSettingsV472() {
     enabled: Boolean(document.getElementById("productionFilesEnabledV472")?.checked),
     enforceStaging: Boolean(document.getElementById("productionEnforceStagingV472")?.checked),
     cacheMinutes: Number(document.getElementById("productionCacheMinutesV472")?.value || 5),
+    lookbackDays: Number(document.getElementById("productionLookbackDaysV473")?.value || 7),
     roots: {
       hardware: document.getElementById("productionHardwarePathV472")?.value.trim() || "",
       sketches: document.getElementById("productionSketchPathV472")?.value.trim() || "",
@@ -35421,11 +35977,16 @@ async function saveProductionFileSettingsV472() {
       denver: splitTerms(document.getElementById("productionDenverTermsV472")?.value),
       waterjet: splitTerms(document.getElementById("productionWaterjetTermsV472")?.value),
     },
+    machineColors: {
+      denver: document.getElementById("productionDenverColorV476")?.value || "#2563eb",
+      waterjet: document.getElementById("productionWaterjetColorV476")?.value || "#7c3aed",
+    },
   };
   state.productionFileSettings = await fetchJson("/api/admin/production-files", { method: "POST", body: JSON.stringify(payload) });
   renderProductionFilesOverviewV472();
   if (els.adminModalBody) els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
-  showSaveConfirmation("Machine and production file settings were saved. Background refresh started.");
+  scheduleProductionFileSettingsPollV473();
+  showSaveConfirmation("Machine and production file settings were saved. Recent-file refresh started.");
 }
 
 async function refreshProductionFileIndexV472(button) {
@@ -35434,6 +35995,7 @@ async function refreshProductionFileIndexV472(button) {
     state.productionFileSettings = await fetchJson("/api/admin/production-files/refresh", { method: "POST", body: "{}" });
     renderProductionFilesOverviewV472();
     if (els.adminModalBody) els.adminModalBody.innerHTML = productionFileSettingsModalHtmlV472();
+    scheduleProductionFileSettingsPollV473();
     showSaveConfirmation(state.productionFileSettings.message || "Production file refresh started.");
   } finally {
     if (button?.isConnected) button.disabled = false;
@@ -41006,7 +41568,7 @@ function wireEvents() {
     if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
-    if (state.homeChartMetric === "glass-sizes" && !(state.homeReportSummary?.glassSizeFrequencyByType || []).length) {
+    if (state.homeChartMetric === "glass-sizes" && !(activeHomeReportSummaryV472()?.glassSizeFrequencyByType || []).length) {
       void loadHomeReportSummary();
     }
   });
@@ -41191,6 +41753,7 @@ function wireEvents() {
     state.statisticsCustomDateTo = "";
     state.homeChartSelectedLabel = "";
     state.homeReportSummary = null;
+    state.homeReportSummaryRangeKey = "";
     closeStatisticsDateCalendar();
     renderStatisticsPage();
     void loadHomeReportSummary();
@@ -43142,6 +43705,17 @@ function wireEvents() {
       setAdminModalSection(adminModalSectionButton.dataset.adminModalSection || "workspace");
       return;
     }
+    const productionSettingsTabV476 = event.target.closest("[data-production-settings-tab-v476]");
+    if (productionSettingsTabV476) {
+      event.preventDefault();
+      state.productionFileSettingsTabV476 = productionSettingsTabV476.dataset.productionSettingsTabV476 === "machines" ? "machines" : "sources";
+      const form = document.getElementById("productionFileSettingsFormV472");
+      if (form) form.dataset.productionSettingsActiveV476 = state.productionFileSettingsTabV476;
+      document.querySelectorAll("[data-production-settings-tab-v476]").forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.productionSettingsTabV476 === state.productionFileSettingsTabV476);
+      });
+      return;
+    }
     const productionIndexRefreshButtonV472 = event.target.closest("[data-production-index-refresh-v472]");
     if (productionIndexRefreshButtonV472) {
       event.preventDefault();
@@ -43316,6 +43890,15 @@ function wireEvents() {
       return;
     }
 
+    const openOrderDetailButtonV474 = event.target.closest("[data-open-order-detail-v474]");
+    if (openOrderDetailButtonV474) {
+      const order = String(openOrderDetailButtonV474.dataset.openOrderDetailV474 || "").trim();
+      const focusItem = String(openOrderDetailButtonV474.dataset.openOrderDetailItemV477 || "").trim();
+      if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
+      if (order) openOrderDetailV470(order, { focusItem }).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
     const openListButton = event.target.closest("[data-open-list]");
     if (openListButton) {
       const searchText = openListButton.dataset.openSearch || "";
@@ -43451,19 +44034,6 @@ function wireEvents() {
       renderScanPage();
       return;
     }
-    const scanOrderToggleV472 = event.target.closest("[data-toggle-scan-order-v472]");
-    if (scanOrderToggleV472) {
-      const order = String(scanOrderToggleV472.dataset.toggleScanOrderV472 || "").trim();
-      window.clearTimeout(state.scanOrderToggleTimer);
-      state.scanOrderToggleTimer = window.setTimeout(() => {
-        const isCollapsed = state.collapsedScanOrders.has(order);
-        void playAppSound(isCollapsed ? "collapse_open" : "collapse_close");
-        if (isCollapsed) state.collapsedScanOrders.delete(order);
-        else state.collapsedScanOrders.add(order);
-        renderScanPage();
-      }, 220);
-      return;
-    }
     if (event.target === els.scanBayOverrideClearBtn) {
       state.selectedBayOverrideCode = "";
       state.bayOverrideMode = "auto";
@@ -43480,6 +44050,18 @@ function wireEvents() {
     const row = event.target.closest("#listRows tr[data-id], #mobileListCards [data-id]");
     if (row) {
       const clickedId = String(row.dataset.id || "");
+      const clickedOrder = String(row.dataset.orderV470 || "").trim();
+      const nowV474 = Date.now();
+      const priorClickV474 = state.scanRowClickV474 || { order: "", id: "", at: 0 };
+      // A normal row click repaints Scan, so the browser may never emit a native
+      // dblclick against the original DOM node. Persist the first click across
+      // that repaint and treat a matching second click as Order Details.
+      if (clickedOrder && priorClickV474.id === clickedId && priorClickV474.order === clickedOrder && nowV474 - Number(priorClickV474.at || 0) <= 475) {
+        state.scanRowClickV474 = { order: "", id: "", at: 0 };
+        openOrderDetailV470(clickedOrder, { focusItem: row.dataset.itemV477 || "" }).catch((error) => showInlineError(error.message, true));
+        return;
+      }
+      state.scanRowClickV474 = { order: clickedOrder, id: clickedId, at: nowV474 };
       const isClearingCurrentSelection = String(state.selectedId || "") === clickedId;
       state.selectedId = isClearingCurrentSelection ? null : clickedId;
       saveState();

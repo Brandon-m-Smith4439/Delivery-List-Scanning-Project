@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 import shutil
+import os
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -1663,7 +1666,7 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(missing["machine"], "Waterjet")
             self.assertTrue(missing["blockStaging"])
 
-            (completed_wj_dir / "279471-001 Complete.dxf").write_text("complete", encoding="utf-8")
+            (completed_wj_dir / "279471-001 Complete.nce").write_text("complete", encoding="utf-8")
             service = ProductionFileService(config)
             complete = service.fabrication_status("279471", "001", "88279471")
             self.assertTrue(complete["fabricated"])
@@ -1699,6 +1702,7 @@ class ImportConsistencyTests(unittest.TestCase):
                     "enabled": True,
                     "enforceStaging": True,
                     "cacheMinutes": 7,
+                    "lookbackDays": 7,
                     "roots": {
                         "hardware": str(hardware_dir),
                         "sketches": str(sketches_dir),
@@ -1713,6 +1717,7 @@ class ImportConsistencyTests(unittest.TestCase):
                 "admin",
             )
             self.assertEqual(saved["cacheMinutes"], 7)
+            self.assertEqual(saved["lookbackDays"], 7)
             self.assertEqual(saved["roots"]["programs"], str(programs_dir))
 
             (sketches_dir / "279473-001 Sketch.txt").write_text(
@@ -1724,7 +1729,9 @@ class ImportConsistencyTests(unittest.TestCase):
             fast_status = store.production_files.fabrication_status(
                 "279473", "001", "88279473", allow_content_read=False
             )
-            self.assertEqual(fast_status["assignedMachine"], "Waterjet")
+            # v0.474 no-content checks intentionally do not parse sketch files;
+            # exact assignment is resolved lazily when the order/item is opened.
+            self.assertEqual(fast_status["assignedMachine"], "")
             self.assertEqual(fast_status["actualMachine"], "Denver CNC")
             status = store.production_files.fabrication_status("279473", "001", "88279473")
             self.assertEqual(status["assignedMachine"], "Waterjet")
@@ -1751,7 +1758,352 @@ class ImportConsistencyTests(unittest.TestCase):
         service._walk_root = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("request thread walked share"))  # type: ignore[method-assign]
         self.assertEqual(service.assets("sketch"), [])
         self.assertEqual(scheduled, [["sketch"]])
+        with mock.patch.object(Path, "stat", side_effect=FileNotFoundError("disconnected mapped drive")):
+            available, reason = service._probe_root("sketch", Path("I:/Production/Sketches"))
+        self.assertFalse(available)
+        self.assertIn("Mapped drive not reachable", reason)
 
+
+    def test_v0473_production_index_uses_recent_window_and_waterjet_nce_evidence(self) -> None:
+        """Production indexing ignores old files and only .nce proves Waterjet completion."""
+        verification_root = ROOT / "_verification_v0473_recent_production"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=hardware_dir,
+                sketches_dir=sketches_dir,
+                programs_dir=programs_dir,
+                completed_wj_dir=completed_wj_dir,
+            )
+            config.data_dir.mkdir()
+            recent_program = programs_dir / "279474-001.egl"
+            old_program = programs_dir / "279475-001.egl"
+            recent_wj = completed_wj_dir / "279476-001.nce"
+            unrelated_wj = completed_wj_dir / "279476-001.dxf"
+            for path in (recent_program, old_program, recent_wj, unrelated_wj):
+                path.write_text(path.suffix, encoding="utf-8")
+            old_timestamp = time.time() - (9 * 86400)
+            os.utime(old_program, (old_timestamp, old_timestamp))
+
+            service = ProductionFileService(config)
+            with mock.patch.object(service, "refresh_async"):
+                service.configure({"lookbackDays": 7, "cacheMinutes": 5})
+            program_names = {asset.name for asset in service.assets("program", refresh=True)}
+            waterjet_names = {asset.name for asset in service.assets("completed_wj", refresh=True)}
+            self.assertIn(recent_program.name, program_names)
+            self.assertNotIn(old_program.name, program_names)
+            self.assertEqual(waterjet_names, {recent_wj.name})
+
+            # Expanding the Admin window makes the older Denver evidence eligible
+            # without changing any file or database content.
+            with mock.patch.object(service, "refresh_async"):
+                service.configure({"lookbackDays": 10, "cacheMinutes": 5})
+            expanded_names = {asset.name for asset in service.assets("program", refresh=True)}
+            self.assertIn(old_program.name, expanded_names)
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+
+    def test_v0473_recent_index_prunes_old_directory_subtrees(self) -> None:
+        """The recent production index must not recurse through known-old history trees."""
+        verification_root = ROOT / "_verification_v0473_pruned_tree"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        programs_dir = verification_root / "Programs"
+        recent_dir = programs_dir / "Recent"
+        archive_dir = programs_dir / "Archive"
+        recent_dir.mkdir(parents=True)
+        (archive_dir / "2024" / "January").mkdir(parents=True)
+        (recent_dir / "279477-001.egl").write_text("recent", encoding="utf-8")
+        (archive_dir / "2024" / "January" / "199999-001.egl").write_text("old", encoding="utf-8")
+        old_timestamp = time.time() - (30 * 86400)
+        for old_folder in (archive_dir / "2024" / "January", archive_dir / "2024", archive_dir):
+            os.utime(old_folder, (old_timestamp, old_timestamp))
+        try:
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists",
+                sketches_dir=verification_root / "Sketches",
+                programs_dir=programs_dir,
+                completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.sketches_dir, config.completed_wj_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+            service = ProductionFileService(config)
+            service.configure({"lookbackDays": 7, "cacheMinutes": 5})
+            original_scandir = os.scandir
+            visited: list[str] = []
+
+            def tracking_scandir(path):
+                visited.append(os.path.normcase(os.path.normpath(str(path))))
+                return original_scandir(path)
+
+            with mock.patch("backend.production_files.os.scandir", side_effect=tracking_scandir):
+                names = {asset.name for asset in service.assets("program", refresh=True)}
+
+            self.assertEqual(names, {"279477-001.egl"})
+            archive_key = os.path.normcase(os.path.normpath(str(archive_dir)))
+            self.assertNotIn(archive_key, visited, "Old production history was recursively opened")
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+
+    def test_v0474_sketch_pages_assign_exact_items_and_program_names(self) -> None:
+        """Order-level sketch PDFs map machines by Order.Item page markers; programs use Order+2-digit Item."""
+        verification_root = ROOT / "_verification_v0474_sketch_contract"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            from reportlab.pdfgen import canvas
+
+            sketch = sketches_dir / "238245 Sketch.pdf"
+            pdf = canvas.Canvas(str(sketch))
+            pdf.setFont("Helvetica-Bold", 20)
+            pdf.drawString(220, 400, "238245.1")
+            pdf.showPage()
+            pdf.setFont("Helvetica-Bold", 20)
+            pdf.drawString(210, 410, "238245.2")
+            pdf.drawString(250, 380, "WJ")
+            pdf.showPage()
+            pdf.setFont("Helvetica-Bold", 20)
+            pdf.drawString(200, 410, "238245.3")
+            pdf.drawString(220, 380, "DENVER 1")
+            pdf.save()
+            (programs_dir / "23824503.egl").write_text("Denver complete", encoding="utf-8")
+            (programs_dir / "23824502.egl").write_text("wrong machine evidence", encoding="utf-8")
+            (completed_wj_dir / "23824502.nce").write_text("Waterjet complete", encoding="utf-8")
+
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=hardware_dir,
+                sketches_dir=sketches_dir,
+                programs_dir=programs_dir,
+                completed_wj_dir=completed_wj_dir,
+            )
+            config.data_dir.mkdir()
+            service = ProductionFileService(config)
+
+            item2 = service.item_assets("238245", "2", "")
+            self.assertEqual(len(item2["sketches"]), 1)
+            self.assertEqual(item2["sketches"][0]["pageNumber"], 2)
+            self.assertEqual(item2["sketches"][0]["itemMarker"], "238245.2")
+            self.assertEqual(item2["sketches"][0]["machineHint"], "Waterjet")
+            self.assertEqual(item2["fabrication"]["assignedMachine"], "Waterjet")
+            self.assertEqual(item2["fabrication"]["actualMachine"], "Waterjet")
+            self.assertTrue(item2["fabrication"]["fabricated"])
+
+            item3 = service.item_assets("238245", "3", "")
+            self.assertEqual(item3["sketches"][0]["pageNumber"], 3)
+            self.assertEqual(item3["sketches"][0]["machineHint"], "Denver CNC")
+            self.assertEqual([row["name"] for row in item3["programs"]], ["23824503.egl"])
+            self.assertTrue(item3["fabrication"]["fabricated"])
+            self.assertEqual(item3["fabrication"]["actualMachine"], "Denver CNC")
+
+            item1 = service.fabrication_status("238245", "1", "")
+            self.assertTrue(item1["sketchMatched"])
+            self.assertEqual(item1["assignedMachine"], "")
+            self.assertIsNone(item1["fabricated"])
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0474_background_sketch_index_never_parses_pdf_content(self) -> None:
+        """Recent sketch refresh is metadata-only; machine parsing occurs only for a requested order."""
+        verification_root = ROOT / "_verification_v0474_metadata_only_index"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        sketches_dir = verification_root / "Sketches"
+        sketches_dir.mkdir()
+        (sketches_dir / "238245 Sketch.pdf").write_bytes(b"%PDF-1.4 metadata fixture")
+        try:
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists",
+                sketches_dir=sketches_dir,
+                programs_dir=verification_root / "Programs",
+                completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.programs_dir, config.completed_wj_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+            service = ProductionFileService(config)
+            with mock.patch.object(service, "_sketch_page_assignments", side_effect=AssertionError("index parsed sketch PDF")):
+                names = {asset.name for asset in service.assets("sketch", refresh=True)}
+            self.assertEqual(names, {"238245 Sketch.pdf"})
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0475_global_search_reports_physical_stage_progress_once(self) -> None:
+        """Smart Search receives one progress record per synchronized stage, not duplicated stage rows."""
+        verification_root = ROOT / "_verification_v0475_search_progress"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            order = "279475"
+            delivery_date = "2026-09-08"
+            item = imported_item(order, "1", 2, "v0475-progress:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": delivery_date, "items": [item]},
+                "fileName": "Delivery List 09-08-2026.xlsx",
+                "user": "admin",
+            })
+            match = next(row for row in store.global_search(order) if row["order"] == order)
+            stages = match.get("progressStages") or []
+            presets = {row.get("stagePreset"): row for row in stages}
+            self.assertIn("airport_staging", presets)
+            self.assertIn("airport_outbound", presets)
+            self.assertEqual(presets["airport_staging"]["qty"], 2)
+            self.assertEqual(presets["airport_staging"]["scanned"], 0)
+            self.assertEqual(presets["airport_outbound"]["qty"], 2)
+            self.assertEqual(presets["airport_outbound"]["scanned"], 0)
+            self.assertEqual(len(stages), len({row.get("stagePreset") for row in stages}))
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0475_missing_child_on_reachable_mapped_parent_is_not_drive_error(self) -> None:
+        """A missing Completed WJ child must not blame I: when its parent is reachable."""
+        config = replace(
+            load_config(ROOT),
+            hardware_lists_dir=Path("I:/Production/Hardware"),
+            sketches_dir=Path("I:/Production/Sketches"),
+            programs_dir=Path("I:/Production/Programs"),
+            completed_wj_dir=Path("I:/Production/Completed WJ"),
+        )
+        service = ProductionFileService(config)
+        target = Path("I:/Production/Completed WJ")
+        target_key = str(target).replace("\\", "/")
+        parent_key = str(target.parent).replace("\\", "/")
+
+        def fake_stat(path_obj, *args, **kwargs):
+            key = str(path_obj).replace("\\", "/")
+            if key == target_key:
+                raise FileNotFoundError(target_key)
+            if key == parent_key:
+                return mock.Mock(st_mode=0o040755)
+            raise FileNotFoundError(key)
+
+        with mock.patch("backend.production_files.os.name", "nt"), mock.patch.object(Path, "stat", fake_stat):
+            available, reason = service._probe_root("completed_wj", target)
+        self.assertFalse(available)
+        self.assertIn("Folder not found", reason)
+        self.assertIn("parent is reachable", reason)
+        self.assertNotIn("Mapped drive not reachable", reason)
+
+    def test_v0476_waterjet_folder_resolves_repeated_space_alias_and_machine_colors(self) -> None:
+        """Completed  WJ is accepted from a legacy one-space setting; machine colors persist."""
+        verification_root = ROOT / "_verification_v0476_waterjet_alias"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        actual_wj = verification_root / "Completed  WJ"
+        actual_wj.mkdir()
+        (actual_wj / "23824502.nce").write_text("waterjet complete", encoding="utf-8")
+        try:
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists",
+                sketches_dir=verification_root / "Sketches",
+                programs_dir=verification_root / "Programs",
+                completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.sketches_dir, config.programs_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+            service = ProductionFileService(config)
+            service.configure({
+                "lookbackDays": 7,
+                "machineColors": {"denver": "#13579b", "waterjet": "#8642c7"},
+            })
+            assets = service.assets("completed_wj", refresh=True)
+            self.assertEqual([asset.name for asset in assets], ["23824502.nce"])
+            self.assertEqual(Path(assets[0].root).name, "Completed  WJ")
+            self.assertEqual(service.settings_snapshot()["machineColors"]["denver"], "#13579b")
+            self.assertEqual(service.settings_snapshot()["machineColors"]["waterjet"], "#8642c7")
+            self.assertTrue(service.index_status()["resolvedRoots"]["completed_wj"].endswith("Completed  WJ"))
+            original_resolver = service._resolve_root_alias
+            service._resolve_root_alias = lambda _root: (_ for _ in ()).throw(AssertionError("index_status must not touch production shares"))
+            try:
+                self.assertTrue(service.index_status()["resolvedRoots"]["completed_wj"].endswith("Completed  WJ"))
+            finally:
+                service._resolve_root_alias = original_resolver
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0477_requested_sketch_pages_persist_without_reparsing_pdf(self) -> None:
+        """Exact PDF page matches survive a restart without turning indexing into a PDF crawl."""
+        verification_root = ROOT / "_verification_v0477_sketch_page_cache"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        sketches_dir = verification_root / "Sketches"
+        sketches_dir.mkdir()
+        try:
+            from reportlab.pdfgen import canvas
+
+            sketch = sketches_dir / "238477 Sketch.pdf"
+            pdf = canvas.Canvas(str(sketch))
+            pdf.drawString(180, 400, "238477.3 DENVER")
+            pdf.save()
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists",
+                sketches_dir=sketches_dir,
+                programs_dir=verification_root / "Programs",
+                completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.programs_dir, config.completed_wj_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+
+            service = ProductionFileService(config)
+            service.assets("sketch", refresh=True)
+            first = service.sketch_item_views("238477", "3")
+            self.assertEqual(first[0]["pageNumber"], 1)
+            service._persist_index()
+
+            with mock.patch.object(ProductionFileService, "_is_network_root", return_value=True):
+                restored = ProductionFileService(config)
+                with mock.patch("pypdf.PdfReader", side_effect=AssertionError("persisted page was reparsed")):
+                    second = restored.sketch_item_views("238477", "3")
+            self.assertEqual(second[0]["itemMarker"], "238477.3")
+            self.assertEqual(second[0]["machineHint"], "Denver CNC")
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
 
     def test_v0469_unified_priority_work_applies_existing_and_waits_for_future_import(self) -> None:
         """Unified Priority Work handles imported and future Rush/Remake/Both orders."""

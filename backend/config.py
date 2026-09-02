@@ -87,7 +87,7 @@ def load_config(root: Path) -> AppConfig:
     default_hardware_lists = production_root / "Hardware Lists"
     default_sketches = production_root / "Sketches"
     default_programs = production_root / "Programs"
-    default_completed_wj = production_root / "Completed WJ"
+    default_completed_wj = production_root / "Completed  WJ"
     database_path = Path(os.environ.get("DLS_DATABASE_PATH", str(default_db_path))).expanduser()
     temp_delivery_lists_dir = Path(os.environ.get("DLS_TEMP_DELIVERY_LISTS_PATH", str(default_temp_delivery_lists))).expanduser()
     hardware_lists_dir = Path(os.environ.get("DLS_HARDWARE_LISTS_PATH", str(default_hardware_lists))).expanduser()

@@ -1698,13 +1698,45 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_production_asset(self, asset_id: str, *, download: bool = False) -> None:
+    def send_production_asset(self, asset_id: str, *, download: bool = False, page_number: int = 0) -> None:
         """Stream one allow-listed production-share asset without exposing a raw path."""
         service = getattr(STORE, "production_files", None)
         asset = service.resolve_asset(asset_id) if service is not None else None
         if not asset:
             self.send_json({"error": "Production file was not found or is no longer available."}, HTTPStatus.NOT_FOUND)
             return
+        # v0.474: an item sketch may point at one page inside an order-level
+        # PDF. Extract just that page when possible so Preview/Print operates on
+        # the exact piece instead of forcing the operator to find the page again.
+        if page_number > 0 and asset.extension.lower() == ".pdf":
+            try:
+                import io
+                from pypdf import PdfReader, PdfWriter  # type: ignore
+
+                reader = PdfReader(str(asset.path))
+                page_index = int(page_number) - 1
+                if page_index < 0 or page_index >= len(reader.pages):
+                    raise IndexError("Sketch page is outside the PDF page range")
+                writer = PdfWriter()
+                writer.add_page(reader.pages[page_index])
+                output = io.BytesIO()
+                writer.write(output)
+                payload = output.getvalue()
+                safe_name = f"{asset.path.stem}-item-page-{page_number}.pdf".replace('"', "'")
+                disposition = "attachment" if download else "inline"
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Disposition", f'{disposition}; filename="{safe_name}"')
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            except Exception:
+                # If page extraction is unavailable on a workstation, fall back
+                # to the full order PDF rather than making the sketch unusable.
+                pass
+
         try:
             size = asset.path.stat().st_size
             body = asset.path.open("rb")
@@ -2329,21 +2361,10 @@ class Handler(SimpleHTTPRequestHandler):
             if not user:
                 return
             query = parse_qs(parsed.query).get("q", [""])[0]
+            # v0.474: Smart Search returns its database matches immediately.
+            # Fabrication state is hydrated in one background batch by the UI so
+            # PDF parsing/network metadata can never delay each search keystroke.
             results = STORE.global_search(query, user)
-            # v0.470: fabrication state is appended only to the already-capped
-            # search result set. The production file service is TTL-cached, so
-            # this does not rescan network shares for every keystroke.
-            service = getattr(STORE, "production_files", None)
-            if service is not None and str(query or "").strip():
-                for result in results:
-                    status = service.fabrication_status(
-                        result.get("order"),
-                        result.get("item"),
-                        result.get("job"),
-                        allow_content_read=False,
-                    )
-                    if status.get("machine"):
-                        result["fabrication"] = status
             self.send_json({"results": results})
             return
 
@@ -2351,9 +2372,11 @@ class Handler(SimpleHTTPRequestHandler):
             user = self.require_permission("global_search")
             if not user:
                 return
-            order_no = parse_qs(parsed.query).get("order", [""])[0]
+            params = parse_qs(parsed.query)
+            order_no = params.get("order", [""])[0]
+            include_production = str(params.get("production", ["1"])[0]).lower() not in {"0", "false", "no"}
             try:
-                self.send_json(STORE.get_order_detail(order_no, user))
+                self.send_json(STORE.get_order_detail(order_no, user, include_production=include_production))
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
             return
@@ -2375,7 +2398,11 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             asset_id = params.get("id", [""])[0]
             download = str(params.get("download", ["0"])[0]).lower() in {"1", "true", "yes"}
-            self.send_production_asset(asset_id, download=download)
+            try:
+                page_number = max(0, int(params.get("page", ["0"])[0] or 0))
+            except (TypeError, ValueError):
+                page_number = 0
+            self.send_production_asset(asset_id, download=download, page_number=page_number)
             return
 
         if parsed.path == "/api/reports/summary":
@@ -2876,6 +2903,28 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(OPERATIONS.record_packing_print(data, user["username"]))
+                return
+
+            if parsed.path == "/api/production-files/status-batch":
+                if not self.require_permission("global_search"):
+                    return
+                service = getattr(STORE, "production_files", None)
+                if service is None:
+                    self.send_json({"results": []})
+                    return
+                raw_items = data.get("items") if isinstance(data.get("items"), list) else []
+                results = []
+                for row in raw_items[:80]:
+                    if not isinstance(row, dict):
+                        continue
+                    order = str(row.get("order") or "").strip()
+                    item = str(row.get("item") or "").strip()
+                    job = str(row.get("job") or "").strip()
+                    if not order:
+                        continue
+                    status = service.fabrication_status(order, item, job, allow_content_read=True)
+                    results.append({"key": str(row.get("key") or f"{order}:{item}:{job}"), "order": order, "item": item, "job": job, "status": status})
+                self.send_json({"results": results})
                 return
 
             if parsed.path == "/api/production-files/open":

@@ -21871,3 +21871,207 @@ button.custom-select-trigger:hover:not(:disabled),
     grid-column: 1 / -1;
   }
 }
+
+/* v0.473 Recent production-index status ownership ------------------------- */
+.production-index-status-v472.is-checking i {
+  background: #2f70bd;
+  box-shadow: 0 0 0 3px #e1ecfb;
+}
+.production-cache-field-v472 > small {
+  color: #617087;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+/* ========================================================================== */
+/* v0.474 Machine/Production status readability + Lookup editor containment   */
+/* ========================================================================== */
+.production-settings-summary-v472 {
+  /* Give status cards the full modal width so long mapped-drive/UNC errors and
+     source paths stay readable instead of collapsing into narrow columns. */
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: start !important;
+}
+.production-settings-summary-v472 .production-index-grid-v472 {
+  grid-column: 1 !important;
+  width: 100% !important;
+}
+.production-settings-summary-v472 .production-index-time-v472 {
+  grid-column: 1 !important;
+  justify-self: end !important;
+}
+.production-index-status-v472 {
+  grid-template-columns: 10px minmax(0, 1fr) !important;
+  align-items: start !important;
+}
+.production-index-status-copy-v474 {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.production-index-status-v472 .production-index-status-copy-v474 > :is(b, small, em) {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.production-index-status-v472 .production-index-status-copy-v474 > b {
+  color: #263f59;
+  font-style: normal;
+}
+.production-index-status-v472 .production-index-status-copy-v474 > small {
+  color: #5f7488;
+  line-height: 1.28;
+}
+.production-index-status-v472 .production-index-status-copy-v474 > em {
+  color: #8293a4;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.25;
+}
+.production-index-status-v472.is-offline {
+  border-color: #e6b9bd;
+  background: #fff7f8;
+}
+.production-index-status-v472.is-offline .production-index-status-copy-v474 > small {
+  color: #9b2b38;
+  font-weight: 800;
+}
+.production-index-status-v472.is-checking {
+  border-color: #b8d2ec;
+  background: #f5f9fd;
+}
+.production-index-status-v472.is-checking i {
+  background: #3c82c3;
+  box-shadow: 0 0 0 3px #deedf9;
+}
+
+/* The focused Lookup editor owns one true foreground layer. The Admin tabs and
+   library remain visible as context, but are visibly inactive and cannot steal
+   clicks while a child editor is open. */
+#adminModal.is-lookup-editor-open-v474 .admin-modal-section-tabs {
+  opacity: .26 !important;
+  filter: saturate(.3) grayscale(.45) !important;
+  pointer-events: none !important;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+#adminModal.is-lookup-editor-open-v474 #adminModalBody > .lookup-manager-shell .lookup-manager-list {
+  opacity: .34;
+  filter: saturate(.45);
+  pointer-events: none;
+}
+.lookup-manager-shell.lookup-manager-v470 .lookup-editor-surface-v470.is-editor-open-v470 {
+  box-sizing: border-box !important;
+  isolation: isolate !important;
+  padding-top: 54px !important;
+}
+.lookup-editor-close-v470 {
+  /* Shared close-button ownership reads these variables at higher specificity.
+     Set the variables instead of overriding the component's positioning rules. */
+  --gui-close-position: absolute;
+  --gui-close-top: 12px;
+  --gui-close-right: 12px;
+  --gui-close-bottom: auto;
+  --gui-close-left: auto;
+  --gui-close-z-index: 8;
+  margin: 0 !important;
+}
+@media (max-width: 920px) {
+  .production-index-grid-v472 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ========================================================================== */
+/* v0.476 Production machine colors + stable full-width Lookup workspace      */
+/* ========================================================================== */
+.production-settings-tabs-v476 {
+  display:flex;
+  gap:5px;
+  padding:4px;
+  border:1px solid #d6e1eb;
+  border-radius:9px;
+  background:#eef4f8;
+}
+.production-settings-tabs-v476 button {
+  min-height:32px;
+  padding:6px 12px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:#60758a;
+  font-size:10px;
+  font-weight:900;
+  cursor:pointer;
+}
+.production-settings-tabs-v476 button.is-active { background:#fff; color:#1b66a2; box-shadow:0 1px 4px rgba(23,60,91,.12); }
+.production-settings-form-v472 [data-production-settings-pane-v476] { display:none !important; }
+.production-settings-form-v472[data-production-settings-active-v476="sources"] [data-production-settings-pane-v476="sources"],
+.production-settings-form-v472[data-production-settings-active-v476="machines"] [data-production-settings-pane-v476="machines"] { display:grid !important; }
+.production-machine-visuals-v476 { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+.production-machine-color-v476 > div { display:flex; align-items:center; gap:8px; min-height:38px; padding:6px 8px; border:1px solid #d6e0ea; border-radius:7px; background:#f8fafc; }
+.production-machine-color-v476 input[type="color"] { width:42px !important; height:28px !important; min-width:42px !important; padding:2px !important; border-radius:5px !important; }
+.production-machine-color-v476 b { color:#314c65; font-size:11px; }
+.production-index-status-copy-v474 > .is-resolved-v476 { color:#317351 !important; font-weight:800; }
+
+/* Every Lookup tab owns the entire body width. Older tab-specific grid rules no
+   longer get to squeeze the library into legacy left/right columns. */
+#adminModalBody > .lookup-manager-shell.lookup-manager-v470 {
+  display:block !important;
+  width:100% !important;
+  max-width:none !important;
+  min-width:0 !important;
+}
+#adminModalBody > .lookup-manager-shell.lookup-manager-v470 .lookup-manager-workspace,
+#adminModalBody > .lookup-manager-shell.lookup-manager-v470 .lookup-manager-list,
+#adminModalBody > .lookup-manager-shell.lookup-manager-v470 :is(.glass-profile-library-v349,.station-library-v346,.stage-definition-library-v346,.presentation-profile-library-v355) {
+  width:100% !important;
+  max-width:none !important;
+  min-width:0 !important;
+  grid-column:1 / -1 !important;
+}
+#adminModalBody > .lookup-manager-shell.lookup-manager-v470 .lookup-manager-workspace {
+  display:block !important;
+}
+
+/* v0.476 moves the active editor to document.body while open. This guarantees
+   the same full-screen gray treatment as other dialogs and avoids hover/z-index
+   flashing caused by the editor sharing the Lookup library stacking context. */
+body.is-lookup-editor-open-v476 { overflow:hidden; }
+.lookup-editor-backdrop-v476 {
+  position:fixed;
+  inset:0;
+  z-index:14990;
+  border:0;
+  margin:0;
+  padding:0;
+  background:rgba(11,29,46,.56);
+  backdrop-filter:blur(2px);
+  cursor:default;
+}
+.lookup-editor-modal-shell-v476 {
+  position:fixed !important;
+  inset:0 !important;
+  z-index:14991 !important;
+  pointer-events:none;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-surface-v470.is-editor-open-v470 {
+  display:block !important;
+  position:absolute !important;
+  inset:50% auto auto 50% !important;
+  transform:translate(-50%,-50%) !important;
+  width:min(780px,calc(100vw - 42px)) !important;
+  max-height:min(86vh,900px) !important;
+  overflow:auto !important;
+  z-index:1 !important;
+  margin:0 !important;
+  padding-top:54px !important;
+  border-radius:15px !important;
+  background:#fff !important;
+  box-shadow:0 30px 85px rgba(6,24,41,.38) !important;
+  pointer-events:auto;
+}
+@media (max-width:760px) {
+  .production-machine-visuals-v476 { grid-template-columns:1fr !important; }
+}
