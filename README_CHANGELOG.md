@@ -1,3 +1,58 @@
+## v0.502 - Manual A+W Sync Throughput, Verified Cut Evidence, and Compact Cutting Labels
+
+### Manual Direct A+W reliability / performance
+- Fixed a command-log observability bug in `Invoke-ConfiguredPython`: the PowerShell runner previously collected `@(& python ... 2>&1)` before logging the result, buffering every importer line until Python exited. The runner now consumes the subprocess pipeline line-by-line and mirrors each flushed `[IMPORT]` message into the authoritative automation log as it happens.
+- Removed the manual-only behavior that forced every selected delivery date through a full scanner rewrite. Manual **Sync A+W Directly** still queries and verifies every selected source date, while `PendingImportDates`, missing-stage detection, and `scanner_stage_drift()` determine which dates actually require database writes.
+- Narrowed A+W production enrichment by deriving `CandidateOptimizations` from the current order batch before reading `PROD_OPTIMIZATION`, `PROD_OPTI_STATISTICS`, and `PROD_OPTI_PLATES`. This avoids repeatedly ranking the complete optimization population for each delivery-order batch while preserving the configured SQL timeout and per-batch progress lines.
+- Added an explicit serialization STEP and payload-byte logging before the Python handoff so logs distinguish SQL query time, JSON transport time, and scanner-import time.
+
+### Cutting progress evidence
+- Extended the production payload/source snapshot with Optimization Sequence, Plate number, `PROD_OPTI_PLATES.CUT`, `STOCKBOOKED`, plate last-change data, and current-generation `MENGE` / `MENGE_CUT` evidence.
+- Added current-generation completion rules for verified `CUT=1 + STOCKBOOKED=1` plate evidence and `MENGE_CUT >= MENGE`. Automatic Cutting bookings and Optimization status 500 remain higher-priority evidence, and all sources remain guarded by the latest Internal Reject/generation cutoff.
+- The live Order **238330 / Item 1** evidence used for this regression is KEYINDEX **1**, Batch **9179**, Optimization **8366**, Sequence **4**, Plate **1**, `CUT=1`, `STOCKBOOKED=1`, Qty/Cut Qty **1/1**. The prior KEYINDEX 0 generation remains Batch 6502 / Optimization 8353 and cannot satisfy a later replacement after another reject.
+
+### Cutting Label / Order Details
+- Reworked the reconstructed label around one fixed 436 x 519 native geometry that follows the supplied A+W physical label more tightly. The Order Details version is a scaled thumbnail about three-quarters of the sketch width, while a new top-left maximize button opens the exact same label at native size.
+- Removed visible diagnostic placeholder wording from the Crystal process area; unknown process-formula content remains blank until its A+W source is proven.
+- Added generation-aware physical-piece allocation. Newest remake quantities are allocated first, with prior generations filling the remaining item quantity, so a one-piece remake on Qty 5 no longer produces five labels for the remake Batch.
+
+### Diagnostics
+- Fixed the v0.501 probe's blank-Optimization path. When Order/Item is supplied, `Probe-AWGlassLabels.ps1` now auto-resolves the newest available Optimization using `PROD_JOBITEM.OPTIMIZATION` with `PROD_OPTI_SEQUENCE` fallback before optimization-gated outputs run, preventing the observed stop around output 34.
+
+### Version / validation
+- Advanced application/browser cache references to **v0.502**. SQLite remains schema **16**; no migration or database reset is required.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **199 pass / 129 known legacy failures**, with **0 new failures**.
+
+## v0.501 - Piece-Level Cutting Labels and Evidence-Consistent Cutting Progress
+
+### Cutting progress accuracy
+- Changed an absent `aw_cutting_generations` row from **Not Optimized** to an explicit unknown/no-A+W-data state. A missing synchronization row is not proof that A+W never optimized the pane.
+- Reconciled full Order Details with downstream fabrication evidence: when the maintained Denver/Waterjet service has current-generation `fabricated = true` evidence, Cutting is shown complete because fabrication cannot physically precede Cutting. The existing reject cutoff continues to reject stale pre-Internal-Reject fabrication files.
+- The lightweight first paint shows **CHECKING** for unknown Cutting data until production-file hydration completes, preventing a misleading NOT OPTIMIZED flash.
+
+### Cutting Labels / Crystal lineage
+- Expanded Order Details from one item-level label preview to one expandable Cutting Label per physical piece. Qty 5 exposes five piece labels while only the first opens by default to keep the GUI compact.
+- Carried the newly proven Crystal source fields through normal Direct A+W production sync: `BW_AUFTR_KOPF.AH_NAME1`, `BEST_TEXT1`, `OR_TOUR`, `BW_AUFTR_POS.PROD_BEZ1`, and position quantity/width/height. These values are persisted in the existing generation `source_payload_json`, so SQLite remains schema 16.
+- Corrected the `(SG)` line to prefer A+W `BEST_TEXT1`. Placeholder route values such as `<n.e.>` are treated as missing and fall back to the scanner-maintained route rather than appearing on the label.
+- Added scanner piece sequence (`1 / N`) to each reconstructed label while keeping the exact Crystal bottom-right formula explicitly unverified.
+- Extended `Probe-AWGlassLabels.ps1` with outputs `58-selected-order-cutting-bridge-v501.csv`, `59-selected-order-optimization-sequence-v501.csv`, and `60-selected-order-process-after-cutting-v501.csv` so a missing Cutting/Optimization state can be diagnosed from Order/Item without already knowing an Optimization number.
+
+### Version / validation
+- Advanced application/browser cache references to **v0.501**. SQLite remains schema **16**; no migration or database reset is required.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **198 pass / 129 known legacy failures**, with no new failures.
+
+## v0.500 - Reject Quantity Accuracy, Faster Startup, and Crystal Label Reconstruction
+
+- Corrected A+W Internal Reject quantity handling end-to-end for multi-piece lines. A reject quantity of one now has an explicit regression proving a Qty 6 line moves from 6 scanned to 5, not to zero, across synchronized stage copies. Scan-page IR counters now sum the actual `internal_reject_count` pieces instead of the full quantity of every flagged line.
+- Shortened A+W reject-reset history presentation across Last Scan, Recent Scans, and All Scans to concise operator text such as `A+W reject · 1 pc reset`; internal `awrej-...` ownership keys stay out of the visible UI. `reject_reset` is now a successful operational event for history status indicators.
+- Kept `scan_events` append-only while correcting legacy Reported By display. `_get_scan_events` resolves the authoritative A+W `timeline_employee` from the immutable event key embedded in legacy/current reject-reset metadata and returns it as a read-time user override; Rejects and Scan history therefore agree without rewriting audit history.
+- Removed historical pending rollback replay from normal server initialization. `ensure_aw_internal_reject_mirrors()` now defaults to missing-mirror repair only, while the post-delivery-import path explicitly calls `retry_pending_rollbacks=True` so A+W rejects received before their delivery lines still reset the correct physical quantity as soon as the order is imported.
+- Rebuilt the Order Details A+W Cutting Label card around the supplied Crystal Reports designer/reference label. The reconstruction now follows the verified placement of Customer/date, Route, REMAKE indicator, (SG) `BEST_TEXT1`, (AW) Order/Item, Batch, Optimization, Glass, Size, Cutting context, Weight, and square footage.
+- Resolved the large Cutting Label barcode from the supplied physical label instead of inventing a database formula. Its bar/space pattern matches **Code 39** and the sample Order `231506` / Item `1` resolves to `T200231506001000`, exactly matching the scanner's existing canonical `T200 + Order(6) + Item(3) + 000` contract. The reconstructed label now renders that canonical value as native Code 39; the exact `Processes_after_cutting` and plate-counter Crystal formulas remain under investigation.
+- Extended `scripts/diagnostics/Probe-AWGlassLabels.ps1` with outputs `55-selected-order-crystal-header-anchors.csv`, `56-selected-order-crystal-item-anchors.csv`, and `57-crystal-screenshot-field-candidates.csv`, using the RPT screenshot's visible `AH_NAME1`, `BEST_TEXT1`, `OR_TOUR`, `PROD_BEZ1`, weight/area, BNUMB, plate, and dimension anchors to narrow the remaining label reverse-engineering work.
+- Advanced application/browser cache references to **v0.500**. SQLite remains schema **16**; no migration or database reset is required.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **197 pass / 129 known legacy failures**, with no new failures.
+
 ## v0.499 - Unified A+W Sync, Production Settings, and Bounded Cutting Queries
 
 ### Automation Control Center
@@ -20,7 +75,7 @@
 - Advanced application/cache references to **v0.499**. SQLite remains schema **16**.
 - Final verification: **53/53 behavioral/backend tests pass**; static structure is **196 pass / 129 known legacy failures**, with no new failures.
 
-## v0.499 - A+W Cutting Progress, Batch/Optimization History, and Cutting Label Context
+## v0.498 - A+W Cutting Progress, Batch/Optimization History, and Cutting Label Context
 
 ### A+W production synchronization
 - Added a bounded SELECT-only Cutting metadata query to the maintained direct A+W workflow. Only order numbers already present in the direct delivery payload are queried, in bounded chunks, so production enrichment does not become another broad A+W scan.
@@ -33,7 +88,7 @@
 - Added Batch and Optimization facts plus an **A+W Cutting Label Data** card with Batch, Optimization, glass, size, weight, area, barcode identifier, remake generation, and prior-generation history. The scanner does not generate a fake Crystal barcode while the exact `Prodman_CuttingLabel_Optimisation.rpt` barcode expression remains unverified.
 
 ### Version / validation
-- Advanced application/cache references to **v0.499** and SQLite schema to **16**.
+- Advanced application/cache references to **v0.498** and SQLite schema to **16**.
 - Final verification: **53/53 behavioral/backend tests pass** and static structure is **195 pass / 129 known legacy failures**, with no new failures. A real v0.497/schema-15 database was upgraded to schema 16 and passed the maintained SQLite integrity checker.
 
 ## v0.497 - Optimization Status Summary SQL Compatibility Fix

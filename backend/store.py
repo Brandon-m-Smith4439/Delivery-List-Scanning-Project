@@ -2018,7 +2018,7 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             rack_move_to = match.group(2).strip()
 
     return {
-        "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update", "rack_move"},
+        "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update", "rack_move", "reject_reset"},
         "isManual": row["event_type"] == "manual_scan",
         "barcode": row["canonical_barcode"] or row["barcode"],
         "raw": row["barcode"],
@@ -2031,7 +2031,10 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "rackMoveFrom": rack_move_from,
         "rackMoveTo": rack_move_to,
         "time": row["created_at"],
-        "user": row["user_name"],
+        # v0.500: scan_events remains append-only. A+W reject actor corrections
+        # are therefore projected at read time from the authoritative reject
+        # booking employee instead of mutating historical scan rows.
+        "user": row_value(row, "event_user_override", row["user_name"]) or row["user_name"],
         "station": row["station"],
         "eventType": row["event_type"],
         "qtyDelta": row["qty_delta"] if "qty_delta" in row.keys() else 0,
@@ -4979,8 +4982,8 @@ class BaseDeliveryStore:
                     str(row_value(row, "barcode", "") or ""),
                     rejected_by or "A+W",
                     location or "A+W Reject",
-                    f"A+W Internal reject reset {order_no}-{item_no} ({event_key})",
-                    f"{reason} at {location}; A+W rejected at {rejected_at}",
+                    f"A+W Internal Reject · {requested_qty} pc reset",
+                    f"{reason} at {location}; A+W rejected at {rejected_at}; Source event {event_key}",
                     -reduction,
                     rollback_at,
                 ),
@@ -5073,21 +5076,21 @@ class BaseDeliveryStore:
             "appliedAt": rollback_at,
         }
 
-    def ensure_aw_internal_reject_mirrors(self) -> dict[str, Any]:
-        """Mirror any already-cached v0.484 A+W events missing Internal Reject rows.
+    def ensure_aw_internal_reject_mirrors(self, *, retry_pending_rollbacks: bool = False) -> dict[str, Any]:
+        """Repair cached A+W mirrors without making normal startup replay history.
 
-        Migration 13 adds the mirror ownership fields but deliberately does not
-        duplicate business logic in SQL. On the first v0.485 startup this method
-        replays only cached raw A+W payloads whose logical event has no
-        ``reject_events`` mirror yet. Subsequent starts are effectively no-ops.
+        Startup only needs to backfill a missing ``reject_events`` mirror and
+        correct legacy actor attribution. Pending operational rollbacks are retried
+        explicitly after delivery import, when the matching scanner lines may have
+        just been created. Keeping that retry out of normal startup prevents every
+        historical A+W reject that never matched an active line from being replayed
+        and reparsed on each server launch.
         """
         actor_corrections = 0
         with self.connect() as con:
             # v0.489 accuracy repair: PROD_BREAKAGE.LASTCHANGEUSER is a mutable
             # source-row maintenance user. The exact same-second BOOK_TYPE=1
             # FS_BOOK_HISTORY employee is the actual reject actor when present.
-            # Existing v0.484-v0.488 mirrors already retain timeline_employee,
-            # so correct them immediately on startup without replaying rollback.
             actor_corrections += int(con.execute(
                 """
                 UPDATE aw_reject_events
@@ -5113,14 +5116,18 @@ class BaseDeliveryStore:
                   )
                 """
             ).rowcount or 0)
+            # scan_events is append-only by design. Legacy A+W reject-reset
+            # actor corrections are projected in _get_scan_events below so the
+            # history remains immutable while the UI still shows the verified actor.
+            pending_clause = " OR src.rollback_applied_at=''" if retry_pending_rollbacks else ""
             rows = con.execute(
-                """
+                f"""
                 SELECT src.aw_row_id, src.source_payload_json
                 FROM aw_reject_source_rows src
                 JOIN aw_reject_events e ON e.event_key = src.event_key
                 LEFT JOIN reject_events r
                   ON r.source_type='aw' AND r.source_external_key=e.event_key
-                WHERE r.id IS NULL OR src.rollback_applied_at=''
+                WHERE r.id IS NULL{pending_clause}
                 ORDER BY e.breakage_date, src.event_key, src.bom_id
                 """
             ).fetchall()
@@ -5143,14 +5150,16 @@ class BaseDeliveryStore:
                 "mirroredInternalRejects": 0,
                 "actorCorrections": actor_corrections,
                 "startupBackfill": True,
+                "pendingRollbackRetry": bool(retry_pending_rollbacks),
             }
         result = self.sync_aw_reject_rows(
             payloads,
-            user="system-v485-aw-backfill",
-            source_window={"mode": "startup-cache-backfill"},
+            user="system-v500-aw-reconciliation",
+            source_window={"mode": "post-import-pending-retry" if retry_pending_rollbacks else "startup-cache-backfill"},
         )
         result["actorCorrections"] = actor_corrections
         result["startupBackfill"] = True
+        result["pendingRollbackRetry"] = bool(retry_pending_rollbacks)
         return result
 
     def list_aw_rejects(
@@ -5670,6 +5679,18 @@ class BaseDeliveryStore:
 
     @staticmethod
     def _aw_cutting_public_row(row: Any) -> dict[str, Any]:
+        # v0.501: label-only A+W fields live inside source_payload_json so label
+        # reconstruction can improve without another schema migration. Keeping
+        # them with the source snapshot also makes their provenance explicit.
+        source_payload: dict[str, Any] = {}
+        try:
+            parsed_payload = json.loads(str(row_value(row, "source_payload_json", "{}") or "{}"))
+            if isinstance(parsed_payload, dict):
+                source_payload = parsed_payload
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source_payload = {}
+        label_context = source_payload.get("labelContext") if isinstance(source_payload.get("labelContext"), dict) else {}
+        cut_evidence = source_payload.get("cutEvidence") if isinstance(source_payload.get("cutEvidence"), dict) else {}
         return {
             "order": str(row_value(row, "order_no", "") or ""),
             "item": str(row_value(row, "item_no", "") or ""),
@@ -5693,6 +5714,21 @@ class BaseDeliveryStore:
             "cuttingBarcodeStart": str(row_value(row, "cutting_barcode_start", "") or "").strip(),
             "weight": float(row_value(row, "weight", 0) or 0),
             "surfaceArea": float(row_value(row, "surface_area", 0) or 0),
+            "customerName": str(label_context.get("customerName") or "").strip(),
+            "sgBestText1": str(label_context.get("sgBestText1") or "").strip(),
+            "routeText": str(label_context.get("routeText") or "").strip(),
+            "productDescription": str(label_context.get("productDescription") or "").strip(),
+            "positionQuantity": float(label_context.get("quantity") or 0),
+            "positionWidth": float(label_context.get("width") or 0),
+            "positionHeight": float(label_context.get("height") or 0),
+            "quantity": float(cut_evidence.get("quantity") or 0),
+            "cutQuantity": float(cut_evidence.get("cutQuantity") or 0),
+            "optimizationSequence": int(cut_evidence.get("optimizationSequence") or 0),
+            "optimizationPlateNumber": int(cut_evidence.get("plateNumber") or 0),
+            "optimizationPlateCut": bool(cut_evidence.get("plateCut")),
+            "optimizationPlateStockBooked": bool(cut_evidence.get("plateStockBooked")),
+            "optimizationPlateLastChangedAt": str(cut_evidence.get("plateLastChangedAt") or ""),
+            "optimizationPlateLastChangedUser": str(cut_evidence.get("plateLastChangedUser") or ""),
             "sourceRowCount": int(row_value(row, "source_row_count", 0) or 0),
             "syncedAt": str(row_value(row, "synced_at", "") or ""),
         }
@@ -5738,6 +5774,12 @@ class BaseDeliveryStore:
                 "optimizationMode": int(raw.get("optimizationMode") or 0),
                 "optimizationDate": str(raw.get("optimizationDate") or "").strip(),
                 "optimizationLastChangedAt": str(raw.get("optimizationLastChangedAt") or "").strip(),
+                "optimizationSequence": int(raw.get("optimizationSequence") or 0),
+                "optimizationPlateNumber": int(raw.get("optimizationPlateNumber") or 0),
+                "optimizationPlateCut": int(raw.get("optimizationPlateCut") or 0),
+                "optimizationPlateStockBooked": int(raw.get("optimizationPlateStockBooked") or 0),
+                "optimizationPlateLastChangedAt": str(raw.get("optimizationPlateLastChangedAt") or "").strip(),
+                "optimizationPlateLastChangedUser": str(raw.get("optimizationPlateLastChangedUser") or "").strip(),
                 "cutCompletedAt": str(raw.get("cuttingBookingAt") or "").strip(),
                 "cutCompletedBy": str(raw.get("cuttingBookingEmployee") or "").strip(),
                 "cutBookingRowId": str(raw.get("cuttingBookingRowId") or "").strip(),
@@ -5748,6 +5790,13 @@ class BaseDeliveryStore:
                 "cutQuantity": float(raw.get("cutQuantity") or 0),
                 "weight": float(raw.get("weight") or 0),
                 "surfaceArea": float(raw.get("surfaceArea") or 0),
+                "customerName": str(raw.get("customerName") or "").strip(),
+                "sgBestText1": str(raw.get("sgBestText1") or "").strip(),
+                "routeText": str(raw.get("routeText") or "").strip(),
+                "productDescription": str(raw.get("productDescription") or "").strip(),
+                "positionQuantity": float(raw.get("positionQuantity") or 0),
+                "positionWidth": float(raw.get("positionWidth") or 0),
+                "positionHeight": float(raw.get("positionHeight") or 0),
             })
 
         grouped: dict[tuple[str, str, int, str], list[dict[str, Any]]] = {}
@@ -5774,19 +5823,58 @@ class BaseDeliveryStore:
                 optimization_row = next((row for row in ranked if int(row.get("optimization") or 0) == optimization and optimization > 0), primary)
                 booking_rows = [row for row in generation_rows if str(row.get("cutCompletedAt") or "").strip()]
                 booking_row = max(booking_rows, key=lambda row: self._aw_cutting_timestamp_epoch(row.get("cutCompletedAt"))) if booking_rows else {}
+                optimization_rows = [
+                    row for row in generation_rows
+                    if optimization > 0 and int(row.get("optimization") or 0) == optimization
+                ] or list(generation_rows)
+                plate_row = max(
+                    optimization_rows,
+                    key=lambda row: (
+                        1 if int(row.get("optimizationPlateCut") or 0) > 0 else 0,
+                        1 if int(row.get("optimizationPlateStockBooked") or 0) > 0 else 0,
+                        self._aw_cutting_timestamp_epoch(row.get("optimizationPlateLastChangedAt")),
+                    ),
+                )
                 item_barcode = next((str(row.get("itemBarcodeStart") or "").strip() for row in ranked if str(row.get("itemBarcodeStart") or "").strip()), "")
                 cut_barcode = next((str(row.get("bomBarcodeStart") or "").strip() for row in ranked if int(row.get("aggregateId") or 0) == 1000 and str(row.get("bomBarcodeStart") or "").strip()), "")
                 if not cut_barcode:
                     cut_barcode = next((str(row.get("bomBarcodeStart") or "").strip() for row in ranked if str(row.get("bomBarcodeStart") or "").strip()), "")
                 source_payload = {
-                    "source": "A+W PROD_JOBITEM/PROD_JOB/PROD_OPTIMIZATION/FS_BOOK_HISTORY",
+                    "source": "A+W PROD_JOBITEM/PROD_JOB/PROD_OPTI_SEQUENCE/PROD_OPTIMIZATION/PROD_OPTI_PLATES/FS_BOOK_HISTORY",
                     "sourceWindow": dict(source_window or {}),
+                    "labelContext": {
+                        "customerName": next((str(row.get("customerName") or "").strip() for row in ranked if str(row.get("customerName") or "").strip()), ""),
+                        "sgBestText1": next((str(row.get("sgBestText1") or "").strip() for row in ranked if str(row.get("sgBestText1") or "").strip()), ""),
+                        "routeText": next((str(row.get("routeText") or "").strip() for row in ranked if str(row.get("routeText") or "").strip()), ""),
+                        "productDescription": next((str(row.get("productDescription") or "").strip() for row in ranked if str(row.get("productDescription") or "").strip()), ""),
+                        "quantity": max((float(row.get("positionQuantity") or 0) for row in generation_rows), default=0.0),
+                        "width": max((float(row.get("positionWidth") or 0) for row in generation_rows), default=0.0),
+                        "height": max((float(row.get("positionHeight") or 0) for row in generation_rows), default=0.0),
+                    },
+                    # v0.502 keeps non-schema production evidence in the immutable
+                    # source snapshot. The probe for 238330 proved current-generation
+                    # PROD_OPTI_PLATES CUT/STOCKBOOKED evidence and MENGE_CUT can
+                    # exist even when the cached optimization status is late.
+                    "cutEvidence": {
+                        "quantity": max((float(row.get("quantity") or 0) for row in generation_rows), default=0.0),
+                        "cutQuantity": max((float(row.get("cutQuantity") or 0) for row in generation_rows), default=0.0),
+                        "optimizationSequence": int(plate_row.get("optimizationSequence") or 0),
+                        "plateNumber": int(plate_row.get("optimizationPlateNumber") or 0),
+                        "plateCut": any(int(row.get("optimizationPlateCut") or 0) > 0 for row in optimization_rows),
+                        "plateStockBooked": any(int(row.get("optimizationPlateStockBooked") or 0) > 0 for row in optimization_rows),
+                        "plateLastChangedAt": str(plate_row.get("optimizationPlateLastChangedAt") or ""),
+                        "plateLastChangedUser": str(plate_row.get("optimizationPlateLastChangedUser") or ""),
+                    },
                     "sourceRows": [
                         {
                             "sourceRowId": row.get("sourceRowId") or "",
                             "bomId": int(row.get("bomId") or 0),
                             "aggregateId": int(row.get("aggregateId") or 0),
                             "optimization": int(row.get("optimization") or 0),
+                            "optimizationSequence": int(row.get("optimizationSequence") or 0),
+                            "optimizationPlateNumber": int(row.get("optimizationPlateNumber") or 0),
+                            "optimizationPlateCut": int(row.get("optimizationPlateCut") or 0),
+                            "optimizationPlateStockBooked": int(row.get("optimizationPlateStockBooked") or 0),
                             "quantity": row.get("quantity") or 0,
                             "cutQuantity": row.get("cutQuantity") or 0,
                         }
@@ -5878,7 +5966,7 @@ class BaseDeliveryStore:
         if clean_item.isdigit():
             clean_item = clean_item.zfill(3)
         if not clean_order or not clean_item:
-            return {"state": "not_optimized", "label": "Not Optimized", "complete": False, "history": []}
+            return {"state": "unknown", "label": "Cutting Data Unavailable", "complete": False, "dataAvailable": False, "history": []}
         source_rows = list(rows) if rows is not None else None
         if source_rows is None:
             with self.connect() as con:
@@ -5893,7 +5981,10 @@ class BaseDeliveryStore:
         history = [self._aw_cutting_public_row(row) for row in source_rows]
         history.sort(key=lambda value: (int(value.get("keyIndex") or 0), self._aw_cutting_timestamp_epoch(value.get("batchCreatedAt")), str(value.get("batch") or "")), reverse=True)
         if not history:
-            return {"state": "not_optimized", "label": "Not Optimized", "complete": False, "history": []}
+            # No synchronized A+W generation is not evidence that the pane was
+            # never optimized. v0.501 keeps the state unknown until A+W or a
+            # downstream fabrication artifact supplies positive evidence.
+            return {"state": "unknown", "label": "No A+W Cutting Data", "complete": False, "dataAvailable": False, "history": []}
         current = dict(history[0])
         reject_epoch = self._aw_cutting_timestamp_epoch(last_rejected_at)
         batch_epoch = self._aw_cutting_timestamp_epoch(current.get("batchCreatedAt"))
@@ -5906,7 +5997,26 @@ class BaseDeliveryStore:
         # PROD_JOB status also reaches 500 for old completed batches, but it is
         # broader than physical cutting and must not independently mark a pane cut.
         booked_status = optimization_status == AW_OPTI_STATUS_BOOKED
-        if cut_after_reject or (has_current_generation and booked_status):
+        source_quantity = float(current.get("quantity") or 0)
+        source_cut_quantity = float(current.get("cutQuantity") or 0)
+        quantity_cut_complete = source_quantity > 0 and source_cut_quantity >= source_quantity
+        # v0.502: the live 238330 probe proves PROD_OPTI_PLATES exposes CUT=1 and
+        # STOCKBOOKED=1 for the current remake optimization (8366) while the pane
+        # is already physically downstream. Treat the pair as positive current-
+        # generation cut evidence; never let an old generation satisfy a newer
+        # reject because has_current_generation remains mandatory.
+        plate_cut_complete = bool(current.get("optimizationPlateCut")) and bool(current.get("optimizationPlateStockBooked"))
+        cut_evidence_source = ""
+        if cut_after_reject:
+            cut_evidence_source = "automatic_cutting_booking"
+        elif has_current_generation and booked_status:
+            cut_evidence_source = "optimization_status_500"
+        elif has_current_generation and plate_cut_complete:
+            cut_evidence_source = "optimization_plate_cut"
+        elif has_current_generation and quantity_cut_complete:
+            cut_evidence_source = "prod_jobitem_cut_quantity"
+
+        if cut_evidence_source:
             state = "cut"
             label = "Cut"
             complete = True
@@ -5934,10 +6044,12 @@ class BaseDeliveryStore:
             "state": state,
             "label": label,
             "complete": complete,
+            "dataAvailable": True,
             "released": state == "released",
             "needsRecutting": state == "needs_recut",
             "evidenceAfter": str(last_rejected_at or ""),
             "history": history,
+            "evidenceSource": cut_evidence_source or str(current.get("evidenceSource") or ""),
         })
         return current
 
@@ -6031,9 +6143,31 @@ class BaseDeliveryStore:
         service = getattr(self, "production_files", None)
         if include_production and service is not None:
             for item in items:
-                item["productionFiles"] = service.item_assets(
+                item_assets = service.item_assets(
                     clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt")
                 )
+                item["productionFiles"] = item_assets
+                fabrication = item_assets.get("fabrication") if isinstance(item_assets, dict) else {}
+                cutting = item.get("cutting") if isinstance(item.get("cutting"), dict) else {}
+                # v0.501 consistency guard: verified Denver/Waterjet completion is
+                # downstream of Cutting. If current-generation fabrication evidence
+                # exists (production_files already rejects evidence older than the
+                # latest Internal Reject), Cutting cannot truthfully display NOT
+                # OPTIMIZED merely because the A+W production enrichment row is
+                # missing or late. Preserve the raw A+W history and mark the source.
+                if isinstance(fabrication, dict) and fabrication.get("fabricated") is True and not cutting.get("complete"):
+                    cutting = dict(cutting)
+                    cutting.update({
+                        "state": "cut",
+                        "label": "Cut",
+                        "complete": True,
+                        "released": False,
+                        "needsRecutting": False,
+                        "inferredFromFabrication": True,
+                        "evidenceSource": "downstream_fabrication",
+                        "fabricationMachine": str(fabrication.get("actualMachine") or fabrication.get("machine") or ""),
+                    })
+                    item["cutting"] = cutting
         return {
             "order": clean_order,
             "customer": first.get("customer") or "",
@@ -11082,6 +11216,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             SELECT se.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.dimensions,
                    li.customer, li.route, li.job, li.product, li.suggested_bay,
                    dl.stage AS list_stage,
+                   CASE WHEN se.event_type='reject_reset' THEN COALESCE((
+                       SELECT aw.timeline_employee
+                       FROM aw_reject_events aw
+                       WHERE TRIM(COALESCE(aw.timeline_employee,''))<>''
+                         AND (
+                           INSTR(COALESCE(se.message,''), aw.event_key)>0
+                           OR INSTR(COALESCE(se.reason,''), aw.event_key)>0
+                         )
+                       ORDER BY aw.breakage_date DESC
+                       LIMIT 1
+                   ), se.user_name) ELSE se.user_name END AS event_user_override,
                    (
                        SELECT r.rack_code
                        FROM rack_items ri

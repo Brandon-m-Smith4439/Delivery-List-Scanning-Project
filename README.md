@@ -1,16 +1,55 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.499**. SQLite remains the active/default backend.
+Current maintained release: **v0.502**. SQLite remains the active/default backend.
 
-v0.499 consolidates manual A+W synchronization, adds dedicated Batch/Optimization/Cutting automation settings, and hardens the production query so Direct A+W Sync remains bounded and visibly progresses instead of appearing frozen.
+v0.502 focuses on the long-running manual **Sync A+W Directly** workflow, uses the live Order 238330 probe to make Cutting completion more authoritative, and turns the reconstructed Crystal Cutting Label into a small true-proportion thumbnail with a maximized view.
 
-## Install v0.499
+## Install v0.502
 
 1. Stop the Delivery List Scanner server.
-2. Copy the v0.499 changed files over the matching paths in your current project.
-3. Start the server. SQLite remains schema **16**; no new database migration is required from v0.498.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.499 cache keys are used.
-5. Open **Automation Control Center -> A+W Production** and review the new production/query settings, then run **Sync A+W Directly** once.
+2. Copy the v0.502 changed files over the matching paths in your current project.
+3. Start the server. SQLite remains schema **16**; no database migration or reset is required from v0.501.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.502 cache keys are used.
+5. Run **Sync A+W Directly** once. Status & Logs should now continue printing the Python importer phase instead of appearing frozen after the PowerShell handoff.
+6. Re-open Order Details for a recent item such as Order 238330 / Item 1. Its newest A+W generation can be confirmed Cut from the verified Optimization plate and cut-quantity evidence even if another Cutting lifecycle field is late.
+
+## v0.502 highlights
+
+- **Fixed the main reason a manual A+W run looked frozen.** `Invoke-ConfiguredPython` previously wrapped the entire Python subprocess in an array expression, which buffered the importer's already-flushed `[IMPORT]` lines until Python exited. The runner now consumes stdout/stderr as a live pipeline and writes each line immediately to the authoritative automation log.
+- **Stopped manual runs from needlessly rewriting every selected delivery date.** A manual Sync still queries and verifies the full configured A+W date window, but only source-changed, missing, or scanner-drifted dates are imported. The previous manual-only force path could rewrite roughly 15-20 already synchronized dates and turn a simple refresh into a many-minute database operation.
+- **Made the new production query substantially narrower.** Optimization status/statistics and plate state are now ranked only for Optimization numbers resolved from the current order batch instead of ranking the complete A+W optimization tables for every SQL batch. Per-batch timeout/progress logging remains in place.
+- **Added verified plate/cut-quantity Cutting evidence.** The live Order 238330 / Item 1 probe proves current remake generation `KEYINDEX 1`, Batch **9179**, Optimization **8366**, Sequence **4**, Plate **1**, `CUT=1`, `STOCKBOOKED=1`, `MENGE=1`, and `MENGE_CUT=1`. Those fields now travel through the normal synchronization source snapshot, and either the CUT+STOCKBOOKED pair or a fully cut `MENGE_CUT` can confirm the current generation as **CUT**. The existing latest-Internal-Reject cutoff still prevents an older generation from completing a newer remake.
+- **Fixed blank-Optimization probe runs.** When Order/Item is known but the operator presses Enter at the Optimization prompt, the probe now resolves the newest generation's Optimization from `PROD_JOBITEM` with `PROD_OPTI_SEQUENCE` fallback before entering the optimization-specific output block. This fixes the observed stop around output 34 for orders that already have an A+W optimization.
+- **Cutting Labels are much smaller in Order Details.** The label section is constrained to roughly three-quarters of the sketch width. The actual reconstructed label keeps one fixed **436 x 519** physical geometry and is scaled down only for the thumbnail, preventing the compact and enlarged versions from drifting apart.
+- **Added a Cutting Label maximize control.** Each expanded piece label has a small top-left maximize button that opens the same label at native size in a focused modal; Escape, the close button, or the backdrop closes it.
+- **Tightened the reconstructed Crystal layout.** Customer/date, centered Route/REMAKE, barcode, `(SG)`, `(AW)`, Batch, Optimization, product, dimensions, process area, and right-side weight/square-foot/piece counters now use fixed positions matching the supplied A+W label proportions much more closely. Unknown Crystal process text is left blank instead of showing diagnostic wording on the operator label.
+- **Piece labels now respect remake quantities.** A Qty 5 item with a one-piece current remake generation is rendered as one current-remake Batch/Optimization label plus four labels from the prior physical generation rather than incorrectly showing all five pieces as the newest remake.
+- Application/cache references advance to **v0.502**. SQLite remains schema **16**.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **199 pass / 129 known legacy failures**, with **0 new failures**.
+
+## v0.501 highlights
+
+- **Missing A+W data is no longer mislabeled as Not Optimized.** `aw_cutting_state()` returns an explicit unknown/no-data state when no synchronized generation exists. While the lightweight Order Details payload hydrates, the card shows **CHECKING** rather than making a false production claim.
+- **Downstream fabrication now reconciles upstream Cutting.** Verified current-generation Denver/Waterjet completion is downstream of Cutting, so a fabricated pane is presented as **CUT** even if Batch/Optimization enrichment has not caught up. Reject-aware fabrication evidence remains protected by the existing latest-Internal-Reject cutoff; stale pre-reject `.egl`/`.nce` evidence cannot satisfy this fallback.
+- **One Cutting Label is available for every physical piece.** An item Qty 5 exposes Piece 1 through Piece 5 as compact expandable label cards in Order Details. The first is open by default so the GUI stays readable instead of stacking five full-height labels.
+- **Crystal field lineage is now used by the live sync.** Direct A+W production enrichment reads `BW_AUFTR_KOPF.AH_NAME1`, `BEST_TEXT1`, `OR_TOUR`, and `BW_AUFTR_POS.PROD_BEZ1` plus position quantity/dimensions and retains them inside each generation's existing source snapshot. No schema migration is required.
+- **The `(SG)` label line is corrected.** The supplied probe proves this is `BEST_TEXT1`; Order Details now prefers that A+W value and uses the scanner Job text only as a compatibility fallback for generations synchronized before v0.501. A+W placeholder route tokens such as `<n.e.>` are suppressed so the scanner's maintained route remains visible instead.
+- **Piece counters are represented separately from unproven Crystal logic.** The label shows the scanner physical sequence (`1 / 5`, `2 / 5`, etc.) while the exact Crystal bottom-right formula remains marked as under investigation rather than being presented as a proven A+W formula.
+- **Probe outputs 58-60 target the Cutting mismatch directly.** They work from Order/Item even when the Optimization number is unknown and expose the current `PROD_JOBITEM -> PROD_JOB -> PROD_OPTI_SEQUENCE` bridge, optimization/plate rows, and `ZW_AUFTR_ZEIT` downstream process route.
+- Application/cache references advance to **v0.501**. SQLite remains schema **16**.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **198 pass / 129 known legacy failures**, with no new failures.
+
+## v0.500 highlights
+
+- **Internal Reject quantity is now piece-accurate.** An A+W reject for Qty **1** on an Order/Item with line Qty **6** reduces scanner progress by exactly one physical piece per synchronized stage copy (`6 -> 5`), and the Scan-page **IR** filter badge sums `internalRejectCount` rather than counting all six pieces on the flagged line.
+- **A+W reject history is much cleaner in Scan views.** Last Scan, Recent Scans, and All Scans now render concise text such as **`A+W reject · 1 pc reset`** instead of exposing the internal `awrej-...` event key. Reject resets are treated as successful operational events rather than scan errors.
+- **Reported By stays tied to the verified A+W booking employee without mutating append-only scan history.** Old reject-reset scan rows can contain a stale `PROD_BREAKAGE.LASTCHANGEUSER`; v0.500 projects the authoritative `timeline_employee` from the matched A+W reject event when scan history is read. The Rejects page and Scan history therefore agree while `scan_events` remains immutable.
+- **Startup no longer retries every historical pending A+W rollback.** Normal initialization backfills only genuinely missing A+W Internal Reject mirrors. Pending physical rollbacks are retried explicitly after a delivery import creates matching line items, which removes an increasingly expensive startup path while preserving the required late-import behavior.
+- **Cutting Label reconstruction now follows the real Crystal layout.** The Order Details preview uses the supplied `Prodman_CuttingLabel_Optimisation.rpt` designer/reference to place Customer/date at the top, Route centered, **REMAKE** at upper right for replacement generations, the (SG) `BEST_TEXT1` line, (AW) Order/Item, Batch, Optimization, Glass, Size, Cutting context, Weight, and square footage in a label-shaped card.
+- **The supplied physical label resolves the barcode payload and symbology.** Its bars match **Code 39**, and the visible pattern begins with the exact scanner format for the sample Order **231506 / Item 1**: `T200231506001000`. That matches the application's long-established canonical `T200 + six-digit Order + three-digit Item + 000` barcode contract. Order Details therefore now renders the real canonical value as native Code 39 instead of a fake placeholder; no new barcode database formula is being guessed.
+- `Probe-AWGlassLabels.ps1` now adds outputs **55-57** specifically from the Crystal screenshot: the selected Order header anchors (`AH_NAME1`, `BEST_TEXT1`, `OR_TOUR`), selected Item/product/size/weight/area anchors, and a schema-wide list of related fields. The remaining reverse-engineering focus is the exact `Processes_after_cutting` / plate-counter logic and confirming the source lineage Crystal uses for each already-visible value.
+- Application/cache references advance to **v0.500**. SQLite remains schema **16**.
+- Final verification: **54/54 behavioral/backend tests pass** and static structure is **197 pass / 129 known legacy failures**, with no new failures.
 
 ## v0.499 highlights
 
@@ -20,7 +59,7 @@ v0.499 consolidates manual A+W synchronization, adds dedicated Batch/Optimizatio
 - Added **Scheduled A+W enrichment** settings to the Automatic Schedule tab so scheduled Direct A+W Sync can independently include/exclude Reject synchronization and Batch/Optimization/Cutting synchronization.
 - Reworked the v0.498 A+W production query around small configurable order batches (default **60**), `DENSE_RANK` generation limiting, bounded recent Automatic Cutting booking evidence, pre-ranked `PROD_OPTI_SEQUENCE` / optimization status data, `OPTION (RECOMPILE)`, and a per-batch timeout. Each production batch writes a live STEP/log line before and after the SQL query so a slow A+W query is visible instead of looking frozen.
 - Production enrichment remains SELECT-only / `READ UNCOMMITTED`, is still bounded to orders already present in the direct delivery payload, and remains non-blocking if A+W production metadata cannot be read.
-- Cutting Label investigation is now anchored to the verified Crystal report **`Prodman_CuttingLabel_Optimisation.rpt`**, Print Point **846 – Cutting Labels**. The Production settings tab records that contract and recommends Crystal Viewer **Export -> PDF** as the best way to capture an exact rendered label without clicking Execute or advancing production. The diagnostic probe also accepts `-LocateCrystalReport` and writes `54-cutting-label-crystal-file-locations.csv` by checking the configured A+W UNC transfer roots and their immediate report-like folders without recursively crawling the server.
+- Cutting Label investigation is anchored to the verified Crystal report **`Prodman_CuttingLabel_Optimisation.rpt`**, Print Point **846 – Cutting Labels**. The Production settings tab records that contract and recommends Crystal Viewer **Export -> PDF** as the best way to capture an exact rendered label without clicking Execute or advancing production. The diagnostic probe also accepts `-LocateCrystalReport` and writes `54-cutting-label-crystal-file-locations.csv` by checking the configured A+W UNC transfer roots and their immediate report-like folders without recursively crawling the server.
 - Application version advanced to **v0.499**; SQLite remains schema **16**.
 - Final verification: **53/53 behavioral/backend tests pass** and static structure is **196 pass / 129 known legacy failures**, with no new failures.
 

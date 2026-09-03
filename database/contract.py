@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "499"
+APPLICATION_VERSION = "502"
 # Schema version 16 adds durable A+W cutting-generation history so Batch,
 # Optimization, and post-reject physical cutting progress survive resyncs.
 CURRENT_SCHEMA_VERSION = 16

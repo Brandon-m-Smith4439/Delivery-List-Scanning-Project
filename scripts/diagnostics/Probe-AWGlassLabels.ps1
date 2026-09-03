@@ -316,7 +316,7 @@ if (-not [string]::IsNullOrWhiteSpace($OrderNumber) -and [string]::IsNullOrWhite
     $ItemNumber = (Read-Host "Known optimized Item Nr. (optional; press Enter for the whole order)").Trim()
 }
 if ([string]::IsNullOrWhiteSpace($OptimizationNumber)) {
-    $OptimizationNumber = (Read-Host "Optimization Nr. from Production Manager > Optimization Overview (recommended; e.g. 8359)").Trim()
+    $OptimizationNumber = (Read-Host "Optimization Nr. from Production Manager > Optimization Overview (optional for outputs 58-60; press Enter if unknown)").Trim()
 }
 if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
     $desktop = [Environment]::GetFolderPath("Desktop")
@@ -336,6 +336,40 @@ SELECT @@SERVERNAME AS ServerName, DB_NAME() AS DatabaseName, SUSER_SNAME() AS L
        GETDATE() AS DatabaseLocalTime, GETUTCDATE() AS DatabaseUtcTime;
 "@
     Export-ProbeTable -Table $environment -Path (Join-Path $OutputFolder "01-environment.csv")
+
+    # v0.502: an Order/Item is enough to discover the newest physical generation's
+    # Optimization. v0.501 advertised outputs 58-60 as order-first diagnostics,
+    # but they were accidentally nested under the Optimization-number gate and
+    # therefore a blank prompt stopped the probe around output 34. Resolve the
+    # current Optimization before that gate whenever A+W already has one.
+    if ([string]::IsNullOrWhiteSpace($OptimizationNumber) -and -not [string]::IsNullOrWhiteSpace($OrderNumber)) {
+        $autoOptimization = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (1)
+       COALESCE(NULLIF(ji.OPTIMIZATION,0), seq.OPTIMIZATION) AS OptimizationNumber,
+       ji.KEYINDEX AS KeyIndex, ji.JOBNUMBER AS BatchJobNumber, seq.SEQUENCE AS OptimizationSequence
+FROM SYSADM.PROD_JOBITEM ji
+OUTER APPLY (
+    SELECT TOP (1) os.OPTIMIZATION, os.SEQUENCE
+    FROM SYSADM.PROD_OPTI_SEQUENCE os
+    WHERE os.AUFNR=ji.AUFNR AND os.POSNR=ji.POSNR
+      AND ISNULL(os.BOM_ID,0)=ISNULL(ji.BOM_ID,0)
+      AND ISNULL(os.KEYINDEX,0)=ISNULL(ji.KEYINDEX,0)
+      AND ISNULL(os.OPTIMIZATION,0)>0
+    ORDER BY os.OPTIMIZATION DESC, os.SEQUENCE DESC
+) seq
+WHERE CONVERT(nvarchar(64),ji.AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),ji.POSNR)=@ItemNumber)
+  AND COALESCE(NULLIF(ji.OPTIMIZATION,0), seq.OPTIMIZATION) IS NOT NULL
+ORDER BY ISNULL(ji.KEYINDEX,0) DESC, ISNULL(ji.JOBNUMBER,0) DESC, ISNULL(ji.BOM_ID,0);
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+        if ($autoOptimization.Rows.Count -gt 0) {
+            $resolvedOptimization = ([string]$autoOptimization.Rows[0].OptimizationNumber).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($resolvedOptimization) -and $resolvedOptimization -ne '0') {
+                $OptimizationNumber = $resolvedOptimization
+                Write-Host ("Auto-resolved current Optimization {0} from Order {1}{2}." -f $OptimizationNumber, $OrderNumber, $(if ([string]::IsNullOrWhiteSpace($ItemNumber)) { '' } else { " / Item $ItemNumber" })) -ForegroundColor Green
+            }
+        }
+    }
 
     $metadata = Invoke-ProbeQuery -Connection $connection -Query @"
 SELECT s.name AS SchemaName, o.name AS ObjectName, o.type_desc AS ObjectType,
@@ -1089,6 +1123,128 @@ FROM SYSADM.RR_SITE WHERE PATH IS NOT NULL;
             Export-ProbeObjects -Rows $locationRows.ToArray() -Path (Join-Path $OutputFolder "54-cutting-label-crystal-file-locations.csv")
         }
 
+        # v0.500: the admin-provided Crystal designer screenshot exposes several
+        # exact RPT anchors (AH_NAME1, BEST_TEXT1, OR_TOUR, PROD_BEZ1, weight/area,
+        # Batch/Optimization and barcode object location). The supplied physical
+        # label now independently confirms the scanner's canonical T200 value in
+        # Code 39; capture the remaining source values so the reconstruction can
+        # be matched field-for-field without guessing Crystal-only formulas.
+        if (-not [string]::IsNullOrWhiteSpace($OrderNumber)) {
+            $crystalHeaderAnchors = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (50)
+       h.ID AS OrderNr,
+       h.AH_NAME1 AS CustomerName,
+       h.BEST_TEXT1 AS SgBestText1,
+       h.OR_TOUR AS RouteText
+FROM SYSADM.BW_AUFTR_KOPF h
+WHERE CONVERT(nvarchar(64),h.ID)=@OrderNumber
+ORDER BY h.ID;
+"@ -Parameters @{ OrderNumber=$OrderNumber }
+            Export-ProbeTable -Table $crystalHeaderAnchors -Path (Join-Path $OutputFolder "55-selected-order-crystal-header-anchors.csv")
+
+            $crystalItemAnchors = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (200)
+       p.ID AS OrderNr,
+       p.POS_NR AS ItemNr,
+       p.PROD_BEZ1 AS ProductDescription,
+       p.PP_MENGE AS Quantity,
+       p.PP_BREITE AS Width,
+       p.PP_HOEHE AS Height,
+       p.PP_GEWICHT AS Weight,
+       p.PP_QM AS SurfaceArea
+FROM SYSADM.BW_AUFTR_POS p
+WHERE CONVERT(nvarchar(64),p.ID)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),p.POS_NR)=@ItemNumber)
+ORDER BY p.POS_NR;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $crystalItemAnchors -Path (Join-Path $OutputFolder "56-selected-order-crystal-item-anchors.csv")
+        }
+
+        $crystalFieldCandidates = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (800)
+       s.name AS SchemaName,
+       o.name AS ObjectName,
+       o.type_desc AS ObjectType,
+       c.column_id AS ColumnOrder,
+       c.name AS ColumnName,
+       ty.name AS DataType,
+       c.max_length AS MaxLength
+FROM sys.objects o
+JOIN sys.schemas s ON s.schema_id=o.schema_id
+JOIN sys.columns c ON c.object_id=o.object_id
+JOIN sys.types ty ON ty.user_type_id=c.user_type_id
+WHERE s.name=@Schema
+  AND o.type IN ('U','V')
+  AND (
+       UPPER(c.name) IN ('AH_NAME1','BEST_TEXT1','OR_TOUR','PROD_BEZ1','PP_GEWICHT','PP_QM','PLATENR','AUFNR','POSNR')
+       OR UPPER(c.name) LIKE '%BARCODE%'
+       OR UPPER(c.name) LIKE '%BNUMB%'
+       OR UPPER(c.name) LIKE '%ENDDIM%'
+       OR UPPER(c.name) LIKE '%GEWICHT%'
+  )
+ORDER BY
+  CASE WHEN UPPER(c.name) IN ('AH_NAME1','BEST_TEXT1','OR_TOUR','PROD_BEZ1','PP_GEWICHT','PP_QM','PLATENR') THEN 0 ELSE 1 END,
+  o.name, c.column_id;
+"@ -Parameters @{ Schema=$schema }
+        Export-ProbeTable -Table $crystalFieldCandidates -Path (Join-Path $OutputFolder "57-crystal-screenshot-field-candidates.csv")
+
+        # v0.501: diagnose a misleading "Not Optimized"/missing Cutting state
+        # without requiring the operator to already know the Optimization number.
+        # These order-first outputs expose the exact current generation -> Batch ->
+        # PROD_OPTI_SEQUENCE bridge and the production route that must exist after
+        # Cutting for downstream fabrication such as Denver/Waterjet.
+        if (-not [string]::IsNullOrWhiteSpace($OrderNumber)) {
+            $orderCuttingBridge = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (4000)
+       ji.AUFNR AS OrderNr, ji.POSNR AS ItemNr, ji.BOM_ID AS JobBomId, ji.KEYINDEX AS JobKeyIndex,
+       ji.JOBNUMBER AS BatchJobNumber, j.STATUS AS BatchStatusCode, j.DESCRIPTION AS BatchDescription,
+       j.CREATIONDATE AS BatchCreationDate, j.LASTCHANGEDATE AS BatchLastChangeDate,
+       ji.OPTIMIZATION AS JobItemOptimization, seq.OPTIMIZATION AS SequenceOptimization,
+       seq.SEQUENCE AS OptimizationSequence, seq.PLATENR AS PlateNumber,
+       ji.AGG AS AggregateId, ji.LASTAGG AS LastAggregateId, ji.MENGE AS Quantity, ji.MENGE_CUT AS CutQuantity,
+       CASE WHEN ISNULL(ji.OPTIMIZATION,0)>0 THEN 'PROD_JOBITEM'
+            WHEN ISNULL(seq.OPTIMIZATION,0)>0 THEN 'PROD_OPTI_SEQUENCE' ELSE 'NONE' END AS OptimizationSource,
+       ji.ROWID AS JobItemRowId, seq.ROWID AS SequenceRowId
+FROM SYSADM.PROD_JOBITEM ji
+LEFT JOIN SYSADM.PROD_JOB j ON j.JOBNUMBER=ji.JOBNUMBER
+LEFT JOIN SYSADM.PROD_OPTI_SEQUENCE seq
+  ON seq.AUFNR=ji.AUFNR AND seq.POSNR=ji.POSNR
+ AND ISNULL(seq.BOM_ID,0)=ISNULL(ji.BOM_ID,0) AND ISNULL(seq.KEYINDEX,0)=ISNULL(ji.KEYINDEX,0)
+WHERE CONVERT(nvarchar(64),ji.AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),ji.POSNR)=@ItemNumber)
+ORDER BY ji.KEYINDEX DESC, ji.JOBNUMBER DESC, ji.BOM_ID, seq.OPTIMIZATION DESC, seq.SEQUENCE DESC;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $orderCuttingBridge -Path (Join-Path $OutputFolder "58-selected-order-cutting-bridge-v501.csv")
+
+            $orderOptimizationSequence = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (4000) seq.OPTIMIZATION AS Optimization, seq.SEQUENCE AS OptimizationSequence,
+       seq.AUFNR AS OrderNr, seq.POSNR AS ItemNr, seq.BOM_ID AS BomId, seq.BOM_NODE AS BomNode,
+       seq.KEYINDEX AS KeyIndex, seq.PLATENR AS PlateNumber, p.PATTERNNR AS PatternNumber,
+       p.CUT AS CutFlag, p.STOCKBOOKED AS StockBooked, p.LASTCHANGEDATE AS PlateLastChangeDate,
+       p.LASTCHANGEUSER AS PlateLastChangeUser, seq.ROWID AS SourceRowId
+FROM SYSADM.PROD_OPTI_SEQUENCE seq
+LEFT JOIN SYSADM.PROD_OPTI_PLATES p ON p.OPTIMIZATION=seq.OPTIMIZATION AND p.PLATENR=seq.PLATENR
+WHERE CONVERT(nvarchar(64),seq.AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),seq.POSNR)=@ItemNumber)
+ORDER BY seq.KEYINDEX DESC, seq.OPTIMIZATION DESC, seq.SEQUENCE DESC, seq.BOM_ID;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $orderOptimizationSequence -Path (Join-Path $OutputFolder "59-selected-order-optimization-sequence-v501.csv")
+
+            $orderProductionRoute = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (4000) z.AUFNR AS OrderNr, z.POSNR AS ItemNr, z.BOM_ID AS BomId, z.BOM_NODE AS BomNode,
+       z.ARBART AS WorkTypeId, wt.BEA_TYPBEZ AS WorkType, z.AGG AS AggregateId, z.ARBFOLGE AS WorkSequence,
+       z.DATUM_PROD AS ProductionDate, z.STUECK AS PlannedPieces, z.FERTIG AS CompletedPieces,
+       z.KZ_SELECTED AS IsSelected, z.KZ_NOP AS IsNoOperation, z.BMENGE AS BomQuantity,
+       z.KANTEN AS EdgeData, z.POOL_POS AS PoolPosition, z.ROWID AS SourceRowId
+FROM SYSADM.ZW_AUFTR_ZEIT z
+LEFT JOIN SYSADM.ZW_BEATYPEN wt ON wt.BEA_TYP=z.ARBART
+WHERE CONVERT(nvarchar(64),z.AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),z.POSNR)=@ItemNumber)
+ORDER BY z.BOM_ID, z.ARBFOLGE, z.ARBART, z.AGG;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $orderProductionRoute -Path (Join-Path $OutputFolder "60-selected-order-process-after-cutting-v501.csv")
+        }
+
         # The prior query incorrectly required PROD_JOBITEM.OPTIMIZATION to be
         # populated. The authoritative optimization membership is PROD_OPTI_SEQUENCE;
         # enumerate all same-order/item job rows and show which keys actually match.
@@ -1418,7 +1574,7 @@ ORDER BY ZEITSTEMPEL, ID, SEQUENZ_NR;
         "Capture Cutting Labels Screen action: $captureScreen",
         "Locate Crystal report on configured UNC roots: $LocateCrystalReport",
         "Safety: SELECT-only; READ UNCOMMITTED; no A+W writes.",
-        "Best next evidence: 45-selected-optimization-lifecycle.csv through 53-optimization-status-module-references.csv. These outputs prove optimization/batch lifecycle before any scanner Cutting progress state is implemented; the exact Cutting Labels Crystal report remains Prodman_CuttingLabel_Optimisation.rpt (DR_REPORTE ID 846 / print point 846)."
+        "Best next label evidence: 55-selected-order-crystal-header-anchors.csv through 60-selected-order-process-after-cutting-v501.csv. For an Order Details Cutting mismatch, outputs 58-60 are the priority because they do not require a known Optimization number and expose the Order/Item -> generation -> Batch -> PROD_OPTI_SEQUENCE bridge plus downstream process route. The admin-provided RPT designer screenshot proves AH_NAME1 / BEST_TEXT1 / OR_TOUR / PROD_BEZ1-style anchors. The supplied physical label also aligns with the scanner's canonical T200 Order/Item barcode in Code 39. The exact report remains Prodman_CuttingLabel_Optimisation.rpt (DR_REPORTE ID 846 / print point 846)."
     ) | Set-Content -LiteralPath (Join-Path $OutputFolder "README.txt") -Encoding UTF8
 
     Write-Host ""

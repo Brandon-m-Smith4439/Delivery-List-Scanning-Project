@@ -1230,6 +1230,8 @@ def direct_sql_sync(
                 if str(entry.get("orderNumber") or "").strip()
                 and str(entry.get("itemNumber") or "").strip()
             }
+            progress(f"Comparing direct A+W rows with live scanner stages for {delivery_date}.")
+            drift_started = time.perf_counter()
             source_data_drift, drift_list_ids = scanner_stage_drift(
                 store,
                 delivery_date,
@@ -1237,12 +1239,13 @@ def direct_sql_sync(
                 allow_source_removals=allow_source_removals,
                 verified_excluded_order_items=date_verified_keys,
             )
+            drift_ms = int(round((time.perf_counter() - drift_started) * 1000))
             manually_forced = delivery_date in force_import_dates
             must_import = manually_forced or bool(missing_before) or source_data_drift
             progress(
                 f"Direct SQL drift decision for {delivery_date}: forced={manually_forced}, "
                 f"missingStages={len(missing_before)}, sourceDataDrift={source_data_drift}, "
-                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}."
+                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}, driftMs={drift_ms}."
             )
 
             if must_import:
@@ -1453,6 +1456,8 @@ def selective_sql_sync(
                 f"Built {len(expected_definitions)} expected stage definition(s) for {delivery_date}; "
                 f"missingBefore={len(missing_before)}, verifiedExclusions={len(date_verified_entries)}."
             )
+            progress(f"Comparing workbook rows with live scanner stages for {delivery_date}.")
+            drift_started = time.perf_counter()
             source_data_drift, drift_list_ids = scanner_stage_drift(
                 store,
                 delivery_date,
@@ -1460,12 +1465,13 @@ def selective_sql_sync(
                 allow_source_removals=allow_source_removals,
                 verified_excluded_order_items=date_verified_keys,
             )
+            drift_ms = int(round((time.perf_counter() - drift_started) * 1000))
             manually_forced = delivery_date in force_import_dates
             must_import = manually_forced or bool(missing_before) or source_data_drift
             progress(
                 f"Drift decision for {delivery_date}: manuallyForced={manually_forced}, "
                 f"missingStages={len(missing_before)}, sourceDataDrift={source_data_drift}, "
-                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}."
+                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}, driftMs={drift_ms}."
             )
 
             if must_import:
@@ -1853,7 +1859,7 @@ def main() -> int:
             # mirrors after the delivery import has created its stage copies.
             try:
                 post_import_rejects = run_with_database_retry(
-                    lambda: store.ensure_aw_internal_reject_mirrors(),
+                    lambda: store.ensure_aw_internal_reject_mirrors(retry_pending_rollbacks=True),
                     "applying pending A+W reject operational resets after delivery import",
                 )
                 aw_reject_sync["postImportReconciliation"] = post_import_rejects

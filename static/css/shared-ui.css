@@ -1095,97 +1095,539 @@ body button.app-primary-button.production-detail-action-v476.is-secondary { back
 @keyframes cutting-progress-spin-v498 { to { transform:rotate(360deg); } }
 .production-cutting-label-v498 {
   display:grid;
+  grid-template-rows:auto auto auto auto auto auto minmax(82px,1fr) auto auto;
+  gap:5px;
+  width:min(100%,440px);
+  min-height:500px;
+  padding:7px 9px 9px;
+  border:2px solid #1c2228;
+  border-radius:2px;
+  background:#fff;
+  color:#111820;
+  box-shadow:3px 3px 0 rgba(20,32,42,.2);
+  font-family:Arial,Helvetica,sans-serif;
+}
+.production-cutting-label-title-v500 {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
   gap:8px;
-  padding:10px 11px;
-  border:1px solid #c7d7e4;
-  border-radius:9px;
-  background:linear-gradient(180deg,#fbfdff,#f4f8fb);
-  box-shadow:inset 4px 0 0 #2f80c4;
+  align-items:center;
+  min-width:0;
 }
-.production-cutting-label-v498 > header {
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:10px;
-}
-.production-cutting-label-v498 > header > span { display:grid; gap:1px; min-width:0; }
-.production-cutting-label-v498 > header small {
-  color:#6f8294;
-  font-size:8px;
-  font-weight:950;
-  letter-spacing:.1em;
-}
-.production-cutting-label-v498 > header strong {
-  color:#193d5b;
-  font-size:14px;
+.production-cutting-label-title-v500 > strong {
+  min-width:0;
+  padding:1px 3px;
+  border:1px solid #d9e0e5;
+  border-radius:3px;
+  font-size:15px;
+  line-height:1.1;
+  font-weight:500;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
 }
-.production-cutting-label-v498 > header em {
-  flex:0 0 auto;
-  padding:3px 6px;
-  border-radius:999px;
-  background:#e7f2fb;
-  color:#246b9f;
-  font-size:8px;
+.production-cutting-label-title-v500 > time { font-size:11px; white-space:nowrap; }
+.production-cutting-label-route-v500 {
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:20px;
+  padding:0 52px;
+  text-align:center;
+}
+.production-cutting-label-route-v500 > b { font-size:15px; line-height:1; text-transform:uppercase; }
+.production-cutting-label-route-v500 > em {
+  position:absolute;
+  right:0;
+  top:1px;
+  font-size:11px;
+  line-height:1;
   font-style:normal;
   font-weight:950;
-  letter-spacing:.05em;
+  letter-spacing:.04em;
 }
-.production-cutting-label-grid-v498 {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:6px;
+.production-cutting-label-barcode-v500 {
+  display:flex;
+  align-items:flex-start;
+  min-height:48px;
 }
-.production-cutting-label-grid-v498 > span {
-  display:grid;
-  gap:1px;
-  min-width:0;
-  padding:6px 7px;
-  border:1px solid #dde7ee;
-  border-radius:6px;
+.production-cutting-label-code39-v500 {
+  display:block;
+  width:84%;
+  height:45px;
+  overflow:visible;
   background:#fff;
+  fill:#050505;
 }
-.production-cutting-label-grid-v498 small {
-  color:#7d8b99;
-  font-size:7.5px;
-  font-weight:900;
-  text-transform:uppercase;
+.production-cutting-label-barcode-v500 > .is-unavailable {
+  display:grid;
+  place-items:center;
+  width:84%;
+  height:45px;
+  border:1px dashed #aab6c0;
+  color:#75828c;
+  font-size:8px;
+  font-weight:800;
 }
-.production-cutting-label-grid-v498 b {
-  color:#253f57;
-  font-size:10px;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
+.production-cutting-label-identifiers-v500 { display:grid; gap:2px; font-size:11px; }
+.production-cutting-label-identifiers-v500 > span {
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr) auto;
+  gap:5px;
+  align-items:baseline;
+  min-width:0;
 }
+.production-cutting-label-identifiers-v500 small { font-size:9px; }
+.production-cutting-label-identifiers-v500 b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.production-cutting-label-identifiers-v500 i { font-style:normal; white-space:nowrap; }
+.production-cutting-label-opt-v500 { display:block !important; padding-left:56%; text-align:left; }
+.production-cutting-label-glass-v500 { font-size:17px; line-height:1.05; }
+.production-cutting-label-size-v500 { font-size:16px; line-height:1.05; }
+.production-cutting-label-process-v500 { display:grid; gap:2px; min-height:43px; padding-top:8px; font-size:8px; }
+.production-cutting-label-process-v500 .is-pending { color:#7d8992; font-style:italic; }
+.production-cutting-label-metrics-v500 {
+  display:grid;
+  justify-content:end;
+  gap:1px;
+  margin-top:auto;
+  padding:8px 10px 0 0;
+}
+.production-cutting-label-metrics-v500 > span {
+  display:grid;
+  grid-template-columns:55px 30px;
+  gap:10px;
+  align-items:baseline;
+  text-align:right;
+  font-size:12px;
+}
+.production-cutting-label-metrics-v500 > span b { font-size:13px; }
 .production-cutting-label-v498 > footer {
   display:flex;
   justify-content:space-between;
-  gap:10px;
-  align-items:center;
-  color:#657789;
-  font-size:8.5px;
-  font-weight:800;
+  gap:8px;
+  align-items:end;
+  padding-top:5px;
+  border-top:1px solid #d9e0e5;
+  color:#596b78;
+  font-size:7px;
+  font-weight:700;
 }
-.production-cutting-label-v498 > footer strong { color:#8c3e46; font-size:8.5px; letter-spacing:.03em; }
+.production-cutting-label-v498 > footer b { color:#183f5e; }
+.production-cutting-label-history-v498,
 .production-cutting-history-v498 {
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
   flex-wrap:wrap;
-  padding-top:5px;
-  border-top:1px solid #dce6ed;
+  padding-top:4px;
+  border-top:1px solid #e3e8ec;
   color:#6f8090;
-  font-size:8px;
+  font-size:7px;
 }
 .production-cutting-history-v498 > small { font-weight:950; letter-spacing:.05em; text-transform:uppercase; }
 .production-cutting-history-v498 > span { padding:2px 5px; border-radius:5px; background:#edf3f7; }
 @media (max-width:980px) {
   .production-item-facts-v498 { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
-  .production-cutting-label-grid-v498 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .production-cutting-label-v498 { width:100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cutting-progress-spinner-v498 { animation:none; border-top-color:#1673bd; }
+}
+
+/* ========================================================================== */
+/* v0.501 Piece-level Cutting Labels + evidence-consistent Cutting progress   */
+/* ========================================================================== */
+.production-cutting-label-set-v501 {
+  display:grid;
+  gap:8px;
+  min-width:0;
+  padding:9px;
+  border:1px solid #d7e0e7;
+  border-radius:10px;
+  background:#f8fafb;
+}
+.production-cutting-label-set-v501 > header {
+  display:flex;
+  align-items:end;
+  justify-content:space-between;
+  gap:12px;
+  min-width:0;
+}
+.production-cutting-label-set-v501 > header > div { display:grid; gap:1px; }
+.production-cutting-label-set-v501 > header small {
+  color:#657687;
+  font-size:8px;
+  font-weight:950;
+  letter-spacing:.08em;
+}
+.production-cutting-label-set-v501 > header strong { color:#183f5e; font-size:12px; }
+.production-cutting-label-set-v501 > header > span {
+  max-width:58%;
+  color:#6c7d8b;
+  font-size:8px;
+  font-weight:700;
+  text-align:right;
+}
+.production-cutting-piece-list-v501 { display:grid; gap:6px; }
+.production-cutting-piece-v501 {
+  overflow:hidden;
+  border:1px solid #d6dfe6;
+  border-radius:7px;
+  background:#fff;
+}
+.production-cutting-piece-v501 > summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:7px 9px;
+  cursor:pointer;
+  color:#334b5d;
+  font-size:9px;
+  font-weight:900;
+  list-style-position:inside;
+  user-select:none;
+}
+.production-cutting-piece-v501 > summary:hover { background:#f3f7fa; }
+.production-cutting-piece-v501 > summary b {
+  color:#1d5f8f;
+  font-size:8px;
+  letter-spacing:.04em;
+}
+.production-cutting-piece-v501 > .production-cutting-label-v498 {
+  width:min(100%,440px);
+  margin:0 9px 10px;
+}
+.production-cutting-label-piece-counter-v501 {
+  margin-top:1px;
+  font-size:12px !important;
+}
+.production-cutting-label-piece-counter-v501 > b { font-size:13px !important; }
+.production-cutting-label-limit-v501 {
+  margin:0;
+  color:#7b5d2c;
+  font-size:8px;
+  font-weight:800;
+}
+@media (max-width:760px) {
+  .production-cutting-label-set-v501 > header { align-items:flex-start; flex-direction:column; gap:3px; }
+  .production-cutting-label-set-v501 > header > span { max-width:none; text-align:left; }
+  .production-cutting-piece-v501 > .production-cutting-label-v498 { width:calc(100% - 18px); }
+}
+
+/* ========================================================================== */
+/* v0.502 compact A+W Cutting Label thumbnails + maximized native preview     */
+/* ========================================================================== */
+.production-cutting-label-set-v502 {
+  width:min(100%,268px);
+  justify-self:start;
+  gap:6px;
+  padding:7px;
+  border-radius:8px;
+}
+.production-cutting-label-set-v502 > header { align-items:start; gap:7px; }
+.production-cutting-label-set-v502 > header > span { display:none; }
+.production-cutting-label-set-v502 > header strong { font-size:11px; }
+.production-cutting-label-set-v502 .production-cutting-piece-list-v501 { gap:4px; }
+.production-cutting-label-set-v502 .production-cutting-piece-v501 > summary {
+  min-height:27px;
+  padding:5px 7px;
+  font-size:8px;
+}
+.production-cutting-label-set-v502 .production-cutting-history-v498 { font-size:6.5px; }
+
+.production-cutting-label-frame-v502 {
+  position:relative;
+  width:246px;
+  height:297px;
+  margin:0 7px 8px;
+  overflow:hidden;
+  border:1px solid #c9d2d9;
+  border-radius:4px;
+  background:#fff;
+  box-shadow:0 2px 6px rgba(23,48,68,.10);
+}
+.production-cutting-label-scale-v502 {
+  width:436px;
+  height:519px;
+  transform:scale(.56);
+  transform-origin:top left;
+}
+.production-cutting-label-maximize-v502 {
+  position:absolute;
+  z-index:4;
+  top:5px;
+  left:5px;
+  display:grid;
+  place-items:center;
+  width:25px;
+  height:25px;
+  padding:0;
+  border:1px solid rgba(34,57,75,.30);
+  border-radius:5px;
+  background:rgba(255,255,255,.93);
+  color:#234d6c;
+  box-shadow:0 1px 4px rgba(16,39,58,.18);
+  cursor:pointer;
+  opacity:.72;
+  transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease;
+}
+.production-cutting-label-frame-v502:hover .production-cutting-label-maximize-v502,
+.production-cutting-label-maximize-v502:focus-visible { opacity:1; }
+.production-cutting-label-maximize-v502:hover { transform:scale(1.05); box-shadow:0 2px 7px rgba(16,39,58,.22); }
+.production-cutting-label-maximize-v502 svg { width:15px; height:15px; }
+
+/* The physical reference is approximately 436 x 519 px. Keep one fixed native
+   geometry and scale only its preview wrapper so the Order Details thumbnail and
+   maximized view cannot drift into two different label layouts. */
+.production-cutting-label-v498.production-cutting-label-v502 {
+  position:relative;
+  display:block;
+  width:436px;
+  height:519px;
+  min-height:519px;
+  padding:0;
+  border:3px solid #171b1e;
+  border-radius:0;
+  background:#fff;
+  box-shadow:3px 3px 0 rgba(16,22,27,.30);
+  color:#0b0d0f;
+  font-family:Arial,Helvetica,sans-serif;
+  overflow:hidden;
+}
+.production-cutting-label-v502 .production-cutting-label-title-v500 {
+  position:absolute;
+  top:4px;
+  left:9px;
+  right:8px;
+  height:23px;
+  display:block;
+}
+.production-cutting-label-v502 .production-cutting-label-title-v500 > strong {
+  position:absolute;
+  left:0;
+  top:0;
+  width:320px;
+  padding:0;
+  border:0;
+  border-radius:0;
+  color:#111;
+  font-size:19px;
+  line-height:22px;
+  font-weight:500;
+  letter-spacing:.01em;
+}
+.production-cutting-label-v502 .production-cutting-label-title-v500 > time {
+  position:absolute;
+  top:1px;
+  right:0;
+  color:#111;
+  font-size:13px;
+  line-height:20px;
+}
+.production-cutting-label-v502 .production-cutting-label-route-v500 {
+  position:absolute;
+  top:28px;
+  left:8px;
+  right:8px;
+  height:22px;
+  min-height:0;
+  padding:0 72px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  white-space:nowrap;
+}
+.production-cutting-label-v502 .production-cutting-label-route-v500 > b {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#111;
+  font-size:19px;
+  line-height:21px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+.production-cutting-label-v502 .production-cutting-label-route-v500 > em {
+  top:2px;
+  right:0;
+  color:#111;
+  font-size:14px;
+  line-height:18px;
+  letter-spacing:.03em;
+}
+.production-cutting-label-v502 .production-cutting-label-barcode-v500 {
+  position:absolute;
+  top:53px;
+  left:10px;
+  width:365px;
+  height:48px;
+  min-height:0;
+  display:block;
+}
+.production-cutting-label-v502 .production-cutting-label-code39-v500,
+.production-cutting-label-v502 .production-cutting-label-barcode-v500 > .is-unavailable {
+  width:100%;
+  height:47px;
+}
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 {
+  position:absolute;
+  top:108px;
+  left:10px;
+  right:12px;
+  height:73px;
+  display:block;
+  color:#111;
+  font-size:16px;
+  line-height:23px;
+}
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 > span {
+  display:grid;
+  grid-template-columns:40px minmax(0,1fr) auto;
+  gap:4px;
+  align-items:baseline;
+  min-width:0;
+}
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 small { font-size:13px; font-weight:400; }
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 b { font-size:17px; font-weight:800; }
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 i { font-size:15px; font-weight:400; }
+.production-cutting-label-v502 .production-cutting-label-identifiers-v500 i strong { font-size:17px; }
+.production-cutting-label-v502 .production-cutting-label-opt-v500 {
+  display:block !important;
+  margin-top:-1px;
+  padding-left:224px;
+  font-size:15px;
+  line-height:21px;
+  text-align:left;
+  white-space:nowrap;
+}
+.production-cutting-label-v502 .production-cutting-label-opt-v500 strong { font-size:17px; }
+.production-cutting-label-v502 .production-cutting-label-glass-v500 {
+  position:absolute;
+  top:190px;
+  left:10px;
+  right:10px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#111;
+  font-size:21px;
+  line-height:25px;
+  font-weight:800;
+}
+.production-cutting-label-v502 .production-cutting-label-size-v500 {
+  position:absolute;
+  top:224px;
+  left:10px;
+  right:10px;
+  color:#111;
+  font-size:21px;
+  line-height:25px;
+  font-weight:800;
+}
+.production-cutting-label-v502 .production-cutting-label-process-v500 {
+  position:absolute;
+  top:260px;
+  left:13px;
+  right:12px;
+  min-height:72px;
+  padding:0;
+  display:grid;
+  align-content:start;
+  gap:7px;
+  color:#111;
+  font-size:10px;
+  line-height:14px;
+}
+.production-cutting-label-v502 .production-cutting-label-metrics-v500 {
+  position:absolute;
+  right:14px;
+  bottom:80px;
+  width:116px;
+  margin:0;
+  padding:0;
+  display:grid;
+  justify-content:stretch;
+  gap:2px;
+}
+.production-cutting-label-v502 .production-cutting-label-metrics-v500 > span {
+  grid-template-columns:70px 39px;
+  gap:7px;
+  color:#111;
+  font-size:17px;
+  line-height:21px;
+}
+.production-cutting-label-v502 .production-cutting-label-metrics-v500 > span b {
+  color:#111;
+  font-size:18px;
+  font-weight:800;
+}
+.production-cutting-label-v502 .production-cutting-label-metrics-v500 > span strong {
+  color:#111;
+  font-size:17px;
+  font-weight:700;
+}
+.production-cutting-label-v502 .production-cutting-label-piece-counter-v501 { margin-top:0; }
+.production-cutting-label-v502 .production-cutting-label-piece-counter-v501 > b { font-size:18px !important; }
+
+.cutting-label-preview-backdrop-v502 {
+  position:fixed;
+  z-index:18990;
+  inset:0;
+  background:rgba(8,18,27,.58);
+  backdrop-filter:blur(3px);
+}
+.cutting-label-preview-v502 {
+  position:fixed;
+  z-index:19000;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  width:min(92vw,500px);
+  max-height:94vh;
+  padding:10px;
+  border:1px solid #aebdc8;
+  border-radius:10px;
+  background:#edf2f5;
+  box-shadow:0 24px 70px rgba(0,0,0,.34);
+}
+.cutting-label-preview-v502 > header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 1px 8px;
+  color:#23465f;
+}
+.cutting-label-preview-v502 > header strong { font-size:12px; }
+.cutting-label-preview-v502 > header button {
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  padding:0;
+  border:0;
+  border-radius:6px;
+  background:#fff;
+  color:#314c60;
+  font-size:20px;
+  line-height:1;
+  cursor:pointer;
+}
+.cutting-label-preview-body-v502 {
+  display:grid;
+  place-items:center;
+  overflow:auto;
+  max-height:calc(94vh - 50px);
+  padding:4px 8px 9px 4px;
+}
+.cutting-label-preview-body-v502 .production-cutting-label-v502.is-maximized-v502 {
+  flex:0 0 auto;
+  width:436px;
+  height:519px;
+  min-height:519px;
+}
+@media (max-width:520px) {
+  .production-cutting-label-set-v502 { width:min(100%,268px); }
+  .cutting-label-preview-body-v502 { justify-content:start; }
+  .cutting-label-preview-body-v502 .production-cutting-label-v502.is-maximized-v502 { transform:scale(.82); transform-origin:top left; margin-right:-78px; margin-bottom:-94px; }
 }

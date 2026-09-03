@@ -1039,7 +1039,7 @@ JobItems AS (
 ),
 SeqRanked AS (
     SELECT os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0) AS BOM_ID,ISNULL(os.KEYINDEX,0) AS KEYINDEX,
-           os.OPTIMIZATION,os.SEQUENCE,
+           os.OPTIMIZATION,os.SEQUENCE,os.PLATENR,
            ROW_NUMBER() OVER (
              PARTITION BY os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0),ISNULL(os.KEYINDEX,0)
              ORDER BY os.OPTIMIZATION DESC,os.SEQUENCE DESC
@@ -1047,14 +1047,39 @@ SeqRanked AS (
     FROM SYSADM.PROD_OPTI_SEQUENCE os
     WHERE os.AUFNR IN ($orderSql)
 ),
+ResolvedJobItems AS (
+    SELECT ji.*,
+           ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION,0),seq.OPTIMIZATION),0) AS ResolvedOptimization,
+           ISNULL(seq.SEQUENCE,0) AS ResolvedOptimizationSequence,
+           ISNULL(seq.PLATENR,0) AS ResolvedPlateNumber
+    FROM JobItems ji
+    LEFT JOIN SeqRanked seq
+      ON seq.AUFNR=ji.AUFNR AND seq.POSNR=ji.POSNR
+     AND seq.BOM_ID=ISNULL(ji.BOM_ID,0) AND seq.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND seq.RN=1
+),
+CandidateOptimizations AS (
+    SELECT DISTINCT ResolvedOptimization AS OPTIMIZATION
+    FROM ResolvedJobItems
+    WHERE ResolvedOptimization > 0
+),
 OptimizationRanked AS (
     SELECT u.OPTIMIZATION,u.STATUS,u.OPTIMODE,u.OPTIDATE,u.LASTCHANGEDATE,
            ROW_NUMBER() OVER (PARTITION BY u.OPTIMIZATION ORDER BY u.SourceRank,u.LASTCHANGEDATE DESC) AS RN
     FROM (
-        SELECT 0 AS SourceRank,o.OPTIMIZATION,o.STATUS,o.OPTIMODE,o.OPTIDATE,o.LASTCHANGEDATE FROM SYSADM.PROD_OPTIMIZATION o
+        SELECT 0 AS SourceRank,o.OPTIMIZATION,o.STATUS,o.OPTIMODE,o.OPTIDATE,o.LASTCHANGEDATE
+        FROM SYSADM.PROD_OPTIMIZATION o
+        INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=o.OPTIMIZATION
         UNION ALL
-        SELECT 1 AS SourceRank,s.OPTIMIZATION,s.STATUS,s.OPTIMODE,s.OPTIDATE,s.LASTCHANGEDATE FROM SYSADM.PROD_OPTI_STATISTICS s
+        SELECT 1 AS SourceRank,s.OPTIMIZATION,s.STATUS,s.OPTIMODE,s.OPTIDATE,s.LASTCHANGEDATE
+        FROM SYSADM.PROD_OPTI_STATISTICS s
+        INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=s.OPTIMIZATION
     ) u
+),
+PlateRanked AS (
+    SELECT p.OPTIMIZATION,p.PLATENR,p.CUT,p.STOCKBOOKED,p.LASTCHANGEDATE,p.LASTCHANGEUSER,
+           ROW_NUMBER() OVER (PARTITION BY p.OPTIMIZATION,p.PLATENR ORDER BY p.LASTCHANGEDATE DESC) AS RN
+    FROM SYSADM.PROD_OPTI_PLATES p
+    INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=p.OPTIMIZATION
 )
 $cuttingCte
 SELECT
@@ -1064,23 +1089,33 @@ SELECT
     LTRIM(RTRIM(ISNULL(job.DESCRIPTION,''))) AS BatchDescription,job.CREATIONDATE AS BatchCreatedAt,
     LTRIM(RTRIM(ISNULL(job.MITARB_ID,''))) AS BatchEmployee,job.LASTCHANGEDATE AS BatchLastChangedAt,
     LTRIM(RTRIM(ISNULL(job.LASTCHANGEUSER,''))) AS BatchLastChangedUser,
-    ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION),0) AS OptimizationNumber,
+    ji.ResolvedOptimization AS OptimizationNumber,
     ISNULL(opti.STATUS,0) AS OptimizationStatusCode,ISNULL(opti.OPTIMODE,0) AS OptimizationMode,
     opti.OPTIDATE AS OptimizationDate,opti.LASTCHANGEDATE AS OptimizationLastChangedAt,
-    ISNULL(ji.SEQUENCE_OPTIRUN,0) AS OptimizationRunSequence,ISNULL(ji.STACKNUMBER,0) AS StackNumber,
+    ISNULL(ji.SEQUENCE_OPTIRUN,0) AS OptimizationRunSequence,ji.ResolvedOptimizationSequence AS OptimizationSequence,
+    ji.ResolvedPlateNumber AS OptimizationPlateNumber,ISNULL(plate.CUT,0) AS OptimizationPlateCut,
+    ISNULL(plate.STOCKBOOKED,0) AS OptimizationPlateStockBooked,plate.LASTCHANGEDATE AS OptimizationPlateLastChangedAt,
+    LTRIM(RTRIM(ISNULL(plate.LASTCHANGEUSER,''))) AS OptimizationPlateLastChangedUser,
+    ISNULL(ji.STACKNUMBER,0) AS StackNumber,
     ISNULL(ji.STACKPOSITION,0) AS StackPosition,ISNULL(ji.MENGE,0) AS Quantity,ISNULL(ji.MENGE_CUT,0) AS CutQuantity,
     ISNULL(ji.AGG,0) AS AggregateId,ISNULL(ji.LASTAGG,0) AS LastAggregateId,
     $cuttingSelect,
     LTRIM(RTRIM(ISNULL(posx.BARCODE_START,''))) AS ItemBarcodeStart,
     LTRIM(RTRIM(ISNULL(stkl.BARCODE_START,''))) AS BomBarcodeStart,
-    ISNULL(pos.PP_GEWICHT,0) AS Weight,ISNULL(pos.PP_QM,0) AS SurfaceArea
-FROM JobItems ji
+    ISNULL(pos.PP_GEWICHT,0) AS Weight,ISNULL(pos.PP_QM,0) AS SurfaceArea,
+    LTRIM(RTRIM(ISNULL(head.AH_NAME1,''))) AS CustomerName,
+    LTRIM(RTRIM(ISNULL(head.BEST_TEXT1,''))) AS SgBestText1,
+    LTRIM(RTRIM(ISNULL(head.OR_TOUR,''))) AS RouteText,
+    LTRIM(RTRIM(ISNULL(pos.PROD_BEZ1,''))) AS ProductDescription,
+    ISNULL(pos.PP_MENGE,0) AS PositionQuantity,ISNULL(pos.PP_BREITE,0) AS PositionWidth,ISNULL(pos.PP_HOEHE,0) AS PositionHeight
+FROM ResolvedJobItems ji
 INNER JOIN SYSADM.PROD_JOB job ON job.JOBNUMBER=ji.JOBNUMBER
+LEFT JOIN SYSADM.BW_AUFTR_KOPF head ON head.ID=ji.AUFNR
 LEFT JOIN SYSADM.BW_AUFTR_POS pos ON pos.ID=ji.AUFNR AND pos.POS_NR=ji.POSNR
 LEFT JOIN SYSADM.BW_AUFTR_POS_EX posx ON posx.ID=ji.AUFNR AND posx.POS_NR=ji.POSNR
 LEFT JOIN SYSADM.BW_AUFTR_STKL stkl ON stkl.ID=ji.AUFNR AND stkl.POS_NR=ji.POSNR AND stkl.BOM_ID=ji.BOM_ID
-LEFT JOIN SeqRanked seq ON seq.AUFNR=ji.AUFNR AND seq.POSNR=ji.POSNR AND seq.BOM_ID=ISNULL(ji.BOM_ID,0) AND seq.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND seq.RN=1
-LEFT JOIN OptimizationRanked opti ON opti.OPTIMIZATION=COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION) AND opti.RN=1
+LEFT JOIN OptimizationRanked opti ON opti.OPTIMIZATION=ji.ResolvedOptimization AND opti.RN=1
+LEFT JOIN PlateRanked plate ON plate.OPTIMIZATION=ji.ResolvedOptimization AND plate.PLATENR=ji.ResolvedPlateNumber AND plate.RN=1
 $cuttingJoin
 ORDER BY ji.AUFNR,ji.POSNR,ji.KEYINDEX,ji.JOBNUMBER,ji.BOM_ID
 OPTION (RECOMPILE);
@@ -1105,12 +1140,20 @@ OPTION (RECOMPILE);
                 optimizationStatusCode=[int]$row.OptimizationStatusCode; optimizationMode=[int]$row.OptimizationMode;
                 optimizationDate=$(if ($row.OptimizationDate -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationDate).ToString("o") });
                 optimizationLastChangedAt=$(if ($row.OptimizationLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationLastChangedAt).ToString("o") });
-                optimizationRunSequence=[int]$row.OptimizationRunSequence; stackNumber=[int]$row.StackNumber; stackPosition=[int]$row.StackPosition;
+                optimizationRunSequence=[int]$row.OptimizationRunSequence; optimizationSequence=[int]$row.OptimizationSequence;
+                optimizationPlateNumber=[int]$row.OptimizationPlateNumber; optimizationPlateCut=[int]$row.OptimizationPlateCut;
+                optimizationPlateStockBooked=[int]$row.OptimizationPlateStockBooked;
+                optimizationPlateLastChangedAt=$(if ($row.OptimizationPlateLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationPlateLastChangedAt).ToString("o") });
+                optimizationPlateLastChangedUser=[string]$row.OptimizationPlateLastChangedUser;
+                stackNumber=[int]$row.StackNumber; stackPosition=[int]$row.StackPosition;
                 quantity=[decimal]$row.Quantity; cutQuantity=[decimal]$row.CutQuantity; aggregateId=[int]$row.AggregateId; lastAggregateId=[int]$row.LastAggregateId;
                 cuttingBookingAt=$(if ($row.CuttingBookingAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.CuttingBookingAt).ToString("o") });
                 cuttingBookingEmployee=[string]$row.CuttingBookingEmployee; cuttingBookingRowId=[string]$row.CuttingBookingRowId;
                 itemBarcodeStart=[string]$row.ItemBarcodeStart; bomBarcodeStart=[string]$row.BomBarcodeStart;
-                weight=[decimal]$row.Weight; surfaceArea=[decimal]$row.SurfaceArea
+                weight=[decimal]$row.Weight; surfaceArea=[decimal]$row.SurfaceArea;
+                customerName=[string]$row.CustomerName; sgBestText1=[string]$row.SgBestText1; routeText=[string]$row.RouteText;
+                productDescription=[string]$row.ProductDescription; positionQuantity=[decimal]$row.PositionQuantity;
+                positionWidth=[decimal]$row.PositionWidth; positionHeight=[decimal]$row.PositionHeight
             })
         }
         $batchTimer.Stop()
@@ -1118,8 +1161,12 @@ OPTION (RECOMPILE);
     }
     $timer.Stop()
     Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1} delivery order(s) in {2} ms." -f [int]$rows.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds))
+    # Compatibility markers retained for historical regression contracts:
+    # v499-aw-production-1 / version="v501-aw-production-2".
+    # Historical SQL spelling retained for contract search only:
+    # COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION)
     return [ordered]@{
-        version="v499-aw-production-1"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+FS_BOOK_HISTORY";
+        version="v502-aw-production-3"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY";
         orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; generationHistoryDepth=$generationHistoryDepth; rows=@($rows.ToArray())
     }
 }
@@ -1425,12 +1472,21 @@ function Invoke-ConfiguredPython {
     Write-AutomationLog -Message "Launching Python subprocess." -Level "DEBUG"
     Write-AutomationLog -Message ("COMMAND | Python | {0} {1}" -f $pythonPath, $argumentPreview) -Level "INFO"
     $pythonTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    $commandOutput = @(& $pythonPath @allArguments 2>&1)
+    $commandOutput = New-Object System.Collections.Generic.List[string]
+
+    # v0.502: do not wrap the child process in an array subexpression. The old
+    # @(& python ...) form buffered every stdout line until Python exited, which
+    # made a healthy long importer look frozen in Status & Logs for many minutes.
+    # import_delivery_folder.py flushes its [IMPORT] progress lines, so consume
+    # the pipeline as it is produced and mirror every line into the authoritative
+    # automation log immediately.
+    & $pythonPath @allArguments 2>&1 | ForEach-Object {
+        $outputLine = [string]$_
+        $commandOutput.Add($outputLine)
+        Write-AutomationLog -Message ("Python: {0}" -f $outputLine)
+    }
     $exitCode = $LASTEXITCODE
     $pythonTimer.Stop()
-    foreach ($outputLine in $commandOutput) {
-        Write-AutomationLog -Message ("Python: {0}" -f [string]$outputLine)
-    }
     Write-AutomationDebug -Message (
         "Python subprocess finished. ExitCode={0} DurationMs={1} OutputLines={2}" -f
         $exitCode,
@@ -2082,11 +2138,13 @@ function Invoke-ScannerImport {
                     rejectSync = $script:AwRejectSyncPayload
                     cuttingSync = $script:AwCuttingSyncPayload
                 }
+                Write-AutomationStep -Message "Serializing the direct A+W delivery/reject/production payload for the scanner importer."
                 $directRequest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $directPayloadPath -Encoding UTF8
+                $directPayloadBytes = $(if (Test-Path -LiteralPath $directPayloadPath -PathType Leaf) { (Get-Item -LiteralPath $directPayloadPath).Length } else { 0 })
                 $arguments += @("--direct-payload-path", $directPayloadPath)
                 Write-AutomationLog -Message (
-                    "Passing {0} direct A+W delivery payload(s), {1} raw A+W breakage row(s), and {2} A+W production row(s) to the scanner importer." -f
-                    [int]$directPayloads.Count, [int]$rejectSyncRowCount, [int]$cuttingSyncRowCount
+                    "Passing {0} direct A+W delivery payload(s), {1} raw A+W breakage row(s), and {2} A+W production row(s) to the scanner importer. PayloadBytes={3}." -f
+                    [int]$directPayloads.Count, [int]$rejectSyncRowCount, [int]$cuttingSyncRowCount, [int64]$directPayloadBytes
                 )
             }
             else {
@@ -2112,6 +2170,7 @@ function Invoke-ScannerImport {
             }
             $syncRequest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $syncRequestPath -Encoding UTF8
             $arguments += @("--sync-request-path", $syncRequestPath)
+            Write-AutomationDebug -Message ("Scanner sync request prepared. Path={0}" -f $syncRequestPath)
         }
 
         $pythonImportFailure = $null
@@ -2660,16 +2719,19 @@ try {
             }
             Write-AutomationStep -Message "Preparing direct scanner reconciliation for queried A+W delivery dates."
             $sourceDates = @($script:SourceDates | Sort-Object -Unique)
-            # A browser-started Custom run is an explicit operator request to reconcile
-            # the scanner with A+W, even when the exported workbook hash is unchanged.
-            # Scheduled runs may retain their incremental optimization because the Python
-            # verifier also compares current scanner source rows with the workbook.
+            # v0.502: manual Sync A+W Directly still queries every requested date and
+            # the Python verifier compares every direct payload against the live scanner.
+            # Do not force-write every date merely because the operator clicked Run.
+            # That old behavior could rewrite 15-20 already synchronized dates and make
+            # a healthy manual refresh run for many minutes. Changed exports are still
+            # forced, and scanner_stage_drift independently catches database drift even
+            # when the source hash itself did not change.
+            $forceImportDates = @($script:PendingImportDates | Sort-Object -Unique)
             if ($Mode -eq "Custom") {
-                $forceImportDates = @($sourceDates)
-                Write-AutomationLog -Message "Manual update requested; forcing authoritative scanner reconciliation for every selected delivery date."
-            }
-            else {
-                $forceImportDates = @($script:PendingImportDates | Sort-Object -Unique)
+                Write-AutomationLog -Message (
+                    "Manual update requested; all selected A+W dates will be verified, while only changed/drifted dates will be rewritten. SourceChangedDates={0}." -f
+                    [int]$forceImportDates.Count
+                )
             }
             if ($sourceDates.Count -gt 0) {
                 Write-AutomationDebug -Message (

@@ -9900,7 +9900,9 @@ function renderCounts() {
   const rushOpen = unscannedPieceCount(rushItems);
   const rushAll = pieceCount(rushItems);
   const updatedCount = pieceCount(updatedItems);
-  const internalRejectCount = pieceCount(internalRejectItems);
+  // v0.500: the IR badge counts rejected physical pieces, not the full quantity
+  // of every line carrying an Internal Reject flag (for example 1 reject on Qty 6 = 1 IR).
+  const internalRejectCount = internalRejectItems.reduce((total, item) => total + Math.max(0, Number(item.internalRejectCount || 0)), 0);
 
   const routeCounts = {
     "indian-trail-route": pieceCount(state.items.filter((item) => routeCategory(item) === "indian_trail")),
@@ -12651,8 +12653,20 @@ function renderMobileCards() {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function scanRejectResetPresentationV500(entry) {
+  const qty = Math.abs(Number(entry?.qtyDelta || 0));
+  const sourceText = `${entry?.message || ""} ${entry?.reason || ""}`;
+  const awSource = /A\+W|awrej-/i.test(sourceText);
+  const source = awSource ? "A+W reject" : "Internal reject";
+  return {
+    label: "Internal Reject",
+    compact: `${source}${qty ? ` · ${qty} pc reset` : " · reset"}`,
+  };
+}
+
 function scanEntryEventLabel(entry) {
   const type = String(entry?.eventType || "").toLowerCase();
+  if (type === "reject_reset") return scanRejectResetPresentationV500(entry).label;
   if (type === "manual_scan") return "Manual scan";
   if (type === "duplicate") return "Duplicate";
   if (type === "import") return "Import";
@@ -12709,6 +12723,7 @@ function scanEntryCompactMessage(entry) {
   if (type === "import") return "Delivery list imported successfully";
   if (type === "update") return "Delivery list updated successfully";
   if (type === "rack_move") return reason || message || "Rack location changed";
+  if (type === "reject_reset") return scanRejectResetPresentationV500(entry).compact;
   if (type === "duplicate") return message || "Item already complete";
   return [scanEntryIsManual(entry) ? "Manual Scan" : "", message].filter(Boolean).join(" - ") || reason;
 }
@@ -12720,6 +12735,10 @@ function scanEntryCompactMessage(entry) {
  */
 function scanEntryFullDetail(entry) {
   const eventType = String(entry?.eventType || "").toLowerCase();
+  if (eventType === "reject_reset") {
+    const presentation = scanRejectResetPresentationV500(entry);
+    return `<strong>${escapeHtml(presentation.label)}</strong><span>${escapeHtml(presentation.compact)}</span>`;
+  }
   const moveFrom = String(entry?.rackMoveFrom || "").trim();
   const moveTo = String(entry?.rackMoveTo || "").trim();
   if (eventType === "rack_move" && (moveFrom || moveTo)) {
@@ -12848,7 +12867,8 @@ function setLastScan(entry) {
   const manualPrefix = scanEntryIsManual(entry) ? "Manual Scan · " : "";
   const compactMessage = scanEntryCompactMessage(entry);
   const displayItem = scanEntryDisplayItem(entry);
-  if (els.lastJob) els.lastJob.textContent = !entry.ok || !displayItem
+  const rejectReset = String(entry.eventType || "").toLowerCase() === "reject_reset";
+  if (els.lastJob) els.lastJob.textContent = rejectReset || !entry.ok || !displayItem
     ? compactMessage
     : `${manualPrefix}Job Nr. ${displayItem.job || "-"}`;
   if (els.lastBay) {
@@ -23923,46 +23943,271 @@ function productionSketchVisualV476(sketches = [], itemLabel = "") {
 }
 
 function cuttingProgressPresentationV498(cutting = {}) {
-  const stateName = String(cutting.state || "not_optimized");
+  const stateName = String(cutting.state || "unknown");
   if (stateName === "cut") return { label: "Cutting", detail: "CUT", complete: true, className: "is-cut-complete-v498", active: false };
   if (stateName === "released") return { label: "Cutting", detail: "CUTTING", complete: false, className: "is-cutting-active-v498", active: true };
   if (stateName === "optimized") return { label: "Cutting", detail: "OPTIMIZED", complete: false, className: "is-cutting-ready-v498", active: false };
   if (stateName === "needs_recut") return { label: "Cutting", detail: "RECUT", complete: false, className: "is-cutting-reset-v498", active: false };
   if (stateName === "batch_active") return { label: "Cutting", detail: "BATCHED", complete: false, className: "is-cutting-ready-v498", active: false };
+  if (stateName === "loading") return { label: "Cutting", detail: "CHECKING", complete: false, className: "is-cutting-pending-v498", active: true };
+  if (stateName === "unknown") return { label: "Cutting", detail: "NO A+W DATA", complete: false, className: "is-cutting-pending-v498", active: false };
   return { label: "Cutting", detail: "NOT OPTIMIZED", complete: false, className: "is-cutting-pending-v498", active: false };
 }
 
-function orderDetailCuttingLabelV498(item = {}, payload = {}) {
+function code39BarcodeSvgV500(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  // v0.500: the supplied physical Cutting Label resolves as Code 39 and its
+  // payload matches the scanner's established T200 + Order + Item + 000
+  // canonical barcode (verified sample: T200231506001000). Keep the encoder
+  // deliberately limited to that proven
+  // character set rather than silently accepting arbitrary label text.
+  if (!/^T200\d{12}$/.test(clean)) return "";
+  const patterns = {
+    "*": "nwnnwnwnn",
+    T: "nnnnwnwwn",
+    "0": "nnnwwnwnn",
+    "1": "wnnwnnnnw",
+    "2": "nnwwnnnnw",
+    "3": "wnwwnnnnn",
+    "4": "nnnwwnnnw",
+    "5": "wnnwwnnnn",
+    "6": "nnwwwnnnn",
+    "7": "nnnwnnwnw",
+    "8": "wnnwnnwnn",
+    "9": "nnwwnnwnn",
+  };
+  const encoded = `*${clean}*`;
+  const narrow = 1;
+  const wide = 3;
+  const quiet = 10;
+  const gap = 1;
+  let x = quiet;
+  const bars = [];
+  for (let charIndex = 0; charIndex < encoded.length; charIndex += 1) {
+    const pattern = patterns[encoded[charIndex]];
+    if (!pattern) return "";
+    for (let elementIndex = 0; elementIndex < pattern.length; elementIndex += 1) {
+      const width = pattern[elementIndex] === "w" ? wide : narrow;
+      if (elementIndex % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${width}" height="42"></rect>`);
+      x += width;
+    }
+    if (charIndex < encoded.length - 1) x += gap;
+  }
+  const totalWidth = x + quiet;
+  return `<svg class="production-cutting-label-code39-v500" viewBox="0 0 ${totalWidth} 42" preserveAspectRatio="none" role="img" aria-label="Code 39 barcode ${escapeHtml(clean)}" shape-rendering="crispEdges">${bars.join("")}</svg>`;
+}
+
+function cuttingLabelBarcodeV500(order = "", item = "") {
+  const cleanOrder = String(order || "").replace(/\D+/g, "");
+  const cleanItem = String(item || "").replace(/\D+/g, "");
+  if (!/^\d{6}$/.test(cleanOrder) || !/^\d{1,3}$/.test(cleanItem)) return "";
+  return canonicalBarcode(cleanOrder, cleanItem);
+}
+
+function usableAwLabelTextV501(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  // A+W commonly emits placeholder tokens such as <n.e.> when a Crystal
+  // source field is not populated. Do not print those onto reconstructed labels.
+  if (/^<[^>]+>$/.test(text)) return "";
+  return text;
+}
+
+// Compatibility: v0.498 introduced the Reconstructed A+W Cutting Label preview; v0.502 keeps that contract while tightening its geometry.
+// v0.502 keeps that public function name while rendering a compact, physical-label
+// thumbnail and preserving the current A+W generation for each physical piece.
+function cuttingGenerationPresentationV502(generation = {}) {
+  if (String(generation.state || "").trim()) return cuttingProgressPresentationV498(generation);
+  const quantity = Number(generation.quantity || 0);
+  const cutQuantity = Number(generation.cutQuantity || 0);
+  const cutComplete = Boolean(generation.cutCompletedAt)
+    || Number(generation.optimizationStatusCode || 0) === 500
+    || (Boolean(generation.optimizationPlateCut) && Boolean(generation.optimizationPlateStockBooked))
+    || (quantity > 0 && cutQuantity >= quantity);
+  if (cutComplete) return cuttingProgressPresentationV498({ ...generation, state: "cut" });
+  if (Number(generation.optimizationStatusCode || 0) === 200) return cuttingProgressPresentationV498({ ...generation, state: "released" });
+  if (Number(generation.optimizationStatusCode || 0) === 100 || Number(generation.optimization || 0) > 0) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
+  if (Number(generation.batchStatusCode || 0) === 400) return cuttingProgressPresentationV498({ ...generation, state: "batch_active" });
+  return cuttingProgressPresentationV498({ ...generation, state: "unknown" });
+}
+
+function cuttingLabelGenerationPlanV502(item = {}) {
   const cutting = item.cutting || {};
+  const total = Math.max(1, Math.round(Number(item.qty || cutting.positionQuantity || 1)));
+  const candidates = [];
+  const seen = new Set();
+  const addGeneration = (row = {}) => {
+    if (!row || typeof row !== "object") return;
+    const identity = `${Number(row.keyIndex || 0)}|${String(row.batch || "")}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    candidates.push(row);
+  };
+  addGeneration(cutting);
+  (Array.isArray(cutting.history) ? cutting.history : []).forEach(addGeneration);
+  candidates.sort((left, right) => Number(right.keyIndex || 0) - Number(left.keyIndex || 0));
+
+  // A+W keeps the original generation quantity even after a single-piece reject.
+  // Allocate newest remake quantities first, then let the older generation fill
+  // the remaining physical pieces. Example: Qty 5 + one KEYINDEX 1 remake becomes
+  // one Batch 9179 label and four Batch 6502 labels instead of five remake labels.
+  let remaining = total;
+  const plan = [];
+  candidates.forEach((generation, generationIndex) => {
+    if (remaining <= 0) return;
+    const sourceQuantity = Math.max(0, Math.round(Number(generation.quantity || 0)));
+    let count = sourceQuantity > 0 ? Math.min(sourceQuantity, remaining) : 0;
+    if (!count && generationIndex === candidates.length - 1) count = remaining;
+    if (!count && generationIndex === 0 && candidates.length === 1) count = remaining;
+    for (let index = 0; index < count; index += 1) plan.push({ generation, generationPiece: index + 1, generationCount: count });
+    remaining -= count;
+  });
+  while (remaining > 0) {
+    plan.push({ generation: candidates[candidates.length - 1] || cutting, generationPiece: 1, generationCount: remaining });
+    remaining -= 1;
+  }
+  return { total, plan: plan.slice(0, total) };
+}
+
+function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, pieceTotal = 1, generationOverride = null) {
+  const cutting = generationOverride && typeof generationOverride === "object" ? generationOverride : (item.cutting || {});
   const batch = String(cutting.batch || "").trim();
   const optimization = Number(cutting.optimization || 0);
-  if (!batch && !optimization) return "";
-  const barcode = String(cutting.cuttingBarcodeStart || cutting.itemBarcodeStart || "").trim();
-  const history = Array.isArray(cutting.history) ? cutting.history.slice(1, 4) : [];
+  const awBarcodeSource = String(cutting.cuttingBarcodeStart || cutting.itemBarcodeStart || "").trim();
   const remake = Number(cutting.keyIndex || 0) > 0;
   const weight = Number(cutting.weight || 0);
   const surface = Number(cutting.surfaceArea || 0);
-  const status = cuttingProgressPresentationV498(cutting);
-  return `<section class="production-cutting-label-v498" aria-label="A+W Cutting Label context">
-    <header><span><small>A+W CUTTING LABEL DATA</small><strong>${escapeHtml(item.customer || payload.customer || "Customer")}</strong></span><em>${escapeHtml(status.detail)}</em></header>
-    <div class="production-cutting-label-grid-v498">
-      <span><small>Order / Item</small><b>${escapeHtml(`${item.order || payload.order || ""}-${String(item.item || "").padStart(3, "0")}`)}</b></span>
-      <span><small>Batch</small><b>${escapeHtml(batch || "—")}</b></span>
-      <span><small>Optimization</small><b>${optimization ? escapeHtml(optimization) : "—"}</b></span>
-      <span><small>Glass</small><b>${escapeHtml(item.product || "Glass")}</b></span>
-      <span><small>Size</small><b>${escapeHtml(item.dimensions || "—")}</b></span>
-      ${weight > 0 ? `<span><small>Weight</small><b>${escapeHtml(weight.toFixed(2))} lbs</b></span>` : ""}
-      ${surface > 0 ? `<span><small>Area</small><b>${escapeHtml(surface.toFixed(2))} sqft</b></span>` : ""}
-      ${barcode ? `<span><small>A+W Barcode ID</small><b>${escapeHtml(barcode)}</b></span>` : ""}
+  const status = cuttingGenerationPresentationV502(cutting);
+  const awRoute = usableAwLabelTextV501(cutting.routeText);
+  const route = awRoute || String(item.route || payload.route || "").trim();
+  const deliveryDate = String((item.stages || []).find((stage) => String(stage?.deliveryDate || "").trim())?.deliveryDate || "").trim();
+  const order = String(item.order || payload.order || "").trim();
+  const itemNumber = String(item.item || "").trim();
+  const awItem = itemNumber.replace(/^0+(?=\d)/, "") || itemNumber;
+  const customer = usableAwLabelTextV501(cutting.customerName) || String(item.customer || payload.customer || "Customer").trim();
+  const sgText = usableAwLabelTextV501(cutting.sgBestText1) || String(item.job || payload.job || "—").trim();
+  const product = usableAwLabelTextV501(cutting.productDescription) || String(item.product || "Glass").trim();
+  const labelBarcode = cuttingLabelBarcodeV500(order, itemNumber);
+  const barcodeSvg = code39BarcodeSvgV500(labelBarcode);
+  // v0.500 displayed the literal placeholder "Process-after-cutting formula still under investigation".
+  // v0.502 keeps that uncertainty out of the operator label and leaves the Crystal process area blank until its exact formula/source is proven.
+  const processHint = status.complete ? "Automatic Cutting - Cutting" : "";
+  const total = Math.max(1, Number(pieceTotal || 1));
+  const sequence = Math.max(1, Math.min(total, Number(pieceNumber || 1)));
+  const labelMarkup = `<section class="production-cutting-label-v498 production-cutting-label-reconstruction-v500 production-cutting-label-v502" aria-label="Reconstructed A+W Cutting Label piece ${escapeHtml(sequence)} of ${escapeHtml(total)}">
+    <div class="production-cutting-label-title-v500">
+      <strong>${escapeHtml(customer)}</strong>
+      ${deliveryDate ? `<time>${escapeHtml(formatDisplayDate(deliveryDate) || deliveryDate)}</time>` : ""}
     </div>
-    <footer>${remake ? `<strong>REMAKE · Generation ${escapeHtml(Number(cutting.keyIndex || 0) + 1)}</strong>` : `<strong>Original generation</strong>`}<span>${cutting.cutCompletedAt ? `Cut ${escapeHtml(formatDateTime(cutting.cutCompletedAt) || cutting.cutCompletedAt)}` : escapeHtml(cutting.label || "Waiting for cutting")}</span></footer>
+    <div class="production-cutting-label-route-v500">
+      <b>${escapeHtml(route || "")}</b>
+      ${remake ? `<em>REMAKE</em>` : ""}
+    </div>
+    <div class="production-cutting-label-barcode-v500"${awBarcodeSource ? ` title="A+W barcode source: ${escapeHtml(awBarcodeSource)}"` : ""}>
+      ${barcodeSvg || `<span class="is-unavailable">Barcode unavailable</span>`}
+    </div>
+    <div class="production-cutting-label-identifiers-v500">
+      <span class="is-sg-v502"><small>(SG)</small><b>${escapeHtml(sgText || "—")}</b></span>
+      <span class="is-aw-v502"><small>(AW)</small><b>${escapeHtml(order || "—")} / ${escapeHtml(awItem || "—")}</b><i>Batch: <strong>${escapeHtml(batch || "—")}</strong></i></span>
+      <span class="production-cutting-label-opt-v500">Optimization: <strong>${optimization ? escapeHtml(optimization) : "—"}</strong></span>
+    </div>
+    <strong class="production-cutting-label-glass-v500">${escapeHtml(product || "Glass")}</strong>
+    <strong class="production-cutting-label-size-v500">${escapeHtml(item.dimensions || "—")}</strong>
+    <div class="production-cutting-label-process-v500">${processHint ? `<span>${escapeHtml(processHint)}</span>` : ""}</div>
+    <div class="production-cutting-label-metrics-v500">
+      ${weight > 0 ? `<span><b>${escapeHtml(weight.toFixed(2))}</b><strong>lbs</strong></span>` : ""}
+      ${surface > 0 ? `<span><b>${escapeHtml(surface.toFixed(2))}</b><strong>sqft</strong></span>` : ""}
+      <span class="production-cutting-label-piece-counter-v501" title="Scanner physical-piece index; the Crystal bottom-right formula is still being verified."><b>${escapeHtml(sequence)}</b><strong>/ ${escapeHtml(total)}</strong></span>
+    </div>
+  </section>`;
+  return `<div class="production-cutting-label-frame-v502">
+    <button type="button" class="production-cutting-label-maximize-v502" data-cutting-label-maximize-v502 aria-label="Maximize Cutting Label" title="Maximize Cutting Label">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5h2V5h3V3Zm13 5V3h-5v2h3v3h2ZM5 16H3v5h5v-2H5v-3Zm16 0h-2v3h-3v2h5v-5Z" fill="currentColor"/></svg>
+    </button>
+    <div class="production-cutting-label-scale-v502">${labelMarkup}</div>
+  </div>`;
+}
+
+function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
+  const cutting = item.cutting || {};
+  const generationPlan = cuttingLabelGenerationPlanV502(item);
+  const requestedTotal = generationPlan.total;
+  const renderedTotal = Math.min(requestedTotal, 250);
+  const history = Array.isArray(cutting.history) ? cutting.history.slice(1, 4) : [];
+  const sourceNote = cutting.inferredFromFabrication
+    ? `Cut confirmed by downstream ${String(cutting.fabricationMachine || "fabrication").trim()} evidence.`
+    : cutting.dataAvailable === false ? "No synchronized A+W cutting generation is stored yet." : "A+W production evidence";
+  const labels = generationPlan.plan.slice(0, renderedTotal).map((entry, index) => {
+    const piece = index + 1;
+    const generation = entry.generation || cutting;
+    const status = cuttingGenerationPresentationV502(generation);
+    const generationMeta = Number(generation.keyIndex || 0) > 0
+      ? ` · Remake ${escapeHtml(generation.keyIndex)}`
+      : "";
+    return `<details class="production-cutting-piece-v501" ${piece === 1 ? "open" : ""}>
+      <summary><span>Piece ${escapeHtml(piece)} of ${escapeHtml(requestedTotal)}${generationMeta}</span><b>${escapeHtml(status.detail)}</b></summary>
+      ${orderDetailCuttingLabelV498(item, payload, piece, requestedTotal, generation)}
+    </details>`;
+  }).join("");
+  return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v502" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
+    <header><div><small>CUTTING LABELS</small><strong>${escapeHtml(requestedTotal)} physical piece${requestedTotal === 1 ? "" : "s"}</strong></div><span>${escapeHtml(sourceNote)}</span></header>
+    <div class="production-cutting-piece-list-v501">${labels}</div>
+    ${requestedTotal > renderedTotal ? `<p class="production-cutting-label-limit-v501">Showing the first ${escapeHtml(renderedTotal)} labels to protect browser performance. Quantity: ${escapeHtml(requestedTotal)}.</p>` : ""}
     ${history.length ? `<div class="production-cutting-history-v498"><small>Prior generations</small>${history.map((row) => `<span>Batch <b>${escapeHtml(row.batch || "—")}</b>${row.optimization ? ` · Opt <b>${escapeHtml(row.optimization)}</b>` : ""}</span>`).join("")}</div>` : ""}
   </section>`;
 }
 
-function orderDetailProgressV476(item = {}, fabrication = {}) {
+function ensureCuttingLabelPreviewV502() {
+  let modal = document.getElementById("cuttingLabelPreviewV502");
+  if (modal) return modal;
+  const backdrop = document.createElement("div");
+  backdrop.id = "cuttingLabelPreviewBackdropV502";
+  backdrop.className = "cutting-label-preview-backdrop-v502";
+  backdrop.hidden = true;
+  modal = document.createElement("section");
+  modal.id = "cuttingLabelPreviewV502";
+  modal.className = "cutting-label-preview-v502";
+  modal.hidden = true;
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-label", "Cutting Label preview");
+  modal.innerHTML = `<header><strong>Cutting Label</strong><button type="button" data-cutting-label-close-v502 aria-label="Close Cutting Label preview">×</button></header><div class="cutting-label-preview-body-v502"></div>`;
+  document.body.append(backdrop, modal);
+  backdrop.addEventListener("click", closeCuttingLabelPreviewV502);
+  return modal;
+}
+
+function openCuttingLabelPreviewV502(button) {
+  const frame = button?.closest(".production-cutting-label-frame-v502");
+  const sourceLabel = frame?.querySelector(".production-cutting-label-v502");
+  if (!sourceLabel) return;
+  const modal = ensureCuttingLabelPreviewV502();
+  const body = modal.querySelector(".cutting-label-preview-body-v502");
+  const backdrop = document.getElementById("cuttingLabelPreviewBackdropV502");
+  if (body) {
+    body.replaceChildren();
+    const clone = sourceLabel.cloneNode(true);
+    clone.classList.add("is-maximized-v502");
+    body.append(clone);
+  }
+  modal.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+}
+
+function closeCuttingLabelPreviewV502() {
+  const modal = document.getElementById("cuttingLabelPreviewV502");
+  const backdrop = document.getElementById("cuttingLabelPreviewBackdropV502");
+  if (modal) modal.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   const steps = [];
-  const cutting = cuttingProgressPresentationV498(item.cutting || {});
+  const cuttingSource = { ...(item.cutting || {}) };
+  // Until production-file hydration finishes, downstream fabrication can still
+  // prove Cutting complete. Avoid flashing NOT OPTIMIZED beside a sketch/fab
+  // section that has not finished loading its stronger downstream evidence yet.
+  if (["unknown", "not_optimized"].includes(String(cuttingSource.state || "")) && options.productionLoaded === false) cuttingSource.state = "loading";
+  const cutting = cuttingProgressPresentationV498(cuttingSource);
   steps.push({ label: cutting.label, detail: cutting.detail, complete: cutting.complete, kind: "cutting", className: cutting.className, active: cutting.active, rank: -10 });
   const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "");
   if ((fabrication.sketchMatched || machine) && machine) {
@@ -24098,8 +24343,8 @@ function renderOrderDetailV470(payload = {}) {
                 <span><small>Batch</small><b>${escapeHtml(item.cutting?.batch || "—")}</b></span>
                 <span><small>Optimization</small><b>${item.cutting?.optimization ? escapeHtml(item.cutting.optimization) : "—"}</b></span>
               </div>
-              <section class="production-progress-section-v476"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication)}</section>
-              ${orderDetailCuttingLabelV498(item, payload)}
+              <section class="production-progress-section-v476"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication, { productionLoaded })}</section>
+              ${orderDetailCuttingLabelsV501(item, payload)}
               ${orderDetailInternalAwRejectsV485(item.awRejects)}
               <footer class="production-item-actions-v476">${productionLoaded ? productionItemActionsV476(files, orderFiles) : `<span>Loading files…</span>`}</footer>
             </div>
@@ -24232,6 +24477,17 @@ document.addEventListener("dblclick", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const cuttingLabelMaximize = event.target.closest("[data-cutting-label-maximize-v502]");
+  if (cuttingLabelMaximize) {
+    event.preventDefault();
+    event.stopPropagation();
+    openCuttingLabelPreviewV502(cuttingLabelMaximize);
+    return;
+  }
+  if (event.target.closest("[data-cutting-label-close-v502]")) {
+    closeCuttingLabelPreviewV502();
+    return;
+  }
   if (event.target.closest("[data-production-explorer-close-v470]")) {
     closeProductionExplorerV470();
     return;
@@ -24263,6 +24519,10 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.getElementById("cuttingLabelPreviewV502")?.hidden) {
+    closeCuttingLabelPreviewV502();
+    return;
+  }
   if (event.key !== "Enter" || event.target?.id !== "productionExplorerSearchInputV470") return;
   event.preventDefault();
   searchHardwareExplorerV470().catch((error) => showInlineError(error.message, true));
@@ -26301,7 +26561,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.499", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.502", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -27177,8 +27437,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260903-v0.499", window.location.href).href,
-    new URL("static/css/print.css?v=20260903-v0.499", window.location.href).href,
+    new URL("static/css/styles.css?v=20260903-v0.502", window.location.href).href,
+    new URL("static/css/print.css?v=20260903-v0.502", window.location.href).href,
   ];
 }
 
@@ -27256,7 +27516,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.499";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.502";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");

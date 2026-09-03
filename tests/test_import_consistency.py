@@ -282,6 +282,50 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_startup_skips_pending_aw_rollbacks_until_post_import_retry(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_startup_pending_v500"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            row = {
+                "awRowId": "pending-bom0", "orderNr": "991100", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-01T12:00:00+00:00", "originalJobNumber": "7101",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine",
+                "locationCode": 5, "locationLabel": "Grinding", "fromScanner": 1,
+                "breakageUser": "A+W User", "timelineEmployee": "A+W User", "bookingMessage": "Reject",
+            }
+            first = store.sync_aw_reject_rows([row])
+            self.assertEqual(first["pendingOperationalRollbacks"], 1)
+            with store.connect() as con:
+                self.assertEqual(con.execute("SELECT rollback_applied_at FROM aw_reject_source_rows WHERE aw_row_id='pending-bom0'").fetchone()[0], "")
+
+            # Normal server startup must not repeatedly replay every historical
+            # pending reject when no delivery line could possibly be reset yet.
+            startup = store.ensure_aw_internal_reject_mirrors()
+            self.assertEqual(startup["sourceRows"], 0)
+
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-03", "items": [imported_item("991100", "1", 6, "pending-reject:1")]},
+                "fileName": "Delivery List 09-03-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as con:
+                con.execute("UPDATE line_items SET scanned_qty=6 WHERE order_no='991100' AND item_no='001'")
+                con.commit()
+
+            post_import = store.ensure_aw_internal_reject_mirrors(retry_pending_rollbacks=True)
+            self.assertEqual(post_import["operationalRollbacks"], 1)
+            with store.connect() as con:
+                states = [int(row[0] or 0) for row in con.execute("SELECT scanned_qty FROM line_items WHERE order_no='991100' AND item_no='001'").fetchall()]
+                marker = con.execute("SELECT rollback_applied_at FROM aw_reject_source_rows WHERE aw_row_id='pending-bom0'").fetchone()[0]
+            self.assertTrue(states)
+            self.assertTrue(all(value == 5 for value in states))
+            self.assertTrue(str(marker or ""))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_aw_reject_new_codes_auto_register_and_unmapped_label_changes_refresh(self) -> None:
         verification_root = ROOT / "_verification_aw_reject_new_codes_v485"
         shutil.rmtree(verification_root, ignore_errors=True)
@@ -332,7 +376,7 @@ class ImportConsistencyTests(unittest.TestCase):
             store.import_delivery_list({
                 "payload": {
                     "deliveryDate": "2026-09-02",
-                    "items": [imported_item("238091", "1", 2, "aw-reject:no-rollback")],
+                    "items": [imported_item("238091", "1", 6, "aw-reject:no-rollback")],
                 },
                 "fileName": "Delivery List 09-02-2026.xlsx",
                 "user": "admin",
@@ -342,7 +386,7 @@ class ImportConsistencyTests(unittest.TestCase):
                     "SELECT id, list_id, barcode FROM line_items WHERE order_no='238091' AND item_no='001' LIMIT 1"
                 ).fetchone()
                 connection.execute(
-                    "UPDATE line_items SET scanned_qty=1 WHERE order_no=? AND item_no=?",
+                    "UPDATE line_items SET scanned_qty=6 WHERE order_no=? AND item_no=?",
                     ("238091", "001"),
                 )
                 connection.execute(
@@ -371,7 +415,7 @@ class ImportConsistencyTests(unittest.TestCase):
                     "SELECT source_type, scan_qty_reduced, delivery_date FROM reject_events WHERE source_type='aw'"
                 ).fetchone()
             self.assertTrue(states)
-            self.assertTrue(all(int(state["scanned_qty"] or 0) == 0 for state in states))
+            self.assertTrue(all(int(state["scanned_qty"] or 0) == 5 for state in states))
             self.assertTrue(all(int(state["internal_reject_count"] or 0) == 1 for state in states))
             reset_rows = [scan for scan in scans if str(scan["event_type"]) == "reject_reset"]
             self.assertEqual(len(reset_rows), len(states))
@@ -399,7 +443,7 @@ class ImportConsistencyTests(unittest.TestCase):
                 second_reset_count = connection.execute(
                     "SELECT COUNT(*) FROM scan_events WHERE event_type='reject_reset'"
                 ).fetchone()[0]
-            self.assertTrue(all(int(state["scanned_qty"] or 0) == 0 for state in second_states))
+            self.assertTrue(all(int(state["scanned_qty"] or 0) == 5 for state in second_states))
             self.assertEqual(second_reset_count, first_reset_count)
 
             unchanged = store.sync_aw_reject_rows([{**row, "sourceLastChangedAt": "2026-09-02T12:00:00+00:00"}])
@@ -513,6 +557,14 @@ class ImportConsistencyTests(unittest.TestCase):
         verification_root.mkdir(exist_ok=True)
         try:
             store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-03", "items": [imported_item("238400", "1", 1, "aw-actor:1")]},
+                "fileName": "Delivery List 09-03-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as con:
+                con.execute("UPDATE line_items SET scanned_qty=1 WHERE order_no='238400' AND item_no='001'")
+                con.commit()
             store.sync_aw_reject_rows([{
                 "awRowId": "actor-bom0", "orderNr": "238400", "itemNr": "1", "bomId": 0,
                 "keyIndex": 1, "subPosition": 0, "quantity": 1,
@@ -528,14 +580,39 @@ class ImportConsistencyTests(unittest.TestCase):
             }])
             with store.connect() as con:
                 mirror = con.execute("SELECT rejected_by FROM reject_events WHERE source_type='aw'").fetchone()
-                event = con.execute("SELECT breakage_user, timeline_employee FROM aw_reject_events").fetchone()
+                event = con.execute("SELECT event_key, breakage_user, timeline_employee FROM aw_reject_events").fetchone()
                 self.assertEqual(mirror["rejected_by"], "Brandon Smith")
                 self.assertEqual(event["breakage_user"], "Brandon Smith")
                 self.assertEqual(event["timeline_employee"], "Brandon Smith")
 
-                # Simulate a v0.488 mirror written with PROD_BREAKAGE.LASTCHANGEUSER.
+                # Simulate v0.488-v0.499 records written with the mutable
+                # PROD_BREAKAGE maintenance user instead of the booking employee.
                 con.execute("UPDATE reject_events SET rejected_by='Vinny Spaulding' WHERE source_type='aw'")
                 con.execute("UPDATE aw_reject_events SET breakage_user='Vinny Spaulding'")
+
+                # scan_events is intentionally append-only. Insert a representative
+                # legacy row carrying the old actor and old verbose message rather
+                # than illegally mutating history. v0.500 must project the verified
+                # FS_BOOK_HISTORY actor at read time while the raw audit row remains
+                # byte-for-byte attributable to its original write.
+                line = con.execute(
+                    "SELECT id, list_id, barcode FROM line_items WHERE order_no='238400' AND item_no='001' LIMIT 1"
+                ).fetchone()
+                con.execute(
+                    """
+                    INSERT INTO scan_events (
+                        list_id, line_item_id, barcode, canonical_barcode, user_name, station,
+                        event_type, message, reason, qty_delta, created_at
+                    ) VALUES (?, ?, ?, ?, 'Vinny Spaulding', 'A+W Reject', 'reject_reset', ?, ?, -1, ?)
+                    """,
+                    (
+                        line["list_id"], line["id"], line["barcode"], line["barcode"],
+                        f"A+W Internal reject reset 238400-001 ({event['event_key']})",
+                        "Legacy A+W reject-reset actor test",
+                        "2026-09-02T14:11:00+00:00",
+                    ),
+                )
+                list_id = str(line["list_id"])
                 con.commit()
 
             repaired = store.ensure_aw_internal_reject_mirrors()
@@ -543,8 +620,13 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 mirror = con.execute("SELECT rejected_by FROM reject_events WHERE source_type='aw'").fetchone()
                 event = con.execute("SELECT breakage_user FROM aw_reject_events").fetchone()
+                raw_scan_users = [row[0] for row in con.execute("SELECT user_name FROM scan_events WHERE event_type='reject_reset'").fetchall()]
+            projected_scan_users = [row["user"] for row in store.get_scan_events(list_id) if row["eventType"] == "reject_reset"]
             self.assertEqual(mirror["rejected_by"], "Brandon Smith")
             self.assertEqual(event["breakage_user"], "Brandon Smith")
+            self.assertIn("Vinny Spaulding", raw_scan_users)
+            self.assertTrue(projected_scan_users)
+            self.assertTrue(all(user == "Brandon Smith" for user in projected_scan_users))
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -3105,13 +3187,16 @@ class ImportConsistencyTests(unittest.TestCase):
         try:
             store = self.make_store(verification_root)
             common = {
-                "orderNr": "238221", "itemNr": "1", "quantity": 1, "cutQuantity": 1,
+                "orderNr": "238221", "itemNr": "1", "quantity": 1, "cutQuantity": 0,
                 "itemBarcodeStart": "130191", "weight": 83.88, "surfaceArea": 17.48,
+                "customerName": "FRAMED MIRROR", "sgBestText1": "43479331.5 30** CEDAR",
+                "routeText": "<n.e.>", "productDescription": '1/4" Mirror',
+                "positionQuantity": 1, "positionWidth": 1018, "positionHeight": 570,
             }
             rows = [
                 {**common, "sourceRowId": "old-cut", "bomId": 1, "keyIndex": 0, "batchJobNumber": "6474",
                  "batchStatusCode": 500, "batchCreatedAt": "2026-08-31T15:22:37",
-                 "optimizationNumber": 8309, "optimizationStatusCode": 500, "aggregateId": 1000,
+                 "optimizationNumber": 8309, "optimizationStatusCode": 500, "aggregateId": 1000, "cutQuantity": 1,
                  "cuttingBookingAt": "2026-09-01T07:08:00", "cuttingBookingEmployee": "Intermac Cutting",
                  "cuttingBookingRowId": "book-old", "bomBarcodeStart": "130192"},
                 {**common, "sourceRowId": "current-cut", "bomId": 1, "keyIndex": 2, "batchJobNumber": "9176",
@@ -3134,6 +3219,14 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(state["cuttingBarcodeStart"], "130192")
             self.assertAlmostEqual(state["weight"], 83.88, places=2)
             self.assertEqual(len(state["history"]), 2)
+            self.assertEqual(state["customerName"], "FRAMED MIRROR")
+            self.assertEqual(state["sgBestText1"], "43479331.5 30** CEDAR")
+            self.assertEqual(state["productDescription"], '1/4" Mirror')
+            self.assertEqual(state["positionWidth"], 1018.0)
+
+            unknown = store.aw_cutting_state("999999", "1")
+            self.assertEqual(unknown["state"], "unknown")
+            self.assertFalse(unknown["dataAvailable"])
 
             order_item = imported_item("238221", "1", 1, "v0498-cutting-order:1")
             store.import_delivery_list({
@@ -3150,6 +3243,34 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(detail["items"][0]["cutting"]["batch"], "9176")
             self.assertEqual(detail["items"][0]["cutting"]["optimization"], 8361)
             self.assertEqual(detail["items"][0]["cutting"]["state"], "optimized")
+
+            class FabricatedProductionFiles:
+                @staticmethod
+                def item_assets(order, item, job, *, evidence_after=""):
+                    return {
+                        "fabrication": {
+                            "fabricated": True, "actualMachine": "Denver CNC", "machine": "Denver CNC",
+                            "evidenceAfter": evidence_after, "evidence": {"name": "238221-1.egl"},
+                        },
+                        "hardware": [], "sketches": [], "programs": [],
+                    }
+
+                @staticmethod
+                def order_assets(order, job):
+                    return {"hardware": [], "sketches": []}
+
+                @staticmethod
+                def availability():
+                    return {}
+
+            store.production_files = FabricatedProductionFiles()
+            fabricated_detail = store.get_order_detail("238221", include_production=True)
+            fabricated_cutting = fabricated_detail["items"][0]["cutting"]
+            self.assertEqual(fabricated_cutting["state"], "cut")
+            self.assertTrue(fabricated_cutting["complete"])
+            self.assertTrue(fabricated_cutting["inferredFromFabrication"])
+            self.assertEqual(fabricated_cutting["fabricationMachine"], "Denver CNC")
+
             recut_state = store.aw_cutting_state("238221", "1", "2026-09-03T08:00:00")
             self.assertEqual(recut_state["state"], "needs_recut")
             self.assertFalse(recut_state["complete"])
@@ -3183,6 +3304,36 @@ class ImportConsistencyTests(unittest.TestCase):
             unchanged = store.sync_aw_cutting_rows(booked_rows)
             self.assertEqual(unchanged["unchanged"], 2)
             self.assertEqual(unchanged["updated"], 0)
+
+            # v0.502 regression from the live 238330 probe: the newest remake
+            # generation can prove physical Cutting through PROD_OPTI_PLATES
+            # CUT/STOCKBOOKED and MENGE_CUT even if a cached lifecycle status or
+            # Automatic Cutting booking is absent from the synchronized row.
+            probe_rows = [{
+                "sourceRowId": "238330-current", "orderNr": "238330", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "batchJobNumber": "9179", "batchStatusCode": 500,
+                "batchDescription": "Reject batch Brandon Smith 09/03/2026",
+                "batchCreatedAt": "2026-09-03T08:06:32", "optimizationNumber": 8366,
+                "optimizationStatusCode": 0, "optimizationSequence": 4, "optimizationPlateNumber": 1,
+                "optimizationPlateCut": 1, "optimizationPlateStockBooked": 1,
+                "optimizationPlateLastChangedAt": "2026-09-03T09:31:12",
+                "optimizationPlateLastChangedUser": "Intermac Cutting",
+                "quantity": 1, "cutQuantity": 1, "aggregateId": 1000, "lastAggregateId": 2000,
+            }]
+            probe_sync = store.sync_aw_cutting_rows(probe_rows)
+            self.assertEqual(probe_sync["generations"], 1)
+            probe_state = store.aw_cutting_state("238330", "1", "2026-09-03T07:50:00")
+            self.assertEqual(probe_state["state"], "cut")
+            self.assertTrue(probe_state["complete"])
+            self.assertEqual(probe_state["optimization"], 8366)
+            self.assertEqual(probe_state["optimizationSequence"], 4)
+            self.assertEqual(probe_state["optimizationPlateNumber"], 1)
+            self.assertTrue(probe_state["optimizationPlateCut"])
+            self.assertTrue(probe_state["optimizationPlateStockBooked"])
+            self.assertEqual(probe_state["evidenceSource"], "optimization_plate_cut")
+            post_probe_reject = store.aw_cutting_state("238330", "1", "2026-09-03T10:00:00")
+            self.assertEqual(post_probe_reject["state"], "needs_recut")
+            self.assertFalse(post_probe_reject["complete"])
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 

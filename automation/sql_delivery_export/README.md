@@ -31,6 +31,12 @@ Use an Order/Item that has already been optimized and has labels available in A+
 <!-- File: automation/sql_delivery_export/README.md -->
 # Delivery List Automation Runtime v132
 
+## Website version 4 piece Cutting labels / sync lineage (v0.501)
+
+Direct A+W production enrichment now carries the Crystal-visible Order/Item label anchors `AH_NAME1`, `BEST_TEXT1`, `OR_TOUR`, and `PROD_BEZ1` plus position quantity/size into the existing cutting-generation source snapshot. This deliberately avoids a schema change while making Order Details label reconstruction use A+W's actual `(SG)` source instead of scanner Job text where current synchronized data is available.
+
+The diagnostic probe adds outputs 58-60 for an Order/Item-first Cutting investigation. These expose `PROD_JOBITEM` generation/Batch rows beside `PROD_OPTI_SEQUENCE` membership, plate evidence, and the `ZW_AUFTR_ZEIT` downstream process route without requiring the operator to know the Optimization number first.
+
 ## Website version 4 unified manual A+W sync / production query controls (v0.499)
 
 The maintained browser workflow exposes one complete manual command: **Sync A+W Directly**. A browser-started direct sync forces delivery reconciliation, A+W Internal Reject synchronization, and Batch/Optimization/Cutting enrichment together. The old `RejectSyncOnly` runner action remains accepted only for compatibility with older installed callers; it is no longer shown as a separate Run Manually card. Scheduled Direct A+W Sync can independently include/exclude Reject and Production enrichment through Automation Control Center settings.
