@@ -1,28 +1,236 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.478**. SQLite remains the active/default backend.
+Current maintained release: **v0.499**. SQLite remains the active/default backend.
 
-v0.478 tightens Scan order grouping, distinguishes items with no fabrication work, streamlines sketch review with a compact/maximized viewer, adds action icons, and corrects Bay Map visual/animation details.
+v0.499 consolidates manual A+W synchronization, adds dedicated Batch/Optimization/Cutting automation settings, and hardens the production query so Direct A+W Sync remains bounded and visibly progresses instead of appearing frozen.
 
-## Install v0.478
+## Install v0.499
 
 1. Stop the Delivery List Scanner server.
-2. Copy the v0.478 changed files over the matching paths in your current project.
-3. Start the server again so the backend/frontend release are both v0.478.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.478 cache keys are used.
+2. Copy the v0.499 changed files over the matching paths in your current project.
+3. Start the server. SQLite remains schema **16**; no new database migration is required from v0.498.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.499 cache keys are used.
+5. Open **Automation Control Center -> A+W Production** and review the new production/query settings, then run **Sync A+W Directly** once.
 
-SQLite schema remains **version 11**. No migration or database reset is required.
+## v0.499 highlights
+
+- **Sync A+W Directly is now the one complete manual A+W command.** It refreshes delivery-list SQL rows, verified A+W Internal Rejects, Batch/Optimization generations, Cutting lifecycle/bookings, and Cutting Label source context. The separate manual **Check A+W Rejects** card is removed from Run Manually.
+- Manual Direct A+W Sync intentionally forces the complete Reject + Production refresh even when those enrichments are disabled for scheduled runs. Scheduled behavior remains independently configurable.
+- Added an **A+W Production** Automation Control Center tab for Batch/Optimization/Cutting settings: production enablement, physical Cutting booking confirmation, orders per SQL batch, SQL timeout, Cutting-booking lookback, and generation-history depth.
+- Added **Scheduled A+W enrichment** settings to the Automatic Schedule tab so scheduled Direct A+W Sync can independently include/exclude Reject synchronization and Batch/Optimization/Cutting synchronization.
+- Reworked the v0.498 A+W production query around small configurable order batches (default **60**), `DENSE_RANK` generation limiting, bounded recent Automatic Cutting booking evidence, pre-ranked `PROD_OPTI_SEQUENCE` / optimization status data, `OPTION (RECOMPILE)`, and a per-batch timeout. Each production batch writes a live STEP/log line before and after the SQL query so a slow A+W query is visible instead of looking frozen.
+- Production enrichment remains SELECT-only / `READ UNCOMMITTED`, is still bounded to orders already present in the direct delivery payload, and remains non-blocking if A+W production metadata cannot be read.
+- Cutting Label investigation is now anchored to the verified Crystal report **`Prodman_CuttingLabel_Optimisation.rpt`**, Print Point **846 – Cutting Labels**. The Production settings tab records that contract and recommends Crystal Viewer **Export -> PDF** as the best way to capture an exact rendered label without clicking Execute or advancing production. The diagnostic probe also accepts `-LocateCrystalReport` and writes `54-cutting-label-crystal-file-locations.csv` by checking the configured A+W UNC transfer roots and their immediate report-like folders without recursively crawling the server.
+- Application version advanced to **v0.499**; SQLite remains schema **16**.
+- Final verification: **53/53 behavioral/backend tests pass** and static structure is **196 pass / 129 known legacy failures**, with no new failures.
+
+## v0.497 highlights
+
+- Fixed `46-recent-optimization-status-summary.csv` failing with SQL Server errors `Incorrect syntax near the keyword 'RowCount'` and `Incorrect syntax near 'q'`.
+- The summary now aliases the count as `[RowCount]`, explicitly aliases the UNION as `AS q`, and qualifies grouped/ordered fields through `q` so the query is unambiguous on SQL Server.
+- No lifecycle status values were changed or guessed; outputs 45-53 remain strictly diagnostic until live BFSMAIN evidence proves Optimized, Released/Cutting, and Booked/Cut mappings.
+- A+W remains SELECT-only / `READ UNCOMMITTED`; SQLite remains schema **15**.
+- Application version advanced to **v0.497**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure remains **194 pass / 129 known legacy failures**, with no new failures.
+
+## v0.496 highlights
+
+- Keeps the exact Cutting Labels Crystal contract anchored to `SYSADM.DR_REPORTE` report/print point **846** and `Prodman_CuttingLabel_Optimisation.rpt`; the user-visible label is therefore tied to the same Optimization Overview output path A+W uses.
+- Added output **45** to compare the selected optimization across live `PROD_OPTIMIZATION` and historical/statistical `PROD_OPTI_STATISTICS`, including raw status code, optimization mode, result, sheet count, timestamps, and source identity.
+- Added output **46** to summarize the last 120 days of optimization status codes separately for the live and statistics tables so Optimized, Released, and Booked/Cut states can be mapped from real BFSMAIN evidence rather than guessed.
+- Added outputs **47-48** to locate status/state columns and human-readable Optimized/Released/Booked (including common German equivalents) text in optimization-related A+W objects.
+- Added outputs **49-51** to separate raw optimization sequence membership, Order/Item `PROD_JOBITEM` rows, Batch/Job number, and `PROD_JOB.STATUS`. This is the source chain intended for showing **Batch** and **Optimization** per physical piece in Order Details.
+- Added output **52** for the complete A+W production booking timeline on the known Order/Item and output **53** for SQL modules that reference optimization/status/archive logic.
+- No Cutting progress state is hard-coded yet. The intended scanner UI is **Not Optimized -> Optimized/Waiting -> Released/Cutting (animated loading circle) -> Booked/Cut (complete)**, but the raw A+W status mapping must be proven by this probe first.
+- A+W remains SELECT-only / `READ UNCOMMITTED`; SQLite remains schema **15**.
+- Application version advanced to **v0.496**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure is **194 pass / 129 known legacy failures**, with no new failures.
+
+## v0.495 highlights
+
+- The live Crystal report catalog now identifies the exact Production Manager > Optimization Overview > Output > **Cutting Labels** template as `Prodman_CuttingLabel_Optimisation.rpt` in `SYSADM.DR_REPORTE`.
+- Added outputs **37-41** to resolve that report's `DR_REPORTE` ID, `DR_DRUCKPUNKTE` print point, sibling Optimization Output reports, `DR_DRUCK` routing, `KA_PRINT_DETAIL` configuration, and report/server path settings.
+- Fixed output **34** so `PROD_OPTI_SEQUENCE` is the authoritative optimization membership. It no longer requires `PROD_JOBITEM.OPTIMIZATION` to be populated; the best same-order/item job row is selected by BOM/key match and optimization match.
+- Added output **42** to expose every same-order/item `PROD_JOBITEM` candidate behind the selected optimization, including Batch/Job, BOM/key matches, aggregate, rack, sequence, and whether the job row itself carries the optimization number.
+- Added output **43** for Order/Item barcode evidence from `BW_AUFTR_POS_EX`, `BW_AUFTR_STKL`, `FS_POS`, `FS_BOOK_HISTORY`, and `BW_ALCIM_RECEIVE`, so the Crystal label barcode can be matched to an authoritative A+W value instead of guessed.
+- Added output **44** for `PROD_JOBPRODSEQ` production-sequence candidates tied to the selected optimization. Existing output 35 remains the direct `ZW_AUFTR_ZEIT` route probe.
+- A+W remains SELECT-only / `READ UNCOMMITTED`; SQLite remains schema **15**.
+- Application version advanced to **v0.495**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure is **193 pass / 129 known legacy failures**, with no new failures.
+
+## v0.494 highlights
+
+- Fixed the live Crystal-label probe failure `Invalid column name 'PI_SURFACEPERPIECE'` from `34-selected-optimization-label-data.csv`. A+W reporting views are not assumed to expose the same optional columns on every installation/version.
+- Output **34** now reads `sys.columns` for `AWV_TD_ORDER_HEADER` and `AWV_TD_ORDER_ITEM` first, then builds the SELECT list only from columns that actually exist. Missing optional fields are returned as safe fallbacks/nulls rather than aborting the whole diagnostic.
+- Weight, surface area, dimensions, quantity, complaint reason/location, and item date can fall back to verified raw `BW_AUFTR_POS` fields (`PP_GEWICHT`, `PP_QM`, `PP_BREITE`, `PP_HOEHE`, `PP_DICKE`, `PP_MENGE`, `REKLA_GRUND`, `REKLA_ORT`, `DATUM`) when the English AWV view omits its convenience alias. Output 34 also includes `RawOrderWeight` and `RawOrderSurfaceArea` for one-to-one comparison with the visible Crystal label.
+- The probe remains SELECT-only / `READ UNCOMMITTED`; SQLite remains schema **15**.
+- Application version advanced to **v0.494**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure is **192 pass / 129 known legacy failures**, with no new failures.
+
+## v0.493 highlights
+
+- The operator-provided Cutting Labels preview confirms the report is rendered by **Crystal Reports** inside the remote Citrix A+W session. Because the prior Screen capture produced no new `BW_PRINT_JOBS`, `FS_POOL`, or useful local A+W temp files, v0.493 no longer depends on local preview-file discovery.
+- Added Crystal/report-template discovery outputs **31-33**. They search report/form/print/path/template metadata and values for `Cutting Labels`, `.rpt`, `Crystal`, `ETIK`, `SCHNEID`, `ZUSCHNITT`, and the other Optimization Output report names, plus SQL module references to those report systems.
+- Added selected-optimization label-data output **34**, joining `PROD_OPTI_SEQUENCE` / `PROD_JOBITEM` to the readable `AWV_TD_ORDER_HEADER` and `AWV_TD_ORDER_ITEM` views so the data can be compared one-to-one with the visible Crystal label: customer, Order/Item, Batch/Job, optimization/plate/sequence, product, size, quantity, customer references, complaint/remake references, and label controls.
+- Added output **35** for the selected optimization's planned production route from `ZW_AUFTR_ZEIT`, plus output **36** for barcode/label candidate columns. The screenshot anchors for the next run are Optimization **8359**, A+W Order **238221**, Item **1**, Batch/Job **9176**.
+- `Find-ProbeTextHits` now materializes its generic list with `.ToArray()` as well, keeping report-catalog scanning safe on Windows PowerShell 5.1.
+- Application version advanced to **v0.493**; SQLite remains schema **15**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure is **191 pass / 129 known legacy failures**, with no new failures.
+
+## v0.492 highlights
+
+- Fixed `Probe-AWGlassLabels.ps1` failing immediately after the first Screen-capture prompt with `Argument types do not match` in `Get-AwBusinessProProcesses` on Windows PowerShell 5.1. Generic `List[object]` results are now materialized with `.ToArray()` instead of `@($rows)`.
+- Applied the same PowerShell 5.1-safe conversion to the temp-file collector so the capture cannot hit the identical failure after the Cutting Labels preview opens.
+- The diagnostic workflow itself is unchanged: prepare Output with only **Cutting Labels** selected, record the baseline, open **Screen** (never Execute), wait for the preview, then capture SQL queue deltas, temp-file metadata, and A+W process metadata.
+- Application version advanced to **v0.492**; SQLite remains schema **15**.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure remains **190 pass / 129 known legacy failures**, with no new failures.
+
+## v0.491 highlights
+
+- A+W `Rejected By` enrichment searches `FS_BOOK_HISTORY.BOOK_TYPE = 1` for the same Order/Item inside a bounded **+/-60 second** window around `PROD_BREAKAGE.BREAKAGEDATE`, ranks candidates by matching breakage reason/location codes, Explicit origin, BOM identity, and timestamp proximity, and keeps `PROD_BREAKAGE.LASTCHANGEUSER` as fallback/source-maintenance metadata only.
+- Added `19-reject-actor-candidates.csv` to `Probe-AWBdeBreakage.ps1` for remaining actor-attribution diagnostics.
+- `Probe-AWGlassLabels.ps1` uses safe **Screen** preview capture and watches SQL queue deltas plus Windows temp-file/A+W process metadata.
+- Final verification for v0.491: **52/52 behavioral/backend tests pass** and static structure is **190 pass / 129 known legacy failures**.
+
+## v0.490 highlights
+
+- `Probe-AWGlassLabels.ps1` now accepts an A+W **Optimization Nr.** directly, matching Production Manager > Optimization Overview instead of requiring one Order/Item from the batch.
+- Added report-definition discovery for the actual Output-screen workflow shown in A+W: **Optimization Result, Optimization List, Rack Loading List, Cutting Plans, List of optimized stock plates, Cutting Labels, and Residue Plate Labels**. The probe searches maintained report/configuration objects such as `KA_FORMULARE`, `KA_PRINT_DETAIL`, `BW_PRINT_JOBS`, and related module definitions for those UI strings/settings.
+- Added optional `-CaptureCuttingLabels` mode. The probe records the current `BW_PRINT_JOBS` / `FS_POOL_KOPF` baseline, waits while the operator presses **Execute** with only Cutting Labels selected, then exports only newly created print jobs, pool payloads, and pool-log rows. This should identify whether the label report is database-queued, pool-generated, or handled entirely in the A+W client/report engine.
+- New diagnostic outputs **19-24** cover selected-optimization/report-definition evidence; interactive capture adds **25-28**. A+W remains strictly SELECT-only / READ UNCOMMITTED.
+- Final verification: **52/52 behavioral/backend tests pass** and static structure is **189 pass / 129 known legacy failures**, with no new failures.
+- Application version advanced to **v0.490**; SQLite remains schema **15**.
+
+## v0.489 highlights
+
+- The maintained Rejects page now defaults to **this calendar week + last calendar week** instead of requesting the entire lifetime reject history. The server returns **50 events per page** with Previous/Next navigation, full-range summary counts, and server-side reason/location/user filters. Older history remains available through explicit date presets/custom ranges.
+- A+W "Rejected By" ownership now prefers the same-second `FS_BOOK_HISTORY.MITARB_ID` from the verified `BOOK_TYPE = 1` reject booking. `PROD_BREAKAGE.LASTCHANGEUSER` remains stored as source-maintenance metadata only and is used as a fallback when no reject booking employee is available.
+- Existing v0.484-v0.488 A+W mirrors are repaired on startup when a preserved timeline employee differs from the older displayed user, so previously imported rejects can be corrected without deleting/reimporting them. Future reject sync payloads also emit the reject-booking employee as `BreakageUser`.
+- The A+W query now prefers an **Explicit** reject booking before an implicit BOM booking when several exact-time reject bookings exist, improving operator attribution while retaining the existing machine/work-type enrichment.
+- Final validation covers bounded paging, filtered totals, older-history exclusion from the default working set, exact reject-actor precedence, and startup repair of previously imported A+W mirrors. **52/52 behavioral/backend tests pass** and static structure is **188 pass / 129 known legacy failures**, with no new failures.
+- Application version advanced to **v0.489**; SQLite remains schema **15**.
+
+## When A+W rejects are checked
+
+On an authorized central host, scheduled/manual **Sync A+W Directly** runs query A+W reject history during every Incremental or Full direct-SQL run when automatic A+W reject sync is enabled. v0.488 also adds **Check A+W Rejects** to Run Manually. That explicit action queries only the configured Normal or Full reject lookback and synchronizes Internal Rejects without exporting or reconciling delivery lists; it still runs when the automatic reject toggle is disabled. Reject persistence no longer depends on finding delivery-list source rows in the same run.
+
+## v0.488 highlights
+
+- Added **Check A+W Rejects** to Automation Control Center > Run Manually. The action supports the saved Normal and Full A+W reject lookback windows, deliberately skips delivery-list export/import, and can be run explicitly even if scheduled reject synchronization is disabled.
+- Fixed the central runner so a successful `PROD_BREAKAGE` query is still handed to the scanner when the selected delivery-list window has zero source dates. This closes the path where A+W reject rows could be queried but never persisted or shown on the Rejects page.
+- Fixed `awMappings is not defined` in Reject Settings and stopped Reject-page, Add Reject, and Edit Reject catalog refreshes from discarding `historyReasons`, `historyLocations`, and `awMappings` from shared UI state.
+- Import History no longer fetches and force-publishes the full delivery-list catalog just to display audit rows. Normal unfiltered Control Center browsing processes at most the newest 1,500 database audit rows plus 250 supplemental run summaries; explicit searches/filters retain the deeper audit scan. Parsed archive results are briefly cached and only 80 history cards are rendered initially with **Show more**.
+- `/latest-import` also stopped fetching/publishing the complete delivery-list catalog. The dedicated catalog heartbeat remains the single owner of list freshness, avoiding duplicate server queries and app-wide repaints when Automation Control Center opens.
+- Expanded the SELECT-only A+W glass-label probe around the now-observed `FS_POOL` output families `STSL*.ASC`, `STSD*.ASC`, and `PRODBDAZ.000`. New outputs 15-18 inspect order/job-linked pool payloads, nearby output-family records, SQL modules that generate/reference those files, and order/item objects that also expose label/etikett/barcode fields.
+- The current label evidence confirms Order **238296** / Item **1** -> Job **6492** -> Optimization **8338** and shows an A+W `PROD_OPTIMIZATION.SAVEFILE` blob plus pool output records generated at optimization/cutting time. The scanner still does not invent a label image until the authoritative printable payload is verified.
+- Final verification: **50/50 behavioral/backend tests pass** and static structure is **187 pass / 129 known legacy failures**, with no new failures.
+- Application version advanced to **v0.488**; SQLite remains schema **15**.
+
+## v0.487 highlights
+
+- A+W-derived Internal Rejects now use the same `/api/rejects` timeline as scanner-entered rejects, with A+W machine/work type/registration-point and original/remake Job Nr. enrichment while retaining the mapped break location/cause.
+- Reject Statistics continue to count the unified `reject_events` history exactly once per logical reject. A+W rows now contribute their uniquely verified A+W machine to machine-breakage tables instead of incorrectly treating the break-location label as the machine.
+- Reject date filtering now uses indexed ISO timestamp ranges rather than wrapping timestamps in `substr(...)`. Schema 15 adds reject-time/source and A+W source-row indexes for the new reporting/sync paths.
+- Repeated A+W reject windows now have a no-write fast path. If every raw A+W ROWID/payload is unchanged, its rollback is already applied, and its Internal Reject mirror exists, the sync returns without rewriting thousands of SQLite rows.
+- Automation Logs & Status exposes the full controller PowerShell command and Python subprocess command; active browser-started runs stream output from memory instead of rereading the entire growing log on every poll.
+- Rejects and Statistics refresh automatically after a browser-started automation run completes.
+
+## v0.486 highlights
+
+- Imported A+W breakages now reset scan/rack/bay state exactly once, matching Internal Reject floor behavior while retaining raw A+W ROWIDs for idempotency.
+- Raw A+W source rows carry a durable rollback marker, so source refreshes, reason/location renames, replacement-job updates, and corrected logical timestamps cannot replay the reset.
+- Existing v0.485-cached A+W rejects with no rollback marker are reconciled on startup; pending rejects are retried after delivery import if the order did not exist when reject synchronization first ran.
+- Fabrication status now requires completion evidence newer than the latest Internal Reject. An existing pre-reject `.egl`/`.nce` is treated as stale; overwriting the same program after the reject makes it valid again because its filesystem modification time advances.
+- Durable `.egl` history remains useful after deletion, but historical evidence also must post-date the latest reject before it can mark the piece fabricated.
+- Added `scripts/diagnostics/Probe-AWGlassLabels.ps1`, a SELECT-only discovery tool that searches A+W label/etikett/barcode/optimization tables, views, and module definitions and samples a known optimized Order/Item.
+- Advanced SQLite schema **13 -> 14**, browser cache references, and `APPLICATION_VERSION` to **v0.486**.
+
+## v0.485 highlights
+
+- A+W breakages are now mirrored into the existing **Internal Reject** history instead of remaining a separate operator-facing reject domain. Raw A+W source rows and logical events remain attached for traceability and refresh safety; A+W synchronization never replays scanner rollback or changes scans, racks, bays, or process state.
+- Existing v0.484 A+W breakage cache is reconciled at startup: any logical A+W event that does not yet have an Internal Reject mirror is added immediately after upgrade, without waiting for another SQL lookback window.
+- Added stable A+W reason/location mappings keyed by the numeric A+W code. Current labels from `KA_REKLA_GRND` and `KA_REKLA_ORT` refresh automatically when A+W changes them or adds new codes; optional scanner display mappings override the label without altering the raw A+W source value.
+- Added persistent per-event overrides for A+W-derived Internal Rejects. Editing quantity, reason, location, notes, or incident time on the Rejects page survives later A+W synchronization.
+- Added **Manage Reject Data** on the Rejects page with A+W code-mapping and historical bulk-replacement tables. Administrators can, for example, change every historical/future A+W location code 5 from `Grinding` to `Polisher` in one operation while preserving the source code and source label.
+- Added a dedicated **A+W Rejects** tab to Automated Import with enable/disable, Normal lookback, and Full lookback settings. Settings round-trip through the maintained automation configuration and validate that Full lookback is not shorter than Normal.
+- Source `RM` values from A+W are now labeled **External Remake**. Operator-created Remake Priority Work remains the scanner's existing internal remake workflow.
+- Added durable `.egl` observation history to the existing production-file index. Once an exact Denver `.egl` has been observed, its existence remains fabrication evidence after deletion and after application restart; deleted files are never offered as openable live program assets.
+- Extended Spanish UI coverage for the new A+W Reject, bulk-maintenance, Internal Reject source, and External Remake controls.
+- Advanced SQLite schema **12 -> 13**, browser cache references, and `APPLICATION_VERSION` to **v0.485**.
+
+## v0.484 highlights
+
+- Added durable `aw_reject_source_rows` keyed by A+W `PROD_BREAKAGE.ROWID`; repeated direct SQL runs update the same source rows instead of duplicating history.
+- Added logical `aw_reject_events` grouped by Order / Item / breakage timestamp / original job / A+W key index, preventing one breakage from being multiplied by its BOM nodes.
+- Verified and integrated A+W lookup sources: `KA_REKLA_GRND.NUMMER -> BEZ` for breakage reason and `KA_REKLA_ORT.NUMMER -> BEZ` for breakage location/cause. The known 238091-1 sample resolves to **Broke in Machine** / **Grinding**.
+- Added read-only recent reject synchronization to the existing direct A+W automation. Incremental runs query the prior 30 days; Full runs backfill the prior 365 days. A+W remains SELECT-only.
+- Enriches each raw breakage row from a same-order/item/BOM `FS_BOOK_HISTORY` booking within +/-1 second where `BOOK_TYPE = 1` (A+W Reject), including employee, work type, registration point, explicit/implicit scan mode, and machine only when the registration point has one unambiguous machine mapping.
+- Added `GET /api/aw-rejects` and included A+W source history in Order Details. v0.485 subsequently promotes those events into the operator-facing Internal Reject workflow while retaining this raw traceability layer.
+- A+W reject query/persistence failures are isolated from delivery reconciliation: the automation records the reject-sync error and continues the normal delivery-list import.
+- Added SQLite migration 12 plus the equivalent Azure SQL schema definitions and database-contract metadata.
+- Added regression coverage for BOM de-duplication, immutable source identities, refresh/upsert behavior, lookup/query contracts, API exposure, and the direct automation handoff.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.484**.
+
+## v0.482 highlights
+
+- Promoted `SYSADM.PROD_BREAKAGE.IS_BREAKAGE = 1` to the verified persisted A+W reject signal after order 238091 / item 1 returned three matching BOM-level breakage rows at the exact reject time.
+- Promoted `SYSADM.UV_BOOK_HISTORY_EX.MENSAJE = 'Reject'` to the verified production-timeline reject signal; its order/item timeline provides employee, work type, registration point, machine, scan mode, process/final product, and reject timestamp.
+- Explicitly retired the former `PROD_BREAKAGE -> FS_BOOK_HISTORY` BOM/item-only diagnostic join because the live run matched unrelated 2017 booking rows to a 2026 breakage. Booking-history correlation is now limited to a +/-10-second window around `BREAKAGEDATE`.
+- Kept status 455 as historical diagnostic evidence only. The live installation returned no `FS_BOOK_HISTORY.BOOK_TYPE = 455` rows and no `KA_PROD_BRUCH.STATUS_ID = 455` row for the verified reject, so production integration will not depend on 455.
+- Added direct reason resolution from each order's `PROD_BREAKAGE.BREAKAGE_REASON` into `KA_PROD_BRUCH.STATUS_ID`, which will test the observed reason code 137 without guessing.
+- Added `14-verified-reject-evidence.csv`, which aligns the persistent `PROD_BREAKAGE` event with same-timestamp Reject rows from `UV_BOOK_HISTORY_EX` and includes any resolved `KA_PROD_BRUCH` reason/location text.
+- Added a 180-day `PROD_BREAKAGE` reason/registration/scanner summary so registration code 5 can be interpreted from live usage patterns without hard-coding an undocumented enum.
+- The next production persistence layer should use `PROD_BREAKAGE.ROWID` as the stable external event identity and keep A+W rejects separate from scanner-created Internal Rejects.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.482**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.481 highlights
+
+- Removed `TRY_CONVERT` from the BDE probe so it works with the legacy SQL Server/compatibility level used by BFSMAIN; comparisons now use broadly supported `CONVERT(nvarchar, ...)` text equality.
+- Corrected A+W order-column discovery to recognize `AUFNR`, which is the verified Order Nr. field on `FS_BRUCH` and `PROD_BREAKAGE`.
+- Added direct SELECT-only samples for `FS_BRUCH` and `PROD_BREAKAGE` using the supplied Order/Item, bypassing noisy generic candidate ranking.
+- Added a verified `PROD_BREAKAGE -> FS_BOOK_HISTORY` BOM/position join that returns breakage date, original/new job number, employee, registration point, scan time, booking type, breakage reason/causer, barcode, and rack in one diagnostic view.
+- Added `PD_PROD_POINT` lookup data to expose the registration-point name/external key and a dedicated booking-type `$StatusCode` sample to test whether code 455 is represented by `FS_BOOK_HISTORY.BOOK_TYPE` in this installation.
+- Added a targeted `KA_PROD_BRUCH` status lookup plus `UV_BOOK_HISTORY_EX` sampling by its explicit `PEDIDO` / `POSICION` Order/Item fields; that expanded view already exposes employee, work type, registration point, machine, scan time, processed product, customer, and production/delivery dates.
+- Added a compact verified-results index covering all targeted queries.
+- The probe remains SELECT-only with `READ UNCOMMITTED`; SQLite schema remains **version 11** and no scanner migration is required.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.481**.
+
+## v0.480 highlights
+
+- Fixed the A+W BDE diagnostic after successful SQL connection by preventing Windows PowerShell 5.1 from flattening returned `DataTable` objects into `DataRow` output.
+- `Invoke-ProbeQuery` now returns the filled table as a single pipeline object, preserving `.Rows` for environment, status-455, candidate metadata, and known-order sample processing.
+- Added focused regression coverage for the PowerShell return-shape requirement and updated the diagnostic SQL application name to v0.480.
+- The probe remains SELECT-only and continues using `READ UNCOMMITTED`; this revision does not write to A+W or change the scanner database schema.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.480**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.479 highlights
+
+- Fixed `scripts/diagnostics/Probe-AWBdeBreakage.ps1` so Windows PowerShell 5.1 can launch it with `-File` without an empty `$PSScriptRoot` causing `Split-Path` to fail before SQL connection.
+- Moved default SQL config discovery out of the parameter declaration and added safe fallbacks through `$PSCommandPath`, `$MyInvocation.MyCommand.Path`, `$PSScriptRoot`, and finally the documented project-root working directory.
+- Preserved explicit `-ConfigPath` overrides and all SELECT-only probe behavior; no A+W write behavior was introduced.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.479**. SQLite schema remains **version 11**; no migration or database reset is required.
 
 ## v0.478 highlights
 
-- Reduced Scan-page order grouping to a subtle, low-height separator while preserving order identity, counts, and the Order Details shortcut.
-- Items confirmed by production hydration to have no fabrication assignment now show a small gray **No Fab** state instead of **Not Scanned** in Scan progress.
-- Removed the temporary resolved Waterjet-folder diagnostic text while preserving the working resolved-path fallback internally.
-- Reduced the default Order Details sketch footprint, fit sketch pages without the embedded scrollbar, and added a dedicated maximize/restore control for large review.
-- Added consistent icons to shared blue Order Details file actions and Smart Search **Scan Page** / **Order Details** actions.
-- Removed obsolete Bay Map icon overlay layers and retained the maintained colored directional stage icons.
-- Reworked the in-transit glass animation so Outbound panes originate at the left edge, load starting with the right-most pane into the truck, and Inbound panes unload starting with the right-most pane toward the right edge.
+- Central **Sync A+W Directly** runs now pass the queried A+W rows directly into the maintained scanner preview/import reconciliation path instead of reparsing the generated XLSX.
+- Dated XLSX workbooks remain available as fallback/export artifacts, and Folder Import Only remains compatible for floor systems during rollout.
+- Direct SQL normalization preserves the original A+W Order/Item identity, manual overrides, 1/32-inch dimension formatting, quantities, routes, customers, and remake state.
+- Direct synchronization performs pre/post source-drift checks and keeps the existing protected-removal behavior; unverified A+W disappearances are not silently retired.
+- Import History records direct runs as `aw_sql_direct_sync` with stable `aw-sql://...` source identities and source hashes.
+- Added `scripts/diagnostics/Probe-AWBdeBreakage.ps1` to verify A+W status 455 and discover the real BDE booking/history relationships with SELECT-only metadata and targeted known-order sampling before reject persistence is implemented.
+- Added regression coverage for direct normalization and direct import through the maintained store.
 - Advanced browser cache references and `APPLICATION_VERSION` to **v0.478**. SQLite schema remains **version 11**; no migration or database reset is required.
+
+## v0.477 highlights
+
+- Made workflow states explicit across Scan, Smart Search, and Order Details: unfinished Denver/Waterjet fabrication is gray, pending scanner stages keep their maintained stage color, and every completed step is green.
+- Added subtle order grouping to desktop and mobile Scan results, including a compact **View order details** action without changing the delivery-list page-size contract.
+- Double-clicking a Scan item opens Order Details at that exact item and briefly highlights it. Order progress is now sorted as fabrication, Staging, Outbound, then the route destination.
+- Enlarged exact-item sketch previews and changed fabrication wording so required work without evidence reads **Not Fabricated**, while untouched non-fabricated work reads **Not Scanned**.
+- Split background fabrication hydration into small sequential batches so visible rows update sooner without increasing concurrent network/PDF load.
+- Persisted only exact sketch-page matches already requested by an operator. This improves repeat/restart performance without crawling PDF content during background indexing.
+- Enlarged Smart Search actions and added focused regression coverage for order grouping, workflow state styling, item targeting, and persistent sketch-page assignments.
+- Advanced browser cache references and `APPLICATION_VERSION` to **v0.477**. SQLite schema remains **version 11**; no migration or database reset is required.
 
 ## v0.476 highlights
 
@@ -647,7 +855,7 @@ These entries preserve Website Version 3's release order and are renumbered from
 - Writes a non-secret `ScannerStore` identity (mode/database/server where applicable) into the maintained automation runtime configuration. SQLite runs also receive the live absolute database path through `DLS_DATABASE_PATH` before Python starts.
 - Makes the Python importer validate its resolved scanner-store identity **before initialization or writes**. If the detached process resolves a different store, the run stops instead of recording a false successful import.
 - Adds explicit updater log lines for scanner-store binding/validation so database-path drift can be diagnosed directly from Status & Logs without exposing credentials.
-- To repair a date that was previously written to the wrong store, install v0.403 and run **Query SQL, Export & Import** for that delivery date once. The maintained selective reconciliation will detect the lists missing from the live store and rebuild them.
+- To repair a date that was previously written to the wrong store, install v0.403 and run **Sync A+W Directly** for that delivery date once. The maintained selective reconciliation will detect the lists missing from the live store and rebuild them.
 - Advances `APPLICATION_VERSION` to 403 while preserving `CURRENT_SCHEMA_VERSION = 11`; no database migration or reset is included.
 
 ## v0.402 highlights

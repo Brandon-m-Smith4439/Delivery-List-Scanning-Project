@@ -2029,6 +2029,25 @@ class Handler(SimpleHTTPRequestHandler):
                     date_from=params.get("dateFrom", [""])[0],
                     date_to=params.get("dateTo", [""])[0],
                     query=params.get("q", [""])[0],
+                    limit=int(params.get("limit", ["50"])[0] or 50),
+                    page=int(params.get("page", ["1"])[0] or 1),
+                    location=params.get("location", [""])[0],
+                    reason=params.get("reason", [""])[0],
+                    rejected_by=params.get("rejectedBy", [""])[0],
+                )
+            )
+            return
+
+        if parsed.path == "/api/aw-rejects":
+            if not self.require_any_permission("view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records"):
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(
+                STORE.list_aw_rejects(
+                    order_no=params.get("order", [""])[0],
+                    item_no=params.get("item", [""])[0],
+                    date_from=params.get("dateFrom", [""])[0],
+                    date_to=params.get("dateTo", [""])[0],
                     limit=int(params.get("limit", ["500"])[0] or 500),
                 )
             )
@@ -2876,6 +2895,34 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            if parsed.path == "/api/rejects/mappings/update":
+                user = self.require_permission("manage_reject_settings")
+                if not user:
+                    return
+                self.send_json(
+                    OPERATIONS.update_aw_reject_mapping(
+                        str(data.get("kind") or ""),
+                        int(data.get("sourceCode") or 0),
+                        str(data.get("mappedLabel") or ""),
+                        user["username"],
+                    )
+                )
+                return
+
+            if parsed.path == "/api/rejects/bulk-relabel":
+                user = self.require_permission("manage_reject_settings")
+                if not user:
+                    return
+                self.send_json(
+                    OPERATIONS.bulk_relabel_rejects(
+                        str(data.get("kind") or ""),
+                        str(data.get("fromLabel") or ""),
+                        str(data.get("toLabel") or ""),
+                        user["username"],
+                    )
+                )
+                return
+
             if parsed.path == "/api/admin/superseded-order-reviews/decision":
                 user = self.require_permission("review_superseded_orders")
                 if not user:
@@ -2922,7 +2969,10 @@ class Handler(SimpleHTTPRequestHandler):
                     job = str(row.get("job") or "").strip()
                     if not order:
                         continue
-                    status = service.fabrication_status(order, item, job, allow_content_read=True)
+                    evidence_after = str(row.get("lastRejectedAt") or "").strip() or STORE.latest_internal_reject_at(order, item)
+                    status = service.fabrication_status(
+                        order, item, job, allow_content_read=True, evidence_after=evidence_after
+                    )
                     results.append({"key": str(row.get("key") or f"{order}:{item}:{job}"), "order": order, "item": item, "job": job, "status": status})
                 self.send_json({"results": results})
                 return

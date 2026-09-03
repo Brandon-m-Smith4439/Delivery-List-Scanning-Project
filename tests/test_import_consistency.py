@@ -5,15 +5,20 @@ from __future__ import annotations
 
 import unittest
 from unittest import mock
+import json
 import shutil
 import os
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.config import load_config
-from backend.store import SQLiteDeliveryStore, canonical_clear_glass_label, glass_cost_profile, glass_profile_identity_key, rack_barcode_text
+from backend.store import SQLiteDeliveryStore, build_delivery_lists, canonical_clear_glass_label, glass_cost_profile, glass_profile_identity_key, rack_barcode_text, parse_aw_delivery_workbook
+from automation.sql_delivery_export.import_delivery_folder import direct_sql_sync, scanner_payload_from_sql_export
 from backend.production_files import ProductionFileService
+from backend.operations import OperationsFeatureService
+from backend.automation_control import DeliveryAutomationController
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +55,898 @@ class ImportConsistencyTests(unittest.TestCase):
         with store.connect() as connection:
             store.create_schema(connection)
         return store
+
+    def test_direct_aw_sql_payload_preserves_source_identity_and_workbook_formatting(self) -> None:
+        payload = scanner_payload_from_sql_export(
+            {
+                "deliveryDate": "2026-09-02",
+                "dimensionUnitsPerInch": 32,
+                "rows": [
+                    {
+                        "product": '3/8" Clear Tempered',
+                        "job": "DIRECT TEST",
+                        "order": 990001,
+                        "item": 7,
+                        "sourceOrder": 240111,
+                        "sourceItem": 1,
+                        "quantity": "2.0",
+                        "widthUnits": 2400,
+                        "heightUnits": 2048,
+                        "customer": "TEST CUSTOMER",
+                        "route": "IT",
+                        "remake": "RM",
+                        "dimensionsOverride": "",
+                    }
+                ],
+            }
+        )
+        item = payload["items"][0]
+        self.assertEqual(item["id"], "aw-sql:240111:001")
+        self.assertEqual(item["order"], "990001")
+        self.assertEqual(item["item"], "007")
+        self.assertEqual(item["qty"], 2)
+        self.assertEqual(item["dimensions"], '75" x 64"')
+        self.assertEqual(item["processState"], "External Remake")
+
+    def test_aw_workbook_rm_marker_is_external_remake(self) -> None:
+        fake_rows = [
+            (1, {"A": '3/8" Clear Tempered'}),
+            (2, {
+                "A": "884200 TEST JOB", "E": "4200", "F": "1", "G": "2",
+                "H": '36" x 72"', "I": "TEST CUSTOMER", "J": "RM", "L": "IT",
+            }),
+        ]
+        with mock.patch("backend.store.read_xlsx_rows", return_value=fake_rows), mock.patch(
+            "backend.store.delivery_date_from_rows_or_name", return_value="2026-09-02"
+        ):
+            payload = parse_aw_delivery_workbook(Path("Delivery List 09-02-2026.xlsx"))
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["processState"], "External Remake")
+        self.assertEqual(payload["items"][0]["queueState"], "RM")
+
+    def test_direct_aw_sql_sync_uses_maintained_scanner_importer(self) -> None:
+        verification_root = ROOT / "_verification_direct_aw_sql"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            envelope = {
+                "sourceName": "A+W SQL 2026-09-02",
+                "sourcePath": "aw-sql://SQLAWGLASS/BFSMAIN/SYSADM/BW_AUFTR_KOPF+BW_AUFTR_POS/2026-09-02",
+                "sourceHash": "direct-test-hash",
+                "payload": {
+                    "deliveryDate": "2026-09-02",
+                    "dimensionUnitsPerInch": 32,
+                    "rows": [
+                        {
+                            "product": '3/8" Clear Tempered',
+                            "job": "DIRECT TEST",
+                            "order": 240222,
+                            "item": 1,
+                            "sourceOrder": 240222,
+                            "sourceItem": 1,
+                            "quantity": 2,
+                            "widthUnits": 2400,
+                            "heightUnits": 2048,
+                            "customer": "TEST CUSTOMER",
+                            "route": "IT",
+                            "remake": "",
+                            "dimensionsOverride": "",
+                        }
+                    ],
+                },
+            }
+            summary = direct_sql_sync(
+                store,
+                verification_root,
+                ["2026-09-02"],
+                {"2026-09-02"},
+                "direct-sync-test",
+                [envelope],
+                build_delivery_lists,
+                allow_source_removals=False,
+            )
+            self.assertTrue(summary["ok"])
+            self.assertEqual(summary["sourceMode"], "aw_sql_direct")
+            self.assertEqual(summary["newFileCount"], 1)
+            self.assertEqual(summary["failedFileCount"], 0)
+            with store.connect() as connection:
+                imported = connection.execute(
+                    "SELECT source_name, source_path, source_hash, import_kind FROM imports ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            self.assertEqual(imported["source_name"], "A+W SQL 2026-09-02")
+            self.assertEqual(imported["source_hash"], "direct-test-hash")
+            self.assertEqual(imported["import_kind"], "aw_sql_direct_sync")
+            self.assertTrue(str(imported["source_path"]).startswith("aw-sql://SQLAWGLASS/"))
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+    def test_aw_reject_sync_groups_bom_rows_and_preserves_external_row_ids(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_sync"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            shared = {
+                "orderNr": "238091",
+                "itemNr": "1",
+                "keyIndex": 1,
+                "subPosition": 0,
+                "quantity": 1,
+                "breakageDate": "2026-09-01T15:27:42.0000000",
+                "originalJobNumber": "6455",
+                "replacementJobNumber": "",
+                "reasonCode": 137,
+                "reasonLabel": "Broke in Machine",
+                "locationCode": 5,
+                "locationLabel": "Grinding",
+                "fromScanner": 1,
+                "breakageUser": "Brandon Smith",
+                "sourceLastChangedAt": "2026-09-01T15:27:42.0000000",
+                "sourceLastChangedUser": "Brandon Smith",
+                "timelineEmployee": "Brandon Smith",
+                "registrationPointId": 3000,
+                "registrationPoint": "08 - Tempering Complete",
+                "machine": "Fuse Cube",
+                "bookingMessage": "Reject",
+            }
+            rows = [
+                {**shared, "awRowId": "row-bom0", "bomId": 0, "bomNode": 0, "workTypeId": 60, "workType": "Tempering", "scanMode": "Explicit"},
+                {**shared, "awRowId": "row-bom1", "bomId": 1, "bomNode": 0, "workTypeId": 10, "workType": "Automatic Cutting", "scanMode": "Implicit"},
+                {**shared, "awRowId": "row-bom2", "bomId": 2, "bomNode": 1, "workTypeId": 20, "workType": "Polishing", "scanMode": "Implicit"},
+            ]
+            result = store.sync_aw_reject_rows(rows, source_window={"windowStart": "2026-08-01", "windowEnd": "2026-09-02"})
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["sourceRows"], 3)
+            self.assertEqual(result["logicalEvents"], 1)
+            self.assertEqual(result["insertedSourceRows"], 3)
+
+            listed = store.list_aw_rejects(order_no="238091", item_no="1")["rejects"]
+            self.assertEqual(len(listed), 1)
+            event = listed[0]
+            self.assertEqual(event["sourceRowCount"], 3)
+            self.assertEqual(event["reason"], "Broke in Machine")
+            self.assertEqual(event["location"], "Grinding")
+            self.assertEqual(event["workType"], "Tempering")
+            self.assertEqual(event["scanMode"], "Explicit")
+            self.assertEqual(event["machine"], "Fuse Cube")
+
+            refreshed = [{**row, "replacementJobNumber": "9001", "sourceLastChangedAt": "2026-09-02T09:15:00.0000000"} for row in rows]
+            second = store.sync_aw_reject_rows(refreshed)
+            self.assertEqual(second["logicalEvents"], 1)
+            with store.connect() as connection:
+                counts = connection.execute(
+                    "SELECT (SELECT COUNT(*) FROM aw_reject_events) AS events, (SELECT COUNT(*) FROM aw_reject_source_rows) AS source_rows"
+                ).fetchone()
+            self.assertEqual(int(counts["events"]), 1)
+            self.assertEqual(int(counts["source_rows"]), 3)
+            self.assertEqual(store.list_aw_rejects(order_no="238091")["rejects"][0]["replacementJobNumber"], "9001")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                verification_root.rmdir()
+
+    def test_existing_aw_cache_backfills_internal_reject_mirror_on_startup_reconciliation(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_startup_backfill_v485"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-02", "items": [imported_item("991000", "1", 1, "aw-cache-backfill:1")]},
+                "fileName": "Delivery List 09-02-2026.xlsx",
+                "user": "admin",
+            })
+            row = {
+                "awRowId": "cached-bom0", "orderNr": "991000", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-01T12:00:00.0000000", "originalJobNumber": "7100",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine",
+                "locationCode": 5, "locationLabel": "Grinding", "fromScanner": 1,
+                "breakageUser": "A+W User", "bookingMessage": "Reject",
+            }
+            store.sync_aw_reject_rows([row])
+            with store.connect() as con:
+                con.execute("DELETE FROM reject_events WHERE source_type='aw'")
+                con.commit()
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM aw_reject_events").fetchone()[0], 1)
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM reject_events WHERE source_type='aw'").fetchone()[0], 0)
+            result = store.ensure_aw_internal_reject_mirrors()
+            self.assertTrue(result["startupBackfill"])
+            self.assertEqual(result["mirroredInternalRejects"], 1)
+            with store.connect() as con:
+                mirror = con.execute("SELECT reason_label, location_label, scan_qty_reduced FROM reject_events WHERE source_type='aw'").fetchone()
+            self.assertEqual(mirror["reason_label"], "Broke in Machine")
+            self.assertEqual(mirror["location_label"], "Grinding")
+            self.assertEqual(int(mirror["scan_qty_reduced"] or 0), 0)
+            # The reconciliation is idempotent once the mirror exists.
+            again = store.ensure_aw_internal_reject_mirrors()
+            self.assertEqual(again["sourceRows"], 0)
+            self.assertEqual(again["mirroredInternalRejects"], 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_new_codes_auto_register_and_unmapped_label_changes_refresh(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_new_codes_v485"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            row = {
+                "awRowId": "new-code-bom0", "orderNr": "990100", "itemNr": "2", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-02T10:15:00.0000000", "originalJobNumber": "7001",
+                "reasonCode": 141, "reasonLabel": "New A+W Reason",
+                "locationCode": 18, "locationLabel": "New A+W Location",
+                "fromScanner": 1, "breakageUser": "A+W User", "bookingMessage": "Reject",
+            }
+            store.sync_aw_reject_rows([row])
+            mappings = {(value["kind"], value["sourceCode"]): value for value in store.list_reject_value_mappings()}
+            self.assertEqual(mappings[("reason", 141)]["sourceLabel"], "New A+W Reason")
+            self.assertEqual(mappings[("location", 18)]["sourceLabel"], "New A+W Location")
+            event = operations.list_rejects()["rejects"][0]
+            self.assertEqual(event["reason_label"], "New A+W Reason")
+            self.assertEqual(event["location_label"], "New A+W Location")
+
+            # With no scanner override, a renamed A+W lookup label becomes the
+            # current display value on the next synchronization.
+            store.sync_aw_reject_rows([{
+                **row,
+                "reasonLabel": "Renamed A+W Reason",
+                "locationLabel": "Renamed A+W Location",
+                "sourceLastChangedAt": "2026-09-02T11:15:00.0000000",
+            }])
+            event = operations.list_rejects()["rejects"][0]
+            self.assertEqual(event["reason_label"], "Renamed A+W Reason")
+            self.assertEqual(event["location_label"], "Renamed A+W Location")
+            mappings = {(value["kind"], value["sourceCode"]): value for value in store.list_reject_value_mappings()}
+            self.assertEqual(mappings[("reason", 141)]["sourceLabel"], "Renamed A+W Reason")
+            self.assertEqual(mappings[("location", 18)]["sourceLabel"], "Renamed A+W Location")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_internal_mirror_rolls_back_scan_state_once(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_rollback_v486"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {
+                    "deliveryDate": "2026-09-02",
+                    "items": [imported_item("238091", "1", 2, "aw-reject:no-rollback")],
+                },
+                "fileName": "Delivery List 09-02-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                line = connection.execute(
+                    "SELECT id, list_id, barcode FROM line_items WHERE order_no='238091' AND item_no='001' LIMIT 1"
+                ).fetchone()
+                connection.execute(
+                    "UPDATE line_items SET scanned_qty=1 WHERE order_no=? AND item_no=?",
+                    ("238091", "001"),
+                )
+                connection.execute(
+                    "INSERT INTO scan_events (list_id, line_item_id, barcode, canonical_barcode, user_name, station, event_type, message, qty_delta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (line["list_id"], line["id"], line["barcode"], line["barcode"], "tester", "TEST", "scan", "Test scan", 1, "2026-09-01T15:00:00+00:00"),
+                )
+                connection.commit()
+            row = {
+                "awRowId": "no-rollback-bom0",
+                "orderNr": "238091", "itemNr": "1", "bomId": 0, "keyIndex": 1, "subPosition": 0,
+                "quantity": 1, "breakageDate": "2026-09-01T15:27:42.0000000", "originalJobNumber": "6455",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine", "locationCode": 5, "locationLabel": "Grinding",
+                "fromScanner": 1, "breakageUser": "Brandon Smith", "workTypeId": 60, "workType": "Tempering",
+                "registrationPointId": 3000, "registrationPoint": "08 - Tempering Complete", "bookingMessage": "Reject",
+            }
+            result = store.sync_aw_reject_rows([row])
+            self.assertEqual(result["mirroredInternalRejects"], 1)
+            with store.connect() as connection:
+                states = connection.execute(
+                    "SELECT scanned_qty, internal_reject_count FROM line_items WHERE order_no='238091' AND item_no='001'"
+                ).fetchall()
+                scans = connection.execute(
+                    "SELECT user_name, station, event_type, qty_delta FROM scan_events WHERE line_item_id IN (SELECT id FROM line_items WHERE order_no='238091' AND item_no='001') ORDER BY id"
+                ).fetchall()
+                mirror = connection.execute(
+                    "SELECT source_type, scan_qty_reduced, delivery_date FROM reject_events WHERE source_type='aw'"
+                ).fetchone()
+            self.assertTrue(states)
+            self.assertTrue(all(int(state["scanned_qty"] or 0) == 0 for state in states))
+            self.assertTrue(all(int(state["internal_reject_count"] or 0) == 1 for state in states))
+            reset_rows = [scan for scan in scans if str(scan["event_type"]) == "reject_reset"]
+            self.assertEqual(len(reset_rows), len(states))
+            self.assertTrue(any(str(scan["event_type"]) == "scan" for scan in scans))
+            self.assertTrue(all(int(scan["qty_delta"] or 0) <= 0 for scan in reset_rows))
+            self.assertEqual(str(mirror["source_type"]), "aw")
+            self.assertEqual(int(mirror["scan_qty_reduced"] or 0), len(states))
+            self.assertEqual(str(mirror["delivery_date"]), "2026-09-02")
+            with store.connect() as connection:
+                source = connection.execute(
+                    "SELECT rollback_applied_at, rollback_scan_qty_reduced FROM aw_reject_source_rows WHERE aw_row_id='no-rollback-bom0'"
+                ).fetchone()
+                first_reset_count = connection.execute(
+                    "SELECT COUNT(*) FROM scan_events WHERE event_type='reject_reset'"
+                ).fetchone()[0]
+            self.assertTrue(str(source["rollback_applied_at"] or ""))
+            self.assertEqual(int(source["rollback_scan_qty_reduced"] or 0), len(states))
+
+            # A source refresh must not replay the operational reset.
+            store.sync_aw_reject_rows([{**row, "sourceLastChangedAt": "2026-09-02T12:00:00+00:00"}])
+            with store.connect() as connection:
+                second_states = connection.execute(
+                    "SELECT scanned_qty FROM line_items WHERE order_no='238091' AND item_no='001'"
+                ).fetchall()
+                second_reset_count = connection.execute(
+                    "SELECT COUNT(*) FROM scan_events WHERE event_type='reject_reset'"
+                ).fetchone()[0]
+            self.assertTrue(all(int(state["scanned_qty"] or 0) == 0 for state in second_states))
+            self.assertEqual(second_reset_count, first_reset_count)
+
+            unchanged = store.sync_aw_reject_rows([{**row, "sourceLastChangedAt": "2026-09-02T12:00:00+00:00"}])
+            self.assertTrue(unchanged.get("skippedUnchanged"))
+            self.assertEqual(int(unchanged.get("unchangedSourceRows") or 0), 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_rejects_feed_standard_timeline_and_machine_statistics(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_reporting_v487"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {
+                    "deliveryDate": "2026-09-03",
+                    "items": [{**imported_item("238296", "1", 1, "aw-reporting:1"), "dimensions": '48" x 14"'}],
+                },
+                "fileName": "Delivery List 09-03-2026.xlsx",
+                "user": "admin",
+            })
+            store.sync_aw_reject_rows([{
+                "awRowId": "reporting-bom0", "orderNr": "238296", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-02T12:22:00+00:00", "originalJobNumber": "6492",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine",
+                "locationCode": 5, "locationLabel": "Grinding",
+                "fromScanner": 1, "breakageUser": "Brandon Smith",
+                "workTypeId": 60, "workType": "Tempering",
+                "registrationPointId": 3000, "registrationPoint": "08 - Tempering Complete",
+                "machine": "Fuse Cube", "scanMode": "Explicit", "bookingMessage": "Reject",
+            }])
+
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            timeline = operations.list_rejects(date_from="2026-09-02", date_to="2026-09-02")["rejects"]
+            self.assertEqual(len(timeline), 1)
+            self.assertEqual(timeline[0]["source_type"], "aw")
+            self.assertEqual(timeline[0]["reason_label"], "Broke in Machine")
+            self.assertEqual(timeline[0]["location_label"], "Grinding")
+            self.assertEqual(timeline[0]["aw_machine"], "Fuse Cube")
+            self.assertEqual(timeline[0]["aw_work_type"], "Tempering")
+
+            report = store.reports_summary({"dateFrom": "2026-09-02", "dateTo": "2026-09-02"})
+            self.assertEqual(report["breakage"]["internalRejects"]["eventCount"], 1)
+            self.assertEqual(report["breakage"]["internalRejects"]["pieces"], 1)
+            machines = report["breakage"]["internalByMachine"]
+            self.assertEqual(machines[0]["machine"], "Fuse Cube")
+            self.assertEqual(machines[0]["eventCount"], 1)
+            self.assertEqual(machines[0]["reasons"][0]["reason"], "Broke in Machine")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_reject_timeline_defaults_to_two_calendar_weeks_and_pages_server_side(self) -> None:
+        verification_root = ROOT / "_verification_reject_paging_v489"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            with store.connect() as con:
+                for index in range(1, 66):
+                    con.execute(
+                        """
+                        INSERT INTO reject_events (
+                            delivery_date, order_no, item_no, qty, reason_label,
+                            location_label, rejected_at, rejected_by
+                        ) VALUES (?, ?, ?, 1, 'Break', 'Cutting', ?, ?)
+                        """,
+                        (
+                            "2026-09-03",
+                            f"88{index:04d}",
+                            "001",
+                            f"2026-09-02T12:{index % 60:02d}:00+00:00",
+                            "Operator A" if index % 2 else "Operator B",
+                        ),
+                    )
+                con.execute(
+                    """
+                    INSERT INTO reject_events (
+                        delivery_date, order_no, item_no, qty, reason_label,
+                        location_label, rejected_at, rejected_by
+                    ) VALUES ('2026-08-01', '770001', '001', 1, 'Old Break', 'Old', '2026-08-01T12:00:00+00:00', 'Old User')
+                    """
+                )
+                con.commit()
+
+            first = operations.list_rejects(limit=50, page=1)
+            self.assertEqual(first["dateFrom"], "2026-08-24")
+            self.assertEqual(first["dateTo"], "2026-09-06")
+            self.assertEqual(first["totalCount"], 65)
+            self.assertEqual(first["totalPages"], 2)
+            self.assertEqual(len(first["rejects"]), 50)
+            self.assertEqual(first["summary"]["eventCount"], 65)
+            self.assertNotIn("Old User", first["filterOptions"]["users"])
+
+            second = operations.list_rejects(limit=50, page=2)
+            self.assertEqual(len(second["rejects"]), 15)
+            self.assertEqual(second["page"], 2)
+
+            filtered = operations.list_rejects(limit=50, page=1, rejected_by="Operator A")
+            self.assertTrue(filtered["rejects"])
+            self.assertTrue(all(row["rejected_by"] == "Operator A" for row in filtered["rejects"]))
+            self.assertLess(filtered["totalCount"], first["totalCount"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_actor_prefers_exact_reject_booking_employee_and_repairs_existing_mirror(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_actor_v489"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.sync_aw_reject_rows([{
+                "awRowId": "actor-bom0", "orderNr": "238400", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-02T14:10:00+00:00", "originalJobNumber": "6510",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine",
+                "locationCode": 5, "locationLabel": "Grinding",
+                "fromScanner": 1,
+                "breakageUser": "Vinny Spaulding",
+                "timelineEmployee": "Brandon Smith",
+                "workTypeId": 60, "workType": "Tempering",
+                "registrationPointId": 3000, "registrationPoint": "08 - Tempering Complete",
+                "machine": "Fuse Cube", "scanMode": "Explicit", "bookingMessage": "Reject",
+            }])
+            with store.connect() as con:
+                mirror = con.execute("SELECT rejected_by FROM reject_events WHERE source_type='aw'").fetchone()
+                event = con.execute("SELECT breakage_user, timeline_employee FROM aw_reject_events").fetchone()
+                self.assertEqual(mirror["rejected_by"], "Brandon Smith")
+                self.assertEqual(event["breakage_user"], "Brandon Smith")
+                self.assertEqual(event["timeline_employee"], "Brandon Smith")
+
+                # Simulate a v0.488 mirror written with PROD_BREAKAGE.LASTCHANGEUSER.
+                con.execute("UPDATE reject_events SET rejected_by='Vinny Spaulding' WHERE source_type='aw'")
+                con.execute("UPDATE aw_reject_events SET breakage_user='Vinny Spaulding'")
+                con.commit()
+
+            repaired = store.ensure_aw_internal_reject_mirrors()
+            self.assertGreaterEqual(int(repaired.get("actorCorrections") or 0), 2)
+            with store.connect() as con:
+                mirror = con.execute("SELECT rejected_by FROM reject_events WHERE source_type='aw'").fetchone()
+                event = con.execute("SELECT breakage_user FROM aw_reject_events").fetchone()
+            self.assertEqual(mirror["rejected_by"], "Brandon Smith")
+            self.assertEqual(event["breakage_user"], "Brandon Smith")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_mirror_mapping_source_refresh_manual_override_and_bulk_relabel(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_mapping_v485"
+        verification_root.mkdir(exist_ok=True)
+        database_path = verification_root / "scanner.db"
+        for suffix in ("", "-shm", "-wal"):
+            candidate = Path(f"{database_path}{suffix}")
+            if candidate.exists():
+                candidate.unlink()
+        try:
+            store = self.make_store(verification_root)
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            row = {
+                "awRowId": "mapping-row-1",
+                "orderNr": "238091",
+                "itemNr": "1",
+                "bomId": 0,
+                "keyIndex": 1,
+                "subPosition": 0,
+                "quantity": 1,
+                "breakageDate": "2026-09-01T15:27:42.0000000",
+                "originalJobNumber": "6455",
+                "replacementJobNumber": "",
+                "reasonCode": 137,
+                "reasonLabel": "Broke in Machine",
+                "locationCode": 5,
+                "locationLabel": "Grinding",
+                "fromScanner": 1,
+                "breakageUser": "Brandon Smith",
+                "workTypeId": 60,
+                "workType": "Tempering",
+                "registrationPointId": 3000,
+                "registrationPoint": "08 - Tempering Complete",
+                "bookingMessage": "Reject",
+            }
+            result = store.sync_aw_reject_rows([row])
+            self.assertEqual(result["mirroredInternalRejects"], 1)
+            internal = operations.list_rejects()["rejects"]
+            self.assertEqual(len(internal), 1)
+            self.assertEqual(internal[0]["source_type"], "aw")
+            self.assertEqual(internal[0]["reason_label"], "Broke in Machine")
+            self.assertEqual(internal[0]["location_label"], "Grinding")
+            self.assertEqual(int(internal[0]["scan_qty_reduced"]), 0)
+
+            # A code-based mapping updates the current mirror and survives an A+W
+            # source-label rename because the numeric code remains authoritative.
+            store.update_reject_value_mapping("location", 5, "Polisher", "admin")
+            self.assertEqual(operations.list_rejects()["rejects"][0]["location_label"], "Polisher")
+            refreshed = {
+                **row,
+                "locationLabel": "Grinding Station",
+                "sourceLastChangedAt": "2026-09-02T10:00:00.0000000",
+            }
+            store.sync_aw_reject_rows([refreshed])
+            self.assertEqual(operations.list_rejects()["rejects"][0]["location_label"], "Polisher")
+            mapping = next(value for value in store.list_reject_value_mappings() if value["kind"] == "location" and value["sourceCode"] == 5)
+            self.assertEqual(mapping["sourceLabel"], "Grinding Station")
+            self.assertEqual(mapping["mappedLabel"], "Polisher")
+
+            # An individual historical correction is a scanner-side override and
+            # must not be erased by source refreshes or later code-map changes.
+            reject_id = int(operations.list_rejects()["rejects"][0]["id"])
+            operations.update_reject(
+                {
+                    "id": reject_id,
+                    "reason": "Reviewed breakage",
+                    "location": "Special Polisher",
+                    "notes": "Corrected after investigation",
+                    "qty": 2,
+                    "rejectedAt": "2026-09-01T15:30:00+00:00",
+                },
+                "admin",
+            )
+            store.update_reject_value_mapping("location", 5, "Polisher 2", "admin")
+            store.sync_aw_reject_rows([{**refreshed, "locationLabel": "Grinding Updated", "sourceLastChangedAt": "2026-09-02T11:00:00.0000000"}])
+            overridden = operations.list_rejects()["rejects"][0]
+            self.assertEqual(overridden["reason_label"], "Reviewed breakage")
+            self.assertEqual(overridden["location_label"], "Special Polisher")
+            self.assertEqual(int(overridden["qty"]), 2)
+            self.assertEqual(overridden["notes"], "Corrected after investigation")
+
+            # Deliberate bulk replacements work for both dimensions and update
+            # the associated A+W code mappings so future synchronization keeps them.
+            reason_bulk = operations.bulk_relabel_rejects("reason", "Reviewed breakage", "Investigated breakage", "admin")
+            self.assertEqual(reason_bulk["affectedEvents"], 1)
+            self.assertIn(137, reason_bulk["awCodes"])
+            self.assertEqual(operations.list_rejects()["rejects"][0]["reason_label"], "Investigated breakage")
+
+            bulk = operations.bulk_relabel_rejects("location", "Special Polisher", "Polisher Bay", "admin")
+            self.assertEqual(bulk["affectedEvents"], 1)
+            self.assertIn(5, bulk["awCodes"])
+            after_bulk = operations.list_rejects()["rejects"][0]
+            self.assertEqual(after_bulk["location_label"], "Polisher Bay")
+            self.assertEqual(json.loads(after_bulk["manual_override_json"])["location"], "Polisher Bay")
+            store.sync_aw_reject_rows([{**refreshed, "locationLabel": "Grinding New Name", "sourceLastChangedAt": "2026-09-02T12:00:00.0000000"}])
+            final_reject = operations.list_rejects()["rejects"][0]
+            self.assertEqual(final_reject["location_label"], "Polisher Bay")
+            self.assertEqual(final_reject["reason_label"], "Investigated breakage")
+        finally:
+            for suffix in ("", "-shm", "-wal"):
+                candidate = Path(f"{database_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            if verification_root.exists():
+                shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_egl_history_remains_fabrication_evidence_after_file_deletion_and_restart(self) -> None:
+        verification_root = ROOT / "_verification_egl_history_v485"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        data_dir = verification_root / "data"
+        programs = verification_root / "Programs"
+        sketches = verification_root / "Sketches"
+        hardware = verification_root / "Hardware"
+        completed = verification_root / "Completed WJ"
+        for folder in (data_dir, programs, sketches, hardware, completed):
+            folder.mkdir(parents=True, exist_ok=True)
+        try:
+            base = load_config(ROOT)
+            config = replace(
+                base,
+                root=verification_root,
+                data_dir=data_dir,
+                programs_dir=programs,
+                sketches_dir=sketches,
+                hardware_lists_dir=hardware,
+                completed_wj_dir=completed,
+            )
+            egl = programs / "23809101-test.egl"
+            egl.write_text("DENVER TEST PROGRAM", encoding="utf-8")
+            service = ProductionFileService(config, cache_seconds=15)
+            service.assets("program", refresh=True)
+            live = service.fabrication_status("238091", "1", "6455")
+            self.assertTrue(live["fabricated"])
+            self.assertFalse(live["evidence"]["historical"])
+            self.assertTrue(live["evidence"]["existsNow"])
+            service._persist_index()
+
+            egl.unlink()
+            service.assets("program", refresh=True)
+            historical = service.fabrication_status("238091", "1", "6455")
+            self.assertTrue(historical["fabricated"])
+            self.assertTrue(historical["evidence"]["historical"])
+            self.assertFalse(historical["evidence"]["existsNow"])
+            self.assertEqual(historical["programs"], [])
+            service._persist_index()
+
+            restarted = ProductionFileService(config, cache_seconds=15)
+            after_restart = restarted.fabrication_status("238091", "1", "6455")
+            self.assertTrue(after_restart["fabricated"])
+            self.assertTrue(after_restart["evidence"]["historical"])
+            self.assertEqual(restarted.index_status()["historicalEglCount"], 1)
+            self.assertIsNone(restarted.resolve_asset(after_restart["evidence"]["id"]))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_internal_reject_requires_newer_or_overwritten_fabrication_evidence(self) -> None:
+        verification_root = ROOT / "_verification_reject_fabrication_reset_v486"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        data_dir = verification_root / "data"
+        programs = verification_root / "Programs"
+        sketches = verification_root / "Sketches"
+        hardware = verification_root / "Hardware"
+        completed = verification_root / "Completed WJ"
+        for folder in (data_dir, programs, sketches, hardware, completed):
+            folder.mkdir(parents=True, exist_ok=True)
+        try:
+            base = load_config(ROOT)
+            config = replace(
+                base,
+                root=verification_root,
+                data_dir=data_dir,
+                programs_dir=programs,
+                sketches_dir=sketches,
+                hardware_lists_dir=hardware,
+                completed_wj_dir=completed,
+            )
+            egl = programs / "23809101-test.egl"
+            egl.write_text("ORIGINAL DENVER PROGRAM", encoding="utf-8")
+            before_reject = datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc).timestamp()
+            os.utime(egl, (before_reject, before_reject))
+            service = ProductionFileService(config, cache_seconds=15)
+            service.assets("program", refresh=True)
+            reject_time = "2026-09-01T15:27:42+00:00"
+
+            stale = service.fabrication_status("238091", "1", "6455", evidence_after=reject_time)
+            self.assertFalse(stale["fabricated"])
+            self.assertTrue(stale["evidenceResetRequired"])
+            self.assertIsNotNone(stale["staleEvidence"])
+            self.assertIsNone(stale["evidence"])
+
+            # Overwriting the exact same program after the reject creates new
+            # fabrication evidence even though the filename did not change.
+            egl.write_text("RE-FABRICATED DENVER PROGRAM", encoding="utf-8")
+            after_reject = datetime(2026, 9, 1, 16, 0, tzinfo=timezone.utc).timestamp()
+            os.utime(egl, (after_reject, after_reject))
+            service.assets("program", refresh=True)
+            refreshed = service.fabrication_status("238091", "1", "6455", evidence_after=reject_time)
+            self.assertTrue(refreshed["fabricated"])
+            self.assertGreater(float(refreshed["evidence"]["modifiedAt"]), before_reject)
+            self.assertIsNone(refreshed["staleEvidence"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_source_identity_change_does_not_replay_rollback(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_rekey_v486"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-02", "items": [imported_item("238092", "1", 1, "aw-reject:rekey")]},
+                "fileName": "Delivery List 09-02-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as con:
+                con.execute("UPDATE line_items SET scanned_qty=1 WHERE order_no='238092' AND item_no='001'")
+                con.commit()
+            row = {
+                "awRowId": "stable-source-guid", "orderNr": "238092", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-01T15:27:42+00:00", "originalJobNumber": "6456",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine", "locationCode": 5,
+                "locationLabel": "Grinding", "fromScanner": 1, "breakageUser": "A+W User",
+            }
+            store.sync_aw_reject_rows([row])
+            with store.connect() as con:
+                self.assertTrue(all(int(value[0] or 0) == 0 for value in con.execute(
+                    "SELECT scanned_qty FROM line_items WHERE order_no='238092' AND item_no='001'"
+                ).fetchall()))
+                con.execute("UPDATE line_items SET scanned_qty=1 WHERE order_no='238092' AND item_no='001'")
+                con.commit()
+
+            # A+W corrects the timestamp, which changes the logical event key,
+            # but the preserved raw ROWID proves the rollback already happened.
+            store.sync_aw_reject_rows([{**row, "breakageDate": "2026-09-01T15:27:43+00:00"}])
+            with store.connect() as con:
+                states = con.execute(
+                    "SELECT scanned_qty FROM line_items WHERE order_no='238092' AND item_no='001'"
+                ).fetchall()
+                reset_count = con.execute("SELECT COUNT(*) FROM scan_events WHERE event_type='reject_reset'").fetchone()[0]
+                mirror = con.execute("SELECT scan_qty_reduced, operational_rollback_applied_at FROM reject_events WHERE source_type='aw'").fetchone()
+            self.assertTrue(all(int(value["scanned_qty"] or 0) == 1 for value in states))
+            self.assertGreater(int(reset_count or 0), 0)
+            self.assertGreater(int(mirror["scan_qty_reduced"] or 0), 0)
+            self.assertTrue(str(mirror["operational_rollback_applied_at"] or ""))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_aw_reject_operational_reset_removes_rack_and_bay_quantity(self) -> None:
+        verification_root = ROOT / "_verification_aw_reject_rack_bay_v486"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                store.seed_bays(con)
+                store.seed_racks(con)
+                con.commit()
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-02", "items": [imported_item("238093", "1", 1, "aw-reject:rack-bay")]},
+                "fileName": "Delivery List 09-02-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as con:
+                lines = con.execute(
+                    "SELECT id, list_id FROM line_items WHERE order_no='238093' AND item_no='001' ORDER BY id"
+                ).fetchall()
+                self.assertGreaterEqual(len(lines), 2)
+                con.execute("UPDATE line_items SET scanned_qty=1 WHERE order_no='238093' AND item_no='001'")
+                rack = con.execute("SELECT id FROM racks WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+                bay = con.execute("SELECT id FROM bays WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+                self.assertIsNotNone(rack)
+                self.assertIsNotNone(bay)
+                con.execute(
+                    "INSERT INTO rack_items (rack_id,line_item_id,qty,status,added_by,added_at,reason,destination_override) VALUES (?,?,1,'Active','tester','2026-09-01T14:00:00+00:00','test','')",
+                    (rack["id"], lines[0]["id"]),
+                )
+                con.execute(
+                    "INSERT INTO bay_assignments (delivery_list_id,line_item_id,bay_id,assigned_qty,status,assigned_by,assigned_at,reason) VALUES (?,?,?,1,'Received','tester','2026-09-01T14:00:00+00:00','test')",
+                    (lines[1]["list_id"], lines[1]["id"], bay["id"]),
+                )
+                con.commit()
+            store.sync_aw_reject_rows([{
+                "awRowId": "rack-bay-source", "orderNr": "238093", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "subPosition": 0, "quantity": 1,
+                "breakageDate": "2026-09-01T15:27:42+00:00", "originalJobNumber": "6457",
+                "reasonCode": 137, "reasonLabel": "Broke in Machine", "locationCode": 5,
+                "locationLabel": "Grinding", "fromScanner": 1, "breakageUser": "A+W User",
+            }])
+            with store.connect() as con:
+                rack_row = con.execute("SELECT qty,status,reason FROM rack_items WHERE line_item_id=?", (lines[0]["id"],)).fetchone()
+                bay_row = con.execute("SELECT assigned_qty,status,reason FROM bay_assignments WHERE line_item_id=?", (lines[1]["id"],)).fetchone()
+            # rack_items preserves the positive historical quantity and uses
+            # status=Removed to represent zero active allocation.
+            self.assertEqual(int(rack_row["qty"] or 0), 1)
+            self.assertEqual(str(rack_row["status"]), "Removed")
+            self.assertEqual(str(rack_row["reason"]), "A+W Internal reject")
+            self.assertEqual(int(bay_row["assigned_qty"] or 0), 0)
+            self.assertEqual(str(bay_row["status"]), "Cleared")
+            self.assertEqual(str(bay_row["reason"]), "A+W Internal reject")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_manual_internal_reject_preserves_removed_rack_history(self) -> None:
+        verification_root = ROOT / "_verification_manual_reject_rack_history_v486"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            with store.connect() as con:
+                store.seed_bays(con)
+                store.seed_racks(con)
+                con.commit()
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-02", "items": [imported_item("238094", "1", 1, "manual-reject:rack-bay")]},
+                "fileName": "Delivery List 09-02-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as con:
+                lines = con.execute(
+                    "SELECT id, list_id FROM line_items WHERE order_no='238094' AND item_no='001' ORDER BY id"
+                ).fetchall()
+                self.assertGreaterEqual(len(lines), 2)
+                con.execute("UPDATE line_items SET scanned_qty=1 WHERE order_no='238094' AND item_no='001'")
+                rack = con.execute("SELECT id FROM racks WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+                bay = con.execute("SELECT id FROM bays WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+                con.execute(
+                    "INSERT INTO rack_items (rack_id,line_item_id,qty,status,added_by,added_at,reason,destination_override) VALUES (?,?,1,'Active','tester','2026-09-01T14:00:00+00:00','test','')",
+                    (rack["id"], lines[0]["id"]),
+                )
+                con.execute(
+                    "INSERT INTO bay_assignments (delivery_list_id,line_item_id,bay_id,assigned_qty,status,assigned_by,assigned_at,reason) VALUES (?,?,?,1,'Received','tester','2026-09-01T14:00:00+00:00','test')",
+                    (lines[1]["list_id"], lines[1]["id"], bay["id"]),
+                )
+                con.commit()
+
+            operations.create_reject(
+                {
+                    "deliveryDate": "2026-09-02",
+                    "order": "238094",
+                    "item": "1",
+                    "qty": 1,
+                    "reason": "Test Reject",
+                    "location": "Test Station",
+                },
+                "tester",
+            )
+            with store.connect() as con:
+                rack_row = con.execute(
+                    "SELECT qty,status,reason FROM rack_items WHERE line_item_id=?", (lines[0]["id"],)
+                ).fetchone()
+                bay_row = con.execute(
+                    "SELECT assigned_qty,status,reason FROM bay_assignments WHERE line_item_id=?", (lines[1]["id"],)
+                ).fetchone()
+            self.assertEqual(int(rack_row["qty"] or 0), 1)
+            self.assertEqual(str(rack_row["status"]), "Removed")
+            self.assertEqual(str(rack_row["reason"]), "Internal reject")
+            self.assertEqual(int(bay_row["assigned_qty"] or 0), 0)
+            self.assertEqual(str(bay_row["status"]), "Cleared")
+            self.assertEqual(str(bay_row["reason"]), "Internal reject")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_automation_reject_sync_settings_round_trip(self) -> None:
+        verification_root = ROOT / "_verification_automation_reject_settings_v485"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        config_dir = verification_root / "automation" / "sql_delivery_export"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        source_config = ROOT / "automation" / "sql_delivery_export" / "sql-export.config.json"
+        config_path = config_dir / "sql-export.config.json"
+        config_path.write_text(source_config.read_text(encoding="utf-8"), encoding="utf-8")
+        base = load_config(ROOT)
+        scanner_config = replace(base, root=verification_root, data_dir=verification_root / "data")
+        try:
+            with mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
+                 mock.patch.object(DeliveryAutomationController, "_schedule_installed", return_value=False):
+                controller = DeliveryAutomationController(verification_root, scanner_config, None)
+                dashboard = controller.get_dashboard()
+                self.assertTrue(dashboard["settings"]["rejectSyncEnabled"])
+                self.assertEqual(dashboard["settings"]["rejectIncrementalPastDays"], 30)
+                self.assertEqual(dashboard["settings"]["rejectFullPastDays"], 365)
+                payload = dict(dashboard["settings"])
+                payload.update({
+                    "automationMode": "sql-export-and-import",
+                    "rejectSyncEnabled": False,
+                    "rejectIncrementalPastDays": 45,
+                    "rejectFullPastDays": 730,
+                })
+                saved = controller.save_settings(payload, "admin")
+                self.assertFalse(saved["settings"]["rejectSyncEnabled"])
+                self.assertEqual(saved["settings"]["rejectIncrementalPastDays"], 45)
+                self.assertEqual(saved["settings"]["rejectFullPastDays"], 730)
+                persisted = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(persisted["RejectSync"], {"Enabled": False, "IncrementalPastDays": 45, "FullPastDays": 730})
+                payload["rejectFullPastDays"] = 10
+                with self.assertRaisesRegex(ValueError, "cannot be shorter"):
+                    controller.save_settings(payload, "admin")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
     def test_legacy_stage_copy_totals_are_normalized_to_physical_pieces(self) -> None:
         store = SQLiteDeliveryStore.__new__(SQLiteDeliveryStore)
@@ -2200,6 +3097,94 @@ class ImportConsistencyTests(unittest.TestCase):
                     candidate.unlink()
             if verification_root.exists():
                 shutil.rmtree(verification_root)
+
+    def test_aw_cutting_generations_follow_latest_remake_and_reject_cutoff(self) -> None:
+        verification_root = ROOT / "_verification_aw_cutting_v498"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            common = {
+                "orderNr": "238221", "itemNr": "1", "quantity": 1, "cutQuantity": 1,
+                "itemBarcodeStart": "130191", "weight": 83.88, "surfaceArea": 17.48,
+            }
+            rows = [
+                {**common, "sourceRowId": "old-cut", "bomId": 1, "keyIndex": 0, "batchJobNumber": "6474",
+                 "batchStatusCode": 500, "batchCreatedAt": "2026-08-31T15:22:37",
+                 "optimizationNumber": 8309, "optimizationStatusCode": 500, "aggregateId": 1000,
+                 "cuttingBookingAt": "2026-09-01T07:08:00", "cuttingBookingEmployee": "Intermac Cutting",
+                 "cuttingBookingRowId": "book-old", "bomBarcodeStart": "130192"},
+                {**common, "sourceRowId": "current-cut", "bomId": 1, "keyIndex": 2, "batchJobNumber": "9176",
+                 "batchStatusCode": 400, "batchCreatedAt": "2026-09-02T15:23:23",
+                 "optimizationNumber": 8361, "optimizationStatusCode": 100, "aggregateId": 1000,
+                 "bomBarcodeStart": "130192"},
+                {**common, "sourceRowId": "current-fab", "bomId": 2, "keyIndex": 2, "batchJobNumber": "9176",
+                 "batchStatusCode": 400, "batchCreatedAt": "2026-09-02T15:23:23",
+                 "optimizationNumber": 0, "optimizationStatusCode": 0, "aggregateId": 2000},
+            ]
+            first = store.sync_aw_cutting_rows(rows)
+            self.assertEqual(first["generations"], 2)
+            self.assertEqual(first["inserted"], 2)
+
+            state = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertEqual(state["batch"], "9176")
+            self.assertEqual(state["optimization"], 8361)
+            self.assertEqual(state["state"], "optimized")
+            self.assertFalse(state["complete"])
+            self.assertEqual(state["cuttingBarcodeStart"], "130192")
+            self.assertAlmostEqual(state["weight"], 83.88, places=2)
+            self.assertEqual(len(state["history"]), 2)
+
+            order_item = imported_item("238221", "1", 1, "v0498-cutting-order:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-04", "items": [order_item]},
+                "fileName": "Delivery List 09-04-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                connection.execute(
+                    "UPDATE line_items SET last_rejected_at = ? WHERE order_no = ? AND item_no IN (?, ?)",
+                    ("2026-09-02T10:55:27", "238221", "1", "001"),
+                )
+            detail = store.get_order_detail("238221", include_production=False)
+            self.assertEqual(detail["items"][0]["cutting"]["batch"], "9176")
+            self.assertEqual(detail["items"][0]["cutting"]["optimization"], 8361)
+            self.assertEqual(detail["items"][0]["cutting"]["state"], "optimized")
+            recut_state = store.aw_cutting_state("238221", "1", "2026-09-03T08:00:00")
+            self.assertEqual(recut_state["state"], "needs_recut")
+            self.assertFalse(recut_state["complete"])
+
+            batch_only_rows = [dict(row) for row in rows]
+            batch_only_rows[1]["batchStatusCode"] = 500
+            store.sync_aw_cutting_rows(batch_only_rows)
+            batch_only_state = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertEqual(batch_only_state["state"], "optimized")
+            self.assertFalse(batch_only_state["complete"])
+
+            released_rows = [dict(row) for row in rows]
+            released_rows[1]["optimizationStatusCode"] = 200
+            released = store.sync_aw_cutting_rows(released_rows)
+            self.assertGreaterEqual(released["updated"], 1)
+            self.assertEqual(store.aw_cutting_state("238221", "001", "2026-09-02T10:55:27")["state"], "released")
+
+            booked_rows = [dict(row) for row in released_rows]
+            booked_rows[1].update({
+                "batchStatusCode": 500, "optimizationStatusCode": 500,
+                "cuttingBookingAt": "2026-09-02T16:10:00",
+                "cuttingBookingEmployee": "Intermac Cutting", "cuttingBookingRowId": "book-current",
+            })
+            booked = store.sync_aw_cutting_rows(booked_rows)
+            self.assertGreaterEqual(booked["updated"], 1)
+            state = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertEqual(state["state"], "cut")
+            self.assertTrue(state["complete"])
+            self.assertEqual(state["cutCompletedBy"], "Intermac Cutting")
+
+            unchanged = store.sync_aw_cutting_rows(booked_rows)
+            self.assertEqual(unchanged["unchanged"], 2)
+            self.assertEqual(unchanged["updated"], 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

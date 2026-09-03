@@ -94,6 +94,36 @@ MIGRATIONS = (
         "Persist the exact candidate order selected for removal while preserving legacy original-order approvals; v257-r1",
         "_migration_011_v257_superseded_remove_choice",
     ),
+    Migration(
+        12,
+        "v484_aw_reject_sync",
+        "Persist raw A+W PROD_BREAKAGE rows by external ROWID and de-duplicate BOM-level source rows into logical A+W reject events; v484-r1",
+        "_migration_012_v484_aw_reject_sync",
+    ),
+    Migration(
+        13,
+        "v485_internalize_aw_rejects",
+        "Mirror A+W breakage into Internal Reject history without replaying floor rollback, add stable reason/location display mappings, and preserve source linkage; v485-r1",
+        "_migration_013_v485_internalize_aw_rejects",
+    ),
+    Migration(
+        14,
+        "v486_aw_reject_operational_reset",
+        "Apply A+W Internal Reject scan/rack/bay rollback exactly once per preserved PROD_BREAKAGE source row and retain the rollback marker across source refreshes; v486-r1",
+        "_migration_014_v486_aw_reject_operational_reset",
+    ),
+    Migration(
+        15,
+        "v487_reject_reporting_performance",
+        "Add index-friendly Internal Reject timeline/statistics access paths after A+W history synchronization; v487-r1",
+        "_migration_015_v487_reject_reporting_performance",
+    ),
+    Migration(
+        16,
+        "v498_aw_cutting_progress",
+        "Persist A+W production batch/optimization generations for reject-aware Cutting progress and label context; v498-r1",
+        "_migration_016_v498_aw_cutting_progress",
+    ),
 )
 
 
@@ -586,6 +616,203 @@ def _migration_011_v257_superseded_remove_choice(connection: Any) -> None:
         "superseded_order_reviews",
         "approved_remove_order_no",
         "TEXT NOT NULL DEFAULT ''",
+    )
+
+
+def _migration_012_v484_aw_reject_sync(connection: Any) -> None:
+    """Persist A+W breakage source rows separately from scanner Internal Rejects.
+
+    ``PROD_BREAKAGE.ROWID`` is the immutable external row identity. Multiple
+    BOM rows that share the same order/item/breakage timestamp and A+W
+    ``KEYINDEX`` are grouped into one logical event so UI and metrics do not
+    multiply one operator reject by the number of production BOM nodes.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS aw_reject_events (
+            event_key TEXT PRIMARY KEY,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            breakage_date TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+            original_job_number TEXT NOT NULL DEFAULT '',
+            replacement_job_number TEXT NOT NULL DEFAULT '',
+            reason_code INTEGER NOT NULL DEFAULT 0,
+            reason_label TEXT NOT NULL DEFAULT '',
+            location_code INTEGER NOT NULL DEFAULT 0,
+            location_label TEXT NOT NULL DEFAULT '',
+            from_scanner INTEGER NOT NULL DEFAULT 0 CHECK (from_scanner IN (0, 1)),
+            breakage_user TEXT NOT NULL DEFAULT '',
+            timeline_employee TEXT NOT NULL DEFAULT '',
+            work_type_id INTEGER NOT NULL DEFAULT 0,
+            work_type TEXT NOT NULL DEFAULT '',
+            registration_point_id INTEGER NOT NULL DEFAULT 0,
+            registration_point TEXT NOT NULL DEFAULT '',
+            machine TEXT NOT NULL DEFAULT '',
+            scan_mode TEXT NOT NULL DEFAULT '',
+            booking_message TEXT NOT NULL DEFAULT '',
+            source_row_count INTEGER NOT NULL DEFAULT 0 CHECK (source_row_count >= 0),
+            source_last_changed_at TEXT NOT NULL DEFAULT '',
+            source_last_changed_user TEXT NOT NULL DEFAULT '',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            source_payload_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_payload_json))
+        );
+
+        CREATE TABLE IF NOT EXISTS aw_reject_source_rows (
+            aw_row_id TEXT PRIMARY KEY,
+            event_key TEXT NOT NULL REFERENCES aw_reject_events(event_key) ON DELETE CASCADE,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            bom_id INTEGER NOT NULL DEFAULT 0,
+            key_index INTEGER NOT NULL DEFAULT 0,
+            sub_position INTEGER NOT NULL DEFAULT 0,
+            bom_node INTEGER NOT NULL DEFAULT 0,
+            quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+            breakage_date TEXT NOT NULL,
+            original_job_number TEXT NOT NULL DEFAULT '',
+            replacement_job_number TEXT NOT NULL DEFAULT '',
+            is_breakage INTEGER NOT NULL DEFAULT 1 CHECK (is_breakage IN (0, 1)),
+            reason_code INTEGER NOT NULL DEFAULT 0,
+            location_code INTEGER NOT NULL DEFAULT 0,
+            from_scanner INTEGER NOT NULL DEFAULT 0 CHECK (from_scanner IN (0, 1)),
+            last_changed_at TEXT NOT NULL DEFAULT '',
+            last_changed_user TEXT NOT NULL DEFAULT '',
+            synced_at TEXT NOT NULL,
+            source_payload_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_events_order_item_time
+            ON aw_reject_events(order_no, item_no, breakage_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_events_time
+            ON aw_reject_events(breakage_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_source_rows_event
+            ON aw_reject_source_rows(event_key, bom_id, key_index);
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_source_rows_time
+            ON aw_reject_source_rows(breakage_date DESC);
+        """
+    )
+
+
+
+def _migration_013_v485_internalize_aw_rejects(connection: Any) -> None:
+    """Unify A+W breakage with Internal Reject reporting without mutating A+W.
+
+    Scanner-created reject rows keep their existing rollback semantics. Imported
+    A+W breakage rows are mirrored into ``reject_events`` as source_type ``aw``
+    records and never replay scan/rack/bay rollback. Stable numeric A+W codes are
+    mapped separately so admins can rename historical and future display values
+    in one operation while retaining raw A+W labels in ``aw_reject_events``.
+    """
+    _ensure_column(connection, "reject_events", "source_type", "TEXT NOT NULL DEFAULT 'scanner'")
+    _ensure_column(connection, "reject_events", "source_external_key", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "reject_events", "source_reason_code", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "reject_events", "source_location_code", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "reject_events", "manual_override_json", "TEXT NOT NULL DEFAULT '{}'")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS reject_value_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_system TEXT NOT NULL DEFAULT 'aw',
+            kind TEXT NOT NULL CHECK (kind IN ('reason', 'location')),
+            source_code INTEGER NOT NULL,
+            source_label TEXT NOT NULL DEFAULT '',
+            mapped_label TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_system, kind, source_code)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_reject_events_source_external
+            ON reject_events(source_type, source_external_key)
+            WHERE source_external_key <> '';
+        CREATE INDEX IF NOT EXISTS idx_reject_events_source_codes
+            ON reject_events(source_type, source_reason_code, source_location_code, rejected_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_reject_value_mappings_kind_code
+            ON reject_value_mappings(source_system, kind, source_code);
+        """
+    )
+
+
+def _migration_014_v486_aw_reject_operational_reset(connection: Any) -> None:
+    """Track the one-time floor rollback attached to imported A+W rejects.
+
+    A+W source ROWIDs are immutable enough for reconciliation even when the
+    logical event timestamp/job metadata is later corrected. Keeping the marker
+    on every raw source row prevents a corrected logical key from replaying the
+    scan/rack/bay rollback. Existing v0.485 rows intentionally start blank so
+    startup reconciliation can apply the new behavior once after upgrade.
+    """
+    _ensure_column(connection, "aw_reject_source_rows", "rollback_applied_at", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "aw_reject_source_rows", "rollback_scan_qty_reduced", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "reject_events", "operational_rollback_applied_at", "TEXT NOT NULL DEFAULT ''")
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_source_rows_rollback_pending_v486
+            ON aw_reject_source_rows(event_key, rollback_applied_at);
+        """
+    )
+
+
+def _migration_015_v487_reject_reporting_performance(connection: Any) -> None:
+    """Keep unified Internal Reject reads responsive after large A+W backfills."""
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_reject_events_rejected_at_v487
+            ON reject_events(rejected_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_reject_events_source_time_v487
+            ON reject_events(source_type, rejected_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_aw_reject_source_rows_row_event_v487
+            ON aw_reject_source_rows(aw_row_id, event_key, rollback_applied_at);
+        """
+    )
+
+
+def _migration_016_v498_aw_cutting_progress(connection: Any) -> None:
+    """Persist A+W cutting generations without collapsing remake history.
+
+    ``PROD_JOBITEM.KEYINDEX`` separates replacement generations while the
+    production batch/job number identifies the concrete A+W batch.  Keeping
+    each generation lets Order Details select the newest physical replacement
+    after an Internal Reject without losing the previous batch/optimization.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS aw_cutting_generations (
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            key_index INTEGER NOT NULL DEFAULT 0,
+            batch_job_number TEXT NOT NULL,
+            batch_status_code INTEGER NOT NULL DEFAULT 0,
+            batch_description TEXT NOT NULL DEFAULT '',
+            batch_creation_at TEXT NOT NULL DEFAULT '',
+            batch_employee TEXT NOT NULL DEFAULT '',
+            batch_last_changed_at TEXT NOT NULL DEFAULT '',
+            batch_last_changed_user TEXT NOT NULL DEFAULT '',
+            optimization_number INTEGER NOT NULL DEFAULT 0,
+            optimization_status_code INTEGER NOT NULL DEFAULT 0,
+            optimization_mode INTEGER NOT NULL DEFAULT 0,
+            optimization_date TEXT NOT NULL DEFAULT '',
+            optimization_last_changed_at TEXT NOT NULL DEFAULT '',
+            cutting_booking_at TEXT NOT NULL DEFAULT '',
+            cutting_booking_employee TEXT NOT NULL DEFAULT '',
+            cutting_booking_row_id TEXT NOT NULL DEFAULT '',
+            item_barcode_start TEXT NOT NULL DEFAULT '',
+            cutting_barcode_start TEXT NOT NULL DEFAULT '',
+            weight REAL NOT NULL DEFAULT 0,
+            surface_area REAL NOT NULL DEFAULT 0,
+            source_row_count INTEGER NOT NULL DEFAULT 0 CHECK (source_row_count >= 0),
+            source_payload_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_payload_json)),
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            synced_at TEXT NOT NULL,
+            PRIMARY KEY(order_no, item_no, key_index, batch_job_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_aw_cutting_order_item_generation_v498
+            ON aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_aw_cutting_batch_v498
+            ON aw_cutting_generations(batch_job_number, optimization_number);
+        """
     )
 
 

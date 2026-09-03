@@ -22075,3 +22075,55 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
 @media (max-width:760px) {
   .production-machine-visuals-v476 { grid-template-columns:1fr !important; }
 }
+
+/* v0.485: bulk reject history and A+W code-mapping maintenance. */
+.reject-history-maintenance-v485 { margin-top: 18px; }
+.reject-history-table-wrap-v485 { overflow: auto; max-height: 360px; border: 1px solid var(--border-color, #d8e1ec); border-radius: 10px; background: #fff; }
+.reject-history-table-v485 { width: 100%; border-collapse: collapse; min-width: 760px; }
+.reject-history-table-v485 th,
+.reject-history-table-v485 td { padding: 10px 12px; border-bottom: 1px solid #e8edf3; text-align: left; vertical-align: middle; }
+.reject-history-table-v485 th { position: sticky; top: 0; z-index: 1; background: #f4f7fb; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #50647a; }
+.reject-history-table-v485 td { font-size: 13px; color: #26384b; }
+.reject-history-table-v485 input { width: 100%; min-width: 150px; box-sizing: border-box; }
+.automation-aw-reject-settings-v485 .automation-aw-reject-source-v485 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.automation-aw-reject-source-v485 > span { display: flex; flex-direction: column; gap: 3px; padding: 11px 12px; border: 1px solid #dce5ef; border-radius: 9px; background: #f7f9fc; }
+.automation-aw-reject-source-v485 small { color: #64768a; }
+.automation-aw-reject-source-v485 strong { font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .automation-aw-reject-settings-v485 .automation-aw-reject-source-v485 { grid-template-columns: 1fr; }
+}
+
+/* v0.488: keep a busy Import History tab light enough to remain interactive. */
+.import-history-progressive-more-v488 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 12px 4px;
+  color: #6b7890;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* v0.499 Automation Control Center: A+W Production settings */
+.delivery-automation-tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.automation-aw-production-settings-v499 .automation-status-summary strong,
+.automation-crystal-label-contract-v499 .automation-status-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.automation-production-note-v499 {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #dbe7f5;
+  border-radius: 10px;
+  background: #f7faff;
+  color: #53647c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.55;
+}

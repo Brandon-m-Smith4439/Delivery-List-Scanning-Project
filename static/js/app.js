@@ -385,9 +385,15 @@ const state = {
   pendingUpdateDates: new Map(),
   pendingUpdateStages: new Map(),
   pendingUpdateDatesRequestId: 0,
-  rejectCatalog: { reasons: [], locations: [] },
+  rejectCatalog: { reasons: [], locations: [], historyReasons: [], historyLocations: [], awMappings: [] },
   rejectHistory: [],
   rejectHistoryRequestId: 0,
+  rejectHistoryPage: 1,
+  rejectHistoryPageSize: 50,
+  rejectHistoryTotalCount: 0,
+  rejectHistoryTotalPages: 1,
+  rejectHistorySummary: null,
+  rejectHistoryFilterOptions: { locations: [], reasons: [], users: [] },
   rejectMatches: [],
   rejectSelectedDeliveryDate: "",
   rejectLogOpening: false,
@@ -1191,6 +1197,10 @@ const els = {
   rejectReasonFilter: document.getElementById("rejectReasonFilter"),
   rejectUserFilter: document.getElementById("rejectUserFilter"),
   rejectSummaryBar: document.getElementById("rejectSummaryBar"),
+  rejectPagination: document.getElementById("rejectPagination"),
+  rejectPagePrev: document.getElementById("rejectPagePrev"),
+  rejectPageNext: document.getElementById("rejectPageNext"),
+  rejectPageStatusText: document.getElementById("rejectPageStatusText"),
   rejectClearFiltersBtn: document.getElementById("rejectClearFiltersBtn"),
   rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
@@ -2884,6 +2894,46 @@ SPANISH_UI_EXTENDED.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, s
   ["Outbound scan required", "Se requiere escaneo de salida"],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
+const SPANISH_UI_V485 = new Map([
+  ["A+W Rejects", "Rechazos de A+W"],
+  ["Sync A+W rejects", "Sincronizar rechazos de A+W"],
+  ["Internal Reject ownership", "Clasificación como rechazo interno"],
+  ["A+W rejects are Internal Rejects. Raw A+W source rows remain attached for audit and refresh safety.", "Los rechazos de A+W son rechazos internos. Las filas originales de A+W se conservan para auditoría y actualización segura."],
+  ["Query PROD_BREAKAGE during direct A+W runs and mirror verified breakages into Internal Rejects.", "Consultar PROD_BREAKAGE durante las sincronizaciones directas de A+W y reflejar roturas verificadas como rechazos internos."],
+  ["Normal sync lookback", "Período de sincronización normal"],
+  ["Full sync lookback", "Período de sincronización completa"],
+  ["Save A+W Reject Settings", "Guardar configuración de rechazos de A+W"],
+  ["Manage Reject Mappings & History", "Administrar asignaciones e historial de rechazos"],
+  ["Manage Reject Data", "Administrar datos de rechazos"],
+  ["Past & Future A+W Labels", "Etiquetas pasadas y futuras de A+W"],
+  ["A+W code mappings", "Asignaciones de códigos de A+W"],
+  ["Numeric A+W codes stay authoritative. Set a Scanner display label to rename every matching historical and future A+W Internal Reject.", "Los códigos numéricos de A+W siguen siendo la fuente autorizada. Defina una etiqueta del escáner para renombrar todos los rechazos internos de A+W históricos y futuros que coincidan."],
+  ["A+W label", "Etiqueta de A+W"],
+  ["Scanner display", "Nombre mostrado en el escáner"],
+  ["Historical cleanup", "Limpieza histórica"],
+  ["Bulk Replace Reject Data", "Reemplazar datos de rechazos en masa"],
+  ["Replace one stored reason or location across the entire Reject history. Matching A+W codes are also mapped so future syncs keep the replacement.", "Reemplace un motivo o ubicación guardado en todo el historial de rechazos. Los códigos de A+W coincidentes también se asignan para conservar el reemplazo en futuras sincronizaciones."],
+  ["Replace All", "Reemplazar todos"],
+  ["New label", "Nueva etiqueta"],
+  ["No reject history exists yet.", "Todavía no existe historial de rechazos."],
+  ["External Remake", "Rehecho externo"],
+  ["Imported A+W RM marker", "Marcador RM importado de A+W"],
+  ["INTERNAL REJECT · A+W", "RECHAZO INTERNO · A+W"],
+  ["A+W source · editable in Rejects", "Origen A+W · editable en Rechazos"],
+  ["A+W Internal Reject", "Rechazo interno de A+W"],
+  ["Scanner Internal Reject", "Rechazo interno del escáner"],
+  ["Source A+W", "Origen A+W"],
+  ["Source Scanner", "Origen Escáner"],
+]);
+SPANISH_UI_V485.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_V486 = new Map([
+  ["Needs Refabrication", "Necesita refabricación"],
+  ["Existing fabrication evidence predates the latest Internal Reject.", "La evidencia de fabricación existente es anterior al rechazo interno más reciente."],
+  ["Predates latest Internal Reject", "Es anterior al rechazo interno más reciente"],
+]);
+SPANISH_UI_V486.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
 const SPANISH_OPERATIONAL_TEXT = new Map([
   ["Staging", "Preparación"],
   ["Staged", "Preparado"],
@@ -3847,6 +3897,10 @@ const SPANISH_UI_V359 = new Map([
   ["Run a one-time update, choose what this computer does automatically, and review the latest result without leaving the scanner.", "Ejecute una actualización única, elija lo que esta computadora hace automáticamente y revise el resultado más reciente sin salir del escáner."],
   ["Checking runtime", "Revisando entorno de ejecución"],
   ["Run Manually", "Ejecutar manualmente"],
+  ["Check A+W Rejects", "Revisar rechazos de A+W"],
+  ["Rejects only", "Solo rechazos"],
+  ["Queries only recent A+W breakage history and synchronizes Internal Rejects. It does not export or reconcile delivery lists.", "Consulta solo el historial reciente de roturas de A+W y sincroniza los rechazos internos. No exporta ni reconcilia listas de entrega."],
+  ["A+W reject checks use either the Normal or Full reject lookback window", "Las revisiones de rechazos de A+W usan la ventana Normal o Completa de historial de rechazos"],
   ["Automatic Schedule", "Programación automática"],
   ["Status & Logs", "Estado y registros"],
   ["Choose what should happen", "Elija qué debe ocurrir"],
@@ -8340,6 +8394,10 @@ function isRemakeItem(item) {
   return /\b(REMAKE|RM)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
+function isExternalRemakeItem(item) {
+  return /\bEXTERNAL\s+REMAKE\b/i.test(String(item?.processState || ""));
+}
+
 /**
  * Purpose: Run the is rush item workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -8939,7 +8997,7 @@ function syncScanFilterButtons() {
 function scanFlagLabels(item) {
   if (!item) return [];
   return [
-    isRemakeItem(item) ? "Remake" : "",
+    isExternalRemakeItem(item) ? "External Remake" : (isRemakeItem(item) ? "Remake" : ""),
     isRushItem(item) ? "Rush" : "",
     Number(item.internalRejectCount || 0) > 0 ? "Internal Reject" : "",
     item.manualOnly ? "Manual scan only" : "",
@@ -9168,12 +9226,14 @@ function stageVerb() {
  * Effects: Updates visible dom state, may update shared client state.
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
-function fabricationStatusKeyV474(order = "", item = "", job = "") {
-  return [order, item, job].map((value) => String(value || "").trim().toUpperCase()).join("|");
+function fabricationStatusKeyV474(order = "", item = "", job = "", evidenceAfter = "") {
+  return [order, item, job, evidenceAfter].map((value) => String(value || "").trim().toUpperCase()).join("|");
 }
 
 function cachedFabricationStatusV474(item = {}) {
-  return state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(item.order, item.item, item.job)) || null;
+  return state.fabricationStatusCacheV474.get(
+    fabricationStatusKeyV474(item.order, item.item, item.job, item.lastRejectedAt)
+  ) || null;
 }
 
 function compactMachineLabelV475(value = "") {
@@ -9275,19 +9335,8 @@ function scanProgressPairV475(item = {}) {
 
   if (category === "staged") {
     if (!fabrication && scanned <= 0) {
-      const fabricationStatus = cachedFabricationStatusV474(item);
-      // v0.478: once production hydration confirms the item has no machine or
-      // fabrication assignment, identify that state explicitly instead of
-      // implying that a fabrication scan is still expected.
-      const noFabricationRequired = fabricationStatus && !compactMachineLabelV475(
-        fabricationStatus.actualMachine || fabricationStatus.machine || fabricationStatus.assignedMachine || "",
-      ) && !fabricationStatus.sketchMatched;
       return {
-        previous: {
-          label: noFabricationRequired ? "No Fab" : "Not Scanned",
-          scanned: 0, qty, complete: false,
-          tone: noFabricationRequired ? "no-fab-v478" : "not-scanned",
-        },
+        previous: { label: "Not Scanned", scanned: 0, qty, complete: false, tone: "not-scanned" },
         next: current,
       };
     }
@@ -9311,8 +9360,7 @@ function progressStepHtmlV475(step, role = "") {
   const scanned = Math.max(0, Number(step.scanned || 0));
   const qty = Math.max(0, Number(step.qty || 0));
   const stateClass = step.complete ? "is-complete-v475" : role === "previous" ? "is-prior-pending-v475" : "is-next-v475";
-  const toneClass = step.tone === "no-fab-v478" ? "is-no-fab-v478" : "";
-  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass}" style="--progress-step-color:${escapeHtml(progressStageColorV476(step.label || "Progress"))}"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
+  return `<span class="scan-progress-step-v475 ${stateClass}" style="--progress-step-color:${escapeHtml(progressStageColorV476(step.label || "Progress"))}"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
 }
 
 function scanProgressMarkupV475(item = {}) {
@@ -10277,7 +10325,8 @@ function priorityDateMovedOutV441(item) {
 function priorityBannerMetaV441(item) {
   const meta = item?.priorityBanner && typeof item.priorityBanner === "object" ? item.priorityBanner : null;
   if (meta?.label) return meta;
-  if (isRemakeItem(item || {})) return { kind: "remake", label: "Remake", reason: "Imported remake marker" };
+  if (isExternalRemakeItem(item || {})) return { kind: "remake", label: "External Remake", reason: "Imported A+W RM marker" };
+  if (isRemakeItem(item || {})) return { kind: "remake", label: "Remake", reason: "Remake priority handling" };
   if (isRushItem(item || {})) return { kind: "rush", label: "Rush", reason: "Priority handling" };
   return null;
 }
@@ -18131,11 +18180,12 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
     const order = String(row?.order || "").trim();
     const item = String(row?.item || "").trim();
     const job = String(row?.job || "").trim();
+    const lastRejectedAt = String(row?.lastRejectedAt || "").trim();
     if (!order) continue;
-    const key = fabricationStatusKeyV474(order, item, job);
+    const key = fabricationStatusKeyV474(order, item, job, lastRejectedAt);
     if (state.fabricationStatusCacheV474.has(key) || state.fabricationStatusPendingV474.has(key)) continue;
     state.fabricationStatusPendingV474.add(key);
-    candidates.push({ key, order, item, job });
+    candidates.push({ key, order, item, job, lastRejectedAt });
     if (candidates.length >= 80) break;
   }
   if (!candidates.length) return;
@@ -18147,7 +18197,9 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
       if (query && query === String(els.headerGlobalSearchInput?.value || "").trim()) {
         state.globalSearchLastResults = state.globalSearchLastResults.map((row) => ({
           ...row,
-          fabrication: state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(row.order, row.item, row.job)) || row.fabrication,
+          fabrication: state.fabricationStatusCacheV474.get(
+            fabricationStatusKeyV474(row.order, row.item, row.job, row.lastRejectedAt)
+          ) || row.fabrication,
         }));
         renderGlobalSearchResults(state.globalSearchLastResults);
       }
@@ -18168,7 +18220,7 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
         body: JSON.stringify({ items: chunk }),
       });
       for (const result of payload.results || []) {
-        const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job));
+        const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job, result.status?.evidenceAfter));
         state.fabricationStatusCacheV474.set(key, result.status || {});
       }
     } catch (_error) {
@@ -18514,7 +18566,9 @@ function renderGlobalSearchResults(results) {
         const scanMarkup = result.lastScanTime
           ? `<span class="global-result-stage-scan-divider-v440" aria-hidden="true">•</span><span class="global-result-scan-timing-v447 ${searchScanTimingV447.late ? "is-late-v447" : "is-on-time-v447"}">${globalSearchIconV433("scan")}<b class="global-result-inline-label-v427 global-result-scanned-label-v440">${escapeHtml(searchScanTimingV447.label)}</b> <time class="global-result-stage-scan-time-v440" datetime="${escapeHtml(result.lastScanTime)}">${escapeHtml(globalSearchScanDateTimeV439(result.lastScanTime))}</time></span>`
           : "";
-        const fabricationV474 = result.fabrication || state.fabricationStatusCacheV474.get(fabricationStatusKeyV474(result.order, result.item, result.job));
+        const fabricationV474 = result.fabrication || state.fabricationStatusCacheV474.get(
+          fabricationStatusKeyV474(result.order, result.item, result.job, result.lastRejectedAt)
+        );
         const progressTextV475 = globalSearchProgressTextV475(result, fabricationV474);
         const progressFlowV476 = globalSearchProgressMarkupV476(result, fabricationV474);
         const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440 global-result-progress-v475 global-result-progress-v476" title="Progress: ${escapeHtml(progressTextV475)}">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Progress:</b>${progressFlowV476}${scanMarkup}</span>`;
@@ -18542,8 +18596,8 @@ function renderGlobalSearchResults(results) {
               ${stageScanMarkup}
             </span>
             <span class="global-result-actions-v474 global-result-actions-v475">
-              <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">${globalSearchIconV433("scan")}<span>Scan Page</span></button>
-              <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>${globalSearchIconV433("cube")}<span>Order Details</span></button>
+              <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">Scan Page</button>
+              <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>Order Details</button>
             </span>
           </span>
         </article>
@@ -18678,11 +18732,11 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   // v0.470: Outbound glass waits on the *front/right* side of the parked
   // truck, then enters the cargo body right-to-left. The glass layer itself
   // remains above the dotted route but below the truck via bays.css.
-  const outboundLeft = 1; // v0.478: stage Outbound glass from the far-left edge of the transit lane.
+  const outboundLeft = Math.min(Math.max(0, laneWidth - stackWidth), leftTruckLeft + truckWidth + 7);
   // v0.474 mirrors the endpoint geometry: Outbound glass waits to the
   // right of the left truck; after arrival at Indian Trail the unloading
   // stack sits to the left of the flipped right-side truck.
-  const inboundLeft = Math.max(1, laneWidth - stackWidth - 1); // v0.478: unload toward the far-right edge.
+  const inboundLeft = Math.max(1, rightTruckLeft - stackWidth - 7);
   if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
   if (inboundTransfer) inboundTransfer.style.setProperty("left", `${inboundLeft}px`, "important");
 
@@ -18713,15 +18767,13 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
 
   const paneStep = Number(profile.paneStep || 0);
   outboundPanes.forEach((pane, index) => {
-    const sequenceIndex = Math.max(0, outboundPanes.length - 1 - index);
-    const startMs = sequenceIndex * paneStaggerMs;
+    const startMs = index * paneStaggerMs;
     const endMs = startMs + paneMotionMs;
     const paneLeft = outboundLeft + (index * paneStep);
-    // v0.478: load left-to-right into the rear of the parked Outbound truck.
-    // The right-most staged pane moves first so the visible stack collapses
-    // naturally toward the truck instead of jumping from the near edge.
+    // Target the rear half of the cargo body. Because the waiting stack begins
+    // to the truck's right, this is always negative/right-to-left motion.
     const cargoTargetX = leftTruckLeft + Math.min(31, Math.max(21, truckWidth * .30));
-    const targetDx = Math.max(18, cargoTargetX - paneLeft);
+    const targetDx = Math.min(-18, cargoTargetX - paneLeft);
     pane.animate([
       { offset: 0, opacity: 1, transform: "translateX(0)" },
       { offset: offset(startMs), opacity: 1, transform: "translateX(0)" },
@@ -18732,8 +18784,7 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   });
 
   inboundPanes.forEach((pane, index) => {
-    const sequenceIndex = Math.max(0, inboundPanes.length - 1 - index);
-    const startMs = inboundReadyMs + (sequenceIndex * paneStaggerMs);
+    const startMs = inboundReadyMs + (index * paneStaggerMs);
     const endMs = startMs + paneMotionMs;
     const finalPaneLeft = inboundLeft + (index * paneStep);
     const insideRearX = rightTruckLeft + truckWidth - 24;
@@ -23765,7 +23816,7 @@ function productionAssetActionsHtmlV470(asset = {}, kind = "") {
   const pageAttr = pageNumber ? ` data-production-page-v474="${escapeHtml(pageNumber)}"` : "";
   if (!id) return "";
   if (kind === "program") {
-    return `<button type="button" class="app-primary-button production-file-action-v470" data-production-open-asset-v470="${id}" title="Open ${name}">${globalSearchIconV433("denver")}<span>Open Program</span></button>`;
+    return `<button type="button" class="app-primary-button production-file-action-v470" data-production-open-asset-v470="${id}" title="Open ${name}">Open Program</button>`;
   }
   const previewLabel = kind === "sketch" ? "Open Sketch" : "Open";
   const printLabel = kind === "sketch" ? "Print Sketch" : "Print";
@@ -23847,9 +23898,14 @@ function fabricationStatusHtmlV470(status = {}, item = {}) {
   }
   const stateClass = status.fabricated === true ? "is-complete" : "is-missing";
   const override = Boolean(status.machineOverride && status.assignedMachine && status.actualMachine);
-  const missingLabel = `Not Fabricated - ${compactMachineLabelV475(status.assignedMachine || status.machine)}`;
+  const needsRefabrication = Boolean(status.evidenceResetRequired && status.staleEvidence && status.fabricated !== true);
+  const missingLabel = needsRefabrication
+    ? `Needs Refabrication - ${compactMachineLabelV475(status.assignedMachine || status.machine)}`
+    : `Not Fabricated - ${compactMachineLabelV475(status.assignedMachine || status.machine)}`;
   const label = status.fabricated === true ? (status.label || `Fabricated - ${status.machine}`) : missingLabel;
-  const title = override ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}` : label;
+  const title = override
+    ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}`
+    : (needsRefabrication ? `${label}. Existing fabrication evidence predates the latest Internal Reject.` : label);
   return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(label)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
 }
 
@@ -23859,16 +23915,55 @@ function productionSketchVisualV476(sketches = [], itemLabel = "") {
     return `<div class="production-sketch-visual-v476 is-empty"><span>${globalSearchIconV433("staging")}</span><strong>No sketch page</strong><small>${escapeHtml(itemLabel || "This item")} was not found in a recent order sketch.</small></div>`;
   }
   const page = Math.max(0, Number(sketch.pageNumber || 0));
-  const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`;
-  return `<div class="production-sketch-visual-v476 production-sketch-visual-v478">
-    <button type="button" class="production-sketch-maximize-v478" data-production-maximize-sketch-v478 aria-label="Maximize sketch" title="Maximize sketch"><span aria-hidden="true"></span></button>
-    <iframe loading="lazy" scrolling="no" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
+  const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+  return `<div class="production-sketch-visual-v476">
+    <iframe loading="lazy" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
     <span class="production-sketch-caption-v476"><b>${escapeHtml(sketch.itemMarker || itemLabel || "Sketch")}</b>${page ? `<small>Page ${escapeHtml(page)}</small>` : ""}</span>
   </div>`;
 }
 
+function cuttingProgressPresentationV498(cutting = {}) {
+  const stateName = String(cutting.state || "not_optimized");
+  if (stateName === "cut") return { label: "Cutting", detail: "CUT", complete: true, className: "is-cut-complete-v498", active: false };
+  if (stateName === "released") return { label: "Cutting", detail: "CUTTING", complete: false, className: "is-cutting-active-v498", active: true };
+  if (stateName === "optimized") return { label: "Cutting", detail: "OPTIMIZED", complete: false, className: "is-cutting-ready-v498", active: false };
+  if (stateName === "needs_recut") return { label: "Cutting", detail: "RECUT", complete: false, className: "is-cutting-reset-v498", active: false };
+  if (stateName === "batch_active") return { label: "Cutting", detail: "BATCHED", complete: false, className: "is-cutting-ready-v498", active: false };
+  return { label: "Cutting", detail: "NOT OPTIMIZED", complete: false, className: "is-cutting-pending-v498", active: false };
+}
+
+function orderDetailCuttingLabelV498(item = {}, payload = {}) {
+  const cutting = item.cutting || {};
+  const batch = String(cutting.batch || "").trim();
+  const optimization = Number(cutting.optimization || 0);
+  if (!batch && !optimization) return "";
+  const barcode = String(cutting.cuttingBarcodeStart || cutting.itemBarcodeStart || "").trim();
+  const history = Array.isArray(cutting.history) ? cutting.history.slice(1, 4) : [];
+  const remake = Number(cutting.keyIndex || 0) > 0;
+  const weight = Number(cutting.weight || 0);
+  const surface = Number(cutting.surfaceArea || 0);
+  const status = cuttingProgressPresentationV498(cutting);
+  return `<section class="production-cutting-label-v498" aria-label="A+W Cutting Label context">
+    <header><span><small>A+W CUTTING LABEL DATA</small><strong>${escapeHtml(item.customer || payload.customer || "Customer")}</strong></span><em>${escapeHtml(status.detail)}</em></header>
+    <div class="production-cutting-label-grid-v498">
+      <span><small>Order / Item</small><b>${escapeHtml(`${item.order || payload.order || ""}-${String(item.item || "").padStart(3, "0")}`)}</b></span>
+      <span><small>Batch</small><b>${escapeHtml(batch || "—")}</b></span>
+      <span><small>Optimization</small><b>${optimization ? escapeHtml(optimization) : "—"}</b></span>
+      <span><small>Glass</small><b>${escapeHtml(item.product || "Glass")}</b></span>
+      <span><small>Size</small><b>${escapeHtml(item.dimensions || "—")}</b></span>
+      ${weight > 0 ? `<span><small>Weight</small><b>${escapeHtml(weight.toFixed(2))} lbs</b></span>` : ""}
+      ${surface > 0 ? `<span><small>Area</small><b>${escapeHtml(surface.toFixed(2))} sqft</b></span>` : ""}
+      ${barcode ? `<span><small>A+W Barcode ID</small><b>${escapeHtml(barcode)}</b></span>` : ""}
+    </div>
+    <footer>${remake ? `<strong>REMAKE · Generation ${escapeHtml(Number(cutting.keyIndex || 0) + 1)}</strong>` : `<strong>Original generation</strong>`}<span>${cutting.cutCompletedAt ? `Cut ${escapeHtml(formatDateTime(cutting.cutCompletedAt) || cutting.cutCompletedAt)}` : escapeHtml(cutting.label || "Waiting for cutting")}</span></footer>
+    ${history.length ? `<div class="production-cutting-history-v498"><small>Prior generations</small>${history.map((row) => `<span>Batch <b>${escapeHtml(row.batch || "—")}</b>${row.optimization ? ` · Opt <b>${escapeHtml(row.optimization)}</b>` : ""}</span>`).join("")}</div>` : ""}
+  </section>`;
+}
+
 function orderDetailProgressV476(item = {}, fabrication = {}) {
   const steps = [];
+  const cutting = cuttingProgressPresentationV498(item.cutting || {});
+  steps.push({ label: cutting.label, detail: cutting.detail, complete: cutting.complete, kind: "cutting", className: cutting.className, active: cutting.active, rank: -10 });
   const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "");
   if ((fabrication.sketchMatched || machine) && machine) {
     steps.push({ label: machine, scanned: fabrication.fabricated === true ? 1 : 0, qty: 1, complete: fabrication.fabricated === true, kind: "fabrication", rank: 0 });
@@ -23883,8 +23978,15 @@ function orderDetailProgressV476(item = {}, fabrication = {}) {
   }
   if (!steps.length) return `<span class="production-progress-empty-v476">Not Scanned</span>`;
   return `<div class="production-item-progress-v476">${steps.map((step) => {
-    const stateClass = step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
-    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(progressStageColorV476(step.label))}">${globalSearchIconV433(progressStageIconKindV476(step.label))}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(step.scanned)}/${escapeHtml(step.qty)}</strong></span>`;
+    const stateClass = step.kind === "cutting"
+      ? `is-pending ${step.className || "is-cutting-pending-v498"}${step.complete ? " is-complete is-complete-v477" : ""}`
+      : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
+    const icon = step.kind === "cutting" && step.active
+      ? `<i class="cutting-progress-spinner-v498" aria-hidden="true"></i>`
+      : globalSearchIconV433(step.kind === "cutting" ? "staging" : progressStageIconKindV476(step.label));
+    const value = step.kind === "cutting" ? step.detail : `${step.scanned}/${step.qty}`;
+    const color = step.kind === "cutting" ? "#2f80c4" : progressStageColorV476(step.label);
+    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(color)}">${icon}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(value)}</strong></span>`;
   }).join('<i aria-hidden="true">→</i>')}</div>`;
 }
 
@@ -23922,12 +24024,34 @@ function productionItemActionsV476(files = {}, orderFiles = {}) {
   if (sketch?.id) {
     const page = Math.max(0, Number(sketch.pageNumber || 0));
     const pageAttr = page ? ` data-production-page-v474="${escapeHtml(page)}"` : "";
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>${globalSearchIconV433("staging")}<span>Open Sketch</span></button>`);
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-print-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>${globalSearchIconV433("cube")}<span>Print Sketch</span></button>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Open Sketch</button>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-print-asset-v470="${escapeHtml(sketch.id)}"${pageAttr}>Print Sketch</button>`);
   }
-  if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-open-asset-v470="${escapeHtml(program.id)}">${globalSearchIconV433("denver")}<span>Open Program</span></button>`);
-  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">${globalSearchIconV433("cube")}<span>Hardware</span></button>`);
+  if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476" data-production-open-asset-v470="${escapeHtml(program.id)}">Open Program</button>`);
+  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">Hardware</button>`);
   return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
+}
+
+function orderDetailInternalAwRejectsV485(rejects = []) {
+  const rows = Array.isArray(rejects) ? rejects : [];
+  if (!rows.length) return "";
+  return `<section class="production-aw-rejects-v484" aria-label="A+W sourced internal reject history">
+    <div class="production-aw-rejects-heading-v484"><span><small>INTERNAL REJECT · A+W</small><strong>${escapeHtml(rows.length)} event${rows.length === 1 ? "" : "s"}</strong></span><em>A+W source · editable in Rejects</em></div>
+    <div class="production-aw-reject-list-v484">${rows.map((reject) => {
+      const reason = String(reject.reason || "A+W breakage").trim();
+      const location = String(reject.location || "").trim();
+      const process = String(reject.workType || reject.registrationPoint || "").trim();
+      const machine = String(reject.machine || "").trim();
+      const reportedBy = String(reject.reportedBy || reject.timelineEmployee || "").trim();
+      const replacement = String(reject.replacementJobNumber || "").trim();
+      const sourceRows = Math.max(1, Number(reject.sourceRowCount || 1));
+      return `<article class="production-aw-reject-v484">
+        <span class="production-aw-reject-mark-v484" aria-hidden="true">!</span>
+        <div class="production-aw-reject-copy-v484"><strong>${escapeHtml(reason)}</strong><span>${escapeHtml(formatDateTime(reject.breakageAt) || "Time unavailable")}${location ? ` · ${escapeHtml(location)}` : ""}</span><small>${process ? escapeHtml(process) : "A+W production"}${machine ? ` · ${escapeHtml(machine)}` : ""}${reportedBy ? ` · ${escapeHtml(reportedBy)}` : ""}</small></div>
+        <div class="production-aw-reject-meta-v484">${replacement ? `<b>Remake Job ${escapeHtml(replacement)}</b>` : `<b>Remake pending</b>`}<span>${escapeHtml(sourceRows)} source row${sourceRows === 1 ? "" : "s"}</span></div>
+      </article>`;
+    }).join("")}</div>
+  </section>`;
 }
 
 function renderOrderDetailV470(payload = {}) {
@@ -23945,8 +24069,8 @@ function renderOrderDetailV470(payload = {}) {
   const orderSketch = (orderFiles.sketches || [])[0];
   const orderHardware = (orderFiles.hardware || [])[0];
   const orderButtons = [
-    orderSketch?.id ? `<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(orderSketch.id)}">${globalSearchIconV433("staging")}<span>Open Order Sketch</span></button>` : "",
-    orderHardware?.id ? `<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(orderHardware.id)}">${globalSearchIconV433("cube")}<span>Open Hardware</span></button>` : "",
+    orderSketch?.id ? `<button type="button" class="app-primary-button production-detail-action-v476" data-production-preview-asset-v470="${escapeHtml(orderSketch.id)}">Open Order Sketch</button>` : "",
+    orderHardware?.id ? `<button type="button" class="app-primary-button production-detail-action-v476 is-secondary" data-production-preview-asset-v470="${escapeHtml(orderHardware.id)}">Open Hardware</button>` : "",
   ].filter(Boolean).join("");
 
   body.innerHTML = `
@@ -23967,12 +24091,16 @@ function renderOrderDetailV470(payload = {}) {
                 <div><small>ITEM ${escapeHtml(item.item || "-")} · JOB ${escapeHtml(item.job || payload.job || "-")}</small><strong>${escapeHtml(itemLabel)}</strong><span>${escapeHtml(item.product || "Glass")}</span></div>
                 ${productionLoaded ? fabricationStatusHtmlV470(fabrication, item) : `<span class="production-fab-status-v470 is-neutral">Checking fabrication…</span>`}
               </header>
-              <div class="production-item-facts-v476">
+              <div class="production-item-facts-v476 production-item-facts-v498">
                 <span><small>Size</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
                 <span><small>Qty</small><b>${escapeHtml(item.qty || 0)}</b></span>
                 <span><small>Route</small><b>${escapeHtml(item.route || payload.route || "-")}</b></span>
+                <span><small>Batch</small><b>${escapeHtml(item.cutting?.batch || "—")}</b></span>
+                <span><small>Optimization</small><b>${item.cutting?.optimization ? escapeHtml(item.cutting.optimization) : "—"}</b></span>
               </div>
               <section class="production-progress-section-v476"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication)}</section>
+              ${orderDetailCuttingLabelV498(item, payload)}
+              ${orderDetailInternalAwRejectsV485(item.awRejects)}
               <footer class="production-item-actions-v476">${productionLoaded ? productionItemActionsV476(files, orderFiles) : `<span>Loading files…</span>`}</footer>
             </div>
           </article>`;
@@ -24014,7 +24142,10 @@ async function openOrderDetailV470(orderNo, options = {}) {
     state.orderDetailCacheV474.set(order, { at: Date.now(), payload: full });
     for (const item of full.items || []) {
       const status = item.productionFiles?.fabrication;
-      if (status) state.fabricationStatusCacheV474.set(fabricationStatusKeyV474(item.order || order, item.item, item.job), status);
+      if (status) state.fabricationStatusCacheV474.set(
+        fabricationStatusKeyV474(item.order || order, item.item, item.job, item.lastRejectedAt),
+        status
+      );
     }
     if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
       renderOrderDetailV470(full);
@@ -26170,7 +26301,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260820-v0.352", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.499", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -27046,8 +27177,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260902-v0.478", window.location.href).href,
-    new URL("static/css/print.css?v=20260902-v0.478", window.location.href).href,
+    new URL("static/css/styles.css?v=20260903-v0.499", window.location.href).href,
+    new URL("static/css/print.css?v=20260903-v0.499", window.location.href).href,
   ];
 }
 
@@ -27125,7 +27256,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260820-v0.352";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.499";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
@@ -35887,7 +36018,7 @@ function productionFileSettingsModalHtmlV472() {
     const availabilityError = String(index.errors?.[kind] || "").trim();
     const rootPath = String(rootForKindV474[kind] || "").trim();
     const resolvedPath = String(index.resolvedRoots?.[kind] || "").trim();
-    const resolvedNote = ""; // v0.478: path fallback is stable; no longer expose the temporary resolution diagnostic.
+    const resolvedNote = resolvedPath && resolvedPath !== rootPath ? `Resolved: ${resolvedPath}` : "";
     const detail = refreshing
       ? (available ? "Refreshing recent file metadata" : "Checking folder")
       : available
@@ -39107,6 +39238,35 @@ function rejectDateKey(offsetDays = 0) {
   return `${year}-${month}-${day}`;
 }
 
+function rejectTwoWeekWindow() {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  const mondayOffset = (today.getDay() + 6) % 7;
+  const currentMonday = new Date(today);
+  currentMonday.setDate(today.getDate() - mondayOffset);
+  const previousMonday = new Date(currentMonday);
+  previousMonday.setDate(currentMonday.getDate() - 7);
+  const currentSunday = new Date(currentMonday);
+  currentSunday.setDate(currentMonday.getDate() + 6);
+  const dateKey = (value) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  return { from: dateKey(previousMonday), to: dateKey(currentSunday) };
+}
+
+function ensureRejectDefaultRange() {
+  if (!els.rejectDateFrom || !els.rejectDateTo) return;
+  if (els.rejectDateFrom.value || els.rejectDateTo.value) return;
+  const range = rejectTwoWeekWindow();
+  els.rejectDateFrom.value = range.from;
+  els.rejectDateTo.value = range.to;
+  if (els.rejectDatePreset) els.rejectDatePreset.value = "two-weeks";
+  syncRejectDateLimits();
+}
+
 function rejectFilterDescription() {
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
@@ -39135,7 +39295,7 @@ function syncRejectDateLimits() {
 }
 
 function setRejectDatePreset(value, { refresh = true } = {}) {
-  const preset = String(value || "all");
+  const preset = String(value || "two-weeks");
   if (els.rejectDatePreset) els.rejectDatePreset.value = preset;
   if (!els.rejectDateFrom || !els.rejectDateTo) return;
   if (preset === "custom") {
@@ -39144,7 +39304,11 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
     if (refresh) els.rejectDateFrom.focus();
     return;
   }
-  if (preset === "today") {
+  if (preset === "two-weeks") {
+    const range = rejectTwoWeekWindow();
+    els.rejectDateFrom.value = range.from;
+    els.rejectDateTo.value = range.to;
+  } else if (preset === "today") {
     els.rejectDateFrom.value = rejectDateKey(0);
     els.rejectDateTo.value = rejectDateKey(0);
   } else if (preset === "7-days") {
@@ -39153,10 +39317,8 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
   } else if (preset === "30-days") {
     els.rejectDateFrom.value = rejectDateKey(-29);
     els.rejectDateTo.value = rejectDateKey(0);
-  } else if (preset === "all") {
-    els.rejectDateFrom.value = "";
-    els.rejectDateTo.value = "";
   }
+  state.rejectHistoryPage = 1;
   syncRejectDateLimits();
   syncRejectFilterButton();
   if (refresh) refreshRejectPage().catch((error) => showInlineError(error.message, true));
@@ -39165,13 +39327,14 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
 function markRejectDateRangeCustom() {
   syncRejectDateLimits();
   if (els.rejectDatePreset) els.rejectDatePreset.value = "custom";
+  state.rejectHistoryPage = 1;
   syncRejectFilterButton();
 }
 
 function rejectActiveFilterCount() {
+  const countableDate = String(els.rejectDatePreset?.value || "two-weeks") !== "two-weeks";
   return [
-    els.rejectDateFrom?.value,
-    els.rejectDateTo?.value,
+    countableDate ? `${els.rejectDateFrom?.value || ""}:${els.rejectDateTo?.value || ""}` : "",
     rejectSelectedLocation(),
     rejectSelectedReason(),
     rejectSelectedUser(),
@@ -39198,10 +39361,11 @@ function clearRejectFilters() {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput.value = "";
   }
-  setRejectDatePreset("all", { refresh: false });
+  setRejectDatePreset("two-weeks", { refresh: false });
   if (els.rejectLocationFilter) els.rejectLocationFilter.value = "";
   if (els.rejectReasonFilter) els.rejectReasonFilter.value = "";
   if (els.rejectUserFilter) els.rejectUserFilter.value = "";
+  state.rejectHistoryPage = 1;
   setRejectFilterPanelOpen(false);
   syncRejectFilterButton();
   renderRejectPage();
@@ -39211,6 +39375,9 @@ function clearRejectFilters() {
 function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) {
   const reasons = state.rejectCatalog.reasons || [];
   const locations = state.rejectCatalog.locations || [];
+  const historyReasons = state.rejectCatalog.historyReasons || [];
+  const historyLocations = state.rejectCatalog.historyLocations || [];
+  const awMappings = state.rejectCatalog.awMappings || [];
   const catalogReady = reasons.length > 0 && locations.length > 0;
   const submitDisabled = catalogLoading || !catalogReady;
   const catalogMessage = catalogLoading
@@ -39318,20 +39485,63 @@ function updateRejectFilterOptions(rejects = state.rejectHistory) {
   syncRejectFilterButton();
 }
 
-function renderRejectSummary(rejects = rejectRowsForView()) {
+function updateRejectFilterOptionsFromServer(options = {}) {
+  const selectedLocation = rejectSelectedLocation();
+  const selectedReason = rejectSelectedReason();
+  const selectedUser = rejectSelectedUser();
+  replaceRejectFilterOptions(
+    els.rejectLocationFilter,
+    Array.isArray(options.locations) ? options.locations : [],
+    "All machines / locations",
+    selectedLocation,
+  );
+  replaceRejectFilterOptions(
+    els.rejectReasonFilter,
+    Array.isArray(options.reasons) ? options.reasons : [],
+    "All reasons",
+    selectedReason,
+  );
+  replaceRejectFilterOptions(
+    els.rejectUserFilter,
+    Array.isArray(options.users) ? options.users : [],
+    "All users",
+    selectedUser,
+  );
+  syncRejectFilterButton();
+}
+
+function renderRejectSummary(rejects = rejectRowsForView(), summary = state.rejectHistorySummary) {
   const rows = Array.isArray(rejects) ? rejects : [];
-  const totalQty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
-  const locations = new Set(rows.map((row) => String(row.location_label || "").trim()).filter(Boolean));
-  const users = new Set(rows.map((row) => String(row.rejected_by || "").trim()).filter(Boolean));
+  const totalEvents = Number(summary?.eventCount ?? rows.length) || 0;
+  const totalQty = Number(summary?.pieceCount ?? rows.reduce((sum, row) => sum + Number(row.qty || 0), 0)) || 0;
+  const locationCount = Number(summary?.locationCount ?? new Set(rows.map((row) => String(row.location_label || "").trim()).filter(Boolean)).size) || 0;
+  const userCount = Number(summary?.userCount ?? new Set(rows.map((row) => String(row.rejected_by || "").trim()).filter(Boolean)).size) || 0;
   if (els.rejectSummaryBar) {
     els.rejectSummaryBar.innerHTML = `
-      <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${rows.length}</strong><small>Total rejects</small></div></article>
-      <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locations.size}</strong><small>Machines / locations</small></div></article>
-      <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${users.size}</strong><small>Users</small></div></article>
+      <article><span class="reject-summary-icon events" aria-hidden="true"></span><div><strong>${totalEvents}</strong><small>Total rejects</small></div></article>
+      <article><span class="reject-summary-icon locations" aria-hidden="true"></span><div><strong>${locationCount}</strong><small>Machines / locations</small></div></article>
+      <article><span class="reject-summary-icon users" aria-hidden="true"></span><div><strong>${userCount}</strong><small>Users</small></div></article>
       <article class="is-quantity"><span class="reject-summary-icon quantity" aria-hidden="true"></span><div><strong>${totalQty} pc${totalQty === 1 ? "" : "s"}</strong><small>Total rejected quantity</small></div></article>`;
   }
   if (els.rejectTimelineCount) {
-    els.rejectTimelineCount.textContent = `${rows.length} event${rows.length === 1 ? "" : "s"}`;
+    els.rejectTimelineCount.textContent = `${totalEvents} event${totalEvents === 1 ? "" : "s"}`;
+  }
+}
+
+function renderRejectPagination() {
+  const total = Number(state.rejectHistoryTotalCount || 0);
+  const page = Math.max(1, Number(state.rejectHistoryPage || 1));
+  const pageSize = Math.max(1, Number(state.rejectHistoryPageSize || 50));
+  const totalPages = Math.max(1, Number(state.rejectHistoryTotalPages || 1));
+  const first = total ? ((page - 1) * pageSize) + 1 : 0;
+  const last = total ? Math.min(page * pageSize, total) : 0;
+  if (els.rejectPagination) els.rejectPagination.hidden = total <= pageSize;
+  if (els.rejectPagePrev) els.rejectPagePrev.disabled = page <= 1;
+  if (els.rejectPageNext) els.rejectPageNext.disabled = page >= totalPages;
+  if (els.rejectPageStatusText) {
+    els.rejectPageStatusText.textContent = total
+      ? `${first}-${last} of ${total.toLocaleString(appLocale())} · Page ${page} of ${totalPages}`
+      : "No reject events";
   }
 }
 
@@ -39346,7 +39556,16 @@ function rejectAdminActionHtml(row) {
 
 function rejectTimelineDetailHtml(row) {
   const notes = row.notes || "No investigation notes were entered for this reject.";
+  const isAw = String(row.source_type || "scanner").toLowerCase() === "aw";
+  const awEvidence = isAw ? `
+    <div class="reject-timeline-source-evidence-v487">
+      <span><small>A+W machine</small><strong>${escapeHtml(row.aw_machine || "Not uniquely identified")}</strong></span>
+      <span><small>Work type</small><strong>${escapeHtml(row.aw_work_type || "Not available")}</strong></span>
+      <span><small>Registration point</small><strong>${escapeHtml(row.aw_registration_point || "Not available")}</strong></span>
+      <span><small>Original / remake Job Nr.</small><strong>${escapeHtml([row.aw_original_job_number, row.aw_replacement_job_number].filter(Boolean).join(" → ") || "Not available")}</strong></span>
+    </div>` : "";
   return `
+    ${awEvidence}
     <div class="reject-timeline-notes-v151">
       <small>Investigation notes</small>
       <strong>${escapeHtml(notes)}</strong>
@@ -39382,15 +39601,15 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
                 <time>${escapeHtml(formatRejectTime(row.rejected_at))}</time>
                 <span class="reject-timeline-node-v151" aria-hidden="true"></span>
                 <div class="reject-timeline-card-v151 ${isAdminUser() ? "has-admin-actions-v154" : ""}">
-                  <span class="reject-timeline-field-v151 is-job"><small>Job Nr.</small><strong>${escapeHtml(row.job || "Not available")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-job"><small>Job Nr.</small><strong>${escapeHtml(row.job || row.aw_original_job_number || "Not available")}</strong></span>
                   <div class="reject-timeline-identity-v151">
                     <small>Order / Item</small>
                     <strong>${escapeHtml(row.order_no)}-${escapeHtml(row.item_no)}</strong>
-                    <span>Delivery ${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "not available")}</span>
+                    <span>Delivery ${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "not available")}${String(row.source_type || "scanner").toLowerCase() === "aw" ? " · Source A+W" : " · Source Scanner"}</span>
                   </div>
                   <span class="reject-timeline-field-v151 is-product glass-tone-inline" ${glassToneAttributes(row.product || "Not available")}><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></span>
                   <span class="reject-timeline-field-v151 is-reason"><small>Why rejected</small><strong>${escapeHtml(row.reason_label || "Not specified")}</strong></span>
-                  <span class="reject-timeline-field-v151 is-location"><small>Machine / location</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong></span>
+                  <span class="reject-timeline-field-v151 is-location"><small>${String(row.source_type || "scanner").toLowerCase() === "aw" ? "Break location" : "Machine / location"}</small><strong>${escapeHtml(row.location_label || "Not specified")}</strong>${String(row.source_type || "scanner").toLowerCase() === "aw" && row.aw_machine ? `<em>Machine: ${escapeHtml(row.aw_machine)}</em>` : ""}</span>
                   <span class="reject-timeline-field-v151 is-user"><small>Rejected by</small><strong>${escapeHtml(row.rejected_by || "system")}</strong></span>
                   <b class="reject-timeline-qty-v151">${escapeHtml(row.qty)} pc${Number(row.qty || 0) === 1 ? "" : "s"}</b>
                   <span class="reject-timeline-details-label-v151">Notes<i aria-hidden="true"></i></span>
@@ -39406,9 +39625,10 @@ function rejectHistoryHtml(rejects = rejectRowsForView()) {
 
 function renderRejectPage() {
   const rows = rejectRowsForView();
-  renderRejectSummary(rows);
+  renderRejectSummary(rows, state.rejectHistorySummary);
   syncRejectFilterButton();
   if (els.rejectHistory) els.rejectHistory.innerHTML = rejectHistoryHtml(rows);
+  renderRejectPagination();
 }
 
 function rejectRecordById(rejectId) {
@@ -39440,6 +39660,7 @@ function rejectEditModalHtml(row) {
         <div class="glass-tone-inline" ${glassToneAttributes(row.product || "Not available")}><small>Product</small><strong>${escapeHtml(row.product || "Not available")}</strong></div>
         <div><small>Delivery date</small><strong>${escapeHtml(row.delivery_date ? formatDisplayDate(row.delivery_date) : "Not available")}</strong></div>
         <div><small>Originally recorded by</small><strong>${escapeHtml(row.rejected_by || "System")}</strong></div>
+        <div><small>Source</small><strong>${String(row.source_type || "scanner").toLowerCase() === "aw" ? "A+W Internal Reject" : "Scanner Internal Reject"}</strong></div>
       </section>
       <section class="reject-edit-grid-v154">
         <label><span>Reject reason</span><select name="reason" required>${rejectCatalogOptions(state.rejectCatalog.reasons, String(row.reason_label || ""))}</select></label>
@@ -39470,6 +39691,9 @@ async function openRejectEditModal(rejectId) {
     state.rejectCatalog = {
       reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
       locations: Array.isArray(catalog.locations) ? catalog.locations : [],
+      historyReasons: Array.isArray(catalog.historyReasons) ? catalog.historyReasons : [],
+      historyLocations: Array.isArray(catalog.historyLocations) ? catalog.historyLocations : [],
+      awMappings: Array.isArray(catalog.awMappings) ? catalog.awMappings : [],
     };
   }
   openOperationsModal({
@@ -39481,9 +39705,8 @@ async function openRejectEditModal(rejectId) {
 }
 
 async function refreshRejectMutationViews(payload) {
-  state.rejectHistory = Array.isArray(payload?.rejects) ? payload.rejects : state.rejectHistory;
-  updateRejectFilterOptions();
-  renderRejectPage();
+  state.rejectHistoryPage = 1;
+  await refreshRejectPage();
   window.DLSLineUpdates?.clearCache?.();
   if (state.activeListId) await activateList(state.activeListId, false);
 }
@@ -39540,9 +39763,13 @@ async function deleteRejectRecord(rejectId) {
 async function refreshRejectPage() {
   const requestId = ++state.rejectHistoryRequestId;
   const params = new URLSearchParams();
+  ensureRejectDefaultRange();
   const query = els.rejectSearchInput?.value.trim() || "";
   const dateFrom = els.rejectDateFrom?.value || "";
   const dateTo = els.rejectDateTo?.value || "";
+  const location = rejectSelectedLocation();
+  const reason = rejectSelectedReason();
+  const rejectedBy = rejectSelectedUser();
   const status = document.getElementById("rejectPageStatus");
   syncRejectDateLimits();
   if (dateFrom && dateTo && dateFrom > dateTo) {
@@ -39557,7 +39784,11 @@ async function refreshRejectPage() {
   if (query) params.set("q", query);
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
-  params.set("limit", "1000");
+  if (location) params.set("location", location);
+  if (reason) params.set("reason", reason);
+  if (rejectedBy) params.set("rejectedBy", rejectedBy);
+  params.set("page", String(Math.max(1, Number(state.rejectHistoryPage || 1))));
+  params.set("limit", String(Math.max(10, Number(state.rejectHistoryPageSize || 50))));
 
   if (status) {
     status.hidden = false;
@@ -39578,7 +39809,15 @@ async function refreshRejectPage() {
     if (historyResult.status === "rejected") throw historyResult.reason;
     const history = historyResult.value || {};
     state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
-    updateRejectFilterOptions();
+    state.rejectHistoryPage = Math.max(1, Number(history.page || 1));
+    state.rejectHistoryPageSize = Math.max(10, Number(history.pageSize || state.rejectHistoryPageSize || 50));
+    state.rejectHistoryTotalCount = Math.max(0, Number(history.totalCount || 0));
+    state.rejectHistoryTotalPages = Math.max(1, Number(history.totalPages || 1));
+    state.rejectHistorySummary = history.summary && typeof history.summary === "object" ? history.summary : null;
+    state.rejectHistoryFilterOptions = history.filterOptions && typeof history.filterOptions === "object"
+      ? history.filterOptions
+      : { locations: [], reasons: [], users: [] };
+    updateRejectFilterOptionsFromServer(state.rejectHistoryFilterOptions);
     renderRejectPage();
 
     if (catalogResult.status === "fulfilled") {
@@ -39586,6 +39825,9 @@ async function refreshRejectPage() {
       state.rejectCatalog = {
         reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
         locations: Array.isArray(catalog.locations) ? catalog.locations : [],
+        historyReasons: Array.isArray(catalog.historyReasons) ? catalog.historyReasons : [],
+        historyLocations: Array.isArray(catalog.historyLocations) ? catalog.historyLocations : [],
+        awMappings: Array.isArray(catalog.awMappings) ? catalog.awMappings : [],
       };
     }
 
@@ -39600,7 +39842,11 @@ async function refreshRejectPage() {
   } catch (error) {
     if (requestId !== state.rejectHistoryRequestId) return;
     state.rejectHistory = [];
+    state.rejectHistoryTotalCount = 0;
+    state.rejectHistoryTotalPages = 1;
+    state.rejectHistorySummary = null;
     renderRejectSummary([]);
+    renderRejectPagination();
     if (els.rejectHistory) {
       els.rejectHistory.innerHTML = `<div class="reject-empty-state is-error"><span aria-hidden="true"></span><div><strong>Reject history could not be loaded</strong><p>${escapeHtml(error?.message || "The server did not return reject history.")}</p><button class="secondary" type="button" data-reject-retry>Try Again</button></div></div>`;
     }
@@ -39663,6 +39909,9 @@ async function openRejectLogModal() {
       state.rejectCatalog = {
         reasons: Array.isArray(payload.reasons) ? payload.reasons : [],
         locations: Array.isArray(payload.locations) ? payload.locations : [],
+        historyReasons: Array.isArray(payload.historyReasons) ? payload.historyReasons : [],
+        historyLocations: Array.isArray(payload.historyLocations) ? payload.historyLocations : [],
+        awMappings: Array.isArray(payload.awMappings) ? payload.awMappings : [],
       };
       if (state.operationsModalKind === "reject-log") updateRejectCatalogControls();
     }
@@ -39804,6 +40053,7 @@ function rejectSettingsIconV347(kind) {
 function rejectSettingsModalHtml() {
   const reasons = state.rejectCatalog.reasons || [];
   const locations = state.rejectCatalog.locations || [];
+  const awMappings = state.rejectCatalog.awMappings || [];
   const section = (kind, title, description, rows) => `
     <section class="reject-settings-library-v347 is-${escapeHtml(kind)}">
       <header class="reject-settings-library-header-v347">
@@ -39839,12 +40089,38 @@ function rejectSettingsModalHtml() {
         ${section("reason", "Reject Reasons", "Why the piece was rejected.", reasons)}
         ${section("location", "Break Locations", "Where the defect or break occurred.", locations)}
       </div>
+      <section class="reject-settings-library-v347 reject-history-maintenance-v485">
+        <header class="reject-settings-library-header-v347">
+          <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347("reason")}</span>
+          <div><small>A+W code mappings</small><strong>Past &amp; Future A+W Labels</strong><span>Numeric A+W codes stay authoritative. Set a Scanner display label to rename every matching historical and future A+W Internal Reject.</span></div>
+          <b>${escapeHtml(awMappings.length)}</b>
+        </header>
+        <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Type</th><th>Code</th><th>A+W label</th><th>Scanner display</th><th>Events</th><th></th></tr></thead><tbody>
+          ${awMappings.map((row) => `<tr><td>${escapeHtml(row.kind)}</td><td><b>${escapeHtml(row.sourceCode)}</b></td><td>${escapeHtml(row.sourceLabel || "Unknown")}</td><td><input data-reject-aw-mapping-input="${escapeHtml(row.id)}" value="${escapeHtml(row.mappedLabel || "")}" placeholder="Use A+W label"></td><td>${escapeHtml(row.eventCount || 0)}</td><td><button type="button" class="automation-secondary-button" data-reject-aw-mapping-save="${escapeHtml(row.id)}" data-kind="${escapeHtml(row.kind)}" data-code="${escapeHtml(row.sourceCode)}">Save</button></td></tr>`).join("") || `<tr><td colspan="6">No A+W reason/location codes have been synchronized yet.</td></tr>`}
+        </tbody></table></div>
+      </section>
+      <section class="reject-settings-library-v347 reject-history-maintenance-v485">
+        <header class="reject-settings-library-header-v347">
+          <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347("location")}</span>
+          <div><small>Historical cleanup</small><strong>Bulk Replace Reject Data</strong><span>Replace one stored reason or location across the entire Reject history. Matching A+W codes are also mapped so future syncs keep the replacement.</span></div>
+          <b>${escapeHtml(historyReasons.length + historyLocations.length)}</b>
+        </header>
+        <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Type</th><th>Current label</th><th>Events</th><th>A+W events</th><th>Replace with</th><th></th></tr></thead><tbody>
+          ${[["reason", historyReasons], ["location", historyLocations]].flatMap(([kind, rows]) => rows.map((row, index) => `<tr><td>${escapeHtml(kind)}</td><td><strong>${escapeHtml(row.label)}</strong></td><td>${escapeHtml(row.event_count || row.eventCount || 0)}</td><td>${escapeHtml(row.aw_event_count || row.awEventCount || 0)}</td><td><input data-reject-history-replacement="${escapeHtml(kind)}-${escapeHtml(index)}" placeholder="New label"></td><td><button type="button" class="automation-secondary-button" data-reject-history-relabel="${escapeHtml(kind)}-${escapeHtml(index)}" data-kind="${escapeHtml(kind)}" data-from-label="${escapeHtml(row.label)}">Replace All</button></td></tr>`)).join("") || `<tr><td colspan="6">No reject history exists yet.</td></tr>`}
+        </tbody></table></div>
+      </section>
     </div>`;
 }
 
 async function loadRejectSettingsModal() {
   const payload = await fetchJson("/api/rejects/catalog");
-  state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+  state.rejectCatalog = {
+    reasons: payload.reasons || [],
+    locations: payload.locations || [],
+    historyReasons: payload.historyReasons || [],
+    historyLocations: payload.historyLocations || [],
+    awMappings: payload.awMappings || [],
+  };
   if (els.adminModal?.dataset.kind === "rejectSettings" && els.adminModalBody) {
     els.adminModalBody.innerHTML = rejectSettingsModalHtml();
   }
@@ -40692,6 +40968,7 @@ function wireV135OperationsEvents() {
   els.rejectSearchInput?.addEventListener("input", () => {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput._timer = window.setTimeout(() => {
+      state.rejectHistoryPage = 1;
       refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
     }, 250);
   });
@@ -40706,7 +40983,20 @@ function wireV135OperationsEvents() {
   });
   els.rejectClearFiltersBtn?.addEventListener("click", clearRejectFilters);
   [els.rejectLocationFilter, els.rejectReasonFilter, els.rejectUserFilter].forEach((select) => {
-    select?.addEventListener("change", renderRejectPage);
+    select?.addEventListener("change", () => {
+      state.rejectHistoryPage = 1;
+      refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
+    });
+  });
+  els.rejectPagePrev?.addEventListener("click", () => {
+    if (state.rejectHistoryPage <= 1) return;
+    state.rejectHistoryPage -= 1;
+    refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
+  });
+  els.rejectPageNext?.addEventListener("click", () => {
+    if (state.rejectHistoryPage >= state.rejectHistoryTotalPages) return;
+    state.rejectHistoryPage += 1;
+    refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
   });
 
   document.addEventListener("dls:delivery-list-import-history-changed", () => {
@@ -40887,6 +41177,36 @@ function wireV135OperationsEvents() {
       clearRackItem(clearItem.dataset.rackModalClearItem, clearItem.dataset.rackModalClearLabel).then(() => refreshOpenRackDetails()).catch((error) => showInlineError(error.message, true));
       return;
     }
+    const saveAwMapping = event.target.closest("[data-reject-aw-mapping-save]");
+    if (saveAwMapping) {
+      const mappingId = saveAwMapping.dataset.rejectAwMappingSave;
+      const input = document.querySelector(`[data-reject-aw-mapping-input="${CSS.escape(mappingId)}"]`);
+      fetchJson("/api/rejects/mappings/update", {
+        method: "POST",
+        body: JSON.stringify({ kind: saveAwMapping.dataset.kind, sourceCode: Number(saveAwMapping.dataset.code || 0), mappedLabel: String(input?.value || "").trim() }),
+      }).then((payload) => {
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [], historyReasons: payload.historyReasons || [], historyLocations: payload.historyLocations || [], awMappings: payload.awMappings || [] };
+        if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+        showSaveConfirmation("A+W reject mapping was updated.");
+      }).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const bulkRejectRelabel = event.target.closest("[data-reject-history-relabel]");
+    if (bulkRejectRelabel) {
+      const key = bulkRejectRelabel.dataset.rejectHistoryRelabel;
+      const input = document.querySelector(`[data-reject-history-replacement="${CSS.escape(key)}"]`);
+      const toLabel = String(input?.value || "").trim();
+      if (!toLabel) { showInlineError("Enter the replacement label first.", true); return; }
+      fetchJson("/api/rejects/bulk-relabel", {
+        method: "POST",
+        body: JSON.stringify({ kind: bulkRejectRelabel.dataset.kind, fromLabel: bulkRejectRelabel.dataset.fromLabel, toLabel }),
+      }).then((payload) => {
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [], historyReasons: payload.historyReasons || [], historyLocations: payload.historyLocations || [], awMappings: payload.awMappings || [] };
+        if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+        showSaveConfirmation(`Updated ${Number(payload.updatedEvents || 0)} historical reject event(s).`);
+      }).catch((error) => showInlineError(error.message, true));
+      return;
+    }
     const editCatalog = event.target.closest("[data-reject-catalog-edit]");
     if (editCatalog) {
       const currentLabel = String(editCatalog.dataset.rejectCatalogLabel || "").trim();
@@ -40905,7 +41225,7 @@ function wireV135OperationsEvents() {
           method: "POST",
           body: JSON.stringify({ kind, id: Number(editCatalog.dataset.rejectCatalogId || 0), label: cleanLabel }),
         }).then((payload) => {
-          state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+          state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [], historyReasons: payload.historyReasons || [], historyLocations: payload.historyLocations || [], awMappings: payload.awMappings || [] };
           if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
           showSaveConfirmation(`${noun} was updated.`);
         });
@@ -40918,7 +41238,7 @@ function wireV135OperationsEvents() {
         method: "POST",
         body: JSON.stringify({ kind: removeCatalog.dataset.rejectCatalogRemove, id: Number(removeCatalog.dataset.rejectCatalogId || 0) }),
       }).then((payload) => {
-        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [], historyReasons: payload.historyReasons || [], historyLocations: payload.historyLocations || [], awMappings: payload.awMappings || [] };
         if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
       }).catch((error) => showInlineError(error.message, true));
     }
@@ -41039,7 +41359,7 @@ function wireV135OperationsEvents() {
         method: "POST",
         body: JSON.stringify({ kind: catalogForm.dataset.rejectCatalogForm, label }),
       }).then((payload) => {
-        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [] };
+        state.rejectCatalog = { reasons: payload.reasons || [], locations: payload.locations || [], historyReasons: payload.historyReasons || [], historyLocations: payload.historyLocations || [], awMappings: payload.awMappings || [] };
         if (els.adminModalBody) els.adminModalBody.innerHTML = rejectSettingsModalHtml();
       }).catch((error) => showInlineError(error.message, true));
     }
@@ -43906,19 +44226,6 @@ function wireEvents() {
       return;
     }
 
-    const maximizeSketchButtonV478 = event.target.closest("[data-production-maximize-sketch-v478]");
-    if (maximizeSketchButtonV478) {
-      const visual = maximizeSketchButtonV478.closest(".production-sketch-visual-v478");
-      if (visual) {
-        const maximize = !visual.classList.contains("is-maximized-v478");
-        document.querySelectorAll(".production-sketch-visual-v478.is-maximized-v478").forEach((node) => node.classList.remove("is-maximized-v478"));
-        visual.classList.toggle("is-maximized-v478", maximize);
-        maximizeSketchButtonV478.setAttribute("aria-label", maximize ? "Restore sketch" : "Maximize sketch");
-        maximizeSketchButtonV478.setAttribute("title", maximize ? "Restore sketch" : "Maximize sketch");
-      }
-      return;
-    }
-
     const openOrderDetailButtonV474 = event.target.closest("[data-open-order-detail-v474]");
     if (openOrderDetailButtonV474) {
       const order = String(openOrderDetailButtonV474.dataset.openOrderDetailV474 || "").trim();
@@ -44509,7 +44816,8 @@ init().catch((error) => {
   const ACTION_LABELS = {
     "folder-import-only": "Import Temp Folder Only",
     "sql-export-only": "Query SQL & Export Only",
-    "sql-export-and-import": "Query SQL, Export & Import",
+    "sql-export-and-import": "Sync A+W Directly",
+    "reject-sync-only": "Check A+W Rejects",
   };
   const RANGE_LABELS = {
     "one-date": "one delivery date",
@@ -44530,6 +44838,7 @@ init().catch((error) => {
   let importHistoryAbortController = null;
   let lastImportHistoryPayload = null;
   let importHistoryHasNewResults = false;
+  let importHistoryRenderLimit = 80;
   const importHistoryState = {
     page: 1,
     query: "",
@@ -44711,9 +45020,6 @@ init().catch((error) => {
     try {
       const payload = await api("/latest-import");
       publishLatestImportResult(payload, "latest-import", force);
-      if (Array.isArray(payload.lists)) {
-        publishDeliveryCatalog(payload.lists, "latest-import-catalog", force);
-      }
     } catch {
       // The next Admin visibility check, notification, or heartbeat retries.
     } finally {
@@ -45058,6 +45364,13 @@ init().catch((error) => {
     });
     normalizeImportHistoryDateRange();
     wireOwnedVerticalScroll(importHistoryModal.querySelector("#importHistoryResults"));
+    const historyResults = importHistoryModal.querySelector("#importHistoryResults");
+    historyResults.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-import-history-show-more]");
+      if (!button || !lastImportHistoryPayload) return;
+      importHistoryRenderLimit += 80;
+      renderImportHistory(lastImportHistoryPayload);
+    });
     importHistoryModal.querySelector("#importHistoryPager").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-history-page]");
       if (!button || button.disabled) return;
@@ -45132,7 +45445,8 @@ init().catch((error) => {
       return;
     }
 
-    results.innerHTML = imports.map((item, index) => {
+    const visibleImports = imports.slice(0, importHistoryRenderLimit);
+    results.innerHTML = visibleImports.map((item, index) => {
       const status = classificationDetails(item.classification);
       const sourceName = item.sourceName || `Delivery List ${item.deliveryDate || ""}`;
       const historyTimestamp = String(item.runCompletedAt || item.importedAt || item.checkedAt || item.updatedAt || "");
@@ -45175,7 +45489,9 @@ init().catch((error) => {
             </div>
           </div>
         </details>`;
-    }).join("");
+    }).join("") + (visibleImports.length < imports.length
+      ? `<div class="import-history-progressive-more-v488"><button type="button" class="automation-secondary-button" data-import-history-show-more>Show ${Math.min(80, imports.length - visibleImports.length)} more</button><span>${visibleImports.length} of ${imports.length} results rendered</span></div>`
+      : "");
     renderImportHistoryPager(payload);
   }
 
@@ -45198,11 +45514,12 @@ init().catch((error) => {
       const payload = await api(importHistoryRequestPath(), { signal: importHistoryAbortController.signal });
       if (requestId !== importHistoryRequestId) return;
       importHistoryState.page = Number(payload.page || importHistoryState.page);
+      importHistoryRenderLimit = 80;
+      lastImportHistoryPayload = payload;
       renderImportHistory(payload);
       results.scrollTop = resetPage ? 0 : previousScrollTop;
       importHistoryHasNewResults = false;
       setImportHistoryRefreshButtonState("Refresh", false, false);
-      if (Array.isArray(payload.lists)) publishDeliveryCatalog(payload.lists, "import-history", true);
     } catch (error) {
       if (error?.name === "AbortError" || requestId !== importHistoryRequestId) return;
       results.innerHTML = `<div class="import-history-empty is-error"><strong>Import history could not be loaded</strong><span>${escapeHtml(error.message)}</span></div>`;
@@ -45317,6 +45634,8 @@ init().catch((error) => {
       <nav class="delivery-automation-tabs" role="tablist" aria-label="Delivery list automation sections">
         <button type="button" class="is-active" data-automation-tab="manual" role="tab" aria-selected="true"><span class="automation-tab-icon run" aria-hidden="true"></span>Run Manually</button>
         <button type="button" data-automation-tab="settings" role="tab" aria-selected="false"><span class="automation-tab-icon schedule" aria-hidden="true"></span>Automatic Schedule</button>
+        <button type="button" data-automation-tab="production" role="tab" aria-selected="false"><span class="automation-tab-icon sync" aria-hidden="true"></span>A+W Production</button>
+        <button type="button" data-automation-tab="rejects" role="tab" aria-selected="false"><span class="automation-tab-icon status" aria-hidden="true"></span>A+W Rejects</button>
         <button type="button" data-automation-tab="status" role="tab" aria-selected="false"><span class="automation-tab-icon status" aria-hidden="true"></span>Status & Logs</button>
         <button type="button" data-automation-tab="history" role="tab" aria-selected="false"><span class="automation-tab-icon history" aria-hidden="true"></span>Import History</button>
       </nav>
@@ -45331,7 +45650,7 @@ init().catch((error) => {
           <div class="automation-action-grid">
             ${actionCard("folder-import-only", "folder", "Import Temp Folder Only", "Reads existing delivery-list workbooks and imports changes into this scanner database. Does not contact A+W SQL.", "Floor computer", true)}
             ${actionCard("sql-export-only", "database", "Query SQL & Export Only", "Queries A+W and publishes one workbook per delivery date without importing into this scanner database.", "Export only")}
-            ${actionCard("sql-export-and-import", "sync", "Query SQL, Export & Import", "Runs the complete central workflow: query A+W, publish dated workbooks, and immediately update the scanner.", "Central system")}
+            ${actionCard("sql-export-and-import", "sync", "Sync A+W Directly", "Runs the complete A+W refresh: delivery lists, verified Internal Rejects, Batch/Optimization assignments, Cutting status/bookings, and label-source metadata. Dated workbooks are still maintained as fallback/export artifacts.", "Complete A+W sync")}
           </div>
 
           <div class="automation-section-heading">
@@ -45378,7 +45697,7 @@ init().catch((error) => {
             ${modeCard("disabled", "off", "Manual Only", "No scheduled delivery-list runs. All manual commands remain available.", "Disabled")}
             ${modeCard("folder-import-only", "folder", "Import Folder", "Best for floor computers that can read the shared folder but cannot query A+W.", "Floor")}
             ${modeCard("sql-export-only", "database", "Export SQL", "Queries A+W and keeps the Temp Delivery Lists folder current without importing locally.", "Publisher")}
-            ${modeCard("sql-export-and-import", "sync", "Full Workflow", "Queries, exports, and imports. Recommended for the authorized central host.", "Central")}
+            ${modeCard("sql-export-and-import", "sync", "Direct A+W Sync", "Queries A+W and imports SQL rows directly; dated workbooks remain available as a fallback/export. Recommended for the authorized central host.", "Central")}
           </div>
 
           <section class="automation-settings-panel">
@@ -45406,6 +45725,17 @@ init().catch((error) => {
               </div>
             </div>
 
+            <div class="automation-settings-section automation-schedule-enrichment-v499">
+              <div class="automation-settings-section-heading">
+                <strong>Scheduled A+W enrichment</strong>
+                <span>Choose which read-only A+W evidence is refreshed during scheduled Direct A+W Sync runs. Manual Sync A+W Directly always performs the complete refresh.</span>
+              </div>
+              <div class="automation-toggle-grid">
+                <label class="automation-toggle-card"><input id="automationScheduleRejectSync" type="checkbox"><span><strong>Include Internal Rejects</strong><small>Refresh PROD_BREAKAGE and verified reject booking/operator evidence on scheduled direct syncs.</small></span></label>
+                <label class="automation-toggle-card"><input id="automationScheduleProductionSync" type="checkbox"><span><strong>Include Batch / Optimization / Cutting</strong><small>Refresh production generations, optimization lifecycle, and Automatic Cutting completion evidence.</small></span></label>
+              </div>
+            </div>
+
             <div class="automation-settings-section">
               <div class="automation-settings-section-heading">
                 <strong>Files and notifications</strong>
@@ -45424,6 +45754,111 @@ init().catch((error) => {
               <button type="button" class="automation-danger-button" id="automationRemoveScheduleBtn">Disable Scheduled Tasks</button>
             </div>
             <p id="automationSettingsMessage" class="automation-inline-message">Settings have not been changed.</p>
+          </section>
+        </section>
+
+        <section class="delivery-automation-tab" data-automation-panel="production" role="tabpanel">
+          <div class="automation-section-heading">
+            <div><small>A+W production synchronization</small><h3>Batch, Optimization &amp; Cutting</h3></div>
+            <span>Read-only toward A+W</span>
+          </div>
+          <section class="automation-settings-panel automation-aw-production-settings-v499">
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Production data</strong>
+                <span>Controls the A+W evidence used by Order Details for Batch, Optimization, Cutting progress, remake generations, and Cutting Label context.</span>
+              </div>
+              <div class="automation-toggle-grid">
+                <label class="automation-toggle-card"><input id="automationProductionSyncEnabled" type="checkbox"><span><strong>Enable A+W production synchronization</strong><small>Allow Batch/Optimization/Cutting data to be synchronized. Manual Sync A+W Directly still forces one complete refresh when explicitly requested.</small></span></label>
+                <label class="automation-toggle-card"><input id="automationProductionIncludeCutting" type="checkbox"><span><strong>Confirm physical Cutting bookings</strong><small>Use positive FS_BOOK_HISTORY Automatic Cutting bookings as completion evidence in addition to verified optimization lifecycle status.</small></span></label>
+              </div>
+            </div>
+            <div class="automation-settings-section automation-schedule-row-v328">
+              <div class="automation-settings-section-heading">
+                <strong>Performance &amp; history</strong>
+                <span>Production SQL is bounded to orders already present in the direct delivery payload and split into small batches so live logs keep moving.</span>
+              </div>
+              <div class="automation-settings-grid">
+                <label><span>Orders per SQL batch</span><input id="automationProductionQueryBatchSize" type="number" min="10" max="150" step="5"></label>
+                <label><span>SQL timeout</span><div class="automation-number-unit"><input id="automationProductionQueryTimeout" type="number" min="20" max="300" step="5"><b>seconds</b></div></label>
+                <label><span>Cut booking lookback</span><div class="automation-number-unit"><input id="automationProductionCutLookback" type="number" min="14" max="730"><b>days</b></div></label>
+                <label><span>Generations refreshed per item</span><div class="automation-number-unit"><input id="automationProductionHistoryDepth" type="number" min="1" max="12"><b>generations</b></div></label>
+              </div>
+            </div>
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Verified A+W production contract</strong>
+                <span>The scanner stores raw codes alongside interpreted states so future A+W changes remain auditable.</span>
+              </div>
+              <div class="automation-status-summary automation-aw-production-source-v499">
+                <span><small>Generations / batch</small><strong>PROD_JOBITEM + PROD_JOB</strong></span>
+                <span><small>Optimization membership</small><strong>PROD_OPTI_SEQUENCE</strong></span>
+                <span><small>Optimization lifecycle</small><strong>100 Optimized · 200 Cutting · 500 Booked</strong></span>
+                <span><small>Cut confirmation</small><strong>FS_BOOK_HISTORY · Automatic Cutting</strong></span>
+              </div>
+            </div>
+            <div class="automation-settings-section automation-crystal-label-contract-v499">
+              <div class="automation-settings-section-heading">
+                <strong>Cutting Labels / Crystal Reports</strong>
+                <span>The exact A+W report is known. The scanner can rebuild label content now; the remaining discovery is the Crystal barcode expression/template file itself.</span>
+              </div>
+              <div class="automation-status-summary">
+                <span><small>Print point</small><strong>846 · Cutting Labels</strong></span>
+                <span><small>Crystal template</small><strong id="automationProductionCrystalReport">Prodman_CuttingLabel_Optimisation.rpt</strong></span>
+                <span><small>Server transfer root</small><strong>\\bfs-awbppw01\Trans</strong></span>
+              </div>
+              <p class="automation-production-note-v499">Best exact-copy path: use the Crystal viewer's Export control to save one Cutting Labels preview as PDF. That preserves the real typography, spacing, and barcode for one-to-one reconstruction without advancing production.</p>
+            </div>
+            <div class="automation-settings-actions">
+              <button type="button" class="automation-primary-button" id="automationProductionSaveBtn">Save Production Settings</button>
+            </div>
+            <p id="automationProductionSettingsMessage" class="automation-inline-message">A+W production settings have not been changed.</p>
+          </section>
+        </section>
+
+        <section class="delivery-automation-tab" data-automation-panel="rejects" role="tabpanel">
+          <div class="automation-section-heading">
+            <div><small>A+W internal reject synchronization</small><h3>A+W Rejects</h3></div>
+            <span>Read-only toward A+W</span>
+          </div>
+          <section class="automation-settings-panel automation-aw-reject-settings-v485">
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Synchronization behavior</strong>
+                <span>A+W breakage events become standard Internal Rejects, including the one-time scan/rack/bay rollback and reject-aware refabrication rules.</span>
+              </div>
+              <div class="automation-toggle-grid">
+                <label class="automation-toggle-card"><input id="automationRejectSyncEnabled" type="checkbox"><span><strong>Include rejects in scheduled Direct A+W Sync</strong><small>Scheduled direct runs query PROD_BREAKAGE and mirror verified breakages into Internal Rejects. Manual Sync A+W Directly always includes rejects.</small></span></label>
+                <label class="automation-toggle-card"><input type="checkbox" checked disabled><span><strong>Internal Reject ownership</strong><small>A+W rejects are Internal Rejects. Raw A+W source rows remain attached for audit and refresh safety.</small></span></label>
+              </div>
+            </div>
+            <div class="automation-settings-section automation-schedule-row-v328">
+              <div class="automation-settings-section-heading">
+                <strong>History windows</strong>
+                <span>Choose how far each SQL run looks back for new or changed A+W breakage records.</span>
+              </div>
+              <div class="automation-settings-grid">
+                <label><span>Normal sync lookback</span><div class="automation-number-unit"><input id="automationRejectIncrementalPastDays" type="number" min="1" max="3650"><b>days</b></div></label>
+                <label><span>Full sync lookback</span><div class="automation-number-unit"><input id="automationRejectFullPastDays" type="number" min="1" max="3650"><b>days</b></div></label>
+              </div>
+            </div>
+            <div class="automation-settings-section">
+              <div class="automation-settings-section-heading">
+                <strong>Verified A+W sources</strong>
+                <span>Labels are re-read on every sync, while scanner mapping overrides remain stable by numeric A+W code.</span>
+              </div>
+              <div class="automation-status-summary automation-aw-reject-source-v485">
+                <span><small>Breakage events</small><strong>SYSADM.PROD_BREAKAGE</strong></span>
+                <span><small>Reason labels</small><strong>SYSADM.KA_REKLA_GRND</strong></span>
+                <span><small>Location labels</small><strong>SYSADM.KA_REKLA_ORT</strong></span>
+                <span><small>Timeline</small><strong>FS_BOOK_HISTORY · BOOK_TYPE 1</strong></span>
+              </div>
+            </div>
+            <div class="automation-settings-actions">
+              ${hasPermission("manage_reject_settings") ? `<button type="button" class="automation-secondary-button" id="automationRejectManageDataBtn">Manage Reject Mappings &amp; History</button>` : ""}
+              <button type="button" class="automation-primary-button" id="automationRejectSaveBtn">Save A+W Reject Settings</button>
+            </div>
+            <p id="automationRejectSettingsMessage" class="automation-inline-message">A+W reject settings have not been changed.</p>
           </section>
         </section>
 
@@ -45517,12 +45952,18 @@ init().catch((error) => {
     modal.querySelectorAll('input[name="automationAction"]').forEach((input) => {
       input.addEventListener("change", () => {
         updateSelectedCards();
+        updateDateVisibility();
         updateRunSummary();
       });
     });
     modal.querySelectorAll('input[name="automationMode"]').forEach((input) => {
       input.addEventListener("change", updateSelectedCards);
     });
+    const syncRejectScheduleToggle = (source, target) => {
+      source?.addEventListener("change", () => { if (target) target.checked = source.checked; });
+    };
+    syncRejectScheduleToggle(modal.querySelector("#automationRejectSyncEnabled"), modal.querySelector("#automationScheduleRejectSync"));
+    syncRejectScheduleToggle(modal.querySelector("#automationScheduleRejectSync"), modal.querySelector("#automationRejectSyncEnabled"));
     modal.querySelector("#automationRangeMode").addEventListener("change", () => {
       updateDateVisibility();
       updateRunSummary();
@@ -45531,6 +45972,8 @@ init().catch((error) => {
     modal.querySelector("#automationDateTo").addEventListener("change", updateRunSummary);
     modal.querySelector("#automationRunBtn").addEventListener("click", runManual);
     modal.querySelector("#automationSaveBtn").addEventListener("click", () => saveSettings(false));
+    modal.querySelector("#automationRejectSaveBtn").addEventListener("click", () => saveSettings(false, "#automationRejectSettingsMessage", "#automationRejectSaveBtn"));
+    modal.querySelector("#automationProductionSaveBtn").addEventListener("click", () => saveSettings(false, "#automationProductionSettingsMessage", "#automationProductionSaveBtn"));
     modal.querySelector("#automationInstallScheduleBtn").addEventListener("click", () => saveSettings(true));
     modal.querySelector("#automationRemoveScheduleBtn").addEventListener("click", removeSchedule);
     modal.querySelector("#automationRefreshStatusBtn").addEventListener("click", refreshDashboard);
@@ -45608,7 +46051,10 @@ init().catch((error) => {
   }
 
   function updateDateVisibility() {
-    const mode = modal.querySelector("#automationRangeMode").value;
+    const action = modal.querySelector('input[name="automationAction"]:checked')?.value || "folder-import-only";
+    const rangeSelect = modal.querySelector("#automationRangeMode");
+    const mode = rangeSelect.value;
+    [...rangeSelect.options].forEach((option) => { option.disabled = false; });
     const fromField = modal.querySelector('[data-automation-date-field="from"]');
     const toField = modal.querySelector('[data-automation-date-field="to"]');
     fromField.classList.toggle("automation-hidden", !["one-date", "custom"].includes(mode));
@@ -45666,6 +46112,19 @@ init().catch((error) => {
     modal.querySelector("#automationDestinationFolder").value = settings.destinationFolder || "";
     modal.querySelector("#automationNotifications").checked = settings.notificationsEnabled !== false;
     modal.querySelector("#automationNoChangeNotifications").checked = settings.notifyOnNoChanges !== false;
+    modal.querySelector("#automationRejectSyncEnabled").checked = settings.rejectSyncEnabled !== false;
+    modal.querySelector("#automationRejectIncrementalPastDays").value = settings.rejectIncrementalPastDays ?? 30;
+    modal.querySelector("#automationRejectFullPastDays").value = settings.rejectFullPastDays ?? 365;
+    modal.querySelector("#automationScheduleRejectSync").checked = settings.rejectSyncEnabled !== false;
+    modal.querySelector("#automationProductionSyncEnabled").checked = settings.productionSyncEnabled !== false;
+    modal.querySelector("#automationScheduleProductionSync").checked = settings.productionScheduledEnabled !== false;
+    modal.querySelector("#automationProductionIncludeCutting").checked = settings.productionIncludeCuttingBookings !== false;
+    modal.querySelector("#automationProductionCutLookback").value = settings.productionCuttingBookingLookbackDays ?? 120;
+    modal.querySelector("#automationProductionQueryBatchSize").value = settings.productionQueryBatchSize ?? 60;
+    modal.querySelector("#automationProductionQueryTimeout").value = settings.productionQueryTimeoutSeconds ?? 75;
+    modal.querySelector("#automationProductionHistoryDepth").value = settings.productionGenerationHistoryDepth ?? 4;
+    const crystal = modal.querySelector("#automationProductionCrystalReport");
+    if (crystal) crystal.textContent = settings.productionCrystalReportFile || "Prodman_CuttingLabel_Optimisation.rpt";
     updateSelectedCards();
   }
 
@@ -45718,6 +46177,7 @@ init().catch((error) => {
       FolderImportOnly: "folder-import-only",
       SqlExportOnly: "sql-export-only",
       SqlExportAndImport: "sql-export-and-import",
+      RejectSyncOnly: "reject-sync-only",
     }[last.runAction] || "");
     const commandLabel = ACTION_LABELS[normalizedLastAction] || last.runAction || "No command";
     const originLabel = last.runOrigin === "scheduled"
@@ -45758,13 +46218,26 @@ init().catch((error) => {
       ? `${last.taskId || last.mode || "run"}|${last.completedAt}`
       : "";
     const importedResult = Array.isArray(last.importResults) && last.importResults.length > 0;
-    const importAction = ["folder-import-only", "sql-export-and-import"].includes(last.action)
-      || ["FolderImportOnly", "SqlExportAndImport"].includes(last.runAction);
+    const importAction = ["folder-import-only", "sql-export-and-import", "reject-sync-only"].includes(last.action)
+      || ["FolderImportOnly", "SqlExportAndImport", "RejectSyncOnly"].includes(last.runAction);
     if (completedRunKey && completedRunKey !== lastCompletedRunKey && (importedResult || importAction)) {
       lastCompletedRunKey = completedRunKey;
       scheduleRecentImportsRefresh(150);
       window.setTimeout(() => refreshDeliveryListCatalog(true), 175);
       window.setTimeout(() => refreshLatestImportResult(true), 200);
+
+      // v0.487: A+W synchronization can add Internal Rejects and therefore
+      // change both the Reject timeline and breakage Statistics. Invalidate the
+      // report cache immediately and refresh whichever reporting page the
+      // operator is currently watching instead of requiring a page reload.
+      state.homeReportSummary = null;
+      state.homeReportSummaryRangeKey = "";
+      if (state.page === "rejects") {
+        window.setTimeout(() => refreshRejectPage().catch((error) => showInlineError(error.message, true)), 225);
+      }
+      if (state.page === "statistics") {
+        window.setTimeout(() => void loadHomeReportSummary(), 250);
+      }
     }
 
     if (running) {
@@ -45829,12 +46302,24 @@ init().catch((error) => {
       destinationFolder: modal.querySelector("#automationDestinationFolder").value,
       notificationsEnabled: modal.querySelector("#automationNotifications").checked,
       notifyOnNoChanges: modal.querySelector("#automationNoChangeNotifications").checked,
+      rejectSyncEnabled: modal.querySelector("#automationScheduleRejectSync").checked,
+      rejectIncrementalPastDays: modal.querySelector("#automationRejectIncrementalPastDays").value,
+      rejectFullPastDays: modal.querySelector("#automationRejectFullPastDays").value,
+      productionSyncEnabled: modal.querySelector("#automationProductionSyncEnabled").checked,
+      productionScheduledEnabled: modal.querySelector("#automationScheduleProductionSync").checked,
+      productionIncludeCuttingBookings: modal.querySelector("#automationProductionIncludeCutting").checked,
+      productionCuttingBookingLookbackDays: modal.querySelector("#automationProductionCutLookback").value,
+      productionQueryBatchSize: modal.querySelector("#automationProductionQueryBatchSize").value,
+      productionQueryTimeoutSeconds: modal.querySelector("#automationProductionQueryTimeout").value,
+      productionGenerationHistoryDepth: modal.querySelector("#automationProductionHistoryDepth").value,
     };
   }
 
-  async function saveSettings(installSchedule) {
-    const message = modal.querySelector("#automationSettingsMessage");
-    const saveButton = installSchedule ? modal.querySelector("#automationInstallScheduleBtn") : modal.querySelector("#automationSaveBtn");
+  async function saveSettings(installSchedule, messageSelector = "#automationSettingsMessage", buttonSelector = "") {
+    const message = modal.querySelector(messageSelector);
+    const saveButton = installSchedule
+      ? modal.querySelector("#automationInstallScheduleBtn")
+      : modal.querySelector(buttonSelector || "#automationSaveBtn");
     saveButton.disabled = true;
     message.textContent = installSchedule ? "Saving settings and updating Windows scheduled tasks..." : "Saving settings...";
     try {
@@ -45844,7 +46329,11 @@ init().catch((error) => {
       }
       message.textContent = installSchedule
         ? "Settings saved and scheduled tasks installed successfully."
-        : "Settings saved. Reinstall the schedule when you need trigger times changed.";
+        : (messageSelector === "#automationRejectSettingsMessage"
+          ? "A+W reject synchronization settings saved."
+          : messageSelector === "#automationProductionSettingsMessage"
+            ? "A+W Batch, Optimization, Cutting, and label-source settings saved."
+            : "Settings saved. Reinstall the schedule when you need trigger times changed.");
       await refreshDashboard();
     } catch (error) {
       message.textContent = error.message;

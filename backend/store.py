@@ -90,6 +90,12 @@ SESSION_COOKIE_NAME = "dls_session"
 PASSWORD_ITERATIONS = 260000
 SESSION_HOURS = 12
 PASSWORD_RESET_MINUTES = 30
+# Live BFSMAIN production evidence (2026-09-03) maps the optimization lifecycle
+# used by Production Manager to these raw codes. Keep the raw values stored so
+# a future A+W configuration change can be audited rather than silently hidden.
+AW_OPTI_STATUS_OPTIMIZED = 100
+AW_OPTI_STATUS_RELEASED = 200
+AW_OPTI_STATUS_BOOKED = 500
 PERMISSIONS = [
     # Delivery-list visibility and floor scanning.
     "view_delivery_lists",
@@ -1691,7 +1697,7 @@ def parse_aw_delivery_workbook(path: Path) -> dict[str, Any]:
             "route": row.get(route_col, ""),
             "job": a_value,
             "product": current_product,
-            "processState": "Remake" if is_remake else "",
+            "processState": "External Remake" if is_remake else "",
             "queueState": remake,
             "sourceRow": row_number,
         }
@@ -2355,8 +2361,8 @@ class BaseDeliveryStore:
             if is_remake_item(normalized_item):
                 result[line_id] = {
                     "kind": "remake",
-                    "label": "Remake",
-                    "reason": "Imported remake marker",
+                    "label": "External Remake",
+                    "reason": "Imported A+W RM marker",
                     "responsible": "",
                     "createdAt": "",
                 }
@@ -2629,11 +2635,33 @@ class BaseDeliveryStore:
                 "order": str(row["order_no"] or ""),
                 "item": str(row["item_no"] or ""),
                 "job": str(row["job"] or ""),
+                "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
             }
         status = service.fabrication_status(
-            identity["order"], identity["item"], identity["job"], refresh_missing=True
+            identity["order"], identity["item"], identity["job"], refresh_missing=True,
+            evidence_after=identity["lastRejectedAt"],
         )
         return {**identity, **status}
+
+    def latest_internal_reject_at(self, order_no: str, item_no: str = "") -> str:
+        """Return the newest reject cutoff used to invalidate old fabrication evidence."""
+        clean_order = str(order_no or "").strip()
+        clean_item = str(item_no or "").strip()
+        if clean_item.isdigit():
+            clean_item = clean_item.zfill(3)
+        if not clean_order:
+            return ""
+        clauses = ["order_no=?"]
+        params: list[Any] = [clean_order]
+        if clean_item:
+            clauses.append("item_no=?")
+            params.append(clean_item)
+        with self.connect() as con:
+            row = con.execute(
+                f"SELECT MAX(rejected_at) AS rejected_at FROM reject_events WHERE {' AND '.join(clauses)}",
+                params,
+            ).fetchone()
+        return str(row_value(row, "rejected_at", "") or "")
 
     def record_scan(self, scan_request: dict[str, Any]) -> dict[str, Any]:
         """Purpose: Process scan for the delivery-list scanner workflow.
@@ -4479,6 +4507,7 @@ class BaseDeliveryStore:
                 "rackStatus": row["rack_status"],
                 "lastScanTime": row["last_scan_time"],
                 "lastScanUser": row["last_scan_user"],
+                "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
                 "stageLocations": [],
                 "locationText": "Process Not Started",
                 "_rank": (0, "", -1),
@@ -4505,6 +4534,9 @@ class BaseDeliveryStore:
             priority_delivery_date = str(row_value(row, "priority_delivery_date", "") or "").strip()
             if priority_delivery_date:
                 result["priorityDeliveryDate"] = priority_delivery_date
+            row_rejected_at = str(row_value(row, "last_rejected_at", "") or "")
+            if row_rejected_at > str(result.get("lastRejectedAt") or ""):
+                result["lastRejectedAt"] = row_rejected_at
             result["_rush"] = bool(result.get("_rush")) or is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]})
             result["_remake"] = bool(result.get("_remake")) or is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]})
 
@@ -4624,6 +4656,1291 @@ class BaseDeliveryStore:
         # v0.425 compatibility anchor: return cleaned_results[:20]
         return self.attach_priority_search_annotations(cleaned_results)[:20]
 
+    @staticmethod
+    def _aw_reject_event_key(row: dict[str, Any]) -> str:
+        """Return the stable logical A+W reject key shared by BOM source rows.
+
+        A+W writes one ``PROD_BREAKAGE`` row per affected BOM node. ``KEYINDEX``
+        increments for repeated breakages of the same order/item, while every BOM
+        row for one operator action shares the same breakage timestamp. Keeping
+        reason/location out of the key allows a later A+W correction to update the
+        event instead of creating a duplicate logical reject.
+        """
+        order_no = str(row.get("orderNr") or row.get("order") or "").strip()
+        item_no = str(row.get("itemNr") or row.get("item") or "").strip()
+        if item_no.isdigit():
+            item_no = item_no.zfill(3)
+        breakage_date = str(row.get("breakageDate") or "").strip()
+        original_job = str(row.get("originalJobNumber") or "").strip()
+        try:
+            key_index = int(row.get("keyIndex") or 0)
+        except (TypeError, ValueError):
+            key_index = 0
+        try:
+            sub_position = int(row.get("subPosition") or 0)
+        except (TypeError, ValueError):
+            sub_position = 0
+        canonical = "|".join((order_no, item_no, breakage_date, original_job, str(key_index), str(sub_position)))
+        return "awrej-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def _aw_reject_public_row(row: Any) -> dict[str, Any]:
+        """Convert one logical A+W reject database row to an API-safe shape."""
+        return {
+            "source": "aw",
+            "eventKey": str(row_value(row, "event_key", "") or ""),
+            "order": str(row_value(row, "order_no", "") or ""),
+            "item": str(row_value(row, "item_no", "") or ""),
+            "qty": int(row_value(row, "quantity", 0) or 0),
+            "breakageAt": str(row_value(row, "breakage_date", "") or ""),
+            "originalJobNumber": str(row_value(row, "original_job_number", "") or ""),
+            "replacementJobNumber": str(row_value(row, "replacement_job_number", "") or ""),
+            "reasonCode": int(row_value(row, "reason_code", 0) or 0),
+            "reason": str(row_value(row, "display_reason_label", row_value(row, "reason_label", "")) or ""),
+            "sourceReason": str(row_value(row, "reason_label", "") or ""),
+            "locationCode": int(row_value(row, "location_code", 0) or 0),
+            "location": str(row_value(row, "display_location_label", row_value(row, "location_label", "")) or ""),
+            "sourceLocation": str(row_value(row, "location_label", "") or ""),
+            "fromScanner": bool(int(row_value(row, "from_scanner", 0) or 0)),
+            "reportedBy": str(row_value(row, "timeline_employee", "") or row_value(row, "breakage_user", "") or ""),
+            "timelineEmployee": str(row_value(row, "timeline_employee", "") or ""),
+            "workTypeId": int(row_value(row, "work_type_id", 0) or 0),
+            "workType": str(row_value(row, "work_type", "") or ""),
+            "registrationPointId": int(row_value(row, "registration_point_id", 0) or 0),
+            "registrationPoint": str(row_value(row, "registration_point", "") or ""),
+            "machine": str(row_value(row, "machine", "") or ""),
+            "scanMode": str(row_value(row, "scan_mode", "") or ""),
+            "bookingMessage": str(row_value(row, "booking_message", "") or ""),
+            "sourceRowCount": int(row_value(row, "source_row_count", 0) or 0),
+            "sourceLastChangedAt": str(row_value(row, "source_last_changed_at", "") or ""),
+            "sourceLastChangedUser": str(row_value(row, "source_last_changed_user", "") or ""),
+        }
+
+    @staticmethod
+    def _aw_reject_mapped_label(con: Any, kind: str, code: int, raw_label: str) -> str:
+        row = con.execute(
+            """
+            SELECT mapped_label
+            FROM reject_value_mappings
+            WHERE source_system = 'aw' AND kind = ? AND source_code = ?
+            LIMIT 1
+            """,
+            (kind, int(code or 0)),
+        ).fetchone()
+        mapped = str(row_value(row, "mapped_label", "") or "").strip()
+        return mapped or str(raw_label or "").strip() or (f"A+W code {int(code)}" if int(code or 0) else "Not specified")
+
+    @staticmethod
+    def _remember_aw_reject_source_label(con: Any, kind: str, code: int, raw_label: str, user: str, now: str) -> None:
+        clean_code = int(code or 0)
+        if clean_code <= 0:
+            return
+        con.execute(
+            """
+            INSERT INTO reject_value_mappings (
+                source_system, kind, source_code, source_label, mapped_label, updated_by, created_at, updated_at
+            ) VALUES ('aw', ?, ?, ?, '', ?, ?, ?)
+            ON CONFLICT(source_system, kind, source_code) DO UPDATE SET
+                source_label = CASE WHEN TRIM(excluded.source_label) <> '' THEN excluded.source_label ELSE reject_value_mappings.source_label END,
+                updated_at = excluded.updated_at
+            """,
+            (kind, clean_code, str(raw_label or "").strip(), str(user or ""), now, now),
+        )
+
+    @staticmethod
+    def _aw_reject_delivery_context(con: Any, order_no: str, item_no: str, breakage_date: str) -> dict[str, Any]:
+        """Resolve the closest active delivery-list identity for an A+W reject."""
+        row = con.execute(
+            """
+            SELECT dl.delivery_date, li.list_id, li.id AS line_item_id, li.customer, li.job, li.product, li.qty
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active' AND COALESCE(li.is_deleted, 0) = 0
+              AND li.order_no = ? AND li.item_no = ?
+            ORDER BY
+              ABS(julianday(dl.delivery_date) - julianday(substr(?, 1, 10))),
+              CASE WHEN dl.delivery_date >= substr(?, 1, 10) THEN 0 ELSE 1 END,
+              dl.delivery_date DESC, li.id
+            LIMIT 1
+            """,
+            (order_no, item_no, breakage_date, breakage_date),
+        ).fetchone()
+        if not row:
+            return {
+                "delivery_date": str(breakage_date or "")[:10],
+                "list_id": "", "line_item_id": "", "customer": "", "job": "", "product": "", "qty": 0,
+            }
+        return {key: row_value(row, key, "") for key in ("delivery_date", "list_id", "line_item_id", "customer", "job", "product", "qty")}
+
+    @staticmethod
+    def _sync_internal_reject_line_summary_con(con: Any, delivery_date: str, order_no: str, item_no: str) -> None:
+        events = con.execute(
+            """
+            SELECT qty, reason_label, location_label, rejected_at
+            FROM reject_events
+            WHERE delivery_date = ? AND order_no = ? AND item_no = ?
+            ORDER BY rejected_at DESC, id DESC
+            """,
+            (delivery_date, order_no, item_no),
+        ).fetchall()
+        total_qty = sum(max(int(row_value(row, "qty", 0) or 0), 0) for row in events)
+        latest = events[0] if events else None
+        con.execute(
+            """
+            UPDATE line_items
+            SET internal_reject_count = ?, last_reject_reason = ?, last_reject_location = ?,
+                last_rejected_at = ?, updated_at_utc = ?
+            WHERE id IN (
+                SELECT li.id FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.delivery_date = ? AND COALESCE(li.is_deleted, 0) = 0
+                  AND li.order_no = ? AND li.item_no = ?
+            )
+            """,
+            (
+                total_qty,
+                str(row_value(latest, "reason_label", "") or ""),
+                str(row_value(latest, "location_label", "") or ""),
+                str(row_value(latest, "rejected_at", "") or ""),
+                now_iso(), delivery_date, order_no, item_no,
+            ),
+        )
+
+    def list_reject_value_mappings(self) -> list[dict[str, Any]]:
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT m.id, m.kind, m.source_code, m.source_label, m.mapped_label, m.updated_by, m.updated_at,
+                       CASE m.kind
+                         WHEN 'reason' THEN (SELECT COUNT(*) FROM aw_reject_events e WHERE e.reason_code = m.source_code)
+                         ELSE (SELECT COUNT(*) FROM aw_reject_events e WHERE e.location_code = m.source_code)
+                       END AS event_count
+                FROM reject_value_mappings m
+                WHERE m.source_system = 'aw'
+                ORDER BY m.kind, m.source_code
+                """
+            ).fetchall()
+        return [
+            {
+                "id": int(row_value(row, "id", 0) or 0),
+                "kind": str(row_value(row, "kind", "") or ""),
+                "sourceCode": int(row_value(row, "source_code", 0) or 0),
+                "sourceLabel": str(row_value(row, "source_label", "") or ""),
+                "mappedLabel": str(row_value(row, "mapped_label", "") or ""),
+                "eventCount": int(row_value(row, "event_count", 0) or 0),
+                "updatedBy": str(row_value(row, "updated_by", "") or ""),
+                "updatedAt": str(row_value(row, "updated_at", "") or ""),
+            }
+            for row in rows
+        ]
+
+    def update_reject_value_mapping(self, kind: str, source_code: int, mapped_label: str, user: str) -> dict[str, Any]:
+        clean_kind = str(kind or "").strip().lower()
+        if clean_kind not in {"reason", "location"}:
+            raise ValueError("Reject mapping kind must be reason or location")
+        clean_code = int(source_code or 0)
+        clean_label = " ".join(str(mapped_label or "").split())[:160]
+        if clean_code <= 0:
+            raise ValueError("A+W reject code is required")
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            current = con.execute(
+                "SELECT source_label FROM reject_value_mappings WHERE source_system='aw' AND kind=? AND source_code=?",
+                (clean_kind, clean_code),
+            ).fetchone()
+            source_label = str(row_value(current, "source_label", "") or "")
+            con.execute(
+                """
+                INSERT INTO reject_value_mappings (source_system, kind, source_code, source_label, mapped_label, updated_by, created_at, updated_at)
+                VALUES ('aw', ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_system, kind, source_code) DO UPDATE SET
+                    mapped_label=excluded.mapped_label, updated_by=excluded.updated_by, updated_at=excluded.updated_at
+                """,
+                (clean_kind, clean_code, source_label, clean_label, str(user or ""), now, now),
+            )
+            column = "reason_label" if clean_kind == "reason" else "location_label"
+            code_column = "source_reason_code" if clean_kind == "reason" else "source_location_code"
+            fallback = source_label or f"A+W code {clean_code}"
+            display = clean_label or fallback
+            matching_events = con.execute(
+                f"SELECT id, delivery_date, order_no, item_no, manual_override_json FROM reject_events WHERE source_type='aw' AND {code_column}=?",
+                (clean_code,),
+            ).fetchall()
+            affected_identities: set[tuple[str, str, str]] = set()
+            override_key = "reason" if clean_kind == "reason" else "location"
+            for event in matching_events:
+                overrides: dict[str, Any] = {}
+                try:
+                    overrides = json.loads(str(row_value(event, "manual_override_json", "{}") or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    overrides = {}
+                if not isinstance(overrides, dict):
+                    overrides = {}
+                if override_key not in overrides:
+                    con.execute(f"UPDATE reject_events SET {column}=? WHERE id=?", (display, int(row_value(event, "id", 0) or 0)))
+                affected_identities.add((
+                    str(row_value(event, "delivery_date", "") or ""),
+                    str(row_value(event, "order_no", "") or ""),
+                    str(row_value(event, "item_no", "") or ""),
+                ))
+            for delivery_date, order_no, item_no in affected_identities:
+                if not delivery_date or not order_no or not item_no:
+                    continue
+                self._sync_internal_reject_line_summary_con(con, delivery_date, order_no, item_no)
+            self.insert_audit(
+                con, "reject_mapping", f"aw:{clean_kind}:{clean_code}", "update_aw_reject_mapping",
+                str(user or ""), "", f"A+W {clean_kind} {clean_code} display mapping",
+                {"kind": clean_kind, "sourceCode": clean_code, "sourceLabel": source_label, "mappedLabel": clean_label},
+            )
+            con.commit()
+        return {"ok": True, "kind": clean_kind, "sourceCode": clean_code, "mappedLabel": clean_label, "mappings": self.list_reject_value_mappings()}
+
+    @staticmethod
+    def _apply_aw_reject_operational_rollback_con(
+        con: Any,
+        *,
+        event_key: str,
+        delivery_date: str,
+        order_no: str,
+        item_no: str,
+        qty: int,
+        rejected_at: str,
+        rejected_by: str,
+        reason: str,
+        location: str,
+    ) -> dict[str, Any]:
+        """Reset one rejected physical piece across synchronized scanner stages.
+
+        The raw A+W source rows own idempotency. If any source ROWID for this
+        logical event already carries ``rollback_applied_at``, all newly seen BOM
+        rows inherit that marker and no floor state is changed again. A pending
+        reject with no active scanner line remains unmarked so a later sync can
+        apply the reset after the order is imported.
+        """
+        marker_rows = con.execute(
+            "SELECT rollback_applied_at, rollback_scan_qty_reduced FROM aw_reject_source_rows WHERE event_key=? AND rollback_applied_at<>'' ORDER BY rollback_applied_at LIMIT 1",
+            (event_key,),
+        ).fetchall()
+        if marker_rows:
+            marker = str(row_value(marker_rows[0], "rollback_applied_at", "") or "")
+            prior_reduction = max(int(row_value(marker_rows[0], "rollback_scan_qty_reduced", 0) or 0), 0)
+            con.execute(
+                "UPDATE aw_reject_source_rows SET rollback_applied_at=?, rollback_scan_qty_reduced=? WHERE event_key=? AND rollback_applied_at=''",
+                (marker, prior_reduction, event_key),
+            )
+            con.execute(
+                "UPDATE reject_events SET operational_rollback_applied_at=CASE WHEN operational_rollback_applied_at='' THEN ? ELSE operational_rollback_applied_at END, scan_qty_reduced=CASE WHEN scan_qty_reduced=0 THEN ? ELSE scan_qty_reduced END WHERE source_type='aw' AND source_external_key=?",
+                (marker, prior_reduction, event_key),
+            )
+            return {"applied": False, "alreadyApplied": True, "scanQtyReduced": prior_reduction, "affectedLists": []}
+
+        rows = con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id=li.list_id
+            WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
+              AND dl.delivery_date=? AND li.order_no=? AND li.item_no=?
+            ORDER BY dl.stage, li.id
+            """,
+            (delivery_date, order_no, item_no),
+        ).fetchall()
+        if not rows:
+            return {"applied": False, "pending": True, "scanQtyReduced": 0, "affectedLists": []}
+
+        rollback_at = now_iso()
+        requested_qty = max(int(qty or 0), 1)
+        total_scan_reduction = 0
+        affected_lists: list[str] = []
+        for row in rows:
+            line_id = str(row_value(row, "id", "") or "")
+            list_id = str(row_value(row, "list_id", "") or "")
+            affected_lists.append(list_id)
+            before = max(int(row_value(row, "scanned_qty", 0) or 0), 0)
+            reduction = min(before, requested_qty)
+            after = max(before - requested_qty, 0)
+            total_scan_reduction += reduction
+            con.execute(
+                "UPDATE line_items SET scanned_qty=?, updated_at_utc=? WHERE id=?",
+                (after, rollback_at, line_id),
+            )
+            con.execute(
+                """
+                INSERT INTO scan_events (
+                    list_id, line_item_id, barcode, canonical_barcode, user_name, station,
+                    event_type, message, reason, qty_delta, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'reject_reset', ?, ?, ?, ?)
+                """,
+                (
+                    list_id,
+                    line_id,
+                    str(row_value(row, "barcode", "") or ""),
+                    str(row_value(row, "barcode", "") or ""),
+                    rejected_by or "A+W",
+                    location or "A+W Reject",
+                    f"A+W Internal reject reset {order_no}-{item_no} ({event_key})",
+                    f"{reason} at {location}; A+W rejected at {rejected_at}",
+                    -reduction,
+                    rollback_at,
+                ),
+            )
+
+            remaining = requested_qty
+            rack_rows = con.execute(
+                "SELECT id, qty FROM rack_items WHERE line_item_id=? AND status='Active' ORDER BY id DESC",
+                (line_id,),
+            ).fetchall()
+            for rack_row in rack_rows:
+                if remaining <= 0:
+                    break
+                rack_qty = max(int(row_value(rack_row, "qty", 0) or 0), 0)
+                take = min(rack_qty, remaining)
+                if take <= 0:
+                    continue
+                next_qty = rack_qty - take
+                # rack_items keeps the original positive quantity as historical
+                # evidence when an allocation is fully removed.  The live schema
+                # enforces CHECK(qty > 0), so zero is represented by status=Removed
+                # rather than by destroying the quantity that was once on the rack.
+                stored_qty = next_qty if next_qty > 0 else rack_qty
+                con.execute(
+                    """
+                    UPDATE rack_items
+                    SET qty=?, status=CASE WHEN ?<=0 THEN 'Removed' ELSE status END,
+                        removed_by=CASE WHEN ?<=0 THEN ? ELSE removed_by END,
+                        removed_at=CASE WHEN ?<=0 THEN ? ELSE removed_at END,
+                        reason=?, updated_at_utc=?
+                    WHERE id=?
+                    """,
+                    (
+                        stored_qty, next_qty, next_qty, rejected_by or "A+W",
+                        next_qty, rollback_at, "A+W Internal reject", rollback_at,
+                        row_value(rack_row, "id", ""),
+                    ),
+                )
+                remaining -= take
+
+            remaining = requested_qty
+            bay_rows = con.execute(
+                """
+                SELECT id, assigned_qty FROM bay_assignments
+                WHERE line_item_id=? AND status NOT IN ('Cleared','Cancelled')
+                ORDER BY id DESC
+                """,
+                (line_id,),
+            ).fetchall()
+            for bay_row in bay_rows:
+                if remaining <= 0:
+                    break
+                assigned = max(int(row_value(bay_row, "assigned_qty", 0) or 0), 0)
+                take = min(assigned, remaining)
+                next_qty = assigned - take
+                con.execute(
+                    """
+                    UPDATE bay_assignments
+                    SET assigned_qty=?, status=CASE WHEN ?<=0 THEN 'Cleared' ELSE status END,
+                        cleared_by=CASE WHEN ?<=0 THEN ? ELSE cleared_by END,
+                        cleared_at=CASE WHEN ?<=0 THEN ? ELSE cleared_at END,
+                        reason=?, updated_at_utc=?
+                    WHERE id=?
+                    """,
+                    (
+                        next_qty, next_qty, next_qty, rejected_by or "A+W",
+                        next_qty, rollback_at, "A+W Internal reject", rollback_at,
+                        row_value(bay_row, "id", ""),
+                    ),
+                )
+                remaining -= take
+
+        con.execute(
+            "UPDATE aw_reject_source_rows SET rollback_applied_at=?, rollback_scan_qty_reduced=? WHERE event_key=? AND rollback_applied_at=''",
+            (rollback_at, total_scan_reduction, event_key),
+        )
+        con.execute(
+            """
+            UPDATE reject_events
+            SET operational_rollback_applied_at=?, scan_qty_reduced=?
+            WHERE source_type='aw' AND source_external_key=?
+            """,
+            (rollback_at, total_scan_reduction, event_key),
+        )
+        return {
+            "applied": True,
+            "alreadyApplied": False,
+            "scanQtyReduced": total_scan_reduction,
+            "affectedLists": sorted(set(affected_lists)),
+            "appliedAt": rollback_at,
+        }
+
+    def ensure_aw_internal_reject_mirrors(self) -> dict[str, Any]:
+        """Mirror any already-cached v0.484 A+W events missing Internal Reject rows.
+
+        Migration 13 adds the mirror ownership fields but deliberately does not
+        duplicate business logic in SQL. On the first v0.485 startup this method
+        replays only cached raw A+W payloads whose logical event has no
+        ``reject_events`` mirror yet. Subsequent starts are effectively no-ops.
+        """
+        actor_corrections = 0
+        with self.connect() as con:
+            # v0.489 accuracy repair: PROD_BREAKAGE.LASTCHANGEUSER is a mutable
+            # source-row maintenance user. The exact same-second BOOK_TYPE=1
+            # FS_BOOK_HISTORY employee is the actual reject actor when present.
+            # Existing v0.484-v0.488 mirrors already retain timeline_employee,
+            # so correct them immediately on startup without replaying rollback.
+            actor_corrections += int(con.execute(
+                """
+                UPDATE aw_reject_events
+                SET breakage_user = timeline_employee
+                WHERE TRIM(COALESCE(timeline_employee, '')) <> ''
+                  AND COALESCE(breakage_user, '') <> timeline_employee
+                """
+            ).rowcount or 0)
+            actor_corrections += int(con.execute(
+                """
+                UPDATE reject_events
+                SET rejected_by = (
+                    SELECT aw.timeline_employee
+                    FROM aw_reject_events aw
+                    WHERE aw.event_key = reject_events.source_external_key
+                )
+                WHERE source_type = 'aw'
+                  AND EXISTS (
+                    SELECT 1 FROM aw_reject_events aw
+                    WHERE aw.event_key = reject_events.source_external_key
+                      AND TRIM(COALESCE(aw.timeline_employee, '')) <> ''
+                      AND COALESCE(reject_events.rejected_by, '') <> aw.timeline_employee
+                  )
+                """
+            ).rowcount or 0)
+            rows = con.execute(
+                """
+                SELECT src.aw_row_id, src.source_payload_json
+                FROM aw_reject_source_rows src
+                JOIN aw_reject_events e ON e.event_key = src.event_key
+                LEFT JOIN reject_events r
+                  ON r.source_type='aw' AND r.source_external_key=e.event_key
+                WHERE r.id IS NULL OR src.rollback_applied_at=''
+                ORDER BY e.breakage_date, src.event_key, src.bom_id
+                """
+            ).fetchall()
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(str(row_value(row, "source_payload_json", "{}") or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                continue
+            payload.setdefault("awRowId", str(row_value(row, "aw_row_id", "") or ""))
+            if str(payload.get("awRowId") or "").strip():
+                payloads.append(payload)
+        if not payloads:
+            return {
+                "ok": True,
+                "sourceRows": 0,
+                "logicalEvents": 0,
+                "mirroredInternalRejects": 0,
+                "actorCorrections": actor_corrections,
+                "startupBackfill": True,
+            }
+        result = self.sync_aw_reject_rows(
+            payloads,
+            user="system-v485-aw-backfill",
+            source_window={"mode": "startup-cache-backfill"},
+        )
+        result["actorCorrections"] = actor_corrections
+        result["startupBackfill"] = True
+        return result
+
+    def list_aw_rejects(
+        self,
+        order_no: str = "",
+        item_no: str = "",
+        date_from: str = "",
+        date_to: str = "",
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Return logical A+W source rejects with the scanner's current display mappings."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if str(order_no or "").strip():
+            clauses.append("e.order_no = ?")
+            params.append(str(order_no).strip())
+        if str(item_no or "").strip():
+            clean_item = str(item_no).strip()
+            if clean_item.isdigit():
+                clean_item = clean_item.zfill(3)
+            clauses.append("e.item_no = ?")
+            params.append(clean_item)
+        if str(date_from or "").strip():
+            clauses.append("substr(e.breakage_date, 1, 10) >= ?")
+            params.append(str(date_from).strip())
+        if str(date_to or "").strip():
+            clauses.append("substr(e.breakage_date, 1, 10) <= ?")
+            params.append(str(date_to).strip())
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        safe_limit = max(min(int(limit or 500), 5000), 1)
+        with self.connect() as con:
+            rows = con.execute(
+                f"""
+                SELECT e.*,
+                       COALESCE(NULLIF(rm.mapped_label, ''), e.reason_label) AS display_reason_label,
+                       COALESCE(NULLIF(lm.mapped_label, ''), e.location_label) AS display_location_label
+                FROM aw_reject_events e
+                LEFT JOIN reject_value_mappings rm
+                  ON rm.source_system='aw' AND rm.kind='reason' AND rm.source_code=e.reason_code
+                LEFT JOIN reject_value_mappings lm
+                  ON lm.source_system='aw' AND lm.kind='location' AND lm.source_code=e.location_code
+                {where}
+                ORDER BY e.breakage_date DESC, e.event_key LIMIT ?
+                """,
+                (*params, safe_limit),
+            ).fetchall()
+        return {"rejects": [self._aw_reject_public_row(row) for row in rows]}
+
+    def sync_aw_reject_rows(
+        self,
+        rows: list[dict[str, Any]],
+        user: str = "sql-auto-import",
+        source_window: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Upsert read-only A+W breakage and mirror it into Internal Reject history.
+
+        Raw ``PROD_BREAKAGE.ROWID`` records remain auditable and logical A+W
+        events collapse BOM fan-out. Each logical A+W event is also represented
+        by exactly one ``reject_events`` row with ``source_type='aw'``. v0.486
+        applies the same operational reset as a scanner-created Internal Reject,
+        but only once per preserved raw A+W ROWID so later source refreshes cannot
+        subtract scan/rack/bay state twice.
+        """
+        clean_rows = [dict(row) for row in rows if isinstance(row, dict) and str(row.get("awRowId") or "").strip()]
+        if not clean_rows:
+            return {
+                "ok": True,
+                "sourceRows": 0,
+                "logicalEvents": 0,
+                "insertedSourceRows": 0,
+                "updatedSourceRows": 0,
+                "window": dict(source_window or {}),
+            }
+
+        def int_field(row: dict[str, Any], key: str, default: int = 0) -> int:
+            try:
+                return int(row.get(key) if row.get(key) not in (None, "") else default)
+            except (TypeError, ValueError):
+                return default
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        incoming_source_payloads: dict[str, str] = {}
+        incoming_event_keys: dict[str, str] = {}
+        for row in clean_rows:
+            event_key = self._aw_reject_event_key(row)
+            row["_eventKey"] = event_key
+            grouped.setdefault(event_key, []).append(row)
+            aw_row_id = str(row.get("awRowId") or "").strip()
+            incoming_event_keys[aw_row_id] = event_key
+            incoming_source_payloads[aw_row_id] = json.dumps(
+                {key: value for key, value in row.items() if not key.startswith("_")},
+                default=str,
+                separators=(",", ":"),
+            )
+
+        # v0.487 performance guard: the normal 30-day A+W window can contain
+        # thousands of BOM source rows even when nothing changed. Previously every
+        # run rewrote every source row, logical event, mirror, and line summary.
+        # Detect the common fully-unchanged case up front and perform zero SQLite
+        # writes, which keeps the web app responsive while direct SQL sync runs.
+        existing_sources: dict[str, Any] = {}
+        with self.connect() as preflight_con:
+            source_ids = list(incoming_source_payloads)
+            for offset in range(0, len(source_ids), 500):
+                batch = source_ids[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                for existing in preflight_con.execute(
+                    f"SELECT aw_row_id, event_key, source_payload_json, rollback_applied_at FROM aw_reject_source_rows WHERE aw_row_id IN ({placeholders})",
+                    batch,
+                ).fetchall():
+                    existing_sources[str(row_value(existing, "aw_row_id", "") or "")] = existing
+            mirror_keys = {
+                str(row_value(row, "source_external_key", "") or "")
+                for row in preflight_con.execute(
+                    "SELECT source_external_key FROM reject_events WHERE source_type='aw' AND source_external_key<>''"
+                ).fetchall()
+            }
+
+        fully_unchanged = bool(clean_rows) and len(existing_sources) == len(incoming_source_payloads)
+        if fully_unchanged:
+            for aw_row_id, payload in incoming_source_payloads.items():
+                existing = existing_sources.get(aw_row_id)
+                if (
+                    existing is None
+                    or str(row_value(existing, "event_key", "") or "") != incoming_event_keys.get(aw_row_id, "")
+                    or str(row_value(existing, "source_payload_json", "") or "") != payload
+                    or not str(row_value(existing, "rollback_applied_at", "") or "").strip()
+                    or str(row_value(existing, "event_key", "") or "") not in mirror_keys
+                ):
+                    fully_unchanged = False
+                    break
+        if fully_unchanged:
+            return {
+                "ok": True,
+                "sourceRows": len(clean_rows),
+                "logicalEvents": len(grouped),
+                "insertedEvents": 0,
+                "updatedEvents": 0,
+                "insertedSourceRows": 0,
+                "updatedSourceRows": 0,
+                "unchangedSourceRows": len(clean_rows),
+                "mirroredInternalRejects": 0,
+                "operationalRollbacks": 0,
+                "operationalScanQtyReduced": 0,
+                "pendingOperationalRollbacks": 0,
+                "skippedUnchanged": True,
+                "window": dict(source_window or {}),
+            }
+
+        synced_at = now_iso()
+        inserted_source_rows = 0
+        updated_source_rows = 0
+        unchanged_source_rows = 0
+        inserted_events = 0
+        updated_events = 0
+        mirrored_internal_rejects = 0
+        operational_rollbacks = 0
+        operational_scan_reduction = 0
+        pending_operational_rollbacks = 0
+        affected_internal_identities: set[tuple[str, str, str]] = set()
+        rollback_requests: dict[str, dict[str, Any]] = {}
+
+        with self.connect() as con:
+            for event_key, group in grouped.items():
+                representative = sorted(
+                    group,
+                    key=lambda row: (
+                        0 if str(row.get("scanMode") or "").strip().lower() == "explicit" else 1,
+                        0 if int_field(row, "bomId") == 0 else 1,
+                        int_field(row, "bomId"),
+                    ),
+                )[0]
+                quantity = max((max(int_field(row, "quantity", 0), 0) for row in group), default=0)
+                latest_source_row = max(
+                    group,
+                    key=lambda row: str(row.get("sourceLastChangedAt") or row.get("breakageDate") or ""),
+                )
+                reason_code = int_field(representative, "reasonCode")
+                location_code = int_field(representative, "locationCode")
+                raw_reason_label = str(representative.get("reasonLabel") or "").strip()
+                raw_location_label = str(representative.get("locationLabel") or "").strip()
+                self._remember_aw_reject_source_label(con, "reason", reason_code, raw_reason_label, user, synced_at)
+                self._remember_aw_reject_source_label(con, "location", location_code, raw_location_label, user, synced_at)
+                display_reason_label = self._aw_reject_mapped_label(con, "reason", reason_code, raw_reason_label)
+                display_location_label = self._aw_reject_mapped_label(con, "location", location_code, raw_location_label)
+                event_values = {
+                    "event_key": event_key,
+                    "order_no": str(representative.get("orderNr") or "").strip(),
+                    "item_no": str(representative.get("itemNr") or "").strip().zfill(3) if str(representative.get("itemNr") or "").strip().isdigit() else str(representative.get("itemNr") or "").strip(),
+                    "breakage_date": str(representative.get("breakageDate") or "").strip(),
+                    "quantity": quantity,
+                    "original_job_number": str(representative.get("originalJobNumber") or "").strip(),
+                    "replacement_job_number": str(representative.get("replacementJobNumber") or "").strip(),
+                    "reason_code": reason_code,
+                    "reason_label": raw_reason_label,
+                    "location_code": location_code,
+                    "location_label": raw_location_label,
+                    "display_reason_label": display_reason_label,
+                    "display_location_label": display_location_label,
+                    "from_scanner": 1 if int_field(representative, "fromScanner") else 0,
+                    # The exact BOOK_TYPE=1 booking employee is the reject actor.
+                    # PROD_BREAKAGE.LASTCHANGEUSER is only source-row maintenance
+                    # metadata and can be changed later by optimization/production
+                    # activity, so it is a fallback rather than the display owner.
+                    "breakage_user": str(representative.get("timelineEmployee") or representative.get("breakageUser") or "").strip(),
+                    "timeline_employee": str(representative.get("timelineEmployee") or "").strip(),
+                    "work_type_id": int_field(representative, "workTypeId"),
+                    "work_type": str(representative.get("workType") or "").strip(),
+                    "registration_point_id": int_field(representative, "registrationPointId"),
+                    "registration_point": str(representative.get("registrationPoint") or "").strip(),
+                    "machine": str(representative.get("machine") or "").strip(),
+                    "scan_mode": str(representative.get("scanMode") or "").strip(),
+                    "booking_message": str(representative.get("bookingMessage") or "").strip(),
+                    "source_last_changed_at": str(latest_source_row.get("sourceLastChangedAt") or "").strip(),
+                    "source_last_changed_user": str(latest_source_row.get("sourceLastChangedUser") or latest_source_row.get("breakageUser") or "").strip(),
+                    "source_payload_json": json.dumps(
+                        {
+                            "source": "SYSADM.PROD_BREAKAGE",
+                            "reasonLookup": "SYSADM.KA_REKLA_GRND",
+                            "locationLookup": "SYSADM.KA_REKLA_ORT",
+                            "timelineSource": "SYSADM.FS_BOOK_HISTORY",
+                            "window": dict(source_window or {}),
+                        },
+                        separators=(",", ":"),
+                    ),
+                }
+                existing_event = con.execute(
+                    "SELECT event_key FROM aw_reject_events WHERE event_key = ?",
+                    (event_key,),
+                ).fetchone()
+                if existing_event:
+                    con.execute(
+                        """
+                        UPDATE aw_reject_events
+                        SET order_no = ?, item_no = ?, breakage_date = ?, quantity = ?,
+                            original_job_number = ?, replacement_job_number = ?, reason_code = ?, reason_label = ?,
+                            location_code = ?, location_label = ?, from_scanner = ?, breakage_user = ?,
+                            timeline_employee = ?, work_type_id = ?, work_type = ?, registration_point_id = ?,
+                            registration_point = ?, machine = ?, scan_mode = ?, booking_message = ?,
+                            source_last_changed_at = ?, source_last_changed_user = ?, last_seen_at = ?,
+                            source_payload_json = ?
+                        WHERE event_key = ?
+                        """,
+                        (
+                            event_values["order_no"], event_values["item_no"], event_values["breakage_date"], event_values["quantity"],
+                            event_values["original_job_number"], event_values["replacement_job_number"], event_values["reason_code"], event_values["reason_label"],
+                            event_values["location_code"], event_values["location_label"], event_values["from_scanner"], event_values["breakage_user"],
+                            event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"], event_values["registration_point_id"],
+                            event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
+                            event_values["source_last_changed_at"], event_values["source_last_changed_user"], synced_at,
+                            event_values["source_payload_json"], event_key,
+                        ),
+                    )
+                    updated_events += 1
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO aw_reject_events (
+                            event_key, order_no, item_no, breakage_date, quantity, original_job_number,
+                            replacement_job_number, reason_code, reason_label, location_code, location_label,
+                            from_scanner, breakage_user, timeline_employee, work_type_id, work_type,
+                            registration_point_id, registration_point, machine, scan_mode, booking_message,
+                            source_row_count, source_last_changed_at, source_last_changed_user,
+                            first_seen_at, last_seen_at, source_payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event_key, event_values["order_no"], event_values["item_no"], event_values["breakage_date"], event_values["quantity"],
+                            event_values["original_job_number"], event_values["replacement_job_number"], event_values["reason_code"], event_values["reason_label"],
+                            event_values["location_code"], event_values["location_label"], event_values["from_scanner"], event_values["breakage_user"],
+                            event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"], event_values["registration_point_id"],
+                            event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
+                            event_values["source_last_changed_at"], event_values["source_last_changed_user"], synced_at, synced_at, event_values["source_payload_json"],
+                        ),
+                    )
+                    inserted_events += 1
+
+                # A+W breakage is an Internal Reject. The mirror is created first;
+                # the idempotent floor rollback runs after raw ROWIDs are upserted
+                # so those immutable records can own the replay marker.
+                context = self._aw_reject_delivery_context(
+                    con, event_values["order_no"], event_values["item_no"], event_values["breakage_date"]
+                )
+                previous_mirror = con.execute(
+                    "SELECT delivery_date, order_no, item_no, manual_override_json FROM reject_events WHERE source_type='aw' AND source_external_key=?",
+                    (event_key,),
+                ).fetchone()
+                if previous_mirror:
+                    affected_internal_identities.add((
+                        str(previous_mirror["delivery_date"]), str(previous_mirror["order_no"]), str(previous_mirror["item_no"])
+                    ))
+                manual_overrides: dict[str, Any] = {}
+                if previous_mirror:
+                    try:
+                        manual_overrides = json.loads(str(row_value(previous_mirror, "manual_override_json", "{}") or "{}"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        manual_overrides = {}
+                if not isinstance(manual_overrides, dict):
+                    manual_overrides = {}
+                mirrored_qty = max(int(event_values["quantity"] or 0), 1)
+                try:
+                    if "qty" in manual_overrides:
+                        mirrored_qty = max(int(manual_overrides.get("qty") or mirrored_qty), 1)
+                except (TypeError, ValueError):
+                    pass
+                mirrored_reason = str(manual_overrides.get("reason") or event_values["display_reason_label"])
+                mirrored_location = str(manual_overrides.get("location") or event_values["display_location_label"])
+                mirrored_notes = str(manual_overrides.get("notes") or f"Imported from A+W breakage event {event_key}.")
+                mirrored_rejected_at = str(manual_overrides.get("rejectedAt") or event_values["breakage_date"])
+
+                affected_lists = [str(row["list_id"]) for row in con.execute(
+                    """
+                    SELECT DISTINCT li.list_id FROM line_items li
+                    JOIN delivery_lists dl ON dl.id=li.list_id
+                    WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
+                      AND dl.delivery_date=? AND li.order_no=? AND li.item_no=?
+                    """,
+                    (str(context["delivery_date"]), event_values["order_no"], event_values["item_no"]),
+                ).fetchall()]
+                con.execute(
+                    """
+                    INSERT INTO reject_events (
+                        delivery_date, order_no, item_no, qty, customer, job, product, reason_label,
+                        location_label, notes, rejected_at, rejected_by, source_list_id, source_line_item_id,
+                        affected_list_ids_json, scan_qty_reduced, source_type, source_external_key,
+                        source_reason_code, source_location_code
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'aw', ?, ?, ?)
+                    ON CONFLICT(source_type, source_external_key) WHERE source_external_key <> '' DO UPDATE SET
+                        delivery_date=excluded.delivery_date, order_no=excluded.order_no, item_no=excluded.item_no,
+                        qty=excluded.qty, customer=excluded.customer, job=excluded.job, product=excluded.product,
+                        reason_label=excluded.reason_label, location_label=excluded.location_label,
+                        notes=excluded.notes, rejected_at=excluded.rejected_at, rejected_by=excluded.rejected_by,
+                        source_list_id=excluded.source_list_id, source_line_item_id=excluded.source_line_item_id,
+                        affected_list_ids_json=excluded.affected_list_ids_json,
+                        source_reason_code=excluded.source_reason_code, source_location_code=excluded.source_location_code
+                    """,
+                    (
+                        str(context["delivery_date"]), event_values["order_no"], event_values["item_no"],
+                        mirrored_qty, str(context["customer"] or ""),
+                        str(context["job"] or event_values["original_job_number"] or ""), str(context["product"] or ""),
+                        mirrored_reason, mirrored_location, mirrored_notes, mirrored_rejected_at,
+                        event_values["timeline_employee"] or event_values["breakage_user"],
+                        str(context["list_id"] or ""), str(context["line_item_id"] or ""),
+                        json.dumps(affected_lists, separators=(",", ":")), event_key,
+                        event_values["reason_code"], event_values["location_code"],
+                    ),
+                )
+                affected_internal_identities.add((
+                    str(context["delivery_date"]), event_values["order_no"], event_values["item_no"]
+                ))
+                mirrored_internal_rejects += 1
+                rollback_requests[event_key] = {
+                    "delivery_date": str(context["delivery_date"]),
+                    "order_no": event_values["order_no"],
+                    "item_no": event_values["item_no"],
+                    "qty": mirrored_qty,
+                    "rejected_at": event_values["breakage_date"],
+                    "rejected_by": event_values["timeline_employee"] or event_values["breakage_user"] or str(user or "A+W"),
+                    "reason": mirrored_reason,
+                    "location": mirrored_location,
+                }
+
+            for row in clean_rows:
+                aw_row_id = str(row.get("awRowId") or "").strip()
+                event_key = str(row.get("_eventKey") or "")
+                source_payload = incoming_source_payloads.get(aw_row_id) or json.dumps(
+                    {key: value for key, value in row.items() if not key.startswith("_")},
+                    default=str,
+                    separators=(",", ":"),
+                )
+                values = (
+                    event_key,
+                    str(row.get("orderNr") or "").strip(),
+                    str(row.get("itemNr") or "").strip().zfill(3) if str(row.get("itemNr") or "").strip().isdigit() else str(row.get("itemNr") or "").strip(),
+                    int_field(row, "bomId"),
+                    int_field(row, "keyIndex"),
+                    int_field(row, "subPosition"),
+                    int_field(row, "bomNode"),
+                    max(int_field(row, "quantity"), 0),
+                    str(row.get("breakageDate") or "").strip(),
+                    str(row.get("originalJobNumber") or "").strip(),
+                    str(row.get("replacementJobNumber") or "").strip(),
+                    1,
+                    int_field(row, "reasonCode"),
+                    int_field(row, "locationCode"),
+                    1 if int_field(row, "fromScanner") else 0,
+                    str(row.get("sourceLastChangedAt") or "").strip(),
+                    str(row.get("sourceLastChangedUser") or row.get("breakageUser") or "").strip(),
+                    synced_at,
+                    source_payload,
+                )
+                existing = con.execute(
+                    "SELECT event_key, source_payload_json FROM aw_reject_source_rows WHERE aw_row_id = ?",
+                    (aw_row_id,),
+                ).fetchone()
+                if existing:
+                    changed = str(row_value(existing, "event_key", "")) != event_key or str(row_value(existing, "source_payload_json", "")) != source_payload
+                    con.execute(
+                        """
+                        UPDATE aw_reject_source_rows
+                        SET event_key = ?, order_no = ?, item_no = ?, bom_id = ?, key_index = ?, sub_position = ?,
+                            bom_node = ?, quantity = ?, breakage_date = ?, original_job_number = ?, replacement_job_number = ?,
+                            is_breakage = ?, reason_code = ?, location_code = ?, from_scanner = ?, last_changed_at = ?,
+                            last_changed_user = ?, synced_at = ?, source_payload_json = ?
+                        WHERE aw_row_id = ?
+                        """,
+                        (*values, aw_row_id),
+                    )
+                    if changed:
+                        updated_source_rows += 1
+                    else:
+                        unchanged_source_rows += 1
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO aw_reject_source_rows (
+                            aw_row_id, event_key, order_no, item_no, bom_id, key_index, sub_position, bom_node,
+                            quantity, breakage_date, original_job_number, replacement_job_number, is_breakage,
+                            reason_code, location_code, from_scanner, last_changed_at, last_changed_user,
+                            synced_at, source_payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (aw_row_id, *values),
+                    )
+                    inserted_source_rows += 1
+
+            for event_key in grouped:
+                count_row = con.execute(
+                    "SELECT COUNT(*) AS row_count FROM aw_reject_source_rows WHERE event_key = ?",
+                    (event_key,),
+                ).fetchone()
+                con.execute(
+                    "UPDATE aw_reject_events SET source_row_count = ? WHERE event_key = ?",
+                    (int(row_value(count_row, "row_count", 0) or 0), event_key),
+                )
+                request = rollback_requests.get(event_key)
+                if request:
+                    rollback = self._apply_aw_reject_operational_rollback_con(
+                        con,
+                        event_key=event_key,
+                        **request,
+                    )
+                    if rollback.get("applied"):
+                        operational_rollbacks += 1
+                        operational_scan_reduction += int(rollback.get("scanQtyReduced") or 0)
+                        affected_lists = rollback.get("affectedLists") if isinstance(rollback.get("affectedLists"), list) else []
+                        con.execute(
+                            """
+                            UPDATE reject_events
+                            SET affected_list_ids_json=?
+                            WHERE source_type='aw' AND source_external_key=?
+                            """,
+                            (json.dumps(affected_lists, separators=(",", ":")), event_key),
+                        )
+                    elif rollback.get("pending"):
+                        pending_operational_rollbacks += 1
+            con.execute(
+                "DELETE FROM aw_reject_events WHERE NOT EXISTS (SELECT 1 FROM aw_reject_source_rows src WHERE src.event_key = aw_reject_events.event_key)"
+            )
+            # If A+W corrects an event identity (for example its breakage timestamp),
+            # remove only the now-orphaned A+W mirror. Scanner-created rejects are
+            # never touched by this cleanup.
+            con.execute(
+                """
+                DELETE FROM reject_events
+                WHERE source_type='aw' AND source_external_key <> ''
+                  AND NOT EXISTS (SELECT 1 FROM aw_reject_events e WHERE e.event_key = reject_events.source_external_key)
+                """
+            )
+            for delivery_date, order_no, item_no in affected_internal_identities:
+                if delivery_date and order_no and item_no:
+                    self._sync_internal_reject_line_summary_con(con, delivery_date, order_no, item_no)
+
+        service = getattr(self, "production_files", None)
+        if service is not None:
+            for _delivery_date, order_no, item_no in affected_internal_identities:
+                try:
+                    service.invalidate_fabrication(order_no, item_no)
+                except Exception:
+                    # Reject persistence must remain authoritative even if the
+                    # supplemental production-file cache is unavailable.
+                    pass
+
+        return {
+            "ok": True,
+            "sourceRows": len(clean_rows),
+            "logicalEvents": len(grouped),
+            "insertedEvents": inserted_events,
+            "updatedEvents": updated_events,
+            "insertedSourceRows": inserted_source_rows,
+            "updatedSourceRows": updated_source_rows,
+            "unchangedSourceRows": unchanged_source_rows,
+            "mirroredInternalRejects": mirrored_internal_rejects,
+            "operationalRollbacks": operational_rollbacks,
+            "operationalScanQtyReduced": operational_scan_reduction,
+            "pendingOperationalRollbacks": pending_operational_rollbacks,
+            "window": dict(source_window or {}),
+            "syncedAt": synced_at,
+            "user": str(user or ""),
+        }
+
+    @staticmethod
+    def _aw_cutting_timestamp_epoch(value: Any) -> float:
+        """Normalize A+W local SQL timestamps and scanner UTC timestamps for ordering."""
+        text = str(value or "").strip()
+        if not text:
+            return 0.0
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                # A+W SQL datetime values are plant-local.  Use the scanner host's
+                # local zone so they can be compared safely with UTC scanner events.
+                parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            return float(parsed.timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+
+    @staticmethod
+    def _aw_cutting_public_row(row: Any) -> dict[str, Any]:
+        return {
+            "order": str(row_value(row, "order_no", "") or ""),
+            "item": str(row_value(row, "item_no", "") or ""),
+            "keyIndex": int(row_value(row, "key_index", 0) or 0),
+            "batch": str(row_value(row, "batch_job_number", "") or ""),
+            "batchStatusCode": int(row_value(row, "batch_status_code", 0) or 0),
+            "batchDescription": str(row_value(row, "batch_description", "") or ""),
+            "batchCreatedAt": str(row_value(row, "batch_creation_at", "") or ""),
+            "batchEmployee": str(row_value(row, "batch_employee", "") or ""),
+            "batchLastChangedAt": str(row_value(row, "batch_last_changed_at", "") or ""),
+            "batchLastChangedUser": str(row_value(row, "batch_last_changed_user", "") or ""),
+            "optimization": int(row_value(row, "optimization_number", 0) or 0),
+            "optimizationStatusCode": int(row_value(row, "optimization_status_code", 0) or 0),
+            "optimizationMode": int(row_value(row, "optimization_mode", 0) or 0),
+            "optimizationDate": str(row_value(row, "optimization_date", "") or ""),
+            "optimizationLastChangedAt": str(row_value(row, "optimization_last_changed_at", "") or ""),
+            "cutCompletedAt": str(row_value(row, "cutting_booking_at", "") or ""),
+            "cutCompletedBy": str(row_value(row, "cutting_booking_employee", "") or ""),
+            "cutBookingRowId": str(row_value(row, "cutting_booking_row_id", "") or ""),
+            "itemBarcodeStart": str(row_value(row, "item_barcode_start", "") or "").strip(),
+            "cuttingBarcodeStart": str(row_value(row, "cutting_barcode_start", "") or "").strip(),
+            "weight": float(row_value(row, "weight", 0) or 0),
+            "surfaceArea": float(row_value(row, "surface_area", 0) or 0),
+            "sourceRowCount": int(row_value(row, "source_row_count", 0) or 0),
+            "syncedAt": str(row_value(row, "synced_at", "") or ""),
+        }
+
+    def sync_aw_cutting_rows(
+        self,
+        rows: Iterable[dict[str, Any]],
+        user: str = "automation",
+        source_window: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Upsert A+W production batch/optimization generations for Cutting progress.
+
+        A+W retains multiple ``PROD_JOBITEM`` BOM rows for one physical generation.
+        ``KEYINDEX + JOBNUMBER`` is the durable generation identity used here.  Old
+        generations are intentionally retained so reject/remake history remains visible.
+        """
+        clean_rows: list[dict[str, Any]] = []
+        for raw in rows or []:
+            if not isinstance(raw, dict):
+                continue
+            order_no = str(raw.get("orderNr") or raw.get("order") or "").strip()
+            item_no = str(raw.get("itemNr") or raw.get("item") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            batch = str(raw.get("batchJobNumber") or raw.get("batch") or "").strip()
+            if not order_no or not item_no or not batch:
+                continue
+            clean_rows.append({
+                "sourceRowId": str(raw.get("sourceRowId") or "").strip(),
+                "order": order_no,
+                "item": item_no,
+                "bomId": int(raw.get("bomId") or 0),
+                "keyIndex": int(raw.get("keyIndex") or 0),
+                "batch": batch,
+                "batchStatusCode": int(raw.get("batchStatusCode") or 0),
+                "batchDescription": str(raw.get("batchDescription") or "").strip(),
+                "batchCreatedAt": str(raw.get("batchCreatedAt") or "").strip(),
+                "batchEmployee": str(raw.get("batchEmployee") or "").strip(),
+                "batchLastChangedAt": str(raw.get("batchLastChangedAt") or "").strip(),
+                "batchLastChangedUser": str(raw.get("batchLastChangedUser") or "").strip(),
+                "optimization": int(raw.get("optimizationNumber") or 0),
+                "optimizationStatusCode": int(raw.get("optimizationStatusCode") or 0),
+                "optimizationMode": int(raw.get("optimizationMode") or 0),
+                "optimizationDate": str(raw.get("optimizationDate") or "").strip(),
+                "optimizationLastChangedAt": str(raw.get("optimizationLastChangedAt") or "").strip(),
+                "cutCompletedAt": str(raw.get("cuttingBookingAt") or "").strip(),
+                "cutCompletedBy": str(raw.get("cuttingBookingEmployee") or "").strip(),
+                "cutBookingRowId": str(raw.get("cuttingBookingRowId") or "").strip(),
+                "itemBarcodeStart": str(raw.get("itemBarcodeStart") or "").strip(),
+                "bomBarcodeStart": str(raw.get("bomBarcodeStart") or "").strip(),
+                "aggregateId": int(raw.get("aggregateId") or 0),
+                "quantity": float(raw.get("quantity") or 0),
+                "cutQuantity": float(raw.get("cutQuantity") or 0),
+                "weight": float(raw.get("weight") or 0),
+                "surfaceArea": float(raw.get("surfaceArea") or 0),
+            })
+
+        grouped: dict[tuple[str, str, int, str], list[dict[str, Any]]] = {}
+        for row in clean_rows:
+            grouped.setdefault((row["order"], row["item"], row["keyIndex"], row["batch"]), []).append(row)
+
+        now = utc_now_iso()
+        inserted = 0
+        updated = 0
+        unchanged = 0
+        with self.connect() as con:
+            for (order_no, item_no, key_index, batch), generation_rows in grouped.items():
+                ranked = sorted(
+                    generation_rows,
+                    key=lambda row: (
+                        1 if int(row.get("optimization") or 0) > 0 else 0,
+                        1 if int(row.get("aggregateId") or 0) == 1000 else 0,
+                        1 if int(row.get("bomId") or 0) == 1 else 0,
+                    ),
+                    reverse=True,
+                )
+                primary = ranked[0]
+                optimization = next((int(row["optimization"]) for row in ranked if int(row.get("optimization") or 0) > 0), 0)
+                optimization_row = next((row for row in ranked if int(row.get("optimization") or 0) == optimization and optimization > 0), primary)
+                booking_rows = [row for row in generation_rows if str(row.get("cutCompletedAt") or "").strip()]
+                booking_row = max(booking_rows, key=lambda row: self._aw_cutting_timestamp_epoch(row.get("cutCompletedAt"))) if booking_rows else {}
+                item_barcode = next((str(row.get("itemBarcodeStart") or "").strip() for row in ranked if str(row.get("itemBarcodeStart") or "").strip()), "")
+                cut_barcode = next((str(row.get("bomBarcodeStart") or "").strip() for row in ranked if int(row.get("aggregateId") or 0) == 1000 and str(row.get("bomBarcodeStart") or "").strip()), "")
+                if not cut_barcode:
+                    cut_barcode = next((str(row.get("bomBarcodeStart") or "").strip() for row in ranked if str(row.get("bomBarcodeStart") or "").strip()), "")
+                source_payload = {
+                    "source": "A+W PROD_JOBITEM/PROD_JOB/PROD_OPTIMIZATION/FS_BOOK_HISTORY",
+                    "sourceWindow": dict(source_window or {}),
+                    "sourceRows": [
+                        {
+                            "sourceRowId": row.get("sourceRowId") or "",
+                            "bomId": int(row.get("bomId") or 0),
+                            "aggregateId": int(row.get("aggregateId") or 0),
+                            "optimization": int(row.get("optimization") or 0),
+                            "quantity": row.get("quantity") or 0,
+                            "cutQuantity": row.get("cutQuantity") or 0,
+                        }
+                        for row in sorted(generation_rows, key=lambda value: (int(value.get("bomId") or 0), str(value.get("sourceRowId") or "")))
+                    ],
+                }
+                payload_json = json.dumps(source_payload, sort_keys=True, separators=(",", ":"))
+                weight = max((float(row.get("weight") or 0) for row in generation_rows), default=0.0)
+                surface_area = max((float(row.get("surfaceArea") or 0) for row in generation_rows), default=0.0)
+                values = (
+                    int(primary.get("batchStatusCode") or 0), str(primary.get("batchDescription") or ""),
+                    str(primary.get("batchCreatedAt") or ""), str(primary.get("batchEmployee") or ""),
+                    str(primary.get("batchLastChangedAt") or ""), str(primary.get("batchLastChangedUser") or ""),
+                    optimization, int(optimization_row.get("optimizationStatusCode") or 0),
+                    int(optimization_row.get("optimizationMode") or 0), str(optimization_row.get("optimizationDate") or ""),
+                    str(optimization_row.get("optimizationLastChangedAt") or ""), str(booking_row.get("cutCompletedAt") or ""),
+                    str(booking_row.get("cutCompletedBy") or ""), str(booking_row.get("cutBookingRowId") or ""),
+                    item_barcode, cut_barcode, weight, surface_area, len(generation_rows), payload_json,
+                )
+                existing = con.execute(
+                    """
+                    SELECT batch_status_code, batch_description, batch_creation_at, batch_employee,
+                           batch_last_changed_at, batch_last_changed_user, optimization_number,
+                           optimization_status_code, optimization_mode, optimization_date,
+                           optimization_last_changed_at, cutting_booking_at, cutting_booking_employee,
+                           cutting_booking_row_id, item_barcode_start, cutting_barcode_start, weight, surface_area,
+                           source_row_count, source_payload_json
+                    FROM aw_cutting_generations
+                    WHERE order_no=? AND item_no=? AND key_index=? AND batch_job_number=?
+                    """,
+                    (order_no, item_no, key_index, batch),
+                ).fetchone()
+                existing_values = tuple(row_value(existing, key, None) for key in (
+                    "batch_status_code", "batch_description", "batch_creation_at", "batch_employee",
+                    "batch_last_changed_at", "batch_last_changed_user", "optimization_number",
+                    "optimization_status_code", "optimization_mode", "optimization_date",
+                    "optimization_last_changed_at", "cutting_booking_at", "cutting_booking_employee",
+                    "cutting_booking_row_id", "item_barcode_start", "cutting_barcode_start", "weight", "surface_area",
+                    "source_row_count", "source_payload_json",
+                )) if existing else None
+                if existing_values == values:
+                    unchanged += 1
+                    continue
+                if existing:
+                    con.execute(
+                        """
+                        UPDATE aw_cutting_generations SET
+                            batch_status_code=?, batch_description=?, batch_creation_at=?, batch_employee=?,
+                            batch_last_changed_at=?, batch_last_changed_user=?, optimization_number=?,
+                            optimization_status_code=?, optimization_mode=?, optimization_date=?,
+                            optimization_last_changed_at=?, cutting_booking_at=?, cutting_booking_employee=?,
+                            cutting_booking_row_id=?, item_barcode_start=?, cutting_barcode_start=?, weight=?, surface_area=?,
+                            source_row_count=?, source_payload_json=?, last_seen_at=?, synced_at=?
+                        WHERE order_no=? AND item_no=? AND key_index=? AND batch_job_number=?
+                        """,
+                        (*values, now, now, order_no, item_no, key_index, batch),
+                    )
+                    updated += 1
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO aw_cutting_generations (
+                            order_no, item_no, key_index, batch_job_number,
+                            batch_status_code, batch_description, batch_creation_at, batch_employee,
+                            batch_last_changed_at, batch_last_changed_user, optimization_number,
+                            optimization_status_code, optimization_mode, optimization_date,
+                            optimization_last_changed_at, cutting_booking_at, cutting_booking_employee,
+                            cutting_booking_row_id, item_barcode_start, cutting_barcode_start, weight, surface_area,
+                            source_row_count, source_payload_json, first_seen_at, last_seen_at, synced_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (order_no, item_no, key_index, batch, *values, now, now, now),
+                    )
+                    inserted += 1
+        return {
+            "ok": True,
+            "sourceRows": len(clean_rows),
+            "generations": len(grouped),
+            "inserted": inserted,
+            "updated": updated,
+            "unchanged": unchanged,
+            "syncedAt": now,
+            "user": str(user or ""),
+        }
+
+    def aw_cutting_state(self, order_no: str, item_no: str, last_rejected_at: str = "", rows: Iterable[Any] | None = None) -> dict[str, Any]:
+        clean_order = str(order_no or "").strip()
+        clean_item = str(item_no or "").strip()
+        if clean_item.isdigit():
+            clean_item = clean_item.zfill(3)
+        if not clean_order or not clean_item:
+            return {"state": "not_optimized", "label": "Not Optimized", "complete": False, "history": []}
+        source_rows = list(rows) if rows is not None else None
+        if source_rows is None:
+            with self.connect() as con:
+                source_rows = con.execute(
+                    """
+                    SELECT * FROM aw_cutting_generations
+                    WHERE order_no=? AND item_no=?
+                    ORDER BY key_index DESC, batch_creation_at DESC, batch_job_number DESC
+                    """,
+                    (clean_order, clean_item),
+                ).fetchall()
+        history = [self._aw_cutting_public_row(row) for row in source_rows]
+        history.sort(key=lambda value: (int(value.get("keyIndex") or 0), self._aw_cutting_timestamp_epoch(value.get("batchCreatedAt")), str(value.get("batch") or "")), reverse=True)
+        if not history:
+            return {"state": "not_optimized", "label": "Not Optimized", "complete": False, "history": []}
+        current = dict(history[0])
+        reject_epoch = self._aw_cutting_timestamp_epoch(last_rejected_at)
+        batch_epoch = self._aw_cutting_timestamp_epoch(current.get("batchCreatedAt"))
+        cut_epoch = self._aw_cutting_timestamp_epoch(current.get("cutCompletedAt"))
+        optimization_status = int(current.get("optimizationStatusCode") or 0)
+        batch_status = int(current.get("batchStatusCode") or 0)
+        has_current_generation = not reject_epoch or batch_epoch > reject_epoch
+        cut_after_reject = bool(cut_epoch and (not reject_epoch or cut_epoch > reject_epoch))
+        # A+W optimization status 500 is the verified booked/cut lifecycle state.
+        # PROD_JOB status also reaches 500 for old completed batches, but it is
+        # broader than physical cutting and must not independently mark a pane cut.
+        booked_status = optimization_status == AW_OPTI_STATUS_BOOKED
+        if cut_after_reject or (has_current_generation and booked_status):
+            state = "cut"
+            label = "Cut"
+            complete = True
+        elif reject_epoch and not has_current_generation:
+            state = "needs_recut"
+            label = "Needs Recutting"
+            complete = False
+        elif optimization_status == AW_OPTI_STATUS_RELEASED:
+            state = "released"
+            label = "Cutting"
+            complete = False
+        elif optimization_status == AW_OPTI_STATUS_OPTIMIZED or int(current.get("optimization") or 0) > 0:
+            state = "optimized"
+            label = "Optimized"
+            complete = False
+        elif batch_status == 400:
+            state = "batch_active"
+            label = "In Cutting Batch"
+            complete = False
+        else:
+            state = "not_optimized"
+            label = "Not Optimized"
+            complete = False
+        current.update({
+            "state": state,
+            "label": label,
+            "complete": complete,
+            "released": state == "released",
+            "needsRecutting": state == "needs_recut",
+            "evidenceAfter": str(last_rejected_at or ""),
+            "history": history,
+        })
+        return current
+
     def get_order_detail(self, order_no: str, user: dict[str, Any] | None = None, *, include_production: bool = True) -> dict[str, Any]:
         """Return one order grouped by physical item with all active stage copies.
 
@@ -4652,6 +5969,26 @@ class BaseDeliveryStore:
         if not rows:
             raise ValueError(f"Order {clean_order} was not found in active delivery lists")
 
+        with self.connect() as con:
+            aw_reject_rows = con.execute(
+                "SELECT * FROM aw_reject_events WHERE order_no = ? ORDER BY breakage_date DESC, event_key",
+                (clean_order,),
+            ).fetchall()
+            aw_cutting_rows = con.execute(
+                "SELECT * FROM aw_cutting_generations WHERE order_no = ? ORDER BY item_no, key_index DESC, batch_creation_at DESC",
+                (clean_order,),
+            ).fetchall()
+        aw_rejects = [self._aw_reject_public_row(row) for row in aw_reject_rows]
+        aw_rejects_by_item: dict[str, list[dict[str, Any]]] = {}
+        for reject in aw_rejects:
+            aw_rejects_by_item.setdefault(str(reject.get("item") or ""), []).append(reject)
+        aw_cutting_by_item: dict[str, list[Any]] = {}
+        for cutting_row in aw_cutting_rows:
+            cutting_item = str(row_value(cutting_row, "item_no", "") or "").strip()
+            if cutting_item.isdigit():
+                cutting_item = cutting_item.zfill(3)
+            aw_cutting_by_item.setdefault(cutting_item, []).append(cutting_row)
+
         grouped: dict[str, dict[str, Any]] = {}
         for row in rows:
             source_id = str(row["source_id"] or "").strip()
@@ -4663,12 +6000,17 @@ class BaseDeliveryStore:
                 "dimensions": str(row["dimensions"] or ""), "customer": str(row["customer"] or ""),
                 "route": str(row["route"] or ""), "qty": int(row["qty"] or 0),
                 "processState": str(row["process_state"] or ""), "queueState": str(row["queue_state"] or ""),
+                "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
                 "stages": [],
             })
             item["qty"] = max(int(item.get("qty") or 0), int(row["qty"] or 0))
             for field, column in (("job", "job"), ("product", "product"), ("dimensions", "dimensions"), ("customer", "customer"), ("route", "route")):
                 if not item.get(field) and row[column]:
                     item[field] = str(row[column] or "")
+            row_rejected_at = str(row_value(row, "last_rejected_at", "") or "")
+            if row_rejected_at > str(item.get("lastRejectedAt") or ""):
+                item["lastRejectedAt"] = row_rejected_at
+            item["awRejects"] = aw_rejects_by_item.get(item_no, [])
             item["stages"].append({
                 "listId": str(row["list_id"] or ""),
                 "deliveryList": str(row["delivery_list_label"] or ""),
@@ -4679,17 +6021,26 @@ class BaseDeliveryStore:
                 "qty": int(row["qty"] or 0),
             })
         items = sorted(grouped.values(), key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")))
+        for item in items:
+            item_no = str(item.get("item") or "").strip()
+            cutting_item = item_no.zfill(3) if item_no.isdigit() else item_no
+            item["cutting"] = self.aw_cutting_state(
+                clean_order, item_no, str(item.get("lastRejectedAt") or ""), aw_cutting_by_item.get(cutting_item, [])
+            )
         first = items[0]
         service = getattr(self, "production_files", None)
         if include_production and service is not None:
             for item in items:
-                item["productionFiles"] = service.item_assets(clean_order, item.get("item"), item.get("job"))
+                item["productionFiles"] = service.item_assets(
+                    clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt")
+                )
         return {
             "order": clean_order,
             "customer": first.get("customer") or "",
             "job": first.get("job") or "",
             "route": first.get("route") or "",
             "items": items,
+            "awRejects": aw_rejects,
             "productionLoaded": bool(include_production and service is not None),
             "orderProductionFiles": service.order_assets(clean_order, first.get("job")) if include_production and service is not None else {"hardware": [], "sketches": []},
             "productionFileAvailability": service.availability() if include_production and service is not None else {},
@@ -6198,6 +7549,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.seed_bay_auto_assign_settings(con)
                 self.seed_racks(con)
                 self.repair_route_stage_memberships_if_needed(con)
+            self.ensure_aw_internal_reject_mirrors()
             self.refresh_stage_definition_cache()
             self.cleanup_old_bay_events(force=True)
             self.write_superseded_order_exclusion_file()
@@ -17722,15 +19074,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
         def reject_date_clause(alias: str = "re") -> tuple[str, list[str]]:
+            """Use index-friendly ISO timestamp bounds for Internal Rejects.
+
+            Both scanner and maintained A+W mirrors store ISO timestamps. Avoiding
+            ``substr(rejected_at, ...)`` lets SQLite use the v0.487 timestamp index
+            even after a large A+W history sync.
+            """
             column = f"{alias}.rejected_at" if alias else "rejected_at"
             parts: list[str] = []
             params: list[str] = []
             if date_from:
-                parts.append(f"substr({column}, 1, 10) >= ?")
-                params.append(date_from)
+                parts.append(f"{column} >= ?")
+                params.append(f"{date_from}T00:00:00")
             if date_to:
-                parts.append(f"substr({column}, 1, 10) <= ?")
-                params.append(date_to)
+                try:
+                    exclusive_to = (datetime.fromisoformat(date_to).date() + timedelta(days=1)).isoformat()
+                except ValueError:
+                    exclusive_to = date_to
+                parts.append(f"{column} < ?")
+                params.append(f"{exclusive_to}T00:00:00")
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
         def empty_breakage_bucket() -> dict[str, Any]:
@@ -17914,9 +19276,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 f"""
                 SELECT re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
                        re.product, re.reason_label, re.location_label, re.rejected_at,
+                       re.source_type, re.source_external_key,
+                       COALESCE(NULLIF(aw.machine, ''), NULLIF(re.location_label, ''), 'Unknown machine') AS resolved_machine,
+                       COALESCE(NULLIF(aw.work_type, ''), '') AS aw_work_type,
+                       COALESCE(NULLIF(aw.registration_point, ''), '') AS aw_registration_point,
                        COALESCE(NULLIF(re.product, ''), NULLIF(MAX(li.product), ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS resolved_product,
                        COALESCE(NULLIF(MAX(li.dimensions), ''), '') AS dimensions
                 FROM reject_events re
+                LEFT JOIN aw_reject_events aw
+                  ON re.source_type='aw' AND re.source_external_key=aw.event_key
                 LEFT JOIN delivery_lists dl ON dl.delivery_date = re.delivery_date
                 LEFT JOIN line_items li
                   ON li.list_id = dl.id
@@ -17924,7 +19292,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                  AND li.item_no = re.item_no
                 WHERE 1 = 1{reject_date_sql}
                 GROUP BY re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
-                         re.product, re.reason_label, re.location_label, re.rejected_at
+                         re.product, re.reason_label, re.location_label, re.rejected_at,
+                         re.source_type, re.source_external_key, aw.machine, aw.work_type, aw.registration_point
                 ORDER BY re.rejected_at DESC, re.id DESC
                 """,
                 reject_date_params,
@@ -18063,7 +19432,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
             per_piece_sqft = dimensions_square_feet(row_value(row, "dimensions", ""))
             sqft = per_piece_sqft * qty
-            machine = str(row_value(row, "location_label", "") or "Unknown machine").strip() or "Unknown machine"
+            machine = str(row_value(row, "resolved_machine", "") or row_value(row, "location_label", "") or "Unknown machine").strip() or "Unknown machine"
             reason = str(row_value(row, "reason_label", "") or "Unspecified reason").strip() or "Unspecified reason"
 
             add_breakage(internal_rejects, qty, sqft, rate, event_count=1)

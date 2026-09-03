@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "478"
-# Schema version 11 matches the maintained migration registry. Frontend-only
-# releases advance APPLICATION_VERSION without changing the schema version.
-CURRENT_SCHEMA_VERSION = 11
+APPLICATION_VERSION = "499"
+# Schema version 16 adds durable A+W cutting-generation history so Batch,
+# Optimization, and post-reject physical cutting progress survive resyncs.
+CURRENT_SCHEMA_VERSION = 16
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -49,7 +49,11 @@ TABLE_DESCRIPTIONS = {
     "machine_events": "Append-only machine/scanner production events.",
     "reject_reasons": "Admin-managed internal reject reason choices.",
     "reject_locations": "Admin-managed internal reject break-location choices.",
-    "reject_events": "Append-only internal reject history and process resets.",
+    "reject_events": "Internal reject history from scanner actions and mirrored A+W breakage events.",
+    "reject_value_mappings": "Admin display overrides for stable A+W reject reason/location codes.",
+    "aw_reject_events": "Logical A+W breakage events grouped across BOM-level PROD_BREAKAGE rows.",
+    "aw_reject_source_rows": "Raw A+W PROD_BREAKAGE rows keyed by immutable external ROWID.",
+    "aw_cutting_generations": "A+W production batch/optimization generations used for Cutting progress and label context.",
     "packing_list_prints": "Immutable snapshots of rack packing lists when printed.",
     "manual_delivery_entries": "Audit inventory of orders manually added to delivery lists.",
     "superseded_order_reviews": "Admin-reviewed A+W order replacement candidates and exact removal decisions.",
@@ -78,7 +82,10 @@ REQUIRED_COLUMNS = {
     "line_update_notices": {"id", "line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash", "snapshot_json", "created_at"},
     "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty", "barcode", "order_no", "item_no", "metadata_json", "created_at_utc"},
-    "reject_events": {"id", "delivery_date", "order_no", "item_no", "qty", "reason_label", "location_label", "rejected_at", "rejected_by"},
+    "reject_events": {"id", "delivery_date", "order_no", "item_no", "qty", "reason_label", "location_label", "rejected_at", "rejected_by", "source_type", "source_external_key", "source_reason_code", "source_location_code", "manual_override_json"},
+    "aw_reject_events": {"event_key", "order_no", "item_no", "breakage_date", "quantity", "reason_code", "reason_label", "location_code", "location_label", "source_row_count", "first_seen_at", "last_seen_at"},
+    "aw_reject_source_rows": {"aw_row_id", "event_key", "order_no", "item_no", "bom_id", "key_index", "quantity", "breakage_date", "reason_code", "location_code", "synced_at"},
+    "aw_cutting_generations": {"order_no", "item_no", "key_index", "batch_job_number", "batch_status_code", "optimization_number", "optimization_status_code", "cutting_booking_at", "weight", "surface_area", "source_payload_json", "synced_at"},
     "packing_list_prints": {"id", "rack_code", "delivery_date", "printed_at", "printed_by", "snapshot_json"},
     "manual_delivery_entries": {"id", "delivery_date", "order_no", "item_no", "route", "manual_only", "protect_from_aw_import", "created_at"},
     "superseded_order_reviews": {
@@ -97,6 +104,9 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "scanners": {"scanner_code"},
     "line_update_notices": {"line_item_id", "list_id", "delivery_date", "change_type", "change_token", "source_hash"},
     "reject_events": {"order_no", "item_no", "delivery_date"},
+    "aw_reject_events": {"event_key", "order_no", "item_no", "original_job_number", "replacement_job_number"},
+    "aw_reject_source_rows": {"aw_row_id", "event_key", "order_no", "item_no", "original_job_number", "replacement_job_number"},
+    "aw_cutting_generations": {"order_no", "item_no", "batch_job_number"},
     "packing_list_prints": {"rack_code", "delivery_date"},
     "manual_delivery_entries": {"order_no", "item_no", "delivery_date", "route"},
     "superseded_order_reviews": {"candidate_key", "delivery_date", "original_order_no", "replacement_order_no", "status", "source_fingerprint"},
@@ -137,6 +147,12 @@ INDEX_DESCRIPTIONS = {
     "idx_line_update_receipts_user": "Per-user review state for update lines.",
     "idx_reject_events_date_time": "Reject history grouped by delivery date and event time.",
     "idx_reject_events_order_item": "Reject lookup by order and item.",
+    "idx_aw_reject_events_order_item_time": "A+W reject history by order/item without BOM fan-out.",
+    "idx_aw_cutting_order_item_generation_v498": "Newest A+W physical cutting generation by Order/Item and remake key.",
+    "idx_aw_cutting_batch_v498": "A+W Batch/Optimization lookup for cutting history and label context.",
+    "idx_aw_reject_events_time": "Recent logical A+W reject events by breakage time.",
+    "idx_aw_reject_source_rows_event": "Raw A+W breakage rows belonging to one logical event.",
+    "idx_aw_reject_source_rows_time": "Raw A+W breakage synchronization by source breakage time.",
     "idx_packing_list_prints_time": "Packing-list print history newest first.",
     "idx_manual_delivery_entries_date": "Manual delivery-list entries by delivery date.",
     "idx_machine_events_machine_time": "Machine event timeline.",
@@ -155,6 +171,8 @@ JSON_COLUMNS = {
     "scanners": {"metadata_json"},
     "machine_events": {"metadata_json"},
     "reject_events": {"affected_list_ids_json"},
+    "aw_reject_events": {"source_payload_json"},
+    "aw_reject_source_rows": {"source_payload_json"},
     "packing_list_prints": {"snapshot_json"},
     "manual_delivery_entries": {"target_list_ids_json"},
     "line_update_notices": {"snapshot_json"},
@@ -175,6 +193,8 @@ TIMESTAMP_COLUMNS = {
     "line_update_notices": {"created_at"},
     "line_update_receipts": {"seen_at"},
     "reject_events": {"rejected_at"},
+    "aw_reject_events": {"breakage_date", "source_last_changed_at", "first_seen_at", "last_seen_at"},
+    "aw_reject_source_rows": {"breakage_date", "last_changed_at", "synced_at"},
     "packing_list_prints": {"printed_at"},
     "manual_delivery_entries": {"created_at"},
     "machine_events": {"created_at_utc"},

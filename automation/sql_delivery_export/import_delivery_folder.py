@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from collections import Counter
 import argparse
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
+import math
 import os
 import re
 import sqlite3
@@ -63,6 +65,20 @@ def parse_args() -> argparse.Namespace:
             "Optional JSON request for SQL synchronization. The request contains targetDates "
             "to verify and forceImportDates that must pass through the maintained importer."
         ),
+    )
+    parser.add_argument(
+        "--direct-payload-path",
+        default="",
+        help=(
+            "Optional JSON envelope containing normalized A+W SQL row payloads. When present, "
+            "SQL synchronization reconciles these rows directly instead of reparsing XLSX files."
+        ),
+    )
+    parser.add_argument(
+        "--reject-only",
+        choices=("true", "false"),
+        default="false",
+        help="Synchronize the supplied A+W reject payload without reconciling delivery-list workbooks.",
     )
     parser.add_argument(
         "--expected-store-mode",
@@ -197,6 +213,101 @@ def run_with_database_retry(action: Any, label: str, attempts: int = 12) -> Any:
             time.sleep(delay)
             delay = min(delay * 1.7, 2.0)
     raise RuntimeError(f"Could not complete {label} after database-busy retries.")
+
+
+def source_numeric_int(value: Any) -> int:
+    """Convert A+W numeric values to the same whole-number behavior as XLSX export."""
+    try:
+        decimal_value = Decimal(str(value or 0))
+    except (InvalidOperation, ValueError):
+        decimal_value = Decimal(0)
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def format_source_dimension_units(value: Any, units_per_inch: int = 32) -> str:
+    """Format A+W source units exactly like the maintained workbook builder."""
+    units = max(int(units_per_inch or 32), 1)
+    total_units = source_numeric_int(value)
+    whole, remainder = divmod(total_units, units)
+    if remainder == 0:
+        return f'{whole}"'
+    divisor = math.gcd(remainder, units)
+    numerator = remainder // divisor
+    denominator = units // divisor
+    if whole:
+        return f'{whole} {numerator}/{denominator}"'
+    return f'{numerator}/{denominator}"'
+
+
+def format_source_dimensions(width_units: Any, height_units: Any, units_per_inch: int = 32) -> str:
+    """Return the scanner-visible dimensions for one direct A+W SQL row."""
+    return (
+        f"{format_source_dimension_units(width_units, units_per_inch)} x "
+        f"{format_source_dimension_units(height_units, units_per_inch)}"
+    )
+
+
+def scanner_payload_from_sql_export(payload: dict[str, Any]) -> dict[str, Any]:
+    """Convert the SQL exporter's canonical rows directly into scanner import items.
+
+    The item ``id`` deliberately ends in the immutable A+W source Order/Item pair.
+    ``backend.store.import_order_item_key`` uses that suffix when applying durable
+    manual overrides and superseded-order decisions, so a visible Order/Item edit
+    remains linked to its original A+W row just as it does with hidden XLSX Y/Z cells.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Direct A+W payload must be a JSON object")
+    delivery_date = str(payload.get("deliveryDate") or "").strip()
+    if not delivery_date:
+        raise ValueError("Direct A+W payload is missing deliveryDate")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"Direct A+W payload for {delivery_date} has no source rows")
+
+    units_per_inch = max(source_numeric_int(payload.get("dimensionUnitsPerInch") or 32), 1)
+    items: list[dict[str, Any]] = []
+    for index, source in enumerate(rows, start=1):
+        if not isinstance(source, dict):
+            raise ValueError(f"Direct A+W row {index} for {delivery_date} is not an object")
+        source_order = source_numeric_int(source.get("sourceOrder") or source.get("order"))
+        source_item = source_numeric_int(source.get("sourceItem") or source.get("item"))
+        visible_order = source_numeric_int(source.get("order"))
+        visible_item = source_numeric_int(source.get("item"))
+        quantity = max(source_numeric_int(source.get("quantity")), 0)
+        if source_order <= 0 or source_item <= 0 or visible_order <= 0 or visible_item <= 0:
+            raise ValueError(
+                f"Direct A+W row {index} for {delivery_date} is missing a valid Order Nr. / Item Nr."
+            )
+        dimensions_override = str(source.get("dimensionsOverride") or "").strip()
+        remake_text = str(source.get("remake") or "").strip()
+        items.append(
+            {
+                "id": f"aw-sql:{source_order}:{str(source_item).zfill(3)}",
+                "order": str(visible_order),
+                "item": str(visible_item).zfill(3),
+                "qty": quantity,
+                "dimensions": dimensions_override
+                or format_source_dimensions(
+                    source.get("widthUnits"),
+                    source.get("heightUnits"),
+                    units_per_inch,
+                ),
+                "customer": str(source.get("customer") or "").strip(),
+                "route": str(source.get("route") or "").strip(),
+                "sourceRoute": str(source.get("route") or "").strip(),
+                "job": str(source.get("job") or "").strip(),
+                "product": str(source.get("product") or "").strip(),
+                "processState": "External Remake" if remake_text.upper() == "RM" else "",
+                "queueState": remake_text,
+                "sourceRow": index,
+            }
+        )
+
+    return {
+        "deliveryDate": delivery_date,
+        "sourceName": str(payload.get("sourceName") or f"A+W SQL {delivery_date}"),
+        "items": items,
+    }
 
 
 def delivery_date_from_name(value: Any) -> str:
@@ -938,6 +1049,303 @@ def import_selected_workbook(
     )
 
 
+def import_selected_sql_payload(
+    store: Any,
+    payload: dict[str, Any],
+    user: str,
+    source_name: str,
+    source_path: str,
+    source_hash: str,
+    allow_source_removals: bool = True,
+    verified_excluded_order_items: list[dict[str, Any]] | None = None,
+    run_id: str = "",
+    run_started_at: str = "",
+) -> dict[str, Any]:
+    """Import one direct A+W payload through the maintained scanner rules."""
+    delivery_date = str(payload.get("deliveryDate") or "")
+    progress(f"Previewing direct A+W SQL payload for delivery date {delivery_date or 'unknown'}.")
+    preview = store.preview_import(payload)
+    if not bool(preview.get("valid")):
+        errors = [str(value) for value in (preview.get("errors") or []) if str(value).strip()]
+        raise ValueError("; ".join(errors) or f"Direct A+W payload for {delivery_date} failed validation.")
+
+    progress(
+        f"Importing direct A+W SQL payload for {delivery_date} through maintained store rules "
+        f"(allowSourceRemovals={bool(allow_source_removals)})."
+    )
+    result = store.import_delivery_list(
+        {
+            "payload": payload,
+            "fileName": source_name,
+            "sourcePath": source_path,
+            "sourceHash": source_hash,
+            "importKind": "aw_sql_direct_sync",
+            "allowSourceRemovals": bool(allow_source_removals),
+            "verifiedExcludedOrderItems": list(verified_excluded_order_items or []),
+            "runId": str(run_id or ""),
+            "runStartedAt": str(run_started_at or ""),
+            "user": user,
+        }
+    )
+    changed_list_ids = [
+        str(value)
+        for value in (result.get("changedListIds") or result.get("listIds") or [])
+        if str(value).strip()
+    ]
+    stage_summaries = merge_live_stage_totals(
+        store,
+        [
+            dict(value)
+            for value in (result.get("stageSummaries") or [])
+            if isinstance(value, dict)
+        ],
+    )
+    duplicate_manual_line_count = sum(
+        int_value(value.get("duplicateManualLineCount")) for value in stage_summaries
+    )
+    duplicate_manual_piece_qty = sum(
+        int_value(value.get("duplicateManualPieceQty")) for value in stage_summaries
+    )
+    return file_result(
+        {
+            "fileName": source_name,
+            "deliveryDate": delivery_date,
+            "rowCount": int_value(preview.get("rowCount")),
+            "totalQty": int_value(preview.get("totalQty")),
+            "createdCount": int_value(result.get("createdCount")),
+            "updatedCount": int_value(result.get("updatedCount")),
+            "reactivatedCount": int_value(result.get("reactivatedCount")),
+            "newPieceQty": int_value(result.get("newPieceQty")),
+            "updatedPieceQty": int_value(result.get("updatedPieceQty")),
+            "addedPieceQty": int_value(result.get("addedPieceQty")),
+            "changedPieceQty": int_value(result.get("changedPieceQty")),
+            "removedLineCount": int_value(result.get("removedLineCount")),
+            "removedPieceQty": int_value(result.get("removedPieceQty")),
+            "duplicateManualLineCount": duplicate_manual_line_count,
+            "duplicateManualPieceQty": duplicate_manual_piece_qty,
+            "changedListIds": changed_list_ids,
+            "reactivatedListIds": result.get("reactivatedListIds") or [],
+            "stageSummaries": stage_summaries,
+        },
+        "updated",
+    )
+
+
+def read_direct_payload_request(path_text: str) -> dict[str, Any]:
+    """Read the transient, credential-free A+W SQL payload envelope."""
+    if not path_text:
+        return {}
+    path = Path(path_text).expanduser()
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError("Direct A+W payload request must be a JSON object")
+    return payload
+
+
+def direct_sql_sync(
+    store: Any,
+    folder: Path,
+    target_dates: list[str],
+    force_import_dates: set[str],
+    user: str,
+    payload_envelopes: list[dict[str, Any]],
+    list_builder: Any,
+    allow_source_removals: bool = True,
+    verified_excluded_order_items: list[dict[str, Any]] | None = None,
+    run_id: str = "",
+    run_started_at: str = "",
+) -> dict[str, Any]:
+    """Reconcile live A+W SQL rows directly with scanner stages.
+
+    XLSX publishing may still be enabled for operators and troubleshooting, but
+    this path never reparses that workbook. The SQL rows themselves are the
+    authoritative synchronization input and pass through the same scanner
+    preview/import, drift checks, stage preservation, and audit logic.
+    """
+    clean_dates = sorted({str(value or "").strip() for value in target_dates if str(value or "").strip()})
+    if not clean_dates:
+        return summary_from_files([], folder, "", "")
+
+    envelopes_by_date: dict[str, dict[str, Any]] = {}
+    for envelope in payload_envelopes or []:
+        if not isinstance(envelope, dict):
+            continue
+        raw_payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+        delivery_date = str(raw_payload.get("deliveryDate") or "").strip()
+        if delivery_date:
+            envelopes_by_date[delivery_date] = dict(envelope)
+
+    verified_excluded_order_items = verified_excluded_order_items or []
+    existing_ids = current_list_ids(store)
+    files: list[dict[str, Any]] = []
+    recovered_dates: set[str] = set()
+
+    progress(
+        "Direct A+W SQL sync starting for "
+        f"{len(clean_dates)} date(s): {', '.join(clean_dates)}. "
+        f"Payloads={len(envelopes_by_date)}, forced={', '.join(sorted(force_import_dates)) or 'none'}."
+    )
+
+    for delivery_date in clean_dates:
+        envelope = envelopes_by_date.get(delivery_date)
+        if envelope is None:
+            files.append(
+                file_result(
+                    {
+                        "fileName": f"A+W SQL {delivery_date}",
+                        "deliveryDate": delivery_date,
+                        "errors": ["The SQL runner did not provide the expected direct A+W payload for this date."],
+                    },
+                    "failed",
+                )
+            )
+            continue
+
+        raw_payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+        source_name = str(envelope.get("sourceName") or f"A+W SQL {delivery_date}")
+        source_path = str(envelope.get("sourcePath") or f"aw-sql://delivery-list/{delivery_date}")
+        source_hash = str(envelope.get("sourceHash") or "")
+        try:
+            payload = scanner_payload_from_sql_export(raw_payload)
+            routed_payload = routed_payload_for_stage_expectations(store, payload)
+            expected_definitions = list_builder(routed_payload)
+            expected_ids = {
+                str(row[0]).strip()
+                for row in expected_definitions
+                if row and str(row[0]).strip()
+            }
+            missing_before = expected_ids.difference(existing_ids)
+            date_verified_entries = [
+                dict(entry)
+                for entry in verified_excluded_order_items
+                if isinstance(entry, dict)
+                and str(entry.get("deliveryDate") or "").strip() == delivery_date
+            ]
+            date_verified_keys = {
+                (
+                    str(entry.get("orderNumber") or "").strip(),
+                    str(entry.get("itemNumber") or "").strip().zfill(3),
+                )
+                for entry in date_verified_entries
+                if str(entry.get("orderNumber") or "").strip()
+                and str(entry.get("itemNumber") or "").strip()
+            }
+            source_data_drift, drift_list_ids = scanner_stage_drift(
+                store,
+                delivery_date,
+                expected_definitions,
+                allow_source_removals=allow_source_removals,
+                verified_excluded_order_items=date_verified_keys,
+            )
+            manually_forced = delivery_date in force_import_dates
+            must_import = manually_forced or bool(missing_before) or source_data_drift
+            progress(
+                f"Direct SQL drift decision for {delivery_date}: forced={manually_forced}, "
+                f"missingStages={len(missing_before)}, sourceDataDrift={source_data_drift}, "
+                f"driftLists={', '.join(drift_list_ids) or 'none'}, importRequired={must_import}."
+            )
+
+            if must_import:
+                imported_file = run_with_database_retry(
+                    lambda: import_selected_sql_payload(
+                        store,
+                        payload,
+                        user,
+                        source_name,
+                        source_path,
+                        source_hash,
+                        allow_source_removals=allow_source_removals,
+                        verified_excluded_order_items=date_verified_entries,
+                        run_id=run_id,
+                        run_started_at=run_started_at,
+                    ),
+                    f"directly importing A+W delivery date {delivery_date}",
+                )
+                existing_ids = current_list_ids(store)
+                missing_after = expected_ids.difference(existing_ids)
+                if missing_after:
+                    raise RuntimeError(
+                        f"Direct SQL import did not recreate {len(missing_after)} expected stage list(s) "
+                        f"for {delivery_date}: {', '.join(sorted(missing_after))}"
+                    )
+                post_import_drift, post_import_drift_ids = scanner_stage_drift(
+                    store,
+                    delivery_date,
+                    expected_definitions,
+                    allow_source_removals=allow_source_removals,
+                    verified_excluded_order_items=date_verified_keys,
+                )
+                if post_import_drift:
+                    raise RuntimeError(
+                        "Direct A+W reconciliation completed but source-row coverage is still mismatched for "
+                        f"{delivery_date}: {', '.join(post_import_drift_ids)}."
+                    )
+                imported_file["sourceCoverageVerified"] = True
+                reasons: list[str] = []
+                if manually_forced:
+                    reasons.append("Manual update forced direct A+W reconciliation.")
+                if missing_before:
+                    recovered_dates.add(delivery_date)
+                    reasons.append("Recovered missing scanner stage list(s).")
+                if source_data_drift:
+                    reasons.append("Reconciled scanner source-row drift in: " + ", ".join(drift_list_ids) + ".")
+                if not allow_source_removals:
+                    reasons.append(
+                        "Unverified source-row removals remained paused; only exact verified exclusions could be retired."
+                    )
+                if reasons:
+                    imported_file["reason"] = " ".join(reasons)
+                files.append(imported_file)
+            else:
+                live_stage_summaries = active_stage_summaries(store, expected_definitions)
+                items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+                files.append(
+                    file_result(
+                        {
+                            "fileName": source_name,
+                            "deliveryDate": delivery_date,
+                            "rowCount": len(items),
+                            "totalQty": sum(int_value(item.get("qty")) for item in items),
+                            "listIds": [
+                                str(summary.get("listId") or "")
+                                for summary in live_stage_summaries
+                                if str(summary.get("listId") or "")
+                            ],
+                            "stageSummaries": live_stage_summaries,
+                            "reason": "Direct A+W SQL rows and all active source-owned scanner rows match.",
+                        },
+                        "skipped",
+                    )
+                )
+        except Exception as exc:
+            progress(f"Direct A+W delivery date {delivery_date} failed: {type(exc).__name__}: {exc}")
+            files.append(
+                file_result(
+                    {
+                        "fileName": source_name,
+                        "deliveryDate": delivery_date,
+                        "errors": [str(exc)],
+                    },
+                    "failed",
+                )
+            )
+
+    summary = summary_from_files(
+        files,
+        folder,
+        clean_dates[0],
+        clean_dates[-1],
+        recovered_dates=recovered_dates,
+    )
+    summary["sourceMode"] = "aw_sql_direct"
+    progress(
+        "Direct A+W SQL sync complete: "
+        f"new={summary.get('newFileCount', 0)}, updated={summary.get('updatedFileCount', 0)}, "
+        f"unchanged={summary.get('noChangeFileCount', 0)}, failed={summary.get('failedFileCount', 0)}."
+    )
+    return summary
+
+
 def read_sync_request(path_text: str) -> dict[str, Any]:
     """Read and validate the optional targeted SQL synchronization request."""
     if not path_text:
@@ -1314,21 +1722,155 @@ def main() -> int:
                 "traceback": traceback.format_exc(),
             }
 
-        summary = selective_sql_sync(
-            store=store,
-            folder=folder,
-            target_dates=target_dates,
-            force_import_dates=force_dates,
-            user=args.user,
-            date_reader=delivery_date_from_source_header,
-            payload_loader=load_delivery_source_payload,
-            list_builder=build_delivery_lists,
-            source_hash_reader=source_file_hash,
-            allow_source_removals=allow_source_removals,
-            verified_excluded_order_items=verified_excluded_order_items,
-            run_id=args.run_id,
-            run_started_at=args.run_started_at,
-        )
+        direct_payload_request = read_direct_payload_request(args.direct_payload_path)
+        direct_payloads = [
+            dict(value)
+            for value in (direct_payload_request.get("payloads") or [])
+            if isinstance(value, dict)
+        ]
+        reject_sync_request = direct_payload_request.get("rejectSync")
+        cutting_sync_request = direct_payload_request.get("cuttingSync")
+        aw_reject_sync: dict[str, Any] = {"ok": True, "sourceRows": 0, "logicalEvents": 0}
+        aw_cutting_sync: dict[str, Any] = {"ok": True, "sourceRows": 0, "generations": 0}
+        if isinstance(reject_sync_request, dict):
+            reject_rows = [dict(value) for value in (reject_sync_request.get("rows") or []) if isinstance(value, dict)]
+            progress(f"Synchronizing {len(reject_rows)} raw A+W PROD_BREAKAGE row(s) into logical scanner reject events.")
+            reject_sync_started = time.perf_counter()
+            try:
+                aw_reject_sync = run_with_database_retry(
+                    lambda: store.sync_aw_reject_rows(
+                        reject_rows,
+                        user=args.user,
+                        source_window={
+                            "source": str(reject_sync_request.get("source") or "SYSADM.PROD_BREAKAGE"),
+                            "windowStart": str(reject_sync_request.get("windowStart") or ""),
+                            "windowEnd": str(reject_sync_request.get("windowEnd") or ""),
+                        },
+                    ),
+                    "synchronizing A+W reject history",
+                )
+                reject_sync_ms = int(round((time.perf_counter() - reject_sync_started) * 1000))
+                progress(
+                    "A+W reject synchronization finished: "
+                    f"logicalEvents={int_value(aw_reject_sync.get('logicalEvents'))}, "
+                    f"insertedSourceRows={int_value(aw_reject_sync.get('insertedSourceRows'))}, "
+                    f"updatedSourceRows={int_value(aw_reject_sync.get('updatedSourceRows'))}, "
+                    f"unchangedSourceRows={int_value(aw_reject_sync.get('unchangedSourceRows'))}, "
+                    f"skippedUnchanged={bool(aw_reject_sync.get('skippedUnchanged'))}, "
+                    f"durationMs={reject_sync_ms}."
+                )
+                aw_reject_sync["durationMs"] = reject_sync_ms
+            except Exception as exc:
+                aw_reject_sync = {
+                    "ok": False,
+                    "sourceRows": len(reject_rows),
+                    "logicalEvents": 0,
+                    "error": str(exc),
+                }
+                progress(f"WARNING: A+W reject synchronization failed but delivery-list reconciliation will continue: {exc}")
+                progress(
+                    "WARNING: A+W reject synchronization failed, but delivery-list reconciliation will continue: "
+                    + str(exc)
+                )
+        if isinstance(cutting_sync_request, dict):
+            cutting_rows = [dict(value) for value in (cutting_sync_request.get("rows") or []) if isinstance(value, dict)]
+            progress(f"Synchronizing {len(cutting_rows)} A+W production row(s) for Cutting progress and label context.")
+            cutting_sync_started = time.perf_counter()
+            try:
+                aw_cutting_sync = run_with_database_retry(
+                    lambda: store.sync_aw_cutting_rows(
+                        cutting_rows,
+                        user=args.user,
+                        source_window={
+                            "source": str(cutting_sync_request.get("source") or "SYSADM.PROD_JOBITEM"),
+                            "orderCount": int_value(cutting_sync_request.get("orderCount")),
+                        },
+                    ),
+                    "synchronizing A+W Cutting progress",
+                )
+                cutting_sync_ms = int(round((time.perf_counter() - cutting_sync_started) * 1000))
+                aw_cutting_sync["durationMs"] = cutting_sync_ms
+                progress(
+                    "A+W Cutting synchronization finished: "
+                    f"generations={int_value(aw_cutting_sync.get('generations'))}, "
+                    f"inserted={int_value(aw_cutting_sync.get('inserted'))}, "
+                    f"updated={int_value(aw_cutting_sync.get('updated'))}, "
+                    f"unchanged={int_value(aw_cutting_sync.get('unchanged'))}, "
+                    f"durationMs={cutting_sync_ms}."
+                )
+            except Exception as exc:
+                aw_cutting_sync = {
+                    "ok": False,
+                    "sourceRows": len(cutting_rows),
+                    "generations": 0,
+                    "error": str(exc),
+                }
+                progress(f"WARNING: A+W Cutting synchronization failed but delivery-list reconciliation will continue: {exc}")
+
+        if args.reject_only == "true":
+            progress("Reject-only mode requested; delivery-list reconciliation is intentionally skipped.")
+            summary = summary_from_files([], folder, args.date_from, args.date_to, active_list_id="")
+        elif direct_payloads:
+            progress(
+                f"Using {len(direct_payloads)} direct A+W SQL payload(s); generated workbooks are fallback/export artifacts only."
+            )
+            summary = direct_sql_sync(
+                store=store,
+                folder=folder,
+                target_dates=target_dates,
+                force_import_dates=force_dates,
+                user=args.user,
+                payload_envelopes=direct_payloads,
+                list_builder=build_delivery_lists,
+                allow_source_removals=allow_source_removals,
+                verified_excluded_order_items=verified_excluded_order_items,
+                run_id=args.run_id,
+                run_started_at=args.run_started_at,
+            )
+        else:
+            progress(
+                "No direct SQL payload envelope was supplied; retaining workbook-authoritative selective sync for compatibility."
+            )
+            summary = selective_sql_sync(
+                store=store,
+                folder=folder,
+                target_dates=target_dates,
+                force_import_dates=force_dates,
+                user=args.user,
+                date_reader=delivery_date_from_source_header,
+                payload_loader=load_delivery_source_payload,
+                list_builder=build_delivery_lists,
+                source_hash_reader=source_file_hash,
+                allow_source_removals=allow_source_removals,
+                verified_excluded_order_items=verified_excluded_order_items,
+                run_id=args.run_id,
+                run_started_at=args.run_started_at,
+            )
+        if isinstance(reject_sync_request, dict):
+            # Reject rows are synchronized before delivery reconciliation so
+            # existing orders reset immediately. A brand-new order may not have
+            # scanner lines yet at that point, so retry only pending/missing A+W
+            # mirrors after the delivery import has created its stage copies.
+            try:
+                post_import_rejects = run_with_database_retry(
+                    lambda: store.ensure_aw_internal_reject_mirrors(),
+                    "applying pending A+W reject operational resets after delivery import",
+                )
+                aw_reject_sync["postImportReconciliation"] = post_import_rejects
+                progress(
+                    "Post-import A+W reject reconciliation finished: "
+                    f"operationalRollbacks={int_value(post_import_rejects.get('operationalRollbacks'))}, "
+                    f"scanQtyReduced={int_value(post_import_rejects.get('operationalScanQtyReduced'))}, "
+                    f"pending={int_value(post_import_rejects.get('pendingOperationalRollbacks'))}."
+                )
+            except Exception as exc:
+                aw_reject_sync["postImportReconciliation"] = {"ok": False, "error": str(exc)}
+                progress(
+                    "WARNING: pending A+W reject reset reconciliation failed after delivery import; "
+                    "delivery-list reconciliation remains complete: " + str(exc)
+                )
+        summary["awRejectSync"] = aw_reject_sync
+        summary["awCuttingSync"] = aw_cutting_sync
         summary["supersededOrderReview"] = candidate_sync
         summary["pendingSupersededOrderReviews"] = int_value(
             candidate_sync.get("pendingSupersededOrderReviews")

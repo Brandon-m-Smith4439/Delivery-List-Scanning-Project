@@ -89,5 +89,21 @@
     "Mode": "sql-export-and-import",
     "ScheduleEnabled": false,
     "AllowWebGuiControl": true
+  },
+  "RejectSync": {
+    "Enabled": true,
+    "IncrementalPastDays": 30,
+    "FullPastDays": 365
+  },
+  "ProductionSync": {
+    "Enabled": true,
+    "ScheduledEnabled": true,
+    "IncludeCuttingBookings": true,
+    "CuttingBookingLookbackDays": 120,
+    "QueryBatchSize": 60,
+    "QueryTimeoutSeconds": 75,
+    "GenerationHistoryDepth": 4,
+    "CrystalReportFile": "Prodman_CuttingLabel_Optimisation.rpt",
+    "CrystalReportPrintPointId": 846
   }
 }

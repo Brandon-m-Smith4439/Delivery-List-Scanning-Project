@@ -17,6 +17,7 @@ import stat as stat_module
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -86,13 +87,17 @@ class ProductionFileService:
         }
         self._cache: dict[str, tuple[float, list[ProductionAsset]]] = {}
         self._asset_lookup: dict[str, ProductionAsset] = {}
+        # v0.485: once an exact Denver .egl is observed it remains durable fabrication
+        # evidence even if the production share later deletes/archives the live file.
+        # Historical entries are evidence-only and are never exposed as openable assets.
+        self._egl_history: dict[str, tuple[ProductionAsset, float]] = {}
         self._availability_cache: tuple[float, dict[str, bool]] | None = None
         self._availability_errors: dict[str, str] = {}
         # v0.476: resolved production roots are learned only by background/local
         # index work. Settings reads this cache instead of probing mapped shares
         # on the request thread.
         self._resolved_roots: dict[str, str] = {}
-        self._fabrication_cache: dict[tuple[str, str, str, bool], tuple[float, dict[str, Any]]] = {}
+        self._fabrication_cache: dict[tuple[str, str, str, bool, str], tuple[float, dict[str, Any]]] = {}
         self._machine_text_cache: dict[str, tuple[float, str]] = {}
         # v0.474: PDF page assignments are parsed lazily per requested order.
         # The share index itself stays metadata-only so hundreds of recent sketches
@@ -147,6 +152,7 @@ class ProductionFileService:
             lookback_days = max(int(self.lookback_days or 7), 1)
         with self._lock:
             roots_changed = any(str(next_roots[kind]).casefold() != str(self.roots[kind]).casefold() for kind in self.roots)
+            program_root_changed = str(next_roots["program"]).casefold() != str(self.roots["program"]).casefold()
             terms_changed = any(next_terms.get(machine, []) != self.machine_terms.get(machine, []) for machine in next_terms)
             colors_changed = any(next_colors.get(machine) != self.machine_colors.get(machine) for machine in next_colors)
             lookback_changed = lookback_days != self.lookback_days
@@ -160,6 +166,8 @@ class ProductionFileService:
                 self.roots = next_roots
                 self._cache.clear()
                 self._asset_lookup.clear()
+                if program_root_changed:
+                    self._egl_history.clear()
                 self._availability_cache = None
                 self._availability_errors.clear()
                 self._resolved_roots.clear()
@@ -255,6 +263,17 @@ class ProductionFileService:
         saved_roots = payload.get("roots") if isinstance(payload.get("roots"), dict) else {}
         saved_assets = payload.get("assets") if isinstance(payload.get("assets"), dict) else {}
         indexed_at = float(payload.get("indexedAt") or 0)
+        saved_egl_history = payload.get("eglHistory") if isinstance(payload.get("eglHistory"), list) else []
+        saved_program_root = str(saved_roots.get("program") or "")
+        if saved_program_root.casefold() == str(self.roots.get("program") or "").casefold():
+            for row in saved_egl_history:
+                if not isinstance(row, dict):
+                    continue
+                asset = self._deserialize_asset("program", row)
+                if not asset or asset.extension != ".egl":
+                    continue
+                last_seen = float(row.get("lastSeenAt") or indexed_at or asset.modified_at or 0)
+                self._egl_history[asset.asset_id] = (asset, last_seen)
         for kind, root in self.roots.items():
             if not self._is_network_root(root):
                 continue
@@ -305,7 +324,7 @@ class ProductionFileService:
             return
         with self._lock:
             payload = {
-                "version": 3,
+                "version": 4,
                 "indexedAt": time.time(),
                 "lookbackDays": int(self.lookback_days),
                 "roots": {kind: str(root) for kind, root in self.roots.items()},
@@ -314,6 +333,10 @@ class ProductionFileService:
                     kind: [self._serialize_asset(asset) for asset in self._cache.get(kind, (0, []))[1]]
                     for kind in self.roots
                 },
+                "eglHistory": [
+                    {**self._serialize_asset(asset), "lastSeenAt": float(last_seen)}
+                    for asset, last_seen in self._egl_history.values()
+                ],
                 "sketchPages": [
                     {
                         "assetId": asset_id,
@@ -483,6 +506,10 @@ class ProductionFileService:
     def _replace_kind_cache(self, kind: str, assets: list[ProductionAsset], available: bool) -> None:
         now = time.time()
         with self._lock:
+            if kind == "program":
+                for asset in assets:
+                    if asset.extension == ".egl":
+                        self._egl_history[asset.asset_id] = (asset, now)
             self._cache[kind] = (now, assets)
             prefix = f"{kind}-"
             for asset_id in [key for key in self._asset_lookup if key.startswith(prefix)]:
@@ -540,6 +567,7 @@ class ProductionFileService:
                 "indexedAt": max((cached[0] for cached in self._cache.values()), default=0),
                 "indexPath": str(self._index_path),
                 "lookbackDays": int(self.lookback_days),
+                "historicalEglCount": len(self._egl_history),
                 "errors": dict(self._availability_errors),
                 "resolvedRoots": {kind: self._resolved_roots.get(kind, str(root)) for kind, root in self.roots.items()},
             }
@@ -1026,6 +1054,72 @@ class ProductionFileService:
             "sketchMatched": False,
         }
 
+    def _historical_egl_match(
+        self,
+        order: Any,
+        item: Any = "",
+        job: Any = "",
+        *,
+        evidence_cutoff: float = 0.0,
+    ) -> tuple[ProductionAsset, float] | None:
+        """Return the best previously observed exact Denver program for evidence only."""
+        require_item = bool(str(item or "").strip())
+        with self._lock:
+            rows = list(self._egl_history.values())
+        scored: list[tuple[int, float, float, ProductionAsset]] = []
+        for asset, last_seen in rows:
+            if not self._evidence_is_after(asset, evidence_cutoff):
+                continue
+            score = self._score(asset, order, item, job, require_item=require_item)
+            if score > 0:
+                scored.append((score, float(last_seen or 0), float(asset.modified_at or 0), asset))
+        if not scored:
+            return None
+        scored.sort(key=lambda row: (-row[0], -row[1], -row[2], row[3].relative.lower()))
+        _score_value, last_seen, _mtime, asset = scored[0]
+        return asset, last_seen
+
+    @staticmethod
+    def _evidence_cutoff_timestamp(value: Any) -> float:
+        """Normalize a scanner reject timestamp to a UTC epoch cutoff."""
+        text = str(value or "").strip()
+        if not text:
+            return 0.0
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return 0.0
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).timestamp()
+
+    @staticmethod
+    def _evidence_is_after(asset: ProductionAsset | None, cutoff: float) -> bool:
+        if asset is None:
+            return False
+        if cutoff <= 0:
+            return True
+        # An overwritten program receives a new filesystem mtime, so the same
+        # exact filename becomes valid evidence again once it changes after the
+        # reject. lastSeenAt alone is never sufficient because merely observing
+        # an old file after a reject must not make it look newly fabricated.
+        return float(asset.modified_at or 0) > cutoff
+
+    def invalidate_fabrication(self, order: Any = "", item: Any = "") -> None:
+        """Drop cached fabrication answers after reject state or evidence changes."""
+        order_token = _compact(order)
+        item_token = _compact(item)
+        with self._lock:
+            if not order_token and not item_token:
+                self._fabrication_cache.clear()
+                return
+            for key in list(self._fabrication_cache):
+                if order_token and key[0] != order_token:
+                    continue
+                if item_token and key[1] != item_token:
+                    continue
+                self._fabrication_cache.pop(key, None)
+
     def fabrication_status(
         self,
         order: Any,
@@ -1034,8 +1128,11 @@ class ProductionFileService:
         *,
         refresh_missing: bool = False,
         allow_content_read: bool = True,
+        evidence_after: Any = "",
     ) -> dict[str, Any]:
-        cache_key = (_compact(order), _compact(item), _compact(job), bool(allow_content_read))
+        evidence_after_text = str(evidence_after or "").strip()
+        evidence_cutoff = self._evidence_cutoff_timestamp(evidence_after_text)
+        cache_key = (_compact(order), _compact(item), _compact(job), bool(allow_content_read), evidence_after_text)
         now = time.monotonic()
         cached = self._fabrication_cache.get(cache_key)
         cache_is_fresh = bool(cached and now - cached[0] < self.cache_seconds)
@@ -1067,28 +1164,43 @@ class ProductionFileService:
             completed_wj = self.matches(
                 "completed_wj", order, item, job, limit=12, require_item=require_item, refresh=refresh_evidence
             )
-        denver_evidence = next((asset for asset in programs if asset.extension == ".egl"), None)
-        waterjet_evidence = next((asset for asset in completed_wj if asset.extension == ".nce"), None)
+        live_denver_candidates = [asset for asset in programs if asset.extension == ".egl"]
+        denver_evidence = next((asset for asset in live_denver_candidates if self._evidence_is_after(asset, evidence_cutoff)), None)
+        historical_denver = None if denver_evidence else self._historical_egl_match(
+            order, item, job, evidence_cutoff=evidence_cutoff
+        )
+        historical_denver_evidence = historical_denver[0] if historical_denver else None
+        historical_denver_last_seen = historical_denver[1] if historical_denver else 0
+        waterjet_evidence = next(
+            (asset for asset in completed_wj if asset.extension == ".nce" and self._evidence_is_after(asset, evidence_cutoff)),
+            None,
+        )
+        effective_denver_evidence = denver_evidence or historical_denver_evidence
+        stale_denver = next((asset for asset in live_denver_candidates if not self._evidence_is_after(asset, evidence_cutoff)), None)
+        stale_waterjet = next(
+            (asset for asset in completed_wj if asset.extension == ".nce" and not self._evidence_is_after(asset, evidence_cutoff)),
+            None,
+        )
 
         # The sketch is the assignment, but completed-file evidence is the
         # operational truth. If both machine evidence types exist for the exact
         # item, the newest completion wins; that reflects a rerun/machine change
         # instead of permanently preferring one machine type.
-        if denver_evidence and waterjet_evidence:
-            if float(waterjet_evidence.modified_at or 0) >= float(denver_evidence.modified_at or 0):
+        if effective_denver_evidence and waterjet_evidence:
+            if float(waterjet_evidence.modified_at or 0) >= float(effective_denver_evidence.modified_at or 0):
                 actual_machine, evidence = "Waterjet", waterjet_evidence
             else:
-                actual_machine, evidence = "Denver CNC", denver_evidence
-        elif assigned_machine == "Waterjet" and denver_evidence:
-            actual_machine, evidence = "Denver CNC", denver_evidence
+                actual_machine, evidence = "Denver CNC", effective_denver_evidence
+        elif assigned_machine == "Waterjet" and effective_denver_evidence:
+            actual_machine, evidence = "Denver CNC", effective_denver_evidence
         elif assigned_machine == "Denver CNC" and waterjet_evidence:
             actual_machine, evidence = "Waterjet", waterjet_evidence
         elif assigned_machine == "Denver CNC":
-            evidence = denver_evidence
+            evidence = effective_denver_evidence
         elif assigned_machine == "Waterjet":
             evidence = waterjet_evidence
-        elif denver_evidence:
-            actual_machine, evidence = "Denver CNC", denver_evidence
+        elif effective_denver_evidence:
+            actual_machine, evidence = "Denver CNC", effective_denver_evidence
         elif waterjet_evidence:
             actual_machine, evidence = "Waterjet", waterjet_evidence
 
@@ -1120,15 +1232,26 @@ class ProductionFileService:
             "fabricated": fabricated,
             "blockStaging": bool(assigned_machine and enforceable and fabricated is False),
             "label": label,
-            "evidence": evidence.public() if evidence else None,
+            "evidence": (
+                {**evidence.public(), "historical": True, "existsNow": False, "lastSeenAt": historical_denver_last_seen}
+                if evidence is historical_denver_evidence and historical_denver_evidence
+                else ({**evidence.public(), "historical": False, "existsNow": True} if evidence else None)
+            ),
             "availability": availability,
             "programs": [asset.public() for asset in programs],
             "completedWaterjet": [asset.public() for asset in completed_wj],
+            "evidenceAfter": evidence_after_text,
+            "evidenceResetRequired": bool(evidence_cutoff > 0),
+            "staleEvidence": (
+                {**stale_denver.public(), "reason": "Predates latest Internal Reject"}
+                if stale_denver
+                else ({**stale_waterjet.public(), "reason": "Predates latest Internal Reject"} if stale_waterjet else None)
+            ),
         }
         self._fabrication_cache[cache_key] = (now, result)
         return dict(result)
 
-    def item_assets(self, order: Any, item: Any = "", job: Any = "") -> dict[str, Any]:
+    def item_assets(self, order: Any, item: Any = "", job: Any = "", *, evidence_after: Any = "") -> dict[str, Any]:
         # Hardware lists are commonly order-level documents, but sketches and
         # programs are item-specific production records. Keep sibling item files
         # out of an item's Order Details card when an item number is available.
@@ -1140,7 +1263,7 @@ class ProductionFileService:
                 asset.public()
                 for asset in self.matches("program", order, item, job, limit=12, require_item=require_item)
             ],
-            "fabrication": self.fabrication_status(order, item, job),
+            "fabrication": self.fabrication_status(order, item, job, evidence_after=evidence_after),
         }
 
     def order_assets(self, order: Any, job: Any = "") -> dict[str, Any]:

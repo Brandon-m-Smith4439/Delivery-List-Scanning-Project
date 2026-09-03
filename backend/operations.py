@@ -388,9 +388,33 @@ class OperationsFeatureService:
             locations = con.execute(
                 "SELECT id, label, active, created_at FROM reject_locations WHERE active = 1 ORDER BY sort_order, label"
             ).fetchall()
+        with self.store.connect() as con:
+            historical_reasons = con.execute(
+                """
+                SELECT reason_label AS label, COUNT(*) AS event_count,
+                       SUM(CASE WHEN source_type='aw' THEN 1 ELSE 0 END) AS aw_event_count
+                FROM reject_events
+                WHERE TRIM(reason_label) <> ''
+                GROUP BY reason_label
+                ORDER BY event_count DESC, reason_label
+                """
+            ).fetchall()
+            historical_locations = con.execute(
+                """
+                SELECT location_label AS label, COUNT(*) AS event_count,
+                       SUM(CASE WHEN source_type='aw' THEN 1 ELSE 0 END) AS aw_event_count
+                FROM reject_events
+                WHERE TRIM(location_label) <> ''
+                GROUP BY location_label
+                ORDER BY event_count DESC, location_label
+                """
+            ).fetchall()
         return {
             "reasons": [dict(row) for row in reasons],
             "locations": [dict(row) for row in locations],
+            "historyReasons": [dict(row) for row in historical_reasons],
+            "historyLocations": [dict(row) for row in historical_locations],
+            "awMappings": self.store.list_reject_value_mappings(),
         }
 
     def upsert_reject_catalog(self, kind: str, label: str, username: str) -> dict[str, Any]:
@@ -469,6 +493,116 @@ class OperationsFeatureService:
             con.commit()
         return self.reject_catalog()
 
+    def update_aw_reject_mapping(self, kind: str, source_code: int, mapped_label: str, username: str) -> dict[str, Any]:
+        """Persist one code-based display override for all past/future A+W rejects."""
+        result = self.store.update_reject_value_mapping(kind, source_code, mapped_label, username)
+        return {**result, **self.reject_catalog()}
+
+    def bulk_relabel_rejects(self, kind: str, from_label: str, to_label: str, username: str) -> dict[str, Any]:
+        """Replace one reject label across historical records and future A+W codes.
+
+        This is intentionally a data-management operation, not a raw A+W write.
+        Matching A+W source codes receive scanner-side mappings so subsequent
+        synchronization keeps the replacement label.
+        """
+        self._require_sqlite()
+        clean_kind = str(kind or "").strip().lower()
+        if clean_kind not in {"reason", "location"}:
+            raise ValueError("Reject label type must be reason or location")
+        old_label = " ".join(str(from_label or "").split())[:160]
+        new_label = " ".join(str(to_label or "").split())[:160]
+        if not old_label or not new_label:
+            raise ValueError("Both the existing and replacement labels are required")
+        column = "reason_label" if clean_kind == "reason" else "location_label"
+        code_column = "source_reason_code" if clean_kind == "reason" else "source_location_code"
+        table = "reject_reasons" if clean_kind == "reason" else "reject_locations"
+        now = utc_now()
+        affected_count = 0
+        mapping_codes: set[int] = set()
+        with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            affected = con.execute(
+                f"SELECT id, delivery_date, order_no, item_no, source_type, {code_column}, manual_override_json FROM reject_events WHERE lower({column})=lower(?)",
+                (old_label,),
+            ).fetchall()
+            for row in affected:
+                overrides = {}
+                if str(row_value(row, "source_type", "scanner") or "scanner").lower() == "aw":
+                    code = as_int(row_value(row, code_column), 0)
+                    if code > 0:
+                        mapping_codes.add(code)
+                    try:
+                        overrides = json.loads(str(row_value(row, "manual_override_json", "{}") or "{}"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        overrides = {}
+                    if not isinstance(overrides, dict):
+                        overrides = {}
+                    override_key = "reason" if clean_kind == "reason" else "location"
+                    if str(overrides.get(override_key) or "").strip().lower() == old_label.lower():
+                        overrides[override_key] = new_label
+                con.execute(
+                    f"UPDATE reject_events SET {column}=?, manual_override_json=? WHERE id=?",
+                    (new_label, json.dumps(overrides, separators=(",", ":")) if overrides else str(row_value(row, "manual_override_json", "{}") or "{}"), int(row["id"])),
+                )
+                affected_count += 1
+
+            # Codes whose current raw A+W label matches the replaced display are
+            # also mapped, including codes that have not yet created mirror rows.
+            aw_column = "reason_code" if clean_kind == "reason" else "location_code"
+            aw_label_column = "reason_label" if clean_kind == "reason" else "location_label"
+            for row in con.execute(
+                f"SELECT DISTINCT {aw_column} AS source_code FROM aw_reject_events WHERE lower({aw_label_column})=lower(?)",
+                (old_label,),
+            ).fetchall():
+                code = as_int(row_value(row, "source_code"), 0)
+                if code > 0:
+                    mapping_codes.add(code)
+            for code in mapping_codes:
+                existing = con.execute(
+                    "SELECT source_label FROM reject_value_mappings WHERE source_system='aw' AND kind=? AND source_code=?",
+                    (clean_kind, code),
+                ).fetchone()
+                source_label = str(row_value(existing, "source_label", old_label) or old_label)
+                con.execute(
+                    """
+                    INSERT INTO reject_value_mappings (source_system, kind, source_code, source_label, mapped_label, updated_by, created_at, updated_at)
+                    VALUES ('aw', ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_system, kind, source_code) DO UPDATE SET mapped_label=excluded.mapped_label, updated_by=excluded.updated_by, updated_at=excluded.updated_at
+                    """,
+                    (clean_kind, code, source_label, new_label, username, now, now),
+                )
+
+            # Keep the floor-facing choice library aligned with the replacement.
+            source_catalog = con.execute(f"SELECT id FROM {table} WHERE active=1 AND lower(label)=lower(?)", (old_label,)).fetchone()
+            target_catalog = con.execute(f"SELECT id, active FROM {table} WHERE lower(label)=lower(?)", (new_label,)).fetchone()
+            if target_catalog:
+                con.execute(f"UPDATE {table} SET active=1, updated_at=? WHERE id=?", (now, int(target_catalog["id"])))
+                if source_catalog and int(source_catalog["id"]) != int(target_catalog["id"]):
+                    con.execute(f"UPDATE {table} SET active=0, updated_at=? WHERE id=?", (now, int(source_catalog["id"])))
+            elif source_catalog:
+                con.execute(f"UPDATE {table} SET label=?, updated_at=? WHERE id=?", (new_label, now, int(source_catalog["id"])))
+            else:
+                con.execute(
+                    f"INSERT INTO {table} (label, active, sort_order, created_by, created_at, updated_at) VALUES (?,1,999,?,?,?)",
+                    (new_label, username, now, now),
+                )
+
+            identities = {(str(row["delivery_date"]), str(row["order_no"]), str(row["item_no"])) for row in affected}
+            for delivery_date, order_no, item_no in identities:
+                self._sync_reject_line_summary(con, delivery_date, order_no, item_no)
+            self._audit(
+                con, "reject_catalog", clean_kind, "bulk_relabel_reject_history", username,
+                {"kind": clean_kind, "from": old_label, "to": new_label, "affectedEvents": affected_count, "awCodes": sorted(mapping_codes)},
+            )
+            con.commit()
+        return {
+            "ok": True,
+            "message": f"Updated {affected_count} historical reject event(s) from {old_label} to {new_label}.",
+            "affectedEvents": affected_count,
+            "awCodes": sorted(mapping_codes),
+            **self.reject_catalog(),
+        }
+
     def reject_matches(self, order_no: str, item_no: str) -> dict[str, Any]:
         self._require_sqlite()
         order = clean_order(order_no)
@@ -490,32 +624,165 @@ class OperationsFeatureService:
             ).fetchall()
         return {"matches": [dict(row) for row in rows]}
 
-    def list_rejects(self, date_from: str = "", date_to: str = "", query: str = "", limit: int = 500) -> dict[str, Any]:
+    def list_rejects(
+        self,
+        date_from: str = "",
+        date_to: str = "",
+        query: str = "",
+        limit: int = 50,
+        page: int = 1,
+        location: str = "",
+        reason: str = "",
+        rejected_by: str = "",
+    ) -> dict[str, Any]:
+        """Return one unified Internal Reject timeline, including A+W mirrors.
+
+        v0.487 keeps the date predicates index-friendly and enriches A+W-origin
+        rows from the preserved logical breakage event. Scanner-created rejects
+        keep the exact same public shape, while A+W rows additionally expose the
+        verified machine/work-center context used by Order Details and Statistics.
+
+        v0.489 makes the normal Rejects page a bounded, server-paged view. When
+        the browser does not explicitly request a range, only the current and
+        previous calendar week are queried. Older history remains available via
+        an explicit date range without making every page open scan all history.
+        """
         self._require_sqlite()
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if date_from:
-            clauses.append("substr(rejected_at, 1, 10) >= ?")
-            params.append(date_from)
-        if date_to:
-            clauses.append("substr(rejected_at, 1, 10) <= ?")
-            params.append(date_to)
+        base_clauses = ["1 = 1"]
+        base_params: list[Any] = []
+        clean_from = clean_text(date_from, 10)
+        clean_to = clean_text(date_to, 10)
+        if not clean_from and not clean_to:
+            today = date.today()
+            current_week_start = today - timedelta(days=today.weekday())
+            clean_from = (current_week_start - timedelta(days=7)).isoformat()
+            clean_to = (current_week_start + timedelta(days=6)).isoformat()
+        if clean_from:
+            base_clauses.append("re.rejected_at >= ?")
+            base_params.append(f"{clean_from}T00:00:00")
+        if clean_to:
+            try:
+                exclusive_to = (date.fromisoformat(clean_to) + timedelta(days=1)).isoformat()
+            except ValueError:
+                exclusive_to = clean_to
+            base_clauses.append("re.rejected_at < ?")
+            base_params.append(f"{exclusive_to}T00:00:00")
         if query:
             like = f"%{clean_text(query, 120)}%"
-            clauses.append("(order_no LIKE ? OR item_no LIKE ? OR customer LIKE ? OR reason_label LIKE ? OR location_label LIKE ?)")
-            params.extend([like, like, like, like, like])
-        params.append(max(1, min(int(limit or 500), 2000)))
+            base_clauses.append(
+                "(re.order_no LIKE ? OR re.item_no LIKE ? OR re.customer LIKE ? OR re.reason_label LIKE ? OR re.location_label LIKE ? OR COALESCE(aw.machine, '') LIKE ? OR COALESCE(aw.work_type, '') LIKE ?)"
+            )
+            base_params.extend([like, like, like, like, like, like, like])
+
+        clauses = list(base_clauses)
+        params = list(base_params)
+        clean_location = clean_text(location, 160)
+        clean_reason = clean_text(reason, 160)
+        clean_rejected_by = clean_text(rejected_by, 160)
+        if clean_location:
+            clauses.append("re.location_label = ?")
+            params.append(clean_location)
+        if clean_reason:
+            clauses.append("re.reason_label = ?")
+            params.append(clean_reason)
+        if clean_rejected_by:
+            clauses.append("re.rejected_by = ?")
+            params.append(clean_rejected_by)
+
+        page_size = max(10, min(int(limit or 50), 200))
+        page_number = max(1, int(page or 1))
+        offset = (page_number - 1) * page_size
+        from_sql = """
+            FROM reject_events re
+            LEFT JOIN aw_reject_events aw
+              ON re.source_type='aw' AND re.source_external_key=aw.event_key
+        """
         with self.store.connect() as con:
-            rows = con.execute(
+            total_count = int(
+                con.execute(
+                    f"SELECT COUNT(*) {from_sql} WHERE {' AND '.join(clauses)}",
+                    params,
+                ).fetchone()[0]
+                or 0
+            )
+            total_pages = max(1, (total_count + page_size - 1) // page_size)
+            if page_number > total_pages:
+                page_number = total_pages
+                offset = (page_number - 1) * page_size
+
+            summary = con.execute(
                 f"""
-                SELECT * FROM reject_events
+                SELECT COUNT(*) AS event_count,
+                       COALESCE(SUM(re.qty), 0) AS piece_count,
+                       COUNT(DISTINCT NULLIF(TRIM(re.location_label), '')) AS location_count,
+                       COUNT(DISTINCT NULLIF(TRIM(re.rejected_by), '')) AS user_count
+                {from_sql}
                 WHERE {' AND '.join(clauses)}
-                ORDER BY rejected_at DESC, id DESC
-                LIMIT ?
                 """,
                 params,
+            ).fetchone()
+
+            rows = con.execute(
+                f"""
+                SELECT re.*,
+                       COALESCE(aw.machine, '') AS aw_machine,
+                       COALESCE(aw.work_type, '') AS aw_work_type,
+                       COALESCE(aw.registration_point, '') AS aw_registration_point,
+                       COALESCE(aw.original_job_number, '') AS aw_original_job_number,
+                       COALESCE(aw.replacement_job_number, '') AS aw_replacement_job_number
+                {from_sql}
+                WHERE {' AND '.join(clauses)}
+                ORDER BY re.rejected_at DESC, re.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, page_size, offset),
             ).fetchall()
-        return {"rejects": [dict(row) for row in rows]}
+
+            # Facet values are intentionally scoped to the requested date/search
+            # window but not to the selected facet itself. This keeps filter
+            # choices stable while paging through the result set.
+            facet_locations = [
+                str(row[0] or "").strip()
+                for row in con.execute(
+                    f"SELECT DISTINCT re.location_label {from_sql} WHERE {' AND '.join(base_clauses)} AND TRIM(COALESCE(re.location_label, ''))<>'' ORDER BY re.location_label",
+                    base_params,
+                ).fetchall()
+            ]
+            facet_reasons = [
+                str(row[0] or "").strip()
+                for row in con.execute(
+                    f"SELECT DISTINCT re.reason_label {from_sql} WHERE {' AND '.join(base_clauses)} AND TRIM(COALESCE(re.reason_label, ''))<>'' ORDER BY re.reason_label",
+                    base_params,
+                ).fetchall()
+            ]
+            facet_users = [
+                str(row[0] or "").strip()
+                for row in con.execute(
+                    f"SELECT DISTINCT re.rejected_by {from_sql} WHERE {' AND '.join(base_clauses)} AND TRIM(COALESCE(re.rejected_by, ''))<>'' ORDER BY re.rejected_by",
+                    base_params,
+                ).fetchall()
+            ]
+
+        return {
+            "rejects": [dict(row) for row in rows],
+            "page": page_number,
+            "pageSize": page_size,
+            "totalCount": total_count,
+            "totalPages": total_pages,
+            "dateFrom": clean_from,
+            "dateTo": clean_to,
+            "summary": {
+                "eventCount": as_int(row_value(summary, "event_count"), 0),
+                "pieceCount": as_int(row_value(summary, "piece_count"), 0),
+                "locationCount": as_int(row_value(summary, "location_count"), 0),
+                "userCount": as_int(row_value(summary, "user_count"), 0),
+            },
+            "filterOptions": {
+                "locations": facet_locations,
+                "reasons": facet_reasons,
+                "users": facet_users,
+            },
+        }
 
     @staticmethod
     def _normalized_reject_timestamp(value: Any) -> str:
@@ -590,6 +857,22 @@ class OperationsFeatureService:
             if not row:
                 raise ValueError("Reject record was not found")
             before = dict(row)
+            source_type = str(row_value(row, "source_type", "scanner") or "scanner").strip().lower()
+            overrides: dict[str, Any] = {}
+            if source_type == "aw":
+                try:
+                    overrides = json.loads(str(row_value(row, "manual_override_json", "{}") or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    overrides = {}
+                if not isinstance(overrides, dict):
+                    overrides = {}
+                overrides.update({
+                    "qty": qty,
+                    "reason": reason,
+                    "location": location,
+                    "notes": notes,
+                    "rejectedAt": rejected_at,
+                })
             max_row = con.execute(
                 """
                 SELECT MAX(li.qty) AS max_qty
@@ -606,10 +889,11 @@ class OperationsFeatureService:
             con.execute(
                 """
                 UPDATE reject_events
-                SET qty = ?, reason_label = ?, location_label = ?, notes = ?, rejected_at = ?
+                SET qty = ?, reason_label = ?, location_label = ?, notes = ?, rejected_at = ?,
+                    manual_override_json = ?
                 WHERE id = ?
                 """,
-                (qty, reason, location, notes, rejected_at, reject_id),
+                (qty, reason, location, notes, rejected_at, json.dumps(overrides, separators=(",", ":")) if source_type == "aw" else str(row_value(row, "manual_override_json", "{}") or "{}"), reject_id),
             )
             summary = self._sync_reject_line_summary(
                 con,
@@ -637,9 +921,15 @@ class OperationsFeatureService:
                 },
             )
             con.commit()
+        service = getattr(self.store, "production_files", None)
+        if service is not None:
+            try:
+                service.invalidate_fabrication(str(row["order_no"]), str(row["item_no"]))
+            except Exception:
+                pass
         return {
             "ok": True,
-            "message": f"Internal reject {reject_id} was updated. The original scan, rack, and bay rollback was not changed.",
+            "message": f"Internal reject {reject_id} was updated. The original scan, rack, and bay rollback was not changed." + (" A+W source refreshes will preserve these event-specific edits." if source_type == "aw" else ""),
             **self.list_rejects(limit=1000),
         }
 
@@ -675,6 +965,12 @@ class OperationsFeatureService:
                 },
             )
             con.commit()
+        service = getattr(self.store, "production_files", None)
+        if service is not None:
+            try:
+                service.invalidate_fabrication(str(row["order_no"]), str(row["item_no"]))
+            except Exception:
+                pass
         return {
             "ok": True,
             "message": f"Internal reject {reject_id} was deleted. Historical scan, rack, and bay changes were left unchanged.",
@@ -779,7 +1075,13 @@ class OperationsFeatureService:
                         break
                     rack_qty = int(rack_row["qty"] or 0)
                     take = min(rack_qty, remaining)
+                    if take <= 0:
+                        continue
                     next_qty = rack_qty - take
+                    # Preserve the original positive quantity when the rack
+                    # allocation is fully removed.  rack_items uses status to
+                    # express removal and its schema deliberately rejects qty=0.
+                    stored_qty = next_qty if next_qty > 0 else rack_qty
                     con.execute(
                         """
                         UPDATE rack_items
@@ -789,7 +1091,7 @@ class OperationsFeatureService:
                             reason = ?, updated_at_utc = ?
                         WHERE id = ?
                         """,
-                        (next_qty, next_qty, next_qty, username, next_qty, rejected_at, "Internal reject", rejected_at, rack_row["id"]),
+                        (stored_qty, next_qty, next_qty, username, next_qty, rejected_at, "Internal reject", rejected_at, rack_row["id"]),
                     )
                     remaining -= take
 
@@ -890,6 +1192,12 @@ class OperationsFeatureService:
                     acknowledge_creator=False,
                 )
             con.commit()
+        service = getattr(self.store, "production_files", None)
+        if service is not None:
+            try:
+                service.invalidate_fabrication(order, item)
+            except Exception:
+                pass
         return {
             "ok": True,
             "rejectId": reject_id,

@@ -1,7 +1,70 @@
+## Website version 4 manual reject sync / Control Center recovery (v0.488)
+
+`RejectSyncOnly` is a maintained browser/manual action that runs the configured A+W reject query and persists Internal Reject mirrors without exporting or reconciling delivery lists. The explicit manual action can run even when scheduled reject synchronization is disabled. Normal `SqlExportAndImport` runs also persist the reject payload even when no delivery-list source dates are present. This removes the prior coupling between reject ingestion and delivery-list drift.
+
+Import History and `/latest-import` no longer request the full delivery-list catalog from their audit/status endpoints. Normal unfiltered Control Center browsing is bounded to 1,500 database rows plus 250 supplemental archives, cached where useful, and progressively renders 80 history rows; explicit searches/filters retain the deeper audit scan.
+
+The glass-label probe now follows the observed optimization output into `FS_POOL` families (`STSL*.ASC`, `STSD*.ASC`, `PRODBDAZ.000`) and writes outputs 15-18 for payload/module/object discovery.
+
+
+## Website version 4 reject reporting / automation performance (v0.487)
+
+A+W logical breakages mirror into the standard scanner `reject_events` timeline and therefore participate in the Rejects page and normal reject Statistics. The timeline keeps break location/cause while machine-breakage reporting prefers the uniquely verified A+W machine enrichment. Repeat reject windows use a no-write fast path when raw A+W ROWIDs/payloads, rollback markers, and Internal Reject mirrors are already current.
+
+Logs & Status now records the exact controller PowerShell command and the runner's exact Python subprocess command. While a browser-started run is active, live output is served from the controller's in-memory stream rather than rereading the entire growing log on every poll. Reject-sync progress includes unchanged row count, fast-path state, and `durationMs`.
+
+The glass-label probe now writes targeted files `08-order-label-controls.csv` through `14-print-pipeline-module-references.csv`. These follow the verified `PROD_JOBITEM.OPTIMIZATION -> PROD_OPTI_SEQUENCE` bridge and inspect label controls, optimization SAVEFILE metadata, plates, AWV label fields, print jobs, pool payloads, and print-related module definitions. A+W remains SELECT-only.
+
+## Website version 4 reject reset / refabrication behavior (v0.486)
+
+A synchronized A+W `PROD_BREAKAGE` event is an operational Internal Reject. The scanner applies its scan/rack/bay rollback once per preserved raw A+W `ROWID`; later source refreshes cannot replay it. If the reject arrives before its delivery order exists, the reset stays pending and the direct importer retries after delivery reconciliation.
+
+Fabrication completion is also reset by the latest Internal Reject. Existing Denver `.egl` and Waterjet `.nce` files that predate the reject remain visible as source/history but do not satisfy fabrication until a newer or overwritten completion file is observed.
+
+For optimization-generated glass-label discovery, run from the project root:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File ".\scripts\diagnostics\Probe-AWGlassLabels.ps1"
+```
+
+Use an Order/Item that has already been optimized and has labels available in A+W. Return the generated `AW-Glass-Label-Probe-*` folder for schema analysis before the scanner imports label data.
 <!-- File: automation/sql_delivery_export/README.md -->
 # Delivery List Automation Runtime v132
 
-This folder is installed to `C:\DeliveryListAutomation\Scripts` by either the central SQL setup or the v132 floor-folder setup. The setup does not replace the scanner database or generated delivery-list workbooks.
+## Website version 4 unified manual A+W sync / production query controls (v0.499)
+
+The maintained browser workflow exposes one complete manual command: **Sync A+W Directly**. A browser-started direct sync forces delivery reconciliation, A+W Internal Reject synchronization, and Batch/Optimization/Cutting enrichment together. The old `RejectSyncOnly` runner action remains accepted only for compatibility with older installed callers; it is no longer shown as a separate Run Manually card. Scheduled Direct A+W Sync can independently include/exclude Reject and Production enrichment through Automation Control Center settings.
+
+Production enrichment is bounded to order numbers already present in the direct delivery payload and is split into small configurable SQL batches. The query limits historical `PROD_JOBITEM` generations with `DENSE_RANK`, bounds positive Automatic Cutting bookings by a configurable lookback, pre-ranks `PROD_OPTI_SEQUENCE` and optimization state, uses `OPTION (RECOMPILE)`, and emits a live STEP before every SQL batch. A+W remains SELECT-only / `READ UNCOMMITTED`; production enrichment errors do not block delivery-list reconciliation.
+
+The verified Cutting Labels report remains Print Point 846 / `Prodman_CuttingLabel_Optimisation.rpt`. For pixel-accurate reconstruction, export a Screen preview from the Crystal viewer to PDF rather than clicking Execute.
+
+
+## Website version 4 A+W reject synchronization (v0.485)
+
+Central `SqlExportAndImport` runs query `SYSADM.PROD_BREAKAGE` read-only and mirror each logical A+W breakage into scanner **Internal Reject** history while retaining immutable A+W source rows separately. `PROD_BREAKAGE.ROWID` remains the raw external identity; same-event BOM rows collapse into `aw_reject_events`. `KA_REKLA_GRND` and `KA_REKLA_ORT` are re-read on every sync so new/renamed A+W labels are learned automatically, while optional scanner mappings stay keyed to the stable numeric codes. The reject actor/timeline enrichment comes from the nearest `FS_BOOK_HISTORY` row with `BOOK_TYPE = 1` for the same Order/Item inside a tightly bounded 60-second window, ranked first by matching A+W reason/cause codes, then Explicit origin, BOM identity, and timestamp proximity. This avoids falling back to mutable `PROD_BREAKAGE.LASTCHANGEUSER` when A+W commits the booking a few seconds away from `BREAKAGEDATE`. Machine text is retained only when the registration point maps to one unique A+W machine. The Automated Import **A+W Rejects** tab controls enablement and Normal/Full lookback windows. A+W is never written to, and reject-query/persistence failures remain non-blocking so normal delivery reconciliation continues.
+
+## Website version 4 direct A+W synchronization (v0.478)
+
+The authorized central workflow now keeps the queried A+W SQL rows as the
+authoritative scanner input. `Run-DeliveryListSqlAutomation.ps1` passes a
+credential-free transient payload to `import_delivery_folder.py`, which converts
+those rows into the same scanner item contract and sends them through the
+maintained preview/reconciliation path. The dated XLSX is still generated and
+published for troubleshooting, floor-computer folder imports, and manual export,
+but the central SQL import no longer reparses that workbook.
+
+The direct payload preserves immutable A+W Order/Item identity in each source ID,
+so existing manual overrides, approved superseded-order decisions, route rules,
+priority intake, scan/rack/bay preservation, import history, and source-removal
+safety continue to use the same scanner business rules. Import history records
+central direct runs as `aw_sql_direct_sync` and uses an `aw-sql://...` source path
+instead of pretending the workbook was the authoritative source.
+
+### A+W BDE / breakage diagnostic
+
+`scripts\diagnostics\Probe-AWBdeBreakage.ps1` remains available for SELECT-only troubleshooting or schema discovery. The live BFSMAIN contract is now verified and production synchronization does **not** depend on the earlier status-455 hypothesis: durable rejects come from `PROD_BREAKAGE.IS_BREAKAGE = 1`, timeline Reject bookings use `FS_BOOK_HISTORY.BOOK_TYPE = 1`, reason text comes from `KA_REKLA_GRND`, and breakage location/cause text comes from `KA_REKLA_ORT`.
+
 
 ## v132 floor-computer folder import setup
 
