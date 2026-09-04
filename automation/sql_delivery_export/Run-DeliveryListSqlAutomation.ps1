@@ -949,19 +949,20 @@ function Get-AwCuttingSyncPayload {
     }
 
     $orderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    # Keep direct-delivery Orders separate from the broader production coverage
+    # population. Crystal-label process enrichment is useful only for the active
+    # direct delivery payload and is considerably heavier than core Cutting state.
+    $directOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($envelope in @($DirectPayloads)) {
         $payload = Get-OptionalProperty -Object $envelope -Name "payload" -DefaultValue $null
         foreach ($row in @(Get-OptionalProperty -Object $payload -Name "rows" -DefaultValue @())) {
             $orderNumber = ([string](Get-OptionalProperty -Object $row -Name "order" -DefaultValue "")).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($orderNumber)) { [void]$orderSet.Add($orderNumber) }
+            if (-not [string]::IsNullOrWhiteSpace($orderNumber)) {
+                [void]$orderSet.Add($orderNumber)
+                [void]$directOrderSet.Add($orderNumber)
+            }
         }
     }
-    $orders = @($orderSet | Sort-Object)
-    if ($orders.Count -eq 0) {
-        Write-AutomationDebug -Message "A+W production sync skipped because the direct delivery payload contains no orders."
-        return $null
-    }
-
     $batchSize = [int](Get-OptionalProperty -Object $settings -Name "QueryBatchSize" -DefaultValue 60)
     $batchSize = [Math]::Max(10, [Math]::Min(150, $batchSize))
     $queryTimeout = [int](Get-OptionalProperty -Object $settings -Name "QueryTimeoutSeconds" -DefaultValue 75)
@@ -971,12 +972,73 @@ function Get-AwCuttingSyncPayload {
     $includeCutting = [bool](Get-OptionalProperty -Object $settings -Name "IncludeCuttingBookings" -DefaultValue $true)
     $generationHistoryDepth = [int](Get-OptionalProperty -Object $settings -Name "GenerationHistoryDepth" -DefaultValue 4)
     $generationHistoryDepth = [Math]::Max(1, [Math]::Min(12, $generationHistoryDepth))
+    $orderLookbackDays = [int](Get-OptionalProperty -Object $settings -Name "OrderLookbackDays" -DefaultValue 14)
+    $orderLookbackDays = [Math]::Max(1, [Math]::Min(90, $orderLookbackDays))
+
+    # v0.504: Cutting/label enrichment cannot be limited only to the delivery dates
+    # selected for this particular run. Order Details can remain active after its
+    # delivery date falls outside the normal two-day incremental window. Recover a
+    # small bounded set of recently delivered A+W order numbers so older active
+    # scanner orders (for example a pane cut several days ago) still receive their
+    # Batch/Optimization evidence without widening the full delivery import window.
+    $coverageConnection = New-SqlConnection -Config $Config
+    $coverageTable = New-Object System.Data.DataTable
+    try {
+        $coverageConnection.Open()
+        $coverageCommand = $coverageConnection.CreateCommand()
+        $coverageCommand.CommandTimeout = [Math]::Min($queryTimeout, 60)
+        $coverageCommand.CommandText = @"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT DISTINCT coverage.OrderNr
+FROM (
+    SELECT h.ID AS OrderNr
+    FROM SYSADM.BW_AUFTR_KOPF h
+    WHERE h.DATUM_LIEFER_PLAN >= DATEADD(day,-@OrderLookbackDays,CAST(GETDATE() AS date))
+      AND h.DATUM_LIEFER_PLAN < DATEADD(day,1,CAST(GETDATE() AS date))
+
+    UNION
+
+    SELECT ji.AUFNR AS OrderNr
+    FROM SYSADM.PROD_JOBITEM ji
+    INNER JOIN SYSADM.PROD_JOB j ON j.JOBNUMBER=ji.JOBNUMBER
+    WHERE COALESCE(j.LASTCHANGEDATE,j.CREATIONDATE) >= DATEADD(day,-@OrderLookbackDays,GETDATE())
+) coverage
+WHERE coverage.OrderNr IS NOT NULL;
+"@
+        $coverageParameter = $coverageCommand.Parameters.Add("@OrderLookbackDays", [System.Data.SqlDbType]::Int)
+        $coverageParameter.Value = $orderLookbackDays
+        $coverageAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($coverageCommand)
+        [void]$coverageAdapter.Fill($coverageTable)
+        $coverageAdapter.Dispose(); $coverageCommand.Dispose()
+        $beforeCoverage = $orderSet.Count
+        foreach ($coverageRow in $coverageTable.Rows) {
+            $coverageOrder = ([string]$coverageRow.OrderNr).Trim()
+            if ($coverageOrder -match '^\d+$') { [void]$orderSet.Add($coverageOrder) }
+        }
+        $addedCoverage = $orderSet.Count - $beforeCoverage
+        if ($addedCoverage -gt 0) {
+            Write-AutomationLog -Message (
+                "Expanded A+W production coverage by {0} recent delivery/production order(s) from the last {1} day(s)." -f
+                $addedCoverage, $orderLookbackDays
+            )
+        }
+    }
+    finally {
+        $coverageTable.Dispose()
+        if ($coverageConnection.State -ne [System.Data.ConnectionState]::Closed) { $coverageConnection.Close() }
+        $coverageConnection.Dispose()
+    }
+    $orders = @($orderSet | Sort-Object)
+    if ($orders.Count -eq 0) {
+        Write-AutomationDebug -Message "A+W production sync skipped because no direct or recent-delivery orders were found."
+        return $null
+    }
 
     $rows = New-Object System.Collections.Generic.List[object]
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     $totalBatches = [int][Math]::Ceiling($orders.Count / [double]$batchSize)
     Write-AutomationLog -Message (
-        "A+W production sync starting for {0} delivery order(s) in {1} SQL batch(es). BatchSize={2} QueryTimeoutSeconds={3} CuttingBookingLookbackDays={4}." -f
+        "A+W production sync starting for {0} covered order(s) in {1} SQL batch(es). BatchSize={2} QueryTimeoutSeconds={3} CuttingBookingLookbackDays={4}." -f
         [int]$orders.Count, $totalBatches, $batchSize, $queryTimeout, $cutLookbackDays
     )
     Write-AutomationDebug -Message ("A+W production generation history depth={0}; CuttingBookingEvidence={1}." -f $generationHistoryDepth, $includeCutting)
@@ -990,6 +1052,7 @@ function Get-AwCuttingSyncPayload {
 
         $connection = New-SqlConnection -Config $Config
         $table = New-Object System.Data.DataTable
+        $processTable = New-Object System.Data.DataTable
         try {
             $connection.Open()
             $command = $connection.CreateCommand()
@@ -1037,25 +1100,50 @@ SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 JobItems AS (
     SELECT * FROM JobItemsRanked WHERE GenerationRank <= @GenerationHistoryDepth
 ),
-SeqRanked AS (
+SeqCurrentOptimization AS (
     SELECT os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0) AS BOM_ID,ISNULL(os.KEYINDEX,0) AS KEYINDEX,
-           os.OPTIMIZATION,os.SEQUENCE,os.PLATENR,
-           ROW_NUMBER() OVER (
-             PARTITION BY os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0),ISNULL(os.KEYINDEX,0)
-             ORDER BY os.OPTIMIZATION DESC,os.SEQUENCE DESC
-           ) AS RN
+           MAX(ISNULL(os.OPTIMIZATION,0)) AS SequenceOptimization
     FROM SYSADM.PROD_OPTI_SEQUENCE os
     WHERE os.AUFNR IN ($orderSql)
+    GROUP BY os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0),ISNULL(os.KEYINDEX,0)
 ),
 ResolvedJobItems AS (
     SELECT ji.*,
-           ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION,0),seq.OPTIMIZATION),0) AS ResolvedOptimization,
-           ISNULL(seq.SEQUENCE,0) AS ResolvedOptimizationSequence,
-           ISNULL(seq.PLATENR,0) AS ResolvedPlateNumber
+           ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION,0),NULLIF(seqopt.SequenceOptimization,0)),0) AS ResolvedOptimization
     FROM JobItems ji
-    LEFT JOIN SeqRanked seq
+    LEFT JOIN SeqCurrentOptimization seqopt
+      ON seqopt.AUFNR=ji.AUFNR AND seqopt.POSNR=ji.POSNR
+     AND seqopt.BOM_ID=ISNULL(ji.BOM_ID,0) AND seqopt.KEYINDEX=ISNULL(ji.KEYINDEX,0)
+),
+ResolvedSequenceRows AS (
+    SELECT ji.*,
+           ISNULL(seq.SEQUENCE,0) AS ResolvedOptimizationSequence,
+           ISNULL(seq.PLATENR,0) AS ResolvedPlateNumber,
+           CONVERT(nvarchar(64),seq.ROWID) AS OptimizationSequenceRowId
+    FROM ResolvedJobItems ji
+    LEFT JOIN SYSADM.PROD_OPTI_SEQUENCE seq
       ON seq.AUFNR=ji.AUFNR AND seq.POSNR=ji.POSNR
-     AND seq.BOM_ID=ISNULL(ji.BOM_ID,0) AND seq.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND seq.RN=1
+     AND ISNULL(seq.BOM_ID,0)=ISNULL(ji.BOM_ID,0) AND ISNULL(seq.KEYINDEX,0)=ISNULL(ji.KEYINDEX,0)
+     AND seq.OPTIMIZATION=ji.ResolvedOptimization
+),
+-- v0.507: Probe outputs 61-65 proved that Crystal's numbered edge-length
+-- callouts for the verified MOD 13 label come from the active TYPE=0
+-- PROD_JOBITEMSHAPE row. Rank one shape row per physical generation and keep
+-- the raw 1/32-inch parameters; the browser only interprets MOD 13, where the
+-- relationship is proven by the supplied physical label.
+ShapeDisplayRanked AS (
+    SELECT sh.AUFNR,sh.POSNR,ISNULL(sh.JOBNUMBER,0) AS JOBNUMBER,ISNULL(sh.KEYINDEX,0) AS KEYINDEX,
+           ISNULL(sh.MOD_NUMMER,0) AS MOD_NUMMER,
+           ISNULL(sh.MOD_PARAM1,0) AS MOD_PARAM1,ISNULL(sh.MOD_PARAM2,0) AS MOD_PARAM2,
+           ISNULL(sh.MOD_PARAM3,0) AS MOD_PARAM3,ISNULL(sh.MOD_PARAM4,0) AS MOD_PARAM4,
+           ISNULL(sh.MOD_PARAM5,0) AS MOD_PARAM5,ISNULL(sh.MOD_PARAM6,0) AS MOD_PARAM6,
+           ISNULL(sh.MOD_PARAM7,0) AS MOD_PARAM7,ISNULL(sh.MOD_PARAM8,0) AS MOD_PARAM8,
+           ROW_NUMBER() OVER (
+               PARTITION BY sh.AUFNR,sh.POSNR,ISNULL(sh.JOBNUMBER,0),ISNULL(sh.KEYINDEX,0)
+               ORDER BY CASE WHEN ISNULL(sh.BOM_ID,0)=0 THEN 0 ELSE 1 END, ISNULL(sh.BOM_ID,0), sh.ROWID
+           ) AS RN
+    FROM SYSADM.PROD_JOBITEMSHAPE sh
+    WHERE sh.AUFNR IN ($orderSql) AND ISNULL(sh.TYPE,0)=0
 ),
 CandidateOptimizations AS (
     SELECT DISTINCT ResolvedOptimization AS OPTIMIZATION
@@ -1063,14 +1151,19 @@ CandidateOptimizations AS (
     WHERE ResolvedOptimization > 0
 ),
 OptimizationRanked AS (
-    SELECT u.OPTIMIZATION,u.STATUS,u.OPTIMODE,u.OPTIDATE,u.LASTCHANGEDATE,
-           ROW_NUMBER() OVER (PARTITION BY u.OPTIMIZATION ORDER BY u.SourceRank,u.LASTCHANGEDATE DESC) AS RN
+    SELECT u.OPTIMIZATION,u.STATUS,u.OPTIMODE,u.OPTIDATE,u.SHEETCOUNT,u.LASTCHANGEDATE,u.SourceName,
+           ROW_NUMBER() OVER (
+               PARTITION BY u.OPTIMIZATION
+               ORDER BY CASE WHEN u.LASTCHANGEDATE IS NULL THEN 1 ELSE 0 END, u.LASTCHANGEDATE DESC, u.SourceRank
+           ) AS RN
     FROM (
-        SELECT 0 AS SourceRank,o.OPTIMIZATION,o.STATUS,o.OPTIMODE,o.OPTIDATE,o.LASTCHANGEDATE
+        SELECT 0 AS SourceRank,CAST('PROD_OPTIMIZATION' AS nvarchar(40)) AS SourceName,
+               o.OPTIMIZATION,o.STATUS,o.OPTIMODE,o.OPTIDATE,o.SHEETCOUNT,o.LASTCHANGEDATE
         FROM SYSADM.PROD_OPTIMIZATION o
         INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=o.OPTIMIZATION
         UNION ALL
-        SELECT 1 AS SourceRank,s.OPTIMIZATION,s.STATUS,s.OPTIMODE,s.OPTIDATE,s.LASTCHANGEDATE
+        SELECT 1 AS SourceRank,CAST('PROD_OPTI_STATISTICS' AS nvarchar(40)) AS SourceName,
+               s.OPTIMIZATION,s.STATUS,s.OPTIMODE,s.OPTIDATE,s.SHEETCOUNT,s.LASTCHANGEDATE
         FROM SYSADM.PROD_OPTI_STATISTICS s
         INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=s.OPTIMIZATION
     ) u
@@ -1091,13 +1184,21 @@ SELECT
     LTRIM(RTRIM(ISNULL(job.LASTCHANGEUSER,''))) AS BatchLastChangedUser,
     ji.ResolvedOptimization AS OptimizationNumber,
     ISNULL(opti.STATUS,0) AS OptimizationStatusCode,ISNULL(opti.OPTIMODE,0) AS OptimizationMode,
-    opti.OPTIDATE AS OptimizationDate,opti.LASTCHANGEDATE AS OptimizationLastChangedAt,
+    LTRIM(RTRIM(ISNULL(opti.SourceName,''))) AS OptimizationStatusSource,
+    opti.OPTIDATE AS OptimizationDate,ISNULL(opti.SHEETCOUNT,0) AS OptimizationSheetCount,opti.LASTCHANGEDATE AS OptimizationLastChangedAt,
     ISNULL(ji.SEQUENCE_OPTIRUN,0) AS OptimizationRunSequence,ji.ResolvedOptimizationSequence AS OptimizationSequence,
+    ISNULL(ji.OptimizationSequenceRowId,'') AS OptimizationSequenceRowId,
     ji.ResolvedPlateNumber AS OptimizationPlateNumber,ISNULL(plate.CUT,0) AS OptimizationPlateCut,
     ISNULL(plate.STOCKBOOKED,0) AS OptimizationPlateStockBooked,plate.LASTCHANGEDATE AS OptimizationPlateLastChangedAt,
     LTRIM(RTRIM(ISNULL(plate.LASTCHANGEUSER,''))) AS OptimizationPlateLastChangedUser,
     ISNULL(ji.STACKNUMBER,0) AS StackNumber,
-    ISNULL(ji.STACKPOSITION,0) AS StackPosition,ISNULL(ji.MENGE,0) AS Quantity,ISNULL(ji.MENGE_CUT,0) AS CutQuantity,
+    ISNULL(ji.STACKPOSITION,0) AS StackPosition,
+    ISNULL(NULLIF(shape.MOD_NUMMER,0),ISNULL(ji.MOD_NUMMER,0)) AS ShapeNumber,
+    ISNULL(shape.MOD_PARAM1,0) AS ShapeParam1,ISNULL(shape.MOD_PARAM2,0) AS ShapeParam2,
+    ISNULL(shape.MOD_PARAM3,0) AS ShapeParam3,ISNULL(shape.MOD_PARAM4,0) AS ShapeParam4,
+    ISNULL(shape.MOD_PARAM5,0) AS ShapeParam5,ISNULL(shape.MOD_PARAM6,0) AS ShapeParam6,
+    ISNULL(shape.MOD_PARAM7,0) AS ShapeParam7,ISNULL(shape.MOD_PARAM8,0) AS ShapeParam8,
+    ISNULL(ji.MENGE,0) AS Quantity,ISNULL(ji.MENGE_CUT,0) AS CutQuantity,
     ISNULL(ji.AGG,0) AS AggregateId,ISNULL(ji.LASTAGG,0) AS LastAggregateId,
     $cuttingSelect,
     LTRIM(RTRIM(ISNULL(posx.BARCODE_START,''))) AS ItemBarcodeStart,
@@ -1108,12 +1209,14 @@ SELECT
     LTRIM(RTRIM(ISNULL(head.OR_TOUR,''))) AS RouteText,
     LTRIM(RTRIM(ISNULL(pos.PROD_BEZ1,''))) AS ProductDescription,
     ISNULL(pos.PP_MENGE,0) AS PositionQuantity,ISNULL(pos.PP_BREITE,0) AS PositionWidth,ISNULL(pos.PP_HOEHE,0) AS PositionHeight
-FROM ResolvedJobItems ji
+FROM ResolvedSequenceRows ji
 INNER JOIN SYSADM.PROD_JOB job ON job.JOBNUMBER=ji.JOBNUMBER
 LEFT JOIN SYSADM.BW_AUFTR_KOPF head ON head.ID=ji.AUFNR
 LEFT JOIN SYSADM.BW_AUFTR_POS pos ON pos.ID=ji.AUFNR AND pos.POS_NR=ji.POSNR
 LEFT JOIN SYSADM.BW_AUFTR_POS_EX posx ON posx.ID=ji.AUFNR AND posx.POS_NR=ji.POSNR
 LEFT JOIN SYSADM.BW_AUFTR_STKL stkl ON stkl.ID=ji.AUFNR AND stkl.POS_NR=ji.POSNR AND stkl.BOM_ID=ji.BOM_ID
+LEFT JOIN ShapeDisplayRanked shape ON shape.AUFNR=ji.AUFNR AND shape.POSNR=ji.POSNR
+ AND shape.JOBNUMBER=ISNULL(ji.JOBNUMBER,0) AND shape.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND shape.RN=1
 LEFT JOIN OptimizationRanked opti ON opti.OPTIMIZATION=ji.ResolvedOptimization AND opti.RN=1
 LEFT JOIN PlateRanked plate ON plate.OPTIMIZATION=ji.ResolvedOptimization AND plate.PLATENR=ji.ResolvedPlateNumber AND plate.RN=1
 $cuttingJoin
@@ -1123,13 +1226,102 @@ OPTION (RECOMPILE);
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
             [void]$adapter.Fill($table)
             $adapter.Dispose(); $command.Dispose()
+
+            # v0.504: the Crystal Cutting Label prints the actual planned process
+            # route beneath the dimensions. Read the authoritative A+W route once
+            # per bounded order batch rather than multiplying PROD_JOBITEM rows by
+            # ZW_AUFTR_ZEIT in the primary query. Process-label enrichment is
+            # supplemental: if an older A+W install cannot resolve one display
+            # join, preserve Batch/Optimization/Cutting synchronization.
+            try {
+                $processBatchOrders = @($batchOrders | Where-Object { $directOrderSet.Contains([string]$_) })
+                if ($processBatchOrders.Count -gt 0) {
+                    $processCommand = $connection.CreateCommand()
+                    $processCommand.CommandTimeout = $queryTimeout
+                    $processPlaceholders = New-Object System.Collections.Generic.List[string]
+                    for ($index = 0; $index -lt $processBatchOrders.Count; $index++) {
+                        $name = "@ProcessOrder$index"
+                        $processPlaceholders.Add($name)
+                        $parameter = $processCommand.Parameters.Add($name, [System.Data.SqlDbType]::Int)
+                        $parameter.Value = [int]$processBatchOrders[$index]
+                    }
+                    $processOrderSql = [string]::Join(",", $processPlaceholders.ToArray())
+                    $processCommand.CommandText = @"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT
+    z.AUFNR AS OrderNr,z.POSNR AS ItemNr,ISNULL(z.BOM_ID,0) AS BomId,ISNULL(z.BOM_NODE,0) AS BomNode,
+    ISNULL(z.ARBART,0) AS WorkTypeId,LTRIM(RTRIM(ISNULL(wt.BEA_TYPBEZ,''))) AS WorkType,
+    ISNULL(z.AGG,0) AS AggregateId,ISNULL(z.ARBFOLGE,0) AS WorkSequence,
+    LTRIM(RTRIM(ISNULL(z.KANTEN,''))) AS EdgeData,ISNULL(z.STUECK,0) AS PlannedPieces,
+    ISNULL(z.FERTIG,0) AS CompletedPieces,ISNULL(z.KZ_SELECTED,0) AS IsSelected,ISNULL(z.KZ_NOP,0) AS IsNoOperation,
+    LTRIM(RTRIM(ISNULL(prod.BA_BEZ1,''))) AS ProcessProductDescription,
+    LTRIM(RTRIM(ISNULL(machine.AGG_BEZ,''))) AS Machine,
+    CONVERT(nvarchar(64),z.ROWID) AS ProcessRowId
+FROM SYSADM.ZW_AUFTR_ZEIT z
+LEFT JOIN SYSADM.ZW_BEATYPEN wt ON wt.BEA_TYP=z.ARBART
+LEFT JOIN SYSADM.BA_PRODUKTE_BEZ prod ON prod.BA_PRODUKT=z.BOM_PRODUKT AND prod.SPRACH_ID=0
+OUTER APPLY (
+    SELECT CASE WHEN COUNT(*)=1 THEN MAX(candidate.AGG_BEZ) ELSE '' END AS AGG_BEZ
+    FROM (
+        SELECT DISTINCT LTRIM(RTRIM(ISNULL(za.AGG_BEZ,''))) AS AGG_BEZ
+        FROM SYSADM.ZW_AGGREGATE za
+        WHERE za.BARC=z.AGG AND LTRIM(RTRIM(ISNULL(za.AGG_BEZ,'')))<>''
+    ) candidate
+) machine
+WHERE z.AUFNR IN ($processOrderSql)
+  AND ISNULL(z.KZ_SELECTED,0)=1
+  AND ISNULL(z.KZ_NOP,0)=0
+ORDER BY z.AUFNR,z.POSNR,z.ARBFOLGE,z.BOM_ID,z.ARBART,z.AGG
+OPTION (RECOMPILE);
+"@
+                    $processAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($processCommand)
+                    [void]$processAdapter.Fill($processTable)
+                    $processAdapter.Dispose(); $processCommand.Dispose()
+                }
+            }
+            catch {
+                Write-AutomationLog -Message (
+                    "A+W Cutting Label process-route enrichment failed for production batch {0}/{1}; Batch/Optimization/Cutting evidence will continue without process text: {2}" -f
+                    $batchNumber, $totalBatches, $_.Exception.Message
+                ) -Level "WARN"
+                $processTable.Clear()
+            }
         }
         finally {
             if ($connection.State -ne [System.Data.ConnectionState]::Closed) { $connection.Close() }
             $connection.Dispose()
         }
 
+        $processLookup = @{}
+        foreach ($processRow in $processTable.Rows) {
+            $processKey = "{0}|{1}" -f ([string][int64]$processRow.OrderNr),([string][int]$processRow.ItemNr)
+            if (-not $processLookup.ContainsKey($processKey)) {
+                $processLookup[$processKey] = New-Object System.Collections.Generic.List[object]
+            }
+            $processLookup[$processKey].Add([ordered]@{
+                bomId=[int]$processRow.BomId; bomNode=[int]$processRow.BomNode;
+                workTypeId=[int]$processRow.WorkTypeId; workType=[string]$processRow.WorkType;
+                aggregateId=[int]$processRow.AggregateId; workSequence=[int]$processRow.WorkSequence;
+                edgeData=[string]$processRow.EdgeData; plannedPieces=[int]$processRow.PlannedPieces;
+                completedPieces=[int]$processRow.CompletedPieces; processProductDescription=[string]$processRow.ProcessProductDescription;
+                machine=[string]$processRow.Machine; processRowId=[string]$processRow.ProcessRowId
+            })
+        }
+
+        # Process rows describe the physical generation, not each BOM/sequence
+        # source row. Attach the array once per generation so large Orders do not
+        # inflate the JSON payload with identical Crystal-label process metadata.
+        $processAttachedGenerations = New-Object 'System.Collections.Generic.HashSet[string]'
         foreach ($row in $table.Rows) {
+            $rowProcessKey = "{0}|{1}" -f ([string][int64]$row.OrderNr),([string][int]$row.ItemNr)
+            $generationProcessKey = "{0}|{1}|{2}|{3}|{4}" -f (
+                [string][int64]$row.OrderNr, [string][int]$row.ItemNr, [int]$row.KeyIndex,
+                [string][int64]$row.BatchJobNumber, [int]$row.OptimizationNumber
+            )
+            $rowProcessRows = @()
+            if ($processLookup.ContainsKey($rowProcessKey) -and $processAttachedGenerations.Add($generationProcessKey)) {
+                $rowProcessRows = @($processLookup[$rowProcessKey].ToArray())
+            }
             $rows.Add([ordered]@{
                 sourceRowId=[string]$row.SourceRowId; orderNr=[string][int64]$row.OrderNr; itemNr=[string][int]$row.ItemNr;
                 bomId=[int]$row.BomId; keyIndex=[int]$row.KeyIndex; batchJobNumber=[string][int64]$row.BatchJobNumber;
@@ -1138,14 +1330,30 @@ OPTION (RECOMPILE);
                 batchEmployee=[string]$row.BatchEmployee; batchLastChangedAt=$(if ($row.BatchLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.BatchLastChangedAt).ToString("o") });
                 batchLastChangedUser=[string]$row.BatchLastChangedUser; optimizationNumber=[int]$row.OptimizationNumber;
                 optimizationStatusCode=[int]$row.OptimizationStatusCode; optimizationMode=[int]$row.OptimizationMode;
+                optimizationStatusSource=[string]$row.OptimizationStatusSource;
                 optimizationDate=$(if ($row.OptimizationDate -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationDate).ToString("o") });
+                optimizationSheetCount=[int]$row.OptimizationSheetCount;
                 optimizationLastChangedAt=$(if ($row.OptimizationLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationLastChangedAt).ToString("o") });
                 optimizationRunSequence=[int]$row.OptimizationRunSequence; optimizationSequence=[int]$row.OptimizationSequence;
+                optimizationSequenceRowId=[string]$row.OptimizationSequenceRowId;
                 optimizationPlateNumber=[int]$row.OptimizationPlateNumber; optimizationPlateCut=[int]$row.OptimizationPlateCut;
                 optimizationPlateStockBooked=[int]$row.OptimizationPlateStockBooked;
                 optimizationPlateLastChangedAt=$(if ($row.OptimizationPlateLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationPlateLastChangedAt).ToString("o") });
                 optimizationPlateLastChangedUser=[string]$row.OptimizationPlateLastChangedUser;
-                stackNumber=[int]$row.StackNumber; stackPosition=[int]$row.StackPosition;
+                stackNumber=[int]$row.StackNumber; stackPosition=[int]$row.StackPosition; shapeNumber=[int]$row.ShapeNumber;
+                # A+W shape parameters are raw 1/32-inch units. Keep the source
+                # values intact so only evidence-backed label formulas interpret them.
+                shapeParameterUnitsPerInch=32;
+                shapeParameters=@(
+                    [decimal]$row.ShapeParam1
+                    [decimal]$row.ShapeParam2
+                    [decimal]$row.ShapeParam3
+                    [decimal]$row.ShapeParam4
+                    [decimal]$row.ShapeParam5
+                    [decimal]$row.ShapeParam6
+                    [decimal]$row.ShapeParam7
+                    [decimal]$row.ShapeParam8
+                );
                 quantity=[decimal]$row.Quantity; cutQuantity=[decimal]$row.CutQuantity; aggregateId=[int]$row.AggregateId; lastAggregateId=[int]$row.LastAggregateId;
                 cuttingBookingAt=$(if ($row.CuttingBookingAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.CuttingBookingAt).ToString("o") });
                 cuttingBookingEmployee=[string]$row.CuttingBookingEmployee; cuttingBookingRowId=[string]$row.CuttingBookingRowId;
@@ -1153,21 +1361,41 @@ OPTION (RECOMPILE);
                 weight=[decimal]$row.Weight; surfaceArea=[decimal]$row.SurfaceArea;
                 customerName=[string]$row.CustomerName; sgBestText1=[string]$row.SgBestText1; routeText=[string]$row.RouteText;
                 productDescription=[string]$row.ProductDescription; positionQuantity=[decimal]$row.PositionQuantity;
-                positionWidth=[decimal]$row.PositionWidth; positionHeight=[decimal]$row.PositionHeight
+                positionWidth=[decimal]$row.PositionWidth; positionHeight=[decimal]$row.PositionHeight;
+                processRows=$rowProcessRows
             })
         }
         $batchTimer.Stop()
-        Write-AutomationLog -Message ("A+W production batch {0}/{1} completed. Orders={2} Rows={3} DurationMs={4}." -f $batchNumber,$totalBatches,$batchOrders.Count,$table.Rows.Count,[Math]::Round($batchTimer.Elapsed.TotalMilliseconds))
+        Write-AutomationLog -Message ("A+W production batch {0}/{1} completed. Orders={2} ProductionRows={3} ProcessRows={4} DurationMs={5}." -f $batchNumber,$totalBatches,$batchOrders.Count,$table.Rows.Count,$processTable.Rows.Count,[Math]::Round($batchTimer.Elapsed.TotalMilliseconds))
+        $table.Dispose(); $processTable.Dispose()
     }
     $timer.Stop()
-    Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1} delivery order(s) in {2} ms." -f [int]$rows.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds))
+    $matchedOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($productionRow in $rows) {
+        $matchedOrder = ([string](Get-OptionalProperty -Object $productionRow -Name "orderNr" -DefaultValue "")).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($matchedOrder)) { [void]$matchedOrderSet.Add($matchedOrder) }
+    }
+    $missingOrders = @($orders | Where-Object { -not $matchedOrderSet.Contains([string]$_) })
+    $missingSample = @($missingOrders | Select-Object -First 20)
+    $coverage = [ordered]@{
+        requestedOrderCount = [int]$orders.Count
+        directDeliveryOrderCount = [int]$directOrderSet.Count
+        matchedOrderCount = [int]$matchedOrderSet.Count
+        missingOrderCount = [int]$missingOrders.Count
+        missingOrderSample = @($missingSample)
+        orderLookbackDays = [int]$orderLookbackDays
+    }
+    Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1}/{2} covered order(s) in {3} ms. MissingOrders={4}." -f [int]$rows.Count,[int]$matchedOrderSet.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds),[int]$missingOrders.Count)
+    if ($missingSample.Count -gt 0) {
+        Write-AutomationLog -Message ("A+W production coverage missing Order sample: {0}" -f ([string]::Join(", ", @($missingSample)))) -Level "WARN"
+    }
     # Compatibility markers retained for historical regression contracts:
-    # v499-aw-production-1 / version="v501-aw-production-2".
+    # v499-aw-production-1 / version="v501-aw-production-2" / version="v502-aw-production-3".
     # Historical SQL spelling retained for contract search only:
     # COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION)
     return [ordered]@{
-        version="v502-aw-production-3"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY";
-        orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; generationHistoryDepth=$generationHistoryDepth; rows=@($rows.ToArray())
+        version="v507-aw-production-5"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
+        orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; orderLookbackDays=$orderLookbackDays; generationHistoryDepth=$generationHistoryDepth; coverage=$coverage; rows=@($rows.ToArray())
     }
 }
 
@@ -2258,6 +2486,16 @@ function Invoke-ScannerImport {
                 [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "unchanged" -DefaultValue 0),
                 [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "durationMs" -DefaultValue 0)
             )
+            $cuttingCoverage = Get-OptionalProperty -Object $awCuttingSyncResult -Name "coverage" -DefaultValue $null
+            if ($null -ne $cuttingCoverage) {
+                Write-AutomationLog -Message (
+                    "A+W Cutting coverage: matchedOrders={0}/{1}, missingOrders={2}, sample=[{3}]." -f
+                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "matchedOrderCount" -DefaultValue 0),
+                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "requestedOrderCount" -DefaultValue 0),
+                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "missingOrderCount" -DefaultValue 0),
+                    ([string]::Join(", ", @((Get-OptionalProperty -Object $cuttingCoverage -Name "missingOrderSample" -DefaultValue @()))))
+                )
+            }
         }
         $pendingSupersededReviews = [int](Get-OptionalProperty -Object $result -Name "pendingSupersededOrderReviews" -DefaultValue 0)
         $candidateReviewSummary = Get-OptionalProperty -Object $result -Name "supersededOrderReview" -DefaultValue $null

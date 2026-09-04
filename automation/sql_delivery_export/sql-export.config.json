@@ -104,6 +104,7 @@
     "QueryTimeoutSeconds": 75,
     "GenerationHistoryDepth": 4,
     "CrystalReportFile": "Prodman_CuttingLabel_Optimisation.rpt",
-    "CrystalReportPrintPointId": 846
+    "CrystalReportPrintPointId": 846,
+    "OrderLookbackDays": 14
   }
 }

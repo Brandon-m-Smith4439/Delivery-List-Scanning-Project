@@ -2146,7 +2146,10 @@ class Handler(SimpleHTTPRequestHandler):
             user = self.require_permission("view_delivery_lists")
             if not user:
                 return
-            self.send_json({"lists": STORE.get_delivery_lists(user)})
+            params = parse_qs(parsed.query)
+            compact = str(params.get("compact", ["0"])[0]).lower() in {"1", "true", "yes"}
+            lists = STORE.get_delivery_lists_compact(user) if compact else STORE.get_delivery_lists(user)
+            self.send_json({"lists": lists, "compact": compact})
             return
 
         if parsed.path == "/api/stations":
@@ -2396,6 +2399,17 @@ class Handler(SimpleHTTPRequestHandler):
             include_production = str(params.get("production", ["1"])[0]).lower() not in {"0", "false", "no"}
             try:
                 self.send_json(STORE.get_order_detail(order_no, user, include_production=include_production))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+            return
+
+        if parsed.path == "/api/orders/production-detail":
+            user = self.require_permission("global_search")
+            if not user:
+                return
+            order_no = parse_qs(parsed.query).get("order", [""])[0]
+            try:
+                self.send_json(STORE.get_order_production_detail(order_no, user))
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
             return

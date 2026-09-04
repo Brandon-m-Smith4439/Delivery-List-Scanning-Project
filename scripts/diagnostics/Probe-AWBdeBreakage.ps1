@@ -1,4 +1,4 @@
-# File: scripts/diagnostics/Probe-AWBdeBreakage.ps1
+﻿# File: scripts/diagnostics/Probe-AWBdeBreakage.ps1
 # Website version 4 diagnostic: discover A+W BDE/breakage booking storage safely.
 [CmdletBinding()]
 param(

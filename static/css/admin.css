@@ -22076,69 +22076,6 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   .production-machine-visuals-v476 { grid-template-columns:1fr !important; }
 }
 
-/* ========================================================================== */
-/* v0.483 immediate Settings modal loading                                    */
-/* ========================================================================== */
-/* Settings launchers now paint their modal shell before any slower API work.
-   Keep this state visually intentional so operators know the click registered
-   and can distinguish network/share hydration from a frozen interface. */
-.admin-modal-loading-v483 {
-  width: min(720px, 100%);
-  min-height: 210px;
-  margin: 12px auto;
-  padding: 30px 34px;
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  align-content: center;
-  align-items: center;
-  gap: 10px 15px;
-  border: 1px solid #cbdbe8;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #f9fcff 0%, #eef5fb 58%, #e7f0f8 100%);
-  color: #173d5d;
-  box-shadow: inset 0 1px 0 #fff, 0 8px 22px rgba(20, 61, 93, .08);
-}
-.admin-modal-loading-v483 > div { min-width: 0; display: grid; gap: 4px; }
-.admin-modal-loading-v483 strong { color: #0f3859; font-size: 18px; line-height: 1.15; }
-.admin-modal-loading-v483 > div > span { color: #5b7287; font-size: 12px; line-height: 1.4; }
-.admin-modal-loading-v483 > .loading-bar { grid-column: 1 / -1; margin-top: 8px; }
-.admin-modal-loading-icon-v483 {
-  width: 42px;
-  height: 42px;
-  border: 3px solid #c9dbea;
-  border-top-color: #1d5f91;
-  border-radius: 50%;
-  animation: admin-modal-loading-spin-v483 .9s linear infinite;
-}
-.admin-modal-loading-v483.is-error {
-  border-color: #e4b8bc;
-  background: linear-gradient(135deg, #fffafa, #fff2f3);
-}
-.admin-modal-loading-v483.is-error .admin-modal-loading-icon-v483 {
-  border: 0;
-  border-radius: 10px;
-  background: #b42336;
-  animation: none;
-  position: relative;
-}
-.admin-modal-loading-v483.is-error .admin-modal-loading-icon-v483::before,
-.admin-modal-loading-v483.is-error .admin-modal-loading-icon-v483::after {
-  content: "";
-  position: absolute;
-  inset: 19px 9px auto;
-  height: 3px;
-  border-radius: 2px;
-  background: #fff;
-  transform: rotate(45deg);
-}
-.admin-modal-loading-v483.is-error .admin-modal-loading-icon-v483::after { transform: rotate(-45deg); }
-@keyframes admin-modal-loading-spin-v483 { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .admin-modal-loading-icon-v483 { animation: none; } }
-@media (max-width: 640px) {
-  .admin-modal-loading-v483 { min-height: 180px; padding: 24px 20px; grid-template-columns: 38px minmax(0,1fr); }
-  .admin-modal-loading-icon-v483 { width: 36px; height: 36px; }
-}
-
 /* v0.485: bulk reject history and A+W code-mapping maintenance. */
 .reject-history-maintenance-v485 { margin-top: 18px; }
 .reject-history-table-wrap-v485 { overflow: auto; max-height: 360px; border: 1px solid var(--border-color, #d8e1ec); border-radius: 10px; background: #fff; }
@@ -22189,4 +22126,43 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   font-size: 12px;
   font-weight: 700;
   line-height: 1.55;
+}
+
+/* v0.507: Settings/Admin workspaces open immediately and show a lightweight
+   in-modal busy state while their first API read completes. This keeps slow or
+   unavailable network-backed settings from making the launcher feel frozen. */
+.admin-modal-loading-v507 {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 34px 22px;
+  color: #52677f;
+  text-align: left;
+}
+.admin-modal-loading-spinner-v507 {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 3px solid rgba(26, 89, 153, .16);
+  border-top-color: #1d67ae;
+  border-radius: 50%;
+  animation: admin-modal-loading-spin-v507 .8s linear infinite;
+}
+.admin-modal-loading-copy-v507 {
+  display: grid;
+  gap: 3px;
+}
+.admin-modal-loading-copy-v507 strong {
+  color: #173d68;
+  font-size: 14px;
+}
+.admin-modal-loading-copy-v507 small {
+  color: #71839a;
+  font-size: 12px;
+}
+@keyframes admin-modal-loading-spin-v507 { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-modal-loading-spinner-v507 { animation: none; border-top-color: #1d67ae; }
 }

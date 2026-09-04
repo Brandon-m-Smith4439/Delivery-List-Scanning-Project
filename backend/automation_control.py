@@ -726,6 +726,7 @@ class DeliveryAutomationController:
                 "productionScheduledEnabled": bool(production_sync.get("ScheduledEnabled", True)),
                 "productionIncludeCuttingBookings": bool(production_sync.get("IncludeCuttingBookings", True)),
                 "productionCuttingBookingLookbackDays": int(production_sync.get("CuttingBookingLookbackDays") or 120),
+                "productionOrderLookbackDays": int(production_sync.get("OrderLookbackDays") or 14),
                 "productionQueryBatchSize": int(production_sync.get("QueryBatchSize") or 60),
                 "productionQueryTimeoutSeconds": int(production_sync.get("QueryTimeoutSeconds") or 75),
                 "productionGenerationHistoryDepth": int(production_sync.get("GenerationHistoryDepth") or 4),
@@ -1773,6 +1774,10 @@ class DeliveryAutomationController:
         production_sync["CuttingBookingLookbackDays"] = bounded_int(
             data.get("productionCuttingBookingLookbackDays", production_sync.get("CuttingBookingLookbackDays", 120)),
             14, 730, "A+W Cutting booking lookback",
+        )
+        production_sync["OrderLookbackDays"] = bounded_int(
+            data.get("productionOrderLookbackDays", production_sync.get("OrderLookbackDays", 14)),
+            1, 90, "A+W production order coverage lookback",
         )
         production_sync["QueryBatchSize"] = bounded_int(
             data.get("productionQueryBatchSize", production_sync.get("QueryBatchSize", 60)),

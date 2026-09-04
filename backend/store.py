@@ -96,6 +96,9 @@ PASSWORD_RESET_MINUTES = 30
 AW_OPTI_STATUS_OPTIMIZED = 100
 AW_OPTI_STATUS_RELEASED = 200
 AW_OPTI_STATUS_BOOKED = 500
+# v0.504: live A+W evidence includes Booked optimization 8286 with raw status 460.
+# Keep both raw codes authoritative; do not normalize the stored source value.
+AW_OPTI_STATUS_BOOKED_CODES = frozenset({460, 500})
 PERMISSIONS = [
     # Delivery-list visibility and floor scanning.
     "view_delivery_lists",
@@ -1851,6 +1854,19 @@ def is_remake_item(item: dict[str, Any]) -> bool:
     return "REMAKE" in text or re.search(r"\bRM\b", text) is not None
 
 
+def is_yield_percentage_reject_reason(value: Any) -> bool:
+    """Return True for Internal Rejects intentionally excluded from production statistics.
+
+    ``Yield Percentage`` is an operator-owned accounting marker, not production
+    breakage. Keep the reject itself in the immutable Rejects workflow while
+    excluding it from statistical and daily-production-count totals. Accept the
+    common ``Yield %`` / ``Yield Percent`` spellings so a harmless label rename
+    does not unexpectedly put those accounting rows back into production KPIs.
+    """
+    text = re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    return bool(re.search(r"\byield\s*(?:percentage|percent)\b|\byield\s*%", text))
+
+
 def is_rush_item(item: dict[str, Any]) -> bool:
     """Purpose: Validate rush item for the delivery-list scanner workflow.
 
@@ -2121,6 +2137,29 @@ class BaseDeliveryStore:
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         raise NotImplementedError
+
+    def get_delivery_lists_compact(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Return the lightweight catalog used by high-frequency change detection.
+
+        Backends may override this with a focused aggregate query. The fallback
+        preserves compatibility for alternate stores while SQLite supplies the
+        optimized implementation used by the current pilot.
+        """
+        return self.get_delivery_lists(user)
+
+    def get_delivery_list_summaries(
+        self, list_ids: Iterable[str], user: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return focused active-list totals for importer verification.
+
+        Alternate stores may use the maintained catalog as a compatibility
+        fallback. SQLite overrides this so one delivery-date reconciliation does
+        not rebuild report/timing/glass metadata for the entire catalog.
+        """
+        wanted = {str(value or "").strip() for value in list_ids if str(value or "").strip()}
+        if not wanted:
+            return []
+        return [row for row in self.get_delivery_lists(user) if str(row.get("id") or "") in wanted]
 
     def _rush_move_references(self, con: Any, meta_row: Any, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Return traceability-only Rush date-move references for the active stage.
@@ -5704,6 +5743,7 @@ class BaseDeliveryStore:
             "batchLastChangedUser": str(row_value(row, "batch_last_changed_user", "") or ""),
             "optimization": int(row_value(row, "optimization_number", 0) or 0),
             "optimizationStatusCode": int(row_value(row, "optimization_status_code", 0) or 0),
+            "optimizationStatusSource": str(cut_evidence.get("optimizationStatusSource") or source_payload.get("optimizationStatusSource") or "").strip(),
             "optimizationMode": int(row_value(row, "optimization_mode", 0) or 0),
             "optimizationDate": str(row_value(row, "optimization_date", "") or ""),
             "optimizationLastChangedAt": str(row_value(row, "optimization_last_changed_at", "") or ""),
@@ -5721,8 +5761,15 @@ class BaseDeliveryStore:
             "positionQuantity": float(label_context.get("quantity") or 0),
             "positionWidth": float(label_context.get("width") or 0),
             "positionHeight": float(label_context.get("height") or 0),
+            "processRows": list(label_context.get("processRows") or []) if isinstance(label_context.get("processRows"), list) else [],
+            "shapeNumber": int(label_context.get("shapeNumber") or 0),
+            "shapeParameterUnitsPerInch": int(label_context.get("shapeParameterUnitsPerInch") or 32),
+            "shapeParameters": [float(value or 0) for value in list(label_context.get("shapeParameters") or [])[:8]]
+            if isinstance(label_context.get("shapeParameters"), list) else [],
             "quantity": float(cut_evidence.get("quantity") or 0),
             "cutQuantity": float(cut_evidence.get("cutQuantity") or 0),
+            "optimizationSheetCount": int(cut_evidence.get("optimizationSheetCount") or 0),
+            "sequenceAssignments": list(cut_evidence.get("sequenceAssignments") or []) if isinstance(cut_evidence.get("sequenceAssignments"), list) else [],
             "optimizationSequence": int(cut_evidence.get("optimizationSequence") or 0),
             "optimizationPlateNumber": int(cut_evidence.get("plateNumber") or 0),
             "optimizationPlateCut": bool(cut_evidence.get("plateCut")),
@@ -5771,10 +5818,13 @@ class BaseDeliveryStore:
                 "batchLastChangedUser": str(raw.get("batchLastChangedUser") or "").strip(),
                 "optimization": int(raw.get("optimizationNumber") or 0),
                 "optimizationStatusCode": int(raw.get("optimizationStatusCode") or 0),
+                "optimizationStatusSource": str(raw.get("optimizationStatusSource") or "").strip(),
                 "optimizationMode": int(raw.get("optimizationMode") or 0),
                 "optimizationDate": str(raw.get("optimizationDate") or "").strip(),
+                "optimizationSheetCount": int(raw.get("optimizationSheetCount") or 0),
                 "optimizationLastChangedAt": str(raw.get("optimizationLastChangedAt") or "").strip(),
                 "optimizationSequence": int(raw.get("optimizationSequence") or 0),
+                "optimizationSequenceRowId": str(raw.get("optimizationSequenceRowId") or "").strip(),
                 "optimizationPlateNumber": int(raw.get("optimizationPlateNumber") or 0),
                 "optimizationPlateCut": int(raw.get("optimizationPlateCut") or 0),
                 "optimizationPlateStockBooked": int(raw.get("optimizationPlateStockBooked") or 0),
@@ -5797,6 +5847,14 @@ class BaseDeliveryStore:
                 "positionQuantity": float(raw.get("positionQuantity") or 0),
                 "positionWidth": float(raw.get("positionWidth") or 0),
                 "positionHeight": float(raw.get("positionHeight") or 0),
+                "shapeNumber": int(raw.get("shapeNumber") or 0),
+                # v0.507: preserve the raw Crystal/A+W shape parameters. Probe
+                # 61-65 proved MOD 13 uses these as 1/32-inch edge lengths.
+                # Other shape formulas remain uninterpreted until proven.
+                "shapeParameterUnitsPerInch": max(int(raw.get("shapeParameterUnitsPerInch") or 32), 1),
+                "shapeParameters": [float(value or 0) for value in list(raw.get("shapeParameters") or [])[:8]]
+                if isinstance(raw.get("shapeParameters"), list) else [],
+                "processRows": list(raw.get("processRows") or []) if isinstance(raw.get("processRows"), list) else [],
             })
 
         grouped: dict[tuple[str, str, int, str], list[dict[str, Any]]] = {}
@@ -5835,6 +5893,31 @@ class BaseDeliveryStore:
                         self._aw_cutting_timestamp_epoch(row.get("optimizationPlateLastChangedAt")),
                     ),
                 )
+                # v0.504: one generation can have several PROD_OPTI_SEQUENCE rows.
+                # Preserve each plate/sequence assignment so piece-level labels can show
+                # the same bottom-right PLATENR / SEQUENCE pair that Crystal prints.
+                sequence_assignments: list[dict[str, Any]] = []
+                seen_sequence_rows: set[tuple[int, int, str]] = set()
+                for row in optimization_rows:
+                    sequence = int(row.get("optimizationSequence") or 0)
+                    plate_number = int(row.get("optimizationPlateNumber") or 0)
+                    sequence_row_id = str(row.get("optimizationSequenceRowId") or "").strip()
+                    if sequence <= 0:
+                        continue
+                    identity = (sequence, plate_number, sequence_row_id)
+                    if identity in seen_sequence_rows:
+                        continue
+                    seen_sequence_rows.add(identity)
+                    sequence_assignments.append({
+                        "sequence": sequence,
+                        "plateNumber": plate_number,
+                        "plateCut": bool(int(row.get("optimizationPlateCut") or 0)),
+                        "plateStockBooked": bool(int(row.get("optimizationPlateStockBooked") or 0)),
+                        "plateLastChangedAt": str(row.get("optimizationPlateLastChangedAt") or ""),
+                        "plateLastChangedUser": str(row.get("optimizationPlateLastChangedUser") or ""),
+                        "sequenceRowId": sequence_row_id,
+                    })
+                sequence_assignments.sort(key=lambda value: (int(value.get("sequence") or 0), int(value.get("plateNumber") or 0)))
                 item_barcode = next((str(row.get("itemBarcodeStart") or "").strip() for row in ranked if str(row.get("itemBarcodeStart") or "").strip()), "")
                 cut_barcode = next((str(row.get("bomBarcodeStart") or "").strip() for row in ranked if int(row.get("aggregateId") or 0) == 1000 and str(row.get("bomBarcodeStart") or "").strip()), "")
                 if not cut_barcode:
@@ -5850,14 +5933,27 @@ class BaseDeliveryStore:
                         "quantity": max((float(row.get("positionQuantity") or 0) for row in generation_rows), default=0.0),
                         "width": max((float(row.get("positionWidth") or 0) for row in generation_rows), default=0.0),
                         "height": max((float(row.get("positionHeight") or 0) for row in generation_rows), default=0.0),
+                        "shapeNumber": max((int(row.get("shapeNumber") or 0) for row in generation_rows), default=0),
+                        "shapeParameterUnitsPerInch": next((
+                            int(row.get("shapeParameterUnitsPerInch") or 32)
+                            for row in ranked if row.get("shapeParameters")
+                        ), 32),
+                        "shapeParameters": next((
+                            list(row.get("shapeParameters") or [])
+                            for row in ranked if any(float(value or 0) > 0 for value in (row.get("shapeParameters") or []))
+                        ), []),
+                        "processRows": next((list(row.get("processRows") or []) for row in ranked if row.get("processRows")), []),
                     },
                     # v0.502 keeps non-schema production evidence in the immutable
                     # source snapshot. The probe for 238330 proved current-generation
                     # PROD_OPTI_PLATES CUT/STOCKBOOKED evidence and MENGE_CUT can
                     # exist even when the cached optimization status is late.
                     "cutEvidence": {
+                        "optimizationStatusSource": str(optimization_row.get("optimizationStatusSource") or ""),
                         "quantity": max((float(row.get("quantity") or 0) for row in generation_rows), default=0.0),
                         "cutQuantity": max((float(row.get("cutQuantity") or 0) for row in generation_rows), default=0.0),
+                        "optimizationSheetCount": max((int(row.get("optimizationSheetCount") or 0) for row in optimization_rows), default=0),
+                        "sequenceAssignments": sequence_assignments,
                         "optimizationSequence": int(plate_row.get("optimizationSequence") or 0),
                         "plateNumber": int(plate_row.get("optimizationPlateNumber") or 0),
                         "plateCut": any(int(row.get("optimizationPlateCut") or 0) > 0 for row in optimization_rows),
@@ -5872,6 +5968,7 @@ class BaseDeliveryStore:
                             "aggregateId": int(row.get("aggregateId") or 0),
                             "optimization": int(row.get("optimization") or 0),
                             "optimizationSequence": int(row.get("optimizationSequence") or 0),
+                            "optimizationSequenceRowId": str(row.get("optimizationSequenceRowId") or ""),
                             "optimizationPlateNumber": int(row.get("optimizationPlateNumber") or 0),
                             "optimizationPlateCut": int(row.get("optimizationPlateCut") or 0),
                             "optimizationPlateStockBooked": int(row.get("optimizationPlateStockBooked") or 0),
@@ -5956,6 +6053,8 @@ class BaseDeliveryStore:
             "inserted": inserted,
             "updated": updated,
             "unchanged": unchanged,
+            "coverage": dict((source_window or {}).get("coverage") or {})
+            if isinstance((source_window or {}).get("coverage"), dict) else {},
             "syncedAt": now,
             "user": str(user or ""),
         }
@@ -5993,10 +6092,12 @@ class BaseDeliveryStore:
         batch_status = int(current.get("batchStatusCode") or 0)
         has_current_generation = not reject_epoch or batch_epoch > reject_epoch
         cut_after_reject = bool(cut_epoch and (not reject_epoch or cut_epoch > reject_epoch))
-        # A+W optimization status 500 is the verified booked/cut lifecycle state.
-        # PROD_JOB status also reaches 500 for old completed batches, but it is
-        # broader than physical cutting and must not independently mark a pane cut.
-        booked_status = optimization_status == AW_OPTI_STATUS_BOOKED
+        # A+W exposes Booked through more than one raw optimization status in the
+        # live plant data. 500 was established first; v0.504 adds verified status
+        # 460 from Optimization 8286. Preserve the raw code while accepting either
+        # as positive Booked/Cut evidence. PROD_JOB batch status remains insufficient.
+        # Historical v0.498 contract: optimization_status == AW_OPTI_STATUS_BOOKED
+        booked_status = optimization_status in AW_OPTI_STATUS_BOOKED_CODES
         source_quantity = float(current.get("quantity") or 0)
         source_cut_quantity = float(current.get("cutQuantity") or 0)
         quantity_cut_complete = source_quantity > 0 and source_cut_quantity >= source_quantity
@@ -6005,12 +6106,27 @@ class BaseDeliveryStore:
         # is already physically downstream. Treat the pair as positive current-
         # generation cut evidence; never let an old generation satisfy a newer
         # reject because has_current_generation remains mandatory.
-        plate_cut_complete = bool(current.get("optimizationPlateCut")) and bool(current.get("optimizationPlateStockBooked"))
+        sequence_assignments = [row for row in (current.get("sequenceAssignments") or []) if isinstance(row, dict)]
+        complete_assignments = [
+            row for row in sequence_assignments
+            if bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
+        ]
+        expected_assignments = max(1, int(round(source_quantity))) if source_quantity > 0 else len(sequence_assignments)
+        all_sequence_plates_complete = bool(sequence_assignments) and len(sequence_assignments) >= expected_assignments and len(complete_assignments) == len(sequence_assignments)
+        # Retain the single-row evidence fallback for old payloads. For quantity > 1,
+        # one CUT plate must not imply every physical piece is complete when richer
+        # sequence assignments are available.
+        plate_cut_complete = all_sequence_plates_complete or (
+            not sequence_assignments
+            and source_quantity <= 1
+            and bool(current.get("optimizationPlateCut"))
+            and bool(current.get("optimizationPlateStockBooked"))
+        )
         cut_evidence_source = ""
         if cut_after_reject:
             cut_evidence_source = "automatic_cutting_booking"
         elif has_current_generation and booked_status:
-            cut_evidence_source = "optimization_status_500"
+            cut_evidence_source = f"optimization_status_{optimization_status}"
         elif has_current_generation and plate_cut_complete:
             cut_evidence_source = "optimization_plate_cut"
         elif has_current_generation and quantity_cut_complete:
@@ -6178,6 +6294,85 @@ class BaseDeliveryStore:
             "productionLoaded": bool(include_production and service is not None),
             "orderProductionFiles": service.order_assets(clean_order, first.get("job")) if include_production and service is not None else {"hardware": [], "sketches": []},
             "productionFileAvailability": service.availability() if include_production and service is not None else {},
+        }
+
+    def get_order_production_detail(self, order_no: str, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Hydrate slow production-share assets without re-reading full Order Details.
+
+        Order Details core data (including A+W Cutting generations) is SQLite-only
+        and should paint immediately. This focused companion read intentionally
+        selects only the item identity needed by ``ProductionFileService`` before
+        touching network shares, so a slow/offline share cannot block authoritative
+        Batch/Optimization/Cutting data.
+        """
+        clean_order = str(order_no or "").strip()
+        if not clean_order:
+            raise ValueError("Order number is required")
+        service = getattr(self, "production_files", None)
+        if service is None:
+            return {
+                "order": clean_order,
+                "items": [],
+                "productionLoaded": False,
+                "orderProductionFiles": {"hardware": [], "sketches": []},
+                "productionFileAvailability": {},
+            }
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT li.source_id, li.item_no, li.job, li.last_rejected_at,
+                       dl.stage, dl.scanner
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.status = 'active'
+                  AND COALESCE(li.is_deleted, 0) = 0
+                  AND li.order_no = ?
+                ORDER BY CAST(li.item_no AS INTEGER), dl.delivery_date DESC, dl.id
+                """,
+                (clean_order,),
+            ).fetchall()
+        if user is not None:
+            rows = [row for row in rows if user_can_access_stage(user, row["stage"], row["scanner"])]
+        if not rows:
+            raise ValueError(f"Order {clean_order} was not found in active delivery lists")
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item_no = str(row["item_no"] or "").strip()
+            source_id = str(row["source_id"] or "").strip()
+            job = str(row["job"] or "").strip()
+            key = source_id or f"{clean_order}:{item_no}:{job}"
+            item = grouped.setdefault(key, {
+                "order": clean_order,
+                "item": item_no,
+                "job": job,
+                "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
+            })
+            if not item.get("job") and job:
+                item["job"] = job
+            rejected_at = str(row_value(row, "last_rejected_at", "") or "")
+            if rejected_at > str(item.get("lastRejectedAt") or ""):
+                item["lastRejectedAt"] = rejected_at
+
+        items = sorted(
+            grouped.values(),
+            key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")),
+        )
+        hydrated: list[dict[str, Any]] = []
+        for item in items:
+            assets = service.item_assets(
+                clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt")
+            )
+            hydrated.append({**item, "productionFiles": assets})
+
+        first_job = str(items[0].get("job") or "") if items else ""
+        return {
+            "order": clean_order,
+            "items": hydrated,
+            "productionLoaded": True,
+            "orderProductionFiles": service.order_assets(clean_order, first_job),
+            "productionFileAvailability": service.availability(),
         }
 
     def update_line_item(self, data: dict[str, Any], user: str) -> dict[str, Any]:
@@ -7640,7 +7835,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
         con.execute(f"PRAGMA busy_timeout = {timeout_seconds * 1000}")
-        con.execute("PRAGMA journal_mode = WAL")
+        # WAL mode is persistent database state. Reissuing journal_mode on every
+        # request connection can take a schema/database lock and became visible
+        # as random UI stalls once A+W synchronization increased concurrency.
+        # initialize() establishes WAL once; request connections only set cheap
+        # connection-local pragmas.
         con.execute("PRAGMA synchronous = NORMAL")
         con.execute("PRAGMA temp_store = MEMORY")
         return con
@@ -7670,6 +7869,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             backup_path = create_verified_backup(self.database_path)
         try:
             with self.connect() as con:
+                # v0.507: establish persistent WAL once during startup instead of
+                # competing for journal-mode locks on every browser/API request.
+                con.execute("PRAGMA journal_mode = WAL")
                 self.create_schema(con)
                 self.ensure_rack_destination_override_columns(con)
                 self.seed_customer_route_rules(con)
@@ -10065,6 +10267,144 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "timedQty": timed_qty,
             "onTimePercent": (on_time_qty / timed_qty * 100) if timed_qty else 0,
         }
+
+    def get_delivery_list_summaries(
+        self, list_ids: Iterable[str], user: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        """Read only the active list IDs an importer is reconciling.
+
+        v0.507 replaces importer calls to the full delivery catalog with this
+        bounded aggregate. It intentionally returns the quantity/manual/update
+        fields consumed by import history while skipping glass-type discovery and
+        per-list scan-timing metrics.
+        """
+        wanted = sorted({str(value or "").strip() for value in list_ids if str(value or "").strip()})
+        if not wanted:
+            return []
+        placeholders = ",".join("?" for _ in wanted)
+        with self.connect() as con:
+            rows = con.execute(
+                f"""
+                SELECT dl.*,
+                       COALESCE(SUM(li.qty), 0) AS total_qty,
+                       COALESCE(SUM(li.scanned_qty), 0) AS scanned_qty,
+                       COUNT(li.id) AS item_count,
+                       COALESCE(SUM(CASE WHEN COALESCE(li.manual_only,0)=1 OR COALESCE(li.manual_source,'')<>'' THEN li.qty ELSE 0 END),0) AS manual_piece_qty,
+                       COALESCE(SUM(CASE WHEN (COALESCE(li.manual_only,0)=1 OR COALESCE(li.manual_source,'')<>'') AND COALESCE(li.protect_from_aw_import,0)=1 THEN li.qty ELSE 0 END),0) AS protected_manual_piece_qty,
+                       COALESCE(SUM(CASE WHEN COALESCE(li.manual_only,0)=0 AND COALESCE(li.manual_source,'')='' THEN li.qty ELSE 0 END),0) AS source_total_qty,
+                       COUNT(CASE WHEN COALESCE(li.manual_only,0)=1 OR COALESCE(li.manual_source,'')<>'' THEN 1 END) AS manual_line_count,
+                       COUNT(CASE WHEN (COALESCE(li.manual_only,0)=1 OR COALESCE(li.manual_source,'')<>'') AND COALESCE(li.protect_from_aw_import,0)=1 THEN 1 END) AS protected_manual_line_count
+                FROM delivery_lists dl
+                LEFT JOIN line_items li ON li.list_id=dl.id AND COALESCE(li.is_deleted,0)=0
+                WHERE dl.status='active' AND dl.id IN ({placeholders})
+                GROUP BY dl.id,dl.label,dl.delivery_date,dl.stage,dl.scanner,dl.status,dl.revision,dl.created_at
+                ORDER BY dl.delivery_date DESC,dl.label
+                """,
+                wanted,
+            ).fetchall()
+            notices = con.execute(
+                f"""
+                WITH latest_notice AS (
+                    SELECT list_id,MAX(id) AS latest_id
+                    FROM line_update_notices
+                    WHERE list_id IN ({placeholders})
+                    GROUP BY list_id
+                ), latest_token AS (
+                    SELECT n.list_id,n.change_token
+                    FROM line_update_notices n
+                    JOIN latest_notice l ON l.latest_id=n.id
+                )
+                SELECT n.list_id,
+                       SUM(CASE WHEN lower(n.change_type)='new' THEN 1 ELSE 0 END) AS new_count,
+                       SUM(CASE WHEN lower(n.change_type)='updated' THEN 1 ELSE 0 END) AS updated_count,
+                       SUM(CASE WHEN lower(n.change_type)='removed' THEN 1 ELSE 0 END) AS removed_count,
+                       SUM(CASE WHEN lower(n.change_type)='removed' THEN COALESCE(CAST(json_extract(n.snapshot_json,'$.qty') AS INTEGER),0) ELSE 0 END) AS removed_piece_qty,
+                       MAX(n.created_at) AS latest_update_at
+                FROM line_update_notices n
+                JOIN latest_token t ON t.list_id=n.list_id AND t.change_token=n.change_token
+                GROUP BY n.list_id
+                """,
+                wanted,
+            ).fetchall()
+            notices_by_list = {
+                str(row["list_id"]): {
+                    "newItemCount": int(row["new_count"] or 0),
+                    "updatedItemCount": int(row["updated_count"] or 0),
+                    "removedItemCount": int(row["removed_count"] or 0),
+                    "removedPieceQty": int(row["removed_piece_qty"] or 0),
+                    "latestUpdateAt": str(row["latest_update_at"] or ""),
+                }
+                for row in notices
+            }
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                meta = list_meta(row)
+                if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
+                    continue
+                total_qty = int(row["total_qty"] or 0)
+                scanned_qty = int(row["scanned_qty"] or 0)
+                meta.update({
+                    "totalQty": total_qty,
+                    "scannedQty": scanned_qty,
+                    "itemCount": int(row["item_count"] or 0),
+                    "sourceTotalQty": int(row["source_total_qty"] or 0),
+                    "manualPieceQty": int(row["manual_piece_qty"] or 0),
+                    "manualLineCount": int(row["manual_line_count"] or 0),
+                    "protectedManualPieceQty": int(row["protected_manual_piece_qty"] or 0),
+                    "protectedManualLineCount": int(row["protected_manual_line_count"] or 0),
+                    "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
+                    **notices_by_list.get(str(row["id"]), {
+                        "newItemCount": 0,
+                        "updatedItemCount": 0,
+                        "removedItemCount": 0,
+                        "removedPieceQty": 0,
+                        "latestUpdateAt": "",
+                    }),
+                })
+                result.append(meta)
+            return result
+
+    def get_delivery_lists_compact(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Return revision/totals metadata without report/glass/update fan-out.
+
+        This endpoint is intentionally small because the browser polls it every
+        ten seconds.  It contains enough identity, stage, revision, and quantity
+        data to detect a changed active list and rebuild selectors, but it avoids
+        per-list scan-timing reads plus the catalog-wide glass/update queries.
+        """
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT dl.*,
+                       COALESCE(SUM(li.qty), 0) AS total_qty,
+                       COALESCE(SUM(li.scanned_qty), 0) AS scanned_qty,
+                       COUNT(li.id) AS item_count
+                FROM delivery_lists dl
+                LEFT JOIN line_items li
+                  ON li.list_id = dl.id AND COALESCE(li.is_deleted, 0) = 0
+                WHERE dl.status = 'active'
+                GROUP BY dl.id, dl.label, dl.delivery_date, dl.stage, dl.scanner,
+                         dl.status, dl.revision, dl.created_at
+                HAVING COUNT(li.id) > 0
+                ORDER BY dl.delivery_date DESC, dl.label
+                """
+            ).fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                meta = list_meta(row)
+                if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
+                    continue
+                total_qty = int(row["total_qty"] or 0)
+                scanned_qty = int(row["scanned_qty"] or 0)
+                meta.update({
+                    "totalQty": total_qty,
+                    "scannedQty": scanned_qty,
+                    "itemCount": int(row["item_count"] or 0),
+                    "deliveryPercent": (scanned_qty / total_qty * 100) if total_qty else 0,
+                    "compact": True,
+                })
+                result.append(meta)
+            return result
 
     def get_delivery_lists(self, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Purpose: Read delivery lists for the delivery-list scanner workflow.
@@ -19191,6 +19531,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         filters = filters or {}
         date_from = str(filters.get("dateFrom") or "").strip()
         date_to = str(filters.get("dateTo") or "").strip()
+        # v0.507: Statistics cards/charts do not need the potentially thousands
+        # of per-item rows used by the Daily Production Count email. Let the
+        # browser request aggregate-only activity during ordinary report loads;
+        # the daily email keeps the default detailed payload.
+        include_activity_rows = str(filters.get("detailRows", "1") or "1").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
 
         def date_clause(alias: str = "") -> tuple[str, list[str]]:
             column = f"{alias}.created_at" if alias else "created_at"
@@ -19267,6 +19614,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         scan_date_sql, scan_params = date_clause()
         audit_date_sql, audit_params = date_clause()
+        notice_date_sql, notice_date_params = date_clause("n")
         list_date_sql, list_date_params = delivery_list_date_clause("dl")
         reject_date_sql, reject_date_params = reject_date_clause("re")
         current_month = datetime.now(timezone.utc).date().replace(day=1)
@@ -19401,6 +19749,24 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """
             ).fetchall()
 
+            # v0.505: production-count activity is based on when a logical A+W
+            # Order/Item first arrived in the scanner, not its future delivery
+            # date. line_update_notices is the durable first-seen/change ledger;
+            # every workflow stage emits a notice, so the rows are deduplicated
+            # by source lineage below before totals are calculated. Updated rows
+            # are included only so a source item that transitions into REMAKE can
+            # be counted on the day that external remake actually arrived.
+            production_activity_notice_rows = con.execute(
+                f"""
+                SELECT n.id, n.line_item_id, n.list_id, n.delivery_date, n.change_type,
+                       n.change_token, n.snapshot_json, n.created_at
+                FROM line_update_notices n
+                WHERE n.change_type IN ('new', 'updated'){notice_date_sql}
+                ORDER BY n.created_at, n.id
+                """,
+                notice_date_params,
+            ).fetchall()
+
             # Pull only fields required for production/breakage analytics, then
             # deduplicate stage copies in Python. This avoids counting the same
             # physical piece once for Staging, Outbound, and its destination.
@@ -19420,12 +19786,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             reject_rows = con.execute(
                 f"""
                 SELECT re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
-                       re.product, re.reason_label, re.location_label, re.rejected_at,
-                       re.source_type, re.source_external_key,
+                       re.customer, re.product, re.reason_label, re.location_label, re.rejected_at,
+                       re.rejected_by, re.notes, re.source_type, re.source_external_key,
                        COALESCE(NULLIF(aw.machine, ''), NULLIF(re.location_label, ''), 'Unknown machine') AS resolved_machine,
                        COALESCE(NULLIF(aw.work_type, ''), '') AS aw_work_type,
                        COALESCE(NULLIF(aw.registration_point, ''), '') AS aw_registration_point,
-                       COALESCE(NULLIF(re.product, ''), NULLIF(MAX(li.product), ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS resolved_product,
+                       COALESCE(NULLIF(MAX(li.product), ''), NULLIF(re.product, ''), NULLIF(MAX(li.job), ''), 'Other Glass') AS resolved_product,
+                       COALESCE(NULLIF(re.customer, ''), NULLIF(MAX(li.customer), ''), '') AS resolved_customer,
+                       COALESCE(NULLIF(MAX(li.job), ''), '') AS job,
                        COALESCE(NULLIF(MAX(li.dimensions), ''), '') AS dimensions
                 FROM reject_events re
                 LEFT JOIN aw_reject_events aw
@@ -19437,8 +19805,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                  AND li.item_no = re.item_no
                 WHERE 1 = 1{reject_date_sql}
                 GROUP BY re.id, re.delivery_date, re.order_no, re.item_no, re.qty,
-                         re.product, re.reason_label, re.location_label, re.rejected_at,
-                         re.source_type, re.source_external_key, aw.machine, aw.work_type, aw.registration_point
+                         re.customer, re.product, re.reason_label, re.location_label, re.rejected_at,
+                         re.rejected_by, re.notes, re.source_type, re.source_external_key,
+                         aw.machine, aw.work_type, aw.registration_point
                 ORDER BY re.rejected_at DESC, re.id DESC
                 """,
                 reject_date_params,
@@ -19476,6 +19845,93 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 list_date_params,
             ).fetchone()
+
+        # v0.505: Build the "came over during this range" production ledger from
+        # import notices. This is intentionally independent of delivery_date: a
+        # September 10 order first imported on September 3 belongs in September
+        # 3's production count. Stage copies share source lineage and are folded
+        # into one logical Order/Item before pieces/items/orders are counted.
+        production_activity_by_kind: dict[str, dict[tuple[str, str], dict[str, Any]]] = {
+            "newProduction": {},
+            "externalRemakes": {},
+        }
+        for notice_row in production_activity_notice_rows:
+            try:
+                snapshot = json.loads(str(row_value(notice_row, "snapshot_json", "") or "{}"))
+            except Exception:
+                snapshot = {}
+            if not isinstance(snapshot, dict):
+                continue
+            previous_snapshot = snapshot.get("previous") if isinstance(snapshot.get("previous"), dict) else {}
+            change_type = str(row_value(notice_row, "change_type", "") or "").lower()
+            current_is_remake = is_remake_item({
+                "remake": snapshot.get("remake", ""),
+                "processState": snapshot.get("processState", ""),
+                "queueState": snapshot.get("queueState", ""),
+            })
+            previous_is_remake = is_remake_item({
+                "remake": previous_snapshot.get("remake", ""),
+                "processState": previous_snapshot.get("processState", previous_snapshot.get("process_state", "")),
+                "queueState": previous_snapshot.get("queueState", previous_snapshot.get("queue_state", "")),
+            })
+            refresh_same_day_new = False
+            if current_is_remake and (change_type == "new" or not previous_is_remake):
+                activity_kind = "externalRemakes"
+            elif change_type == "new" and not current_is_remake:
+                activity_kind = "newProduction"
+            elif change_type == "updated" and not current_is_remake:
+                # v0.506: if A+W revises Qty/details again on the same day an
+                # Order/Item first arrives, Production Count must show the actual
+                # latest piece quantity rather than the first transient snapshot.
+                # Updates on later days do not move or rewrite the original day's
+                # production ledger because the activity-date key will not match.
+                activity_kind = "newProduction"
+                refresh_same_day_new = True
+            else:
+                continue
+
+            created_at = str(row_value(notice_row, "created_at", "") or "")
+            activity_date = created_at[:10]
+            order_no = str(snapshot.get("order") or "").strip()
+            item_no = str(snapshot.get("item") or "").strip().zfill(3)
+            source_id = str(snapshot.get("sourceId") or "").strip()
+            delivery_date = str(snapshot.get("deliveryDate") or row_value(notice_row, "delivery_date", "") or "").strip()
+            fallback_identity = "|".join([
+                delivery_date, order_no, item_no, str(snapshot.get("job") or "").strip(),
+                str(snapshot.get("product") or "").strip(), str(snapshot.get("dimensions") or "").strip(),
+            ])
+            logical_identity = source_id or fallback_identity
+            dedupe_key = (activity_date, logical_identity)
+            activity_row = {
+                "order": order_no,
+                "item": item_no,
+                "qty": max(int(snapshot.get("qty") or 0), 0),
+                "customer": str(snapshot.get("customer") or "").strip(),
+                "job": str(snapshot.get("job") or "").strip(),
+                "product": str(snapshot.get("product") or "").strip(),
+                "dimensions": str(snapshot.get("dimensions") or "").strip(),
+                "route": str(snapshot.get("route") or "").strip(),
+                "deliveryDate": delivery_date,
+                "firstSeenAt": created_at,
+                "sourceId": source_id,
+            }
+            existing_activity = production_activity_by_kind[activity_kind].get(dedupe_key)
+            if refresh_same_day_new and existing_activity is None:
+                continue
+            if (
+                refresh_same_day_new
+                or existing_activity is None
+                or sum(bool(value) for value in activity_row.values()) > sum(bool(value) for value in existing_activity.values())
+            ):
+                production_activity_by_kind[activity_kind][dedupe_key] = activity_row
+
+        # If a brand-new notice is immediately overlaid as a remake in the same
+        # import day, classify it only as external remake. Across different days
+        # both events remain valid history: original production first, remake later.
+        remake_keys = set(production_activity_by_kind["externalRemakes"].keys())
+        for duplicate_key in list(production_activity_by_kind["newProduction"].keys()):
+            if duplicate_key in remake_keys:
+                production_activity_by_kind["newProduction"].pop(duplicate_key, None)
 
         physical_items: dict[tuple[str, str], dict[str, Any]] = {}
         for row in production_rows:
@@ -19562,6 +20018,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 continue
             add_breakage(production, qty, sqft, rate)
 
+        # Yield Percentage rows remain visible/auditable on the Rejects page but
+        # are accounting exclusions rather than production breakage. Keep their
+        # excluded quantity explicit in the report so operators can reconcile why
+        # the Statistics total differs from raw Reject history.
+        yield_percentage_reject_rows = [
+            row for row in reject_rows
+            if is_yield_percentage_reject_reason(row_value(row, "reason_label", ""))
+        ]
+        statistical_reject_rows = [
+            row for row in reject_rows
+            if not is_yield_percentage_reject_reason(row_value(row, "reason_label", ""))
+        ]
+
         internal_rejects = empty_breakage_bucket()
         internal_by_machine: dict[str, dict[str, Any]] = {}
         internal_by_glass: dict[str, dict[str, Any]] = {}
@@ -19571,7 +20040,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         internal_by_glass_reason: dict[str, dict[str, dict[str, Any]]] = {}
         internal_reason_machine_glass: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
 
-        for row in reject_rows:
+        for row in statistical_reject_rows:
             qty = max(int(row_value(row, "qty", 0) or 0), 0)
             raw_product = str(row_value(row, "resolved_product", "") or row_value(row, "product", "") or "Other Glass")
             glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
@@ -19744,6 +20213,120 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ),
         }
 
+        def activity_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+            """Summarize first-seen production activity as actual physical pieces.
+
+            v0.506 adds the glass-type ledger used by both the Statistics surface and
+            the formatted Daily Production Count email.  Every logical Order/Item
+            contributes its imported quantity exactly once; synchronized stage copies
+            have already been folded out before this helper runs.
+            """
+            ordered = (
+                sorted(
+                    rows,
+                    key=lambda row: (
+                        str(row.get("order") or ""),
+                        str(row.get("item") or ""),
+                        str(row.get("firstSeenAt") or ""),
+                    ),
+                )
+                if include_activity_rows
+                else list(rows)
+            )
+            glass_buckets: dict[str, dict[str, Any]] = {}
+            for row in ordered:
+                raw_product = str(row.get("product") or "Other Glass")
+                glass_label, _rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
+                row["glassType"] = glass_label
+                qty = max(int(row.get("qty") or 0), 0)
+                bucket = glass_buckets.setdefault(glass_label, {
+                    "glassType": glass_label, "pieces": 0, "itemCount": 0,
+                    "orders": set(), "deliveryDates": set(),
+                })
+                bucket["pieces"] += qty
+                bucket["itemCount"] += 1
+                order_no = str(row.get("order") or "").strip()
+                if order_no:
+                    bucket["orders"].add(order_no)
+                delivery_date = str(row.get("deliveryDate") or "").strip()
+                if delivery_date:
+                    bucket["deliveryDates"].add(delivery_date)
+
+            by_glass = [
+                {
+                    "glassType": str(bucket["glassType"]),
+                    "pieces": int(bucket["pieces"]),
+                    "itemCount": int(bucket["itemCount"]),
+                    "orderCount": len(bucket["orders"]),
+                    "deliveryDates": sorted(bucket["deliveryDates"]),
+                }
+                for bucket in glass_buckets.values()
+            ]
+            by_glass.sort(key=lambda row: (-int(row["pieces"]), str(row["glassType"]).lower()))
+
+            pieces = sum(max(int(row.get("qty") or 0), 0) for row in ordered)
+            order_numbers = {str(row.get("order") or "").strip() for row in ordered if str(row.get("order") or "").strip()}
+            # Details are needed for the daily email draft. Cap only pathological
+            # multi-month requests; normal daily/weekly ranges remain complete.
+            detail_limit = 2500
+            return {
+                "pieces": pieces,
+                "itemCount": len(ordered),
+                "orderCount": len(order_numbers),
+                "byGlass": by_glass,
+                "rows": ordered[:detail_limit] if include_activity_rows else [],
+                "detailTruncated": bool(include_activity_rows and len(ordered) > detail_limit),
+            }
+
+        new_production_activity = activity_summary(list(production_activity_by_kind["newProduction"].values()))
+        external_remake_activity = activity_summary(list(production_activity_by_kind["externalRemakes"].values()))
+        internal_reject_activity_rows: list[dict[str, Any]] = []
+        for row in statistical_reject_rows:
+            qty = max(int(row_value(row, "qty", 0) or 0), 0)
+            raw_product = str(row_value(row, "resolved_product", "") or row_value(row, "product", "") or "Other Glass").strip()
+            glass_label, rate = glass_cost_profile(raw_product, effective_glass_costs, effective_glass_aliases)
+            dimensions = str(row_value(row, "dimensions", "") or "").strip()
+            sqft = dimensions_square_feet(dimensions) * qty
+            internal_reject_activity_rows.append({
+                "order": str(row_value(row, "order_no", "") or "").strip(),
+                "item": str(row_value(row, "item_no", "") or "").strip().zfill(3),
+                "qty": qty,
+                "customer": str(row_value(row, "resolved_customer", "") or row_value(row, "customer", "") or "").strip(),
+                "job": str(row_value(row, "job", "") or "").strip(),
+                "product": raw_product,
+                "glassType": glass_label,
+                "dimensions": dimensions,
+                "sqft": round(sqft, 2),
+                "estimatedCost": round(sqft * float(rate), 2) if rate is not None else None,
+                "reason": str(row_value(row, "reason_label", "") or "").strip(),
+                "location": str(row_value(row, "resolved_machine", "") or row_value(row, "location_label", "") or "").strip(),
+                "rejectedBy": str(row_value(row, "rejected_by", "") or "").strip(),
+                "rejectedAt": str(row_value(row, "rejected_at", "") or ""),
+                "deliveryDate": str(row_value(row, "delivery_date", "") or ""),
+            })
+        internal_reject_activity = {
+            "pieces": sum(max(int(row.get("qty") or 0), 0) for row in internal_reject_activity_rows),
+            "eventCount": len(internal_reject_activity_rows),
+            "orderCount": len({row["order"] for row in internal_reject_activity_rows if row.get("order")}),
+            "rows": (
+                sorted(
+                    internal_reject_activity_rows,
+                    key=lambda row: (str(row.get("rejectedAt") or ""), str(row.get("order") or ""), str(row.get("item") or "")),
+                )[:2500]
+                if include_activity_rows else []
+            ),
+            "detailTruncated": bool(include_activity_rows and len(internal_reject_activity_rows) > 2500),
+        }
+        yield_percentage_excluded = {
+            "pieces": sum(max(int(row_value(row, "qty", 0) or 0), 0) for row in yield_percentage_reject_rows),
+            "eventCount": len(yield_percentage_reject_rows),
+            "orderCount": len({
+                str(row_value(row, "order_no", "") or "").strip()
+                for row in yield_percentage_reject_rows
+                if str(row_value(row, "order_no", "") or "").strip()
+            }),
+        }
+
         glass_quantity_by_type = [
             {
                 "glassType": label,
@@ -19803,12 +20386,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "rangeRemakeCount": int(range_remake_row["row_count"] or 0),
             "rangeRemakeQty": int(range_remake_row["qty"] or 0),
             "actionCounts": {row["action"]: row["count"] for row in action_rows},
+            "productionActivity": {
+                "newProduction": new_production_activity,
+                "internalRejects": internal_reject_activity,
+                "externalRemakes": external_remake_activity,
+                "yieldPercentageExcluded": yield_percentage_excluded,
+                "basis": "first-seen import timestamp for new/remake work; reject incident timestamp for Internal Rejects",
+            },
             "breakage": {
                 "costBasis": "USD per square foot",
                 "pricingPerSqft": [{"glassType": label, "rate": rate} for label, rate in effective_glass_costs.items()],
                 "production": production_summary,
                 "producedTotals": produced_totals,
                 "internalRejects": internal_summary,
+                "yieldPercentageExcluded": yield_percentage_excluded,
                 "externalRemakes": external_summary,
                 "rates": breakage_rates,
                 "internalByMachine": internal_machine_rows,
@@ -21134,7 +21725,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         with self.connect() as con:
-            self.seed_racks(con)
+            # Racks are seeded/repaired during initialization and explicit admin
+            # mutations. A read endpoint must not perform duplicate startup-style
+            # writes because that creates avoidable writer contention.
             racks = [self.rack_from_row(con, row) for row in con.execute("SELECT * FROM racks WHERE active = 1 ORDER BY sort_order, rack_code").fetchall()]
             visuals = self.rack_set_visuals(con)
             for rack in racks:

@@ -1126,3 +1126,26 @@ IF NOT EXISTS (
 )
     CREATE INDEX idx_aw_cutting_batch_v498
         ON dbo.aw_cutting_generations(batch_job_number, optimization_number);
+
+-- v0.507 / schema 17 parity: targeted runtime read indexes.
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.line_items') AND name = N'idx_line_items_active_order_item_v507'
+)
+    CREATE INDEX idx_line_items_active_order_item_v507
+        ON dbo.line_items(order_no, item_no, list_id, is_deleted);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.delivery_lists') AND name = N'idx_delivery_lists_active_date_revision_v507'
+)
+    CREATE INDEX idx_delivery_lists_active_date_revision_v507
+        ON dbo.delivery_lists(status, delivery_date DESC, revision, id);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.line_update_notices') AND name = N'idx_line_update_notices_list_recent_v507'
+)
+    CREATE INDEX idx_line_update_notices_list_recent_v507
+        ON dbo.line_update_notices(list_id, id DESC, change_token, change_type);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.aw_cutting_generations') AND name = N'idx_aw_cutting_order_item_recent_v507'
+)
+    CREATE INDEX idx_aw_cutting_order_item_recent_v507
+        ON dbo.aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC);
+GO

@@ -587,8 +587,13 @@ def write_result(path_text: str, payload: dict[str, Any]) -> None:
 
 
 def current_list_ids(store: Any) -> set[str]:
-    """Return current scanner delivery-list ids through the maintained store API."""
-    getter = getattr(store, "get_delivery_lists", None)
+    """Return current scanner delivery-list ids through the lightest maintained API."""
+    # v0.507: this helper is called repeatedly during direct reconciliation. The
+    # full catalog calculates glass/timing/update metadata that is irrelevant to
+    # existence checks, so prefer the compact catalog when the active store has it.
+    getter = getattr(store, "get_delivery_lists_compact", None)
+    if not callable(getter):
+        getter = getattr(store, "get_delivery_lists", None)
     if not callable(getter):
         return set()
     rows = getter() or []
@@ -790,23 +795,37 @@ def scanner_stage_drift(
     return bool(mismatched), sorted(mismatched)
 
 
-def active_list_summary_map(store: Any) -> dict[str, dict[str, Any]]:
-    """Return live active-stage totals and retained preview counters by list ID.
+def active_list_summary_map(
+    store: Any, list_ids: list[str] | tuple[str, ...] | set[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return live stage totals without rebuilding the entire rich catalog.
 
     Automation history is an audit record, not the source of truth for current
-    quantities. Reading the maintained list catalog after each reconciliation
-    keeps No Changes results, management totals, and manual-row diagnostics tied
-    to the same active rows that the Scan page receives.
+    quantities. v0.507 asks SQLite only for the stage IDs being reconciled, which
+    removes repeated catalog-wide timing/glass scans from each delivery date.
+    Compatibility stores still fall back to the original maintained API.
     """
-    getter = getattr(store, "get_delivery_lists", None)
-    if not callable(getter):
-        return {}
-    try:
-        rows = list(getter() or [])
-    except TypeError:
-        rows = list(getter(None) or [])
-    except Exception:
-        return {}
+    wanted = {str(value or "").strip() for value in (list_ids or []) if str(value or "").strip()}
+    focused = getattr(store, "get_delivery_list_summaries", None)
+    if callable(focused) and wanted:
+        try:
+            rows = list(focused(sorted(wanted)) or [])
+        except TypeError:
+            rows = list(focused(sorted(wanted), None) or [])
+        except Exception:
+            rows = []
+    else:
+        getter = getattr(store, "get_delivery_lists", None)
+        if not callable(getter):
+            return {}
+        try:
+            rows = list(getter() or [])
+        except TypeError:
+            rows = list(getter(None) or [])
+        except Exception:
+            return {}
+        if wanted:
+            rows = [row for row in rows if isinstance(row, dict) and str(row.get("id") or "").strip() in wanted]
     return {
         str(row.get("id") or "").strip(): dict(row)
         for row in rows
@@ -819,7 +838,8 @@ def active_stage_summaries(
     expected_definitions: list[Any],
 ) -> list[dict[str, Any]]:
     """Build zero-change stage rows from current scanner catalog totals."""
-    active_by_id = active_list_summary_map(store)
+    expected_ids = [str(definition[0] or "").strip() for definition in expected_definitions if definition]
+    active_by_id = active_list_summary_map(store, expected_ids)
     summaries: list[dict[str, Any]] = []
     for definition in expected_definitions:
         if not definition:
@@ -870,7 +890,8 @@ def merge_live_stage_totals(
     stage_summaries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Attach current active/manual quantities to changed import summaries."""
-    active_by_id = active_list_summary_map(store)
+    summary_ids = [str(row.get("listId") or "").strip() for row in stage_summaries if isinstance(row, dict)]
+    active_by_id = active_list_summary_map(store, summary_ids)
     merged: list[dict[str, Any]] = []
     for raw_summary in stage_summaries:
         summary = dict(raw_summary)
@@ -1790,18 +1811,24 @@ def main() -> int:
                         source_window={
                             "source": str(cutting_sync_request.get("source") or "SYSADM.PROD_JOBITEM"),
                             "orderCount": int_value(cutting_sync_request.get("orderCount")),
+                            "coverage": dict(cutting_sync_request.get("coverage") or {})
+                            if isinstance(cutting_sync_request.get("coverage"), dict) else {},
                         },
                     ),
                     "synchronizing A+W Cutting progress",
                 )
                 cutting_sync_ms = int(round((time.perf_counter() - cutting_sync_started) * 1000))
                 aw_cutting_sync["durationMs"] = cutting_sync_ms
+                coverage = cutting_sync_request.get("coverage") if isinstance(cutting_sync_request.get("coverage"), dict) else {}
+                aw_cutting_sync["coverage"] = dict(coverage)
                 progress(
                     "A+W Cutting synchronization finished: "
                     f"generations={int_value(aw_cutting_sync.get('generations'))}, "
                     f"inserted={int_value(aw_cutting_sync.get('inserted'))}, "
                     f"updated={int_value(aw_cutting_sync.get('updated'))}, "
                     f"unchanged={int_value(aw_cutting_sync.get('unchanged'))}, "
+                    f"coverage={int_value(coverage.get('matchedOrderCount'))}/{int_value(coverage.get('requestedOrderCount'))} orders, "
+                    f"missing={int_value(coverage.get('missingOrderCount'))}, "
                     f"durationMs={cutting_sync_ms}."
                 )
             except Exception as exc:
