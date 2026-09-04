@@ -107,6 +107,13 @@ const state = {
   fabricationStatusPendingV474: new Set(),
   fabricationStatusBatchTokenV474: 0,
   orderDetailCacheV474: new Map(),
+  // v0.507: keep authoritative SQLite/A+W data independent from slow network-share
+  // hydration. In-flight maps deduplicate repeated clicks on the same Order.
+  orderDetailCorePendingV507: new Map(),
+  orderDetailProductionCacheV507: new Map(),
+  orderDetailProductionPendingV507: new Map(),
+  orderDetailRenderedPayloadV507: null,
+  orderDetailSketchObserverV507: null,
   orderDetailOpenOrderV474: "",
   orderDetailFocusItemV477: "",
   orderDetailFocusTimerV477: 0,
@@ -315,6 +322,8 @@ const state = {
   homeReportSummaryRequestKey: "",
   homeReportSummaryRequestToken: 0,
   homeReportSummaryPromise: null,
+  // v0.506: transient HTML/plain-text review payload for the daily production email.
+  dailyProductionEmailDraftV506: null,
   // v0.260: Statistics opens glass-first with a compact top-10 donut.
   // The external-remake toggle is intentionally independent so machine
   // accountability never silently attributes customer/external remakes.
@@ -842,6 +851,10 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
 
 document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
   const detail = event.detail && typeof event.detail === "object" ? event.detail : {};
+  if (!detail.catalogOnly) {
+    state.orderDetailCacheV474.clear();
+    state.orderDetailProductionCacheV507.clear();
+  }
   dlsAutomationApplyImportSnapshot(detail);
   window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 250);
 });
@@ -1027,6 +1040,8 @@ const els = {
   statisticsChartCanvas: document.getElementById("statisticsChartCanvas"),
   statisticsChartViewButtons: document.querySelectorAll("[data-statistics-view]"),
   statisticsMiniCharts: document.getElementById("statisticsMiniCharts"),
+  statisticsProductionActivity: document.getElementById("statisticsProductionActivity"),
+  statisticsDailyProductionEmailBtn: document.getElementById("statisticsDailyProductionEmailBtn"),
   homeGreeting: document.getElementById("homeGreeting"),
   homeHubUpdated: document.getElementById("homeHubUpdated"),
   homeDeliveryTimeline: document.getElementById("homeDeliveryTimeline"),
@@ -1919,6 +1934,23 @@ const SPANISH_UI_TEXT = new Map([
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_UI_ADDITIONS = new Map([
+  ["Daily production activity", "Actividad diaria de producción"],
+  ["Production count", "Conteo de producción"],
+  ["Actual new-piece counts by glass type, plus Internal Rejects and external remakes for the selected reporting range.", "Conteo real de piezas nuevas por tipo de vidrio, más rechazos internos y rehacer externos para el rango seleccionado."],
+  ["Draft daily email", "Redactar correo diario"],
+  ["Draft today's formatted production count email", "Redactar el correo con formato del conteo de producción de hoy"],
+  ["Formatted email draft", "Borrador de correo con formato"],
+  ["Copy plain text", "Copiar texto sin formato"],
+  ["Copy formatted email", "Copiar correo con formato"],
+  ["New production", "Producción nueva"],
+  ["Internal rejects", "Rechazos internos"],
+  ["Yield Percentage rejects excluded", "Rechazos de porcentaje de rendimiento excluidos"],
+  ["First imported during this range · remakes excluded", "Importado por primera vez en este rango · rehacer excluidos"],
+  ["First imported or first changed to REMAKE during this range", "Importado por primera vez o cambiado por primera vez a REHACER durante este rango"],
+  ["Email draft", "Borrador de correo"],
+  ["Copy body", "Copiar cuerpo"],
+  ["Open in Email App", "Abrir en la aplicación de correo"],
+  ["Close email draft", "Cerrar borrador de correo"],
   ["Actions", "Acciones"],
   ["All glass types", "Todos los tipos de vidrio"],
   ["Bar", "Barras"],
@@ -4301,6 +4333,8 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Source:", "Fuente:"],
   ["0 lines", "0 líneas"],
   ["Runtime", "Entorno de ejecución"],
+  ["Loading settings...", "Cargando configuración..."],
+  ["Settings could not be loaded.", "No se pudo cargar la configuración."],
   ["Automatic mode", "Modo automático"],
   ["Last command", "Último comando"],
   ["Keys, behavior presets, station bindings, and route codes are engine contracts. Display names and aliases are presentation. Keeping those layers separate makes location/company changes safe.", "Las claves, preajustes de comportamiento, vinculaciones de estación y códigos de ruta son contratos del motor. Los nombres para mostrar y alias pertenecen a la presentación. Mantener esas capas separadas hace seguros los cambios de ubicación o empresa."],
@@ -4939,6 +4973,7 @@ function spanishBayCategoryLabel(category, plural = false) {
 }
 
 const SPANISH_DYNAMIC_PATTERNS = [
+  [/^(\d+) Yield Percentage pieces? excluded$/i, (_, count) => `${count} ${Number(count) === 1 ? "pieza" : "piezas"} de porcentaje de rendimiento excluidas`],
   [/^(\d+) alias$/i, (_, count) => `${count} alias`],
   [/^(\d+) aliases$/i, (_, count) => `${count} alias`],
   [/^Already combined into (.+)$/i, (_, target) => `Ya combinado en ${target}`],
@@ -8198,7 +8233,11 @@ function applyBackendPayload(payload, { selectionFallbackId = "" } = {}) {
  */
 async function loadDeliveryLists(preferredListId = "") {
   if (state.backend) {
-    const payload = await fetchJson("/api/delivery-lists");
+    // v0.507: the global catalog is selector/progress metadata, not line detail.
+    // Keeping startup/admin refreshes on the compact endpoint avoids rebuilding
+    // catalog-wide update/glass/report summaries before the operator can work.
+    // The selected list is still hydrated from /api/delivery-lists/{id}.
+    const payload = await fetchJson("/api/delivery-lists?compact=1");
     state.lists = payload.lists || [];
   }
   renderHome();
@@ -11150,32 +11189,6 @@ function rackOperatorDisplayName(rack = {}) {
 /** Return the concise current-location label used in scanner/order tables. */
 function rackLocationDisplayLabel(code = "", name = "", type = "") {
   return rackDisplayLabelFromParts(code, name, type);
-}
-
-/** Return the compact operator-facing bay label without exposing internal T-BAY prefixes. */
-function bayLocationDisplayLabel(code = "", name = "") {
-  const cleanCode = String(code || "").trim();
-  const cleanName = String(name || "").trim();
-
-  const compactCanonical = (value) => {
-    let text = String(value || "").trim();
-    if (!text) return "";
-    text = text.replace(/^BAY\s+/i, "").trim();
-    // Legacy bay display names can contain doubled separators (for example
-    // 12--1). Normalize those for operator-facing labels without changing the
-    // stored bay code or assignment identity.
-    text = text.replace(/-{2,}/g, "-");
-    const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
-      || text.match(/^(\d+(?:-\d+)*)$/);
-    return match ? `Bay ${match[1]}` : "";
-  };
-
-  const compactName = compactCanonical(cleanName);
-  if (compactName) return compactName;
-  const compactCode = compactCanonical(cleanCode);
-  if (compactCode) return compactCode;
-  if (cleanName) return /^bay\b/i.test(cleanName) ? cleanName.replace(/^bay\b/i, "Bay") : `Bay ${cleanName}`;
-  return cleanCode ? `Bay ${cleanCode}` : "";
 }
 
 /** Return the compact operator-facing bay label without exposing internal T-BAY prefixes. */
@@ -15288,13 +15301,22 @@ function renderStatisticsAnalytics() {
 
   if (!entries.length) {
     state.homeChartSelectedLabel = "";
-    els.statisticsChartCanvas.innerHTML = `
-      <div class="statistics-chart-empty-v0258">
-        <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
-        <strong>No data is available</strong>
-        <p>Change the range, data type, or category filter to display results.</p>
-      </div>
-    `;
+    if (state.homeReportSummaryLoading && !activeHomeReportSummaryV472()) {
+      els.statisticsChartCanvas.innerHTML = `
+        <div class="statistics-chart-loading-v507" role="status" aria-live="polite">
+          <span class="statistics-chart-loading-spinner-v507" aria-hidden="true"></span>
+          <div><strong>Loading statistics…</strong><p>Building the selected production and breakage metrics.</p></div>
+        </div>
+      `;
+    } else {
+      els.statisticsChartCanvas.innerHTML = `
+        <div class="statistics-chart-empty-v0258">
+          <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
+          <strong>No data is available</strong>
+          <p>Change the range, data type, or category filter to display results.</p>
+        </div>
+      `;
+    }
     return;
   }
 
@@ -15408,6 +15430,307 @@ function selectedRangeBreakageStats() {
   };
 }
 
+/** Return the range-scoped first-seen production activity payload used by v0.506. */
+function statisticsProductionActivityV506(report = activeHomeReportSummaryV472()) {
+  return report?.productionActivity || {
+    newProduction: { pieces: 0, itemCount: 0, orderCount: 0, byGlass: [], rows: [] },
+    internalRejects: { pieces: 0, eventCount: 0, orderCount: 0, rows: [] },
+    externalRemakes: { pieces: 0, itemCount: 0, orderCount: 0, byGlass: [], rows: [] },
+    yieldPercentageExcluded: { pieces: 0, eventCount: 0, orderCount: 0 },
+  };
+}
+
+/** Format one compact delivery-date list for production-count glass rows. */
+function productionDeliveryDatesV506(values = []) {
+  const dates = [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!dates.length) return "—";
+  return dates.map((value) => formatDisplayDate(value) || value).join(" · ");
+}
+
+/** Render true piece counts by glass type plus separate reject/remake totals. */
+function renderStatisticsProductionActivityV506() {
+  if (!els.statisticsProductionActivity) return;
+  const report = activeHomeReportSummaryV472();
+  if (!report) {
+    const message = state.homeReportSummaryLoading ? "Loading production activity…" : "Production activity is not available for this range yet.";
+    els.statisticsProductionActivity.innerHTML = `<div class="statistics-production-count-empty-v505">${escapeHtml(message)}</div>`;
+    return;
+  }
+
+  const activity = statisticsProductionActivityV506(report);
+  const newWork = activity.newProduction || {};
+  const rejects = activity.internalRejects || {};
+  const remakes = activity.externalRemakes || {};
+  const glassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
+  const glassMarkup = glassRows.length
+    ? glassRows.map((row) => `
+        <div class="statistics-production-glass-row-v506">
+          <span class="statistics-production-glass-name-v506">${escapeHtml(row.glassType || "Other Glass")}</span>
+          <strong>${escapeHtml(Number(row.pieces || 0))}<small> pcs</small></strong>
+          <span>${escapeHtml(Number(row.itemCount || 0))} item${Number(row.itemCount || 0) === 1 ? "" : "s"}</span>
+          <em>DD ${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
+        </div>`).join("")
+    : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported in this range.</div>`;
+
+  const excludedPieces = Number(activity.yieldPercentageExcluded?.pieces || 0);
+  els.statisticsProductionActivity.innerHTML = `
+    <article class="statistics-production-count-card-v505 statistics-production-new-v506 is-new">
+      <header class="statistics-production-new-header-v506">
+        <span class="statistics-production-count-icon-v505" aria-hidden="true"></span>
+        <div>
+          <small>New production</small>
+          <strong>${escapeHtml(Number(newWork.pieces || 0))}<span> pieces</span></strong>
+          <p>${escapeHtml(Number(newWork.itemCount || 0))} item${Number(newWork.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(newWork.orderCount || 0))} order${Number(newWork.orderCount || 0) === 1 ? "" : "s"} · remakes excluded</p>
+        </div>
+      </header>
+      <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">${glassMarkup}</div>
+    </article>
+    <div class="statistics-production-side-stack-v506">
+      <article class="statistics-production-count-card-v505 is-reject statistics-production-side-card-v506">
+        <span class="statistics-production-count-icon-v505" aria-hidden="true"></span>
+        <div>
+          <small>Internal rejects</small>
+          <strong>${escapeHtml(Number(rejects.pieces || 0))}</strong>
+          <p>${escapeHtml(Number(rejects.eventCount || 0))} reject event${Number(rejects.eventCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(rejects.orderCount || 0))} order${Number(rejects.orderCount || 0) === 1 ? "" : "s"}</p>
+          <em>${excludedPieces ? `${excludedPieces} Yield Percentage piece${excludedPieces === 1 ? "" : "s"} excluded` : "Yield Percentage rejects excluded"}</em>
+        </div>
+      </article>
+      <article class="statistics-production-count-card-v505 is-remake statistics-production-side-card-v506">
+        <span class="statistics-production-count-icon-v505" aria-hidden="true"></span>
+        <div>
+          <small>External remakes</small>
+          <strong>${escapeHtml(Number(remakes.pieces || 0))}</strong>
+          <p>${escapeHtml(Number(remakes.itemCount || 0))} item${Number(remakes.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(remakes.orderCount || 0))} order${Number(remakes.orderCount || 0) === 1 ? "" : "s"}</p>
+          <em>First imported or first changed to REMAKE during this range</em>
+        </div>
+      </article>
+    </div>`;
+}
+
+/** Sort one production-count detail set using numeric-aware Order/Item keys. */
+function sortedDailyProductionRowsV506(rows = []) {
+  return (Array.isArray(rows) ? rows : []).slice().sort((left, right) =>
+    String(left.order || "").localeCompare(String(right.order || ""), undefined, { numeric: true })
+      || String(left.item || "").localeCompare(String(right.item || ""), undefined, { numeric: true })
+      || String(left.firstSeenAt || left.rejectedAt || "").localeCompare(String(right.firstSeenAt || right.rejectedAt || ""))
+  );
+}
+
+function dailyProductionCellV506(value, options = {}) {
+  const align = options.align || "left";
+  const weight = options.bold ? "700" : "500";
+  return `<td style="padding:8px 9px;border-bottom:1px solid #dce7f0;color:#22384c;font-size:12px;line-height:1.3;text-align:${align};font-weight:${weight};vertical-align:top;">${escapeHtml(value == null || value === "" ? "—" : String(value))}</td>`;
+}
+
+function dailyProductionHeaderCellV506(value, color = "#0b3158", align = "left") {
+  return `<th style="padding:8px 9px;background:${color};color:#ffffff;font-size:10px;letter-spacing:.03em;text-transform:uppercase;text-align:${align};font-weight:800;border-right:1px solid rgba(255,255,255,.15);">${escapeHtml(value)}</th>`;
+}
+
+/** Build an Outlook-friendly formatted email and a complete plain-text fallback. */
+function dailyProductionEmailDraftV506(report, dateKey) {
+  const activity = statisticsProductionActivityV506(report);
+  const newWork = activity.newProduction || {};
+  const rejects = activity.internalRejects || {};
+  const remakes = activity.externalRemakes || {};
+  const excluded = activity.yieldPercentageExcluded || {};
+  const displayDate = formatDisplayDate(dateKey) || dateKey;
+  const newGlassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
+  const rejectRows = sortedDailyProductionRowsV506(rejects.rows);
+  const remakeRows = sortedDailyProductionRowsV506(remakes.rows);
+
+  const plain = [`DAILY PRODUCTION COUNT - ${displayDate}`, "", "NEW ORDERS:"];
+  if (!newGlassRows.length) plain.push("  No new production pieces.");
+  newGlassRows.forEach((row) => {
+    plain.push(`  ${row.glassType || "Other Glass"} - ${Number(row.pieces || 0)} Piece${Number(row.pieces || 0) === 1 ? "" : "s"} | DD: ${productionDeliveryDatesV506(row.deliveryDates)}`);
+  });
+  plain.push("", `INTERNAL REJECTS: ${Number(rejects.pieces || 0)} pieces`);
+  if (!rejectRows.length) plain.push("  No statistical Internal Rejects.");
+  rejectRows.forEach((row) => {
+    const orderItem = `${String(row.order || "—").trim()}-${String(row.item || "—").trim().padStart(3, "0")}`;
+    plain.push(`  ${orderItem} | Qty ${Number(row.qty || 0)} | ${row.glassType || row.product || "Other Glass"} | ${row.dimensions || "—"} | ${row.reason || "—"} | ${row.location || "—"} | ${row.rejectedBy || "—"}`);
+  });
+  if (Number(excluded.pieces || 0) > 0) plain.push(`  Yield Percentage excluded: ${Number(excluded.pieces || 0)} pieces`);
+  plain.push("", `EXTERNAL REMAKES: ${Number(remakes.pieces || 0)} pieces`);
+  if (!remakeRows.length) plain.push("  No external remakes.");
+  remakeRows.forEach((row) => {
+    const orderItem = `${String(row.order || "—").trim()}-${String(row.item || "—").trim().padStart(3, "0")}`;
+    plain.push(`  ${orderItem} | Qty ${Number(row.qty || 0)} | ${row.customer || "—"} | ${row.glassType || row.product || "Other Glass"} | ${row.dimensions || "—"} | DD ${formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—"}`);
+  });
+  plain.push("", "Generated by Delivery List Scanner");
+
+  const newRowsHtml = newGlassRows.length ? newGlassRows.map((row) => `<tr>
+    ${dailyProductionCellV506(row.glassType || "Other Glass", { bold: true })}
+    ${dailyProductionCellV506(Number(row.pieces || 0), { bold: true, align: "center" })}
+    ${dailyProductionCellV506(Number(row.itemCount || 0), { align: "center" })}
+    ${dailyProductionCellV506(Number(row.orderCount || 0), { align: "center" })}
+    ${dailyProductionCellV506(productionDeliveryDatesV506(row.deliveryDates))}
+  </tr>`).join("") : `<tr><td colspan="5" style="padding:16px;color:#687d90;text-align:center;font-size:12px;">No new production pieces.</td></tr>`;
+
+  const rejectRowsHtml = rejectRows.length ? rejectRows.map((row) => `<tr>
+    ${dailyProductionCellV506(formatDateTime(row.rejectedAt) || row.rejectedAt || "—")}
+    ${dailyProductionCellV506(row.order || "—", { bold: true })}
+    ${dailyProductionCellV506(String(row.item || "").replace(/^0+/, "") || "—", { align: "center" })}
+    ${dailyProductionCellV506(Number(row.qty || 0), { align: "center" })}
+    ${dailyProductionCellV506(row.glassType || row.product || "Other Glass")}
+    ${dailyProductionCellV506(row.dimensions || "—")}
+    ${dailyProductionCellV506(Number(row.sqft || 0).toFixed(2), { align: "right" })}
+    ${dailyProductionCellV506(formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—")}
+    ${dailyProductionCellV506(row.reason || "—")}
+    ${dailyProductionCellV506(row.location || "—")}
+    ${dailyProductionCellV506(row.rejectedBy || "—")}
+  </tr>`).join("") : `<tr><td colspan="11" style="padding:16px;color:#687d90;text-align:center;font-size:12px;">No statistical Internal Rejects.</td></tr>`;
+
+  const remakeRowsHtml = remakeRows.length ? remakeRows.map((row) => `<tr>
+    ${dailyProductionCellV506(formatDateTime(row.firstSeenAt) || row.firstSeenAt || "—")}
+    ${dailyProductionCellV506(row.order || "—", { bold: true })}
+    ${dailyProductionCellV506(String(row.item || "").replace(/^0+/, "") || "—", { align: "center" })}
+    ${dailyProductionCellV506(Number(row.qty || 0), { align: "center" })}
+    ${dailyProductionCellV506(row.customer || "—")}
+    ${dailyProductionCellV506(row.job || "—")}
+    ${dailyProductionCellV506(row.glassType || row.product || "Other Glass")}
+    ${dailyProductionCellV506(row.dimensions || "—")}
+    ${dailyProductionCellV506(formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—")}
+  </tr>`).join("") : `<tr><td colspan="9" style="padding:16px;color:#687d90;text-align:center;font-size:12px;">No external remakes.</td></tr>`;
+
+  const summaryCard = (label, value, note, accent) => `<td width="33.33%" style="padding:0 5px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dbe6ef;border-top:4px solid ${accent};border-radius:6px;"><tr><td style="padding:12px 14px;"><div style="font-size:10px;color:#6a8094;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">${escapeHtml(label)}</div><div style="font-size:28px;line-height:1.05;color:#123a61;font-weight:800;margin-top:3px;">${escapeHtml(value)}</div><div style="font-size:10px;color:#7d8d9c;margin-top:4px;">${escapeHtml(note)}</div></td></tr></table></td>`;
+
+  const html = `<div style="margin:0;padding:0;background:#f4f7fa;font-family:'Segoe UI',Arial,sans-serif;color:#22384c;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f4f7fa;"><tr><td align="center" style="padding:24px 10px;">
+      <table role="presentation" width="900" cellpadding="0" cellspacing="0" style="width:100%;max-width:900px;border-collapse:collapse;background:#ffffff;border:1px solid #d5e1eb;box-shadow:0 5px 18px rgba(15,47,76,.08);">
+        <tr><td style="padding:20px 24px;background:#0b3158;border-bottom:4px solid #2f77ad;color:#ffffff;">
+          <table width="100%" cellpadding="0" cellspacing="0"><tr><td><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#a9c9e4;font-weight:800;">Delivery List Scanner</div><div style="font-size:26px;line-height:1.15;font-weight:800;margin-top:3px;">Daily Production Count</div></td><td align="right" style="font-size:15px;font-weight:700;color:#ffffff;">${escapeHtml(displayDate)}</td></tr></table>
+        </td></tr>
+        <tr><td style="padding:16px 18px 4px;"><table width="100%" cellpadding="0" cellspacing="0"><tr>
+          ${summaryCard("New production", `${Number(newWork.pieces || 0)} pcs`, `${Number(newWork.itemCount || 0)} items · ${Number(newWork.orderCount || 0)} orders`, "#2f77ad")}
+          ${summaryCard("Internal rejects", `${Number(rejects.pieces || 0)} pcs`, `${Number(rejects.eventCount || 0)} events`, "#c34232")}
+          ${summaryCard("External remakes", `${Number(remakes.pieces || 0)} pcs`, `${Number(remakes.itemCount || 0)} items`, "#7255a5")}
+        </tr></table></td></tr>
+        <tr><td style="padding:18px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#123a61;">New Orders</div><div style="font-size:11px;color:#718599;margin-top:2px;">Actual new-piece count grouped by glass type. Remakes are excluded.</div></td></tr>
+        <tr><td style="padding:0 23px 18px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
+          <thead><tr>${dailyProductionHeaderCellV506("Glass Type")}${dailyProductionHeaderCellV506("Pieces", "#0b3158", "center")}${dailyProductionHeaderCellV506("Items", "#0b3158", "center")}${dailyProductionHeaderCellV506("Orders", "#0b3158", "center")}${dailyProductionHeaderCellV506("Delivery Date(s)")}</tr></thead><tbody>${newRowsHtml}</tbody>
+        </table></td></tr>
+        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#9f2f25;">Internal Rejects</div><div style="font-size:11px;color:#718599;margin-top:2px;">Yield Percentage rejects are excluded from these production-accounting totals.</div></td></tr>
+        <tr><td style="padding:0 23px 18px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #ead8d5;">
+          <thead><tr>${["Date / Time","Order #","Line","Qty","Glass Type","Size","Sq Ft.","Delivery Date","Reason","Machine","Reported By"].map((value) => dailyProductionHeaderCellV506(value, "#b63c30", ["Line","Qty","Sq Ft."].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${rejectRowsHtml}</tbody>
+        </table></div>${Number(excluded.pieces || 0) > 0 ? `<div style="padding:8px 10px;margin-top:8px;background:#fff8e8;border:1px solid #f0d79c;color:#765516;font-size:11px;"><b>${Number(excluded.pieces || 0)} Yield Percentage piece${Number(excluded.pieces || 0) === 1 ? "" : "s"}</b> excluded from production statistics.</div>` : ""}</td></tr>
+        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#5d468a;">External Remakes</div><div style="font-size:11px;color:#718599;margin-top:2px;">Replacement work first imported or first changed to REMAKE today.</div></td></tr>
+        <tr><td style="padding:0 23px 22px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dfd8eb;">
+          <thead><tr>${["Reported","Order #","Line","Qty","Customer","Job ID","Glass Type","Size","Delivery Date"].map((value) => dailyProductionHeaderCellV506(value, "#654c92", ["Line","Qty"].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${remakeRowsHtml}</tbody>
+        </table></div></td></tr>
+        <tr><td style="padding:13px 23px;background:#f3f7fa;border-top:1px solid #dbe5ed;color:#748698;font-size:10px;">Generated by Delivery List Scanner · Production counts use first-seen import activity; Internal Rejects use reject incident time.</td></tr>
+      </table>
+    </td></tr></table>
+  </div>`;
+
+  return { subject: `Daily Production Count - ${displayDate}`, body: plain.join("\r\n"), html, dateKey };
+}
+
+/** Create a polished HTML review surface before handing the draft to Outlook. */
+function ensureDailyProductionEmailPreviewV506() {
+  let modal = document.getElementById("dailyProductionEmailPreviewV506");
+  if (modal) return modal;
+  const backdrop = document.createElement("div");
+  backdrop.id = "dailyProductionEmailBackdropV506";
+  backdrop.className = "statistics-email-preview-backdrop-v505";
+  backdrop.hidden = true;
+  modal = document.createElement("section");
+  modal.id = "dailyProductionEmailPreviewV506";
+  modal.className = "statistics-email-preview-v505 statistics-email-preview-v506";
+  modal.hidden = true;
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-label", "Daily Production Count email draft");
+  modal.innerHTML = `
+    <header><div><small>DAILY PRODUCTION COUNT</small><strong>Formatted email draft</strong></div><button type="button" data-production-email-close-v506 aria-label="Close email draft">×</button></header>
+    <div class="statistics-email-preview-subject-v505"><small>Subject</small><strong data-production-email-subject-v506></strong></div>
+    <div class="statistics-email-preview-render-v506" data-production-email-html-v506></div>
+    <footer>
+      <button type="button" data-production-email-copy-text-v506>Copy plain text</button>
+      <button type="button" class="app-primary-button" data-production-email-copy-formatted-v506>Copy formatted email</button>
+      <button type="button" data-production-email-open-v506>Open in Email App</button>
+    </footer>`;
+  document.body.append(backdrop, modal);
+  backdrop.addEventListener("click", closeDailyProductionEmailPreviewV506);
+  modal.querySelector("[data-production-email-close-v506]")?.addEventListener("click", closeDailyProductionEmailPreviewV506);
+  modal.querySelector("[data-production-email-copy-text-v506]")?.addEventListener("click", () => copyDailyProductionEmailTextV506().catch((error) => showFloatingNotice(error?.message || "Could not copy the email body.", "error")));
+  modal.querySelector("[data-production-email-copy-formatted-v506]")?.addEventListener("click", () => copyDailyProductionEmailFormattedV506().catch((error) => showFloatingNotice(error?.message || "Could not copy the formatted email.", "error")));
+  modal.querySelector("[data-production-email-open-v506]")?.addEventListener("click", () => openDailyProductionEmailAppV506().catch((error) => showFloatingNotice(error?.message || "Could not open the email application.", "error")));
+  return modal;
+}
+
+function closeDailyProductionEmailPreviewV506() {
+  const modal = document.getElementById("dailyProductionEmailPreviewV506");
+  const backdrop = document.getElementById("dailyProductionEmailBackdropV506");
+  if (modal) modal.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+/** Always draft today's production email regardless of the Statistics range being viewed. */
+async function draftDailyProductionEmailV506() {
+  const button = els.statisticsDailyProductionEmailBtn;
+  const today = todayKey() || dateInputValue(new Date());
+  if (button) button.disabled = true;
+  try {
+    const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}`);
+    const draft = dailyProductionEmailDraftV506(report, today);
+    state.dailyProductionEmailDraftV506 = draft;
+    const modal = ensureDailyProductionEmailPreviewV506();
+    const backdrop = document.getElementById("dailyProductionEmailBackdropV506");
+    const subject = modal.querySelector("[data-production-email-subject-v506]");
+    const body = modal.querySelector("[data-production-email-html-v506]");
+    if (subject) subject.textContent = draft.subject;
+    if (body) body.innerHTML = draft.html;
+    modal.hidden = false;
+    if (backdrop) backdrop.hidden = false;
+  } catch (error) {
+    showFloatingNotice(error?.message || "Could not build the daily production email.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function copyDailyProductionEmailTextV506() {
+  const draft = state.dailyProductionEmailDraftV506;
+  if (!draft?.body) return;
+  await navigator.clipboard.writeText(draft.body);
+  showFloatingNotice("Plain-text production email copied.", "success");
+}
+
+/** Copy both HTML and plain text so Outlook pastes the professional table layout. */
+async function copyDailyProductionEmailFormattedV506() {
+  const draft = state.dailyProductionEmailDraftV506;
+  if (!draft?.html) return;
+  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    const item = new ClipboardItem({
+      "text/html": new Blob([draft.html], { type: "text/html" }),
+      "text/plain": new Blob([draft.body || ""], { type: "text/plain" }),
+    });
+    await navigator.clipboard.write([item]);
+    showFloatingNotice("Formatted production email copied. Paste it into Outlook with Ctrl+V.", "success");
+    return;
+  }
+  await navigator.clipboard.writeText(draft.body || "");
+  showFloatingNotice("Formatted clipboard is unavailable in this browser; plain text was copied instead.", "warning");
+}
+
+async function openDailyProductionEmailAppV506() {
+  const draft = state.dailyProductionEmailDraftV506;
+  if (!draft) return;
+  const fullParams = `${mailtoParam("subject", draft.subject)}&${mailtoParam("body", draft.body)}`;
+  if (fullParams.length > 7000) {
+    try {
+      await copyDailyProductionEmailFormattedV506();
+      showFloatingNotice("The formatted report is on your clipboard. Paste it into the new email with Ctrl+V.", "info");
+    } catch {
+      showFloatingNotice("This report is too large for a reliable mail draft. Copy the formatted email, then paste it into Outlook.", "warning");
+      return;
+    }
+    window.location.href = `mailto:?${mailtoParam("subject", draft.subject)}`;
+    return;
+  }
+  window.location.href = `mailto:?${fullParams}`;
+}
+
 /**
  * Purpose: Render the dedicated Statistics page summaries and live analytics.
  * Effects: Updates priority metrics, the main analytics workspace, and mini charts.
@@ -15476,6 +15799,7 @@ function renderHomeStatistics(overviewLists, overview) {
     }).join("");
   }
 
+  renderStatisticsProductionActivityV506();
   renderStatisticsAnalytics();
   renderStatisticsMiniCharts();
 }
@@ -15505,7 +15829,13 @@ async function loadHomeReportSummary() {
   state.homeReportSummaryLoading = true;
   if (state.page === "statistics") renderStatisticsAnalytics();
 
-  const requestPromise = fetchJson(`/api/reports/summary${requestParams}`);
+  // v0.507: ordinary Statistics/Home views only need aggregates. Detailed
+  // per-order activity rows are reserved for the Daily Production Count email,
+  // cutting hundreds of KB from common 30-day report responses.
+  const reportQuery = requestParams
+    ? `${requestParams}&detailRows=0`
+    : "?detailRows=0";
+  const requestPromise = fetchJson(`/api/reports/summary${reportQuery}`);
   state.homeReportSummaryPromise = requestPromise;
   try {
     const report = await requestPromise;
@@ -23936,10 +24266,38 @@ function productionSketchVisualV476(sketches = [], itemLabel = "") {
   }
   const page = Math.max(0, Number(sketch.pageNumber || 0));
   const source = `${productionAssetUrlV470(sketch.id, page)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+  // v0.507: native iframe loading=lazy is not enough for embedded PDF viewers;
+  // Chromium may still initialize every plugin. Keep src detached until the sketch
+  // approaches the visible Order Details viewport.
   return `<div class="production-sketch-visual-v476">
-    <iframe loading="lazy" src="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
+    <iframe loading="lazy" data-order-sketch-src-v507="${escapeHtml(source)}" title="Sketch ${escapeHtml(sketch.itemMarker || itemLabel || "item")}" tabindex="-1"></iframe>
     <span class="production-sketch-caption-v476"><b>${escapeHtml(sketch.itemMarker || itemLabel || "Sketch")}</b>${page ? `<small>Page ${escapeHtml(page)}</small>` : ""}</span>
   </div>`;
+}
+
+function hydrateOrderDetailSketchesV507() {
+  const frames = [...document.querySelectorAll("#productionExplorerBodyV470 iframe[data-order-sketch-src-v507]")];
+  state.orderDetailSketchObserverV507?.disconnect?.();
+  state.orderDetailSketchObserverV507 = null;
+  if (!frames.length) return;
+  const loadFrame = (frame) => {
+    if (!frame || frame.src || !frame.dataset.orderSketchSrcV507) return;
+    frame.src = frame.dataset.orderSketchSrcV507;
+    delete frame.dataset.orderSketchSrcV507;
+  };
+  if (!("IntersectionObserver" in window)) {
+    frames.slice(0, 1).forEach(loadFrame);
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      loadFrame(entry.target);
+      observer.unobserve(entry.target);
+    });
+  }, { root: document.getElementById("productionExplorerBodyV470"), rootMargin: "420px 0px" });
+  frames.forEach((frame) => observer.observe(frame));
+  state.orderDetailSketchObserverV507 = observer;
 }
 
 function cuttingProgressPresentationV498(cutting = {}) {
@@ -24016,19 +24374,78 @@ function usableAwLabelTextV501(value = "") {
 // Compatibility: v0.498 introduced the Reconstructed A+W Cutting Label preview; v0.502 keeps that contract while tightening its geometry.
 // v0.502 keeps that public function name while rendering a compact, physical-label
 // thumbnail and preserving the current A+W generation for each physical piece.
+// Historical v0.500 investigation text retained only for regression search: Process-after-cutting formula still under investigation.
+function cuttingLabelRouteTextV504(value = "") {
+  const raw = usableAwLabelTextV501(value).toUpperCase().replace(/\s+/g, " ").trim();
+  if (!raw || raw === "IT" || raw.includes("INDIAN TRAIL")) return "";
+  if (raw === "CPU" || raw === "CUSTOMER PICKUP" || raw === "CUSTOMER PICK UP") return "CUSTOMER PICK UP";
+  if (raw === "DTC" || raw === "DELIVERY TO CUSTOMER" || raw === "DELIVER TO CUSTOMER") return "DELIVERY TO CUSTOMER";
+  // Current A+W Cutting Labels only use CPU and DTC route headings. Unknown
+  // scanner route codes remain blank rather than inventing Crystal output.
+  return "";
+}
+
 function cuttingGenerationPresentationV502(generation = {}) {
   if (String(generation.state || "").trim()) return cuttingProgressPresentationV498(generation);
   const quantity = Number(generation.quantity || 0);
   const cutQuantity = Number(generation.cutQuantity || 0);
+  const statusCode = Number(generation.optimizationStatusCode || 0);
+  const assignments = (Array.isArray(generation.sequenceAssignments) ? generation.sequenceAssignments : []).filter((row) => row && typeof row === "object");
+  const expectedAssignments = quantity > 0 ? Math.max(1, Math.round(quantity)) : assignments.length;
+  const allAssignmentsCut = assignments.length >= expectedAssignments
+    && assignments.every((row) => Boolean(row.plateCut) && Boolean(row.plateStockBooked));
+  const singleLegacyPlateCut = !assignments.length && quantity <= 1
+    && Boolean(generation.optimizationPlateCut) && Boolean(generation.optimizationPlateStockBooked);
   const cutComplete = Boolean(generation.cutCompletedAt)
-    || Number(generation.optimizationStatusCode || 0) === 500
-    || (Boolean(generation.optimizationPlateCut) && Boolean(generation.optimizationPlateStockBooked))
+    || statusCode === 460
+    || statusCode === 500
+    || allAssignmentsCut
+    || singleLegacyPlateCut
     || (quantity > 0 && cutQuantity >= quantity);
   if (cutComplete) return cuttingProgressPresentationV498({ ...generation, state: "cut" });
-  if (Number(generation.optimizationStatusCode || 0) === 200) return cuttingProgressPresentationV498({ ...generation, state: "released" });
-  if (Number(generation.optimizationStatusCode || 0) === 100 || Number(generation.optimization || 0) > 0) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
+  if (statusCode === 200) return cuttingProgressPresentationV498({ ...generation, state: "released" });
+  if (statusCode === 100 || Number(generation.optimization || 0) > 0) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
   if (Number(generation.batchStatusCode || 0) === 400) return cuttingProgressPresentationV498({ ...generation, state: "batch_active" });
   return cuttingProgressPresentationV498({ ...generation, state: "unknown" });
+}
+
+function cuttingLabelProcessRowsV504(cutting = {}) {
+  const rows = (Array.isArray(cutting.processRows) ? cutting.processRows : [])
+    .filter((row) => row && typeof row === "object")
+    .slice()
+    .sort((left, right) => Number(left.workSequence || 0) - Number(right.workSequence || 0)
+      || Number(left.bomId || 0) - Number(right.bomId || 0)
+      || Number(left.workTypeId || 0) - Number(right.workTypeId || 0));
+  const output = [];
+  rows.forEach((row) => {
+    const workTypeId = Number(row.workTypeId || 0);
+    const work = String(row.workType || "").trim();
+    const product = String(row.processProductDescription || "").trim();
+    const machine = String(row.machine || "").trim();
+    if (workTypeId === 80 || /packing|shipping/i.test(work)) return;
+    let label = "";
+    if (workTypeId === 10 || /automatic cutting/i.test(work)) {
+      // The supplied Crystal labels consistently use this literal display text
+      // even though FS_BOOK_HISTORY may name the cutting employee/machine Intermac.
+      label = "Automatic Cutting - Cutting";
+    } else if (workTypeId === 20 || /polish/i.test(work) || /polish/i.test(product)) {
+      const edgeData = String(row.edgeData || "").trim();
+      const sides = Array.from(edgeData.slice(0, 8)).map((value, index) => (value !== "0" && value !== " " ? index + 1 : 0)).filter(Boolean);
+      const sideText = sides.length ? ` side(s) ${sides.join("/")}` : "";
+      label = `Flat Polish${sideText}${machine ? ` - ${machine}` : ""}`;
+    } else if (workTypeId === 60 || /temper/i.test(work)) {
+      label = `Tempering${machine ? ` - ${machine}` : ""}`;
+    } else {
+      const operation = product || work;
+      if (!operation) return;
+      label = operation;
+      if (machine && !operation.toLowerCase().includes(machine.toLowerCase())) label += ` - ${machine}`;
+    }
+    // Do not deduplicate: the real A+W labels intentionally repeat identical
+    // hole/slot operations when a piece contains that operation more than once.
+    if (label) output.push(label);
+  });
+  return output;
 }
 
 function cuttingLabelGenerationPlanV502(item = {}) {
@@ -24047,29 +24464,51 @@ function cuttingLabelGenerationPlanV502(item = {}) {
   (Array.isArray(cutting.history) ? cutting.history : []).forEach(addGeneration);
   candidates.sort((left, right) => Number(right.keyIndex || 0) - Number(left.keyIndex || 0));
 
-  // A+W keeps the original generation quantity even after a single-piece reject.
-  // Allocate newest remake quantities first, then let the older generation fill
-  // the remaining physical pieces. Example: Qty 5 + one KEYINDEX 1 remake becomes
-  // one Batch 9179 label and four Batch 6502 labels instead of five remake labels.
+  // Allocate newest remake quantities first, then older generations. Within each
+  // generation preserve every A+W PROD_OPTI_SEQUENCE assignment so the printed
+  // bottom-right PLATENR / SEQUENCE pair follows the real optimization label.
   let remaining = total;
   const plan = [];
   candidates.forEach((generation, generationIndex) => {
     if (remaining <= 0) return;
     const sourceQuantity = Math.max(0, Math.round(Number(generation.quantity || 0)));
+    const assignments = (Array.isArray(generation.sequenceAssignments) ? generation.sequenceAssignments : [])
+      .filter((row) => row && typeof row === "object" && Number(row.sequence || 0) > 0)
+      .slice()
+      .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0) || Number(left.plateNumber || 0) - Number(right.plateNumber || 0));
     let count = sourceQuantity > 0 ? Math.min(sourceQuantity, remaining) : 0;
+    if (!count && assignments.length) count = Math.min(assignments.length, remaining);
     if (!count && generationIndex === candidates.length - 1) count = remaining;
     if (!count && generationIndex === 0 && candidates.length === 1) count = remaining;
-    for (let index = 0; index < count; index += 1) plan.push({ generation, generationPiece: index + 1, generationCount: count });
+    for (let index = 0; index < count; index += 1) {
+      plan.push({ generation, generationPiece: index + 1, generationCount: count, sequenceAssignment: assignments[index] || null });
+    }
     remaining -= count;
   });
   while (remaining > 0) {
-    plan.push({ generation: candidates[candidates.length - 1] || cutting, generationPiece: 1, generationCount: remaining });
+    plan.push({ generation: candidates[candidates.length - 1] || cutting, generationPiece: 1, generationCount: remaining, sequenceAssignment: null });
     remaining -= 1;
   }
   return { total, plan: plan.slice(0, total) };
 }
 
-function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, pieceTotal = 1, generationOverride = null) {
+function cuttingLabelEdgeCalloutsV507(cutting = {}) {
+  // Probe 61-65 + the physical 238375/3 label resolved Crystal's
+  // Dim_LengthInfo behavior for MOD 13 exactly: MOD_PARAM1..4 are raw
+  // 1/32-inch edge lengths (1880,1878,1444,1438 -> 58 3/4, 58 11/16,
+  // 45 1/8, 44 15/16). Do not extrapolate this formula to other shape
+  // modules until A+W evidence proves their parameter semantics.
+  if (Number(cutting.shapeNumber || 0) !== 13) return [];
+  const units = Math.max(Number(cutting.shapeParameterUnitsPerInch || 32), 1);
+  const params = Array.isArray(cutting.shapeParameters) ? cutting.shapeParameters : [];
+  return params
+    .map((value) => Number(value || 0))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .slice(0, 8)
+    .map((value, index) => `${index + 1}: ${formatSupersededDimensionUnit(value, units)}`);
+}
+
+function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, pieceTotal = 1, generationOverride = null, sequenceAssignment = null) {
   const cutting = generationOverride && typeof generationOverride === "object" ? generationOverride : (item.cutting || {});
   const batch = String(cutting.batch || "").trim();
   const optimization = Number(cutting.optimization || 0);
@@ -24077,10 +24516,10 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
   const remake = Number(cutting.keyIndex || 0) > 0;
   const weight = Number(cutting.weight || 0);
   const surface = Number(cutting.surfaceArea || 0);
-  const status = cuttingGenerationPresentationV502(cutting);
-  const awRoute = usableAwLabelTextV501(cutting.routeText);
-  const route = awRoute || String(item.route || payload.route || "").trim();
-  const deliveryDate = String((item.stages || []).find((stage) => String(stage?.deliveryDate || "").trim())?.deliveryDate || "").trim();
+  const awRoute = cuttingLabelRouteTextV504(cutting.routeText);
+  const scannerRoute = cuttingLabelRouteTextV504(item.route || payload.route || "");
+  const route = awRoute || scannerRoute;
+  const deliveryDate = String((item.stages || []).find((stage) => String(stage?.deliveryDate || "").trim())?.deliveryDate || payload.deliveryDate || "").trim();
   const order = String(item.order || payload.order || "").trim();
   const itemNumber = String(item.item || "").trim();
   const awItem = itemNumber.replace(/^0+(?=\d)/, "") || itemNumber;
@@ -24089,35 +24528,52 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
   const product = usableAwLabelTextV501(cutting.productDescription) || String(item.product || "Glass").trim();
   const labelBarcode = cuttingLabelBarcodeV500(order, itemNumber);
   const barcodeSvg = code39BarcodeSvgV500(labelBarcode);
-  // v0.500 displayed the literal placeholder "Process-after-cutting formula still under investigation".
-  // v0.502 keeps that uncertainty out of the operator label and leaves the Crystal process area blank until its exact formula/source is proven.
-  const processHint = status.complete ? "Automatic Cutting - Cutting" : "";
+  const processes = cuttingLabelProcessRowsV504(cutting);
+  const shapeNumber = Number(cutting.shapeNumber || 0);
+  const edgeCallouts = cuttingLabelEdgeCalloutsV507(cutting);
+  const assignment = sequenceAssignment && typeof sequenceAssignment === "object" ? sequenceAssignment : null;
+  const plateNumber = Number(assignment?.plateNumber || cutting.optimizationPlateNumber || 0);
+  const optimizationSequence = Number(assignment?.sequence || cutting.optimizationSequence || 0);
   const total = Math.max(1, Number(pieceTotal || 1));
   const sequence = Math.max(1, Math.min(total, Number(pieceNumber || 1)));
-  const labelMarkup = `<section class="production-cutting-label-v498 production-cutting-label-reconstruction-v500 production-cutting-label-v502" aria-label="Reconstructed A+W Cutting Label piece ${escapeHtml(sequence)} of ${escapeHtml(total)}">
+  // v0.505: the supplied physical A+W labels resolve two previously-unknown
+  // Crystal marks. A back-mitre operation carries '#', while Diamon/Diamond
+  // Fusion carries '@'. Keep each mark on the process row that triggers it;
+  // this matches their vertical placement across labels with different routes.
+  const processHtml = processes.map((line) => {
+    const marker = /back\s+mit(?:re|er)/i.test(line)
+      ? "#"
+      : /diamon(?:d)?\s+fusion/i.test(line) ? "@" : "";
+    const markerClass = marker === "@" ? " is-at" : marker === "#" ? " is-hash" : "";
+    return `<span>${escapeHtml(line)}${marker ? `<b class="production-cutting-label-process-marker-v505${markerClass}" aria-label="A+W process marker ${escapeHtml(marker)}">${escapeHtml(marker)}</b>` : ""}</span>`;
+  }).join("");
+  const labelMarkup = `<section class="production-cutting-label-v498 production-cutting-label-reconstruction-v500 production-cutting-label-v502 production-cutting-label-v504" aria-label="Reconstructed A+W Cutting Label piece ${escapeHtml(sequence)} of ${escapeHtml(total)}">
     <div class="production-cutting-label-title-v500">
       <strong>${escapeHtml(customer)}</strong>
       ${deliveryDate ? `<time>${escapeHtml(formatDisplayDate(deliveryDate) || deliveryDate)}</time>` : ""}
     </div>
-    <div class="production-cutting-label-route-v500">
-      <b>${escapeHtml(route || "")}</b>
-      ${remake ? `<em>REMAKE</em>` : ""}
-    </div>
+    <div class="production-cutting-label-route-v500">${route ? `<b>${escapeHtml(route)}</b>` : ""}</div>
+    ${remake ? `<em class="production-cutting-label-remake-v504">REMAKE</em>` : ""}
     <div class="production-cutting-label-barcode-v500"${awBarcodeSource ? ` title="A+W barcode source: ${escapeHtml(awBarcodeSource)}"` : ""}>
       ${barcodeSvg || `<span class="is-unavailable">Barcode unavailable</span>`}
     </div>
     <div class="production-cutting-label-identifiers-v500">
       <span class="is-sg-v502"><small>(SG)</small><b>${escapeHtml(sgText || "—")}</b></span>
-      <span class="is-aw-v502"><small>(AW)</small><b>${escapeHtml(order || "—")} / ${escapeHtml(awItem || "—")}</b><i>Batch: <strong>${escapeHtml(batch || "—")}</strong></i></span>
-      <span class="production-cutting-label-opt-v500">Optimization: <strong>${optimization ? escapeHtml(optimization) : "—"}</strong></span>
+      <span class="is-aw-v502"><small>(AW)</small><b>${escapeHtml(order || "—")} / ${escapeHtml(awItem || "—")}</b></span>
+    </div>
+    <div class="production-cutting-label-production-meta-v504">
+      <span>Batch:<strong>${escapeHtml(batch || "—")}</strong></span>
+      <span>Optimization:<strong>${optimization ? escapeHtml(optimization) : "—"}</strong></span>
     </div>
     <strong class="production-cutting-label-glass-v500">${escapeHtml(product || "Glass")}</strong>
     <strong class="production-cutting-label-size-v500">${escapeHtml(item.dimensions || "—")}</strong>
-    <div class="production-cutting-label-process-v500">${processHint ? `<span>${escapeHtml(processHint)}</span>` : ""}</div>
+    ${shapeNumber > 0 && !edgeCallouts.length ? `<b class="production-cutting-label-shape-v505">SHAPE ${escapeHtml(shapeNumber)}</b>` : ""}
+    ${edgeCallouts.length ? `<div class="production-cutting-label-edge-dims-v507" aria-label="A+W edge dimensions">${edgeCallouts.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}</div>` : ""}
+    <div class="production-cutting-label-process-v500">${processHtml}</div>
     <div class="production-cutting-label-metrics-v500">
       ${weight > 0 ? `<span><b>${escapeHtml(weight.toFixed(2))}</b><strong>lbs</strong></span>` : ""}
       ${surface > 0 ? `<span><b>${escapeHtml(surface.toFixed(2))}</b><strong>sqft</strong></span>` : ""}
-      <span class="production-cutting-label-piece-counter-v501" title="Scanner physical-piece index; the Crystal bottom-right formula is still being verified."><b>${escapeHtml(sequence)}</b><strong>/ ${escapeHtml(total)}</strong></span>
+      ${(plateNumber > 0 || optimizationSequence > 0) ? `<span class="production-cutting-label-piece-counter-v501" title="A+W optimization plate / sequence"><b>${escapeHtml(plateNumber || "—")}</b><strong>/ ${escapeHtml(optimizationSequence || "—")}</strong></span>` : ""}
     </div>
   </section>`;
   return `<div class="production-cutting-label-frame-v502">
@@ -24128,31 +24584,36 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
   </div>`;
 }
 
+function cuttingLabelPieceHtmlV507(item = {}, payload = {}, piece = 1) {
+  const generationPlan = cuttingLabelGenerationPlanV502(item);
+  const total = Math.max(1, Number(generationPlan.total || 1));
+  const index = Math.min(Math.max(Number(piece || 1), 1), total) - 1;
+  const entry = generationPlan.plan[index] || generationPlan.plan[0] || { generation: item.cutting || {}, sequenceAssignment: null };
+  const generation = entry.generation || item.cutting || {};
+  const status = cuttingGenerationPresentationV502(generation);
+  const generationMeta = Number(generation.keyIndex || 0) > 0 ? ` · Remake ${escapeHtml(generation.keyIndex)}` : "";
+  return `<div class="production-cutting-piece-v501 is-virtual-v507">
+    <div class="production-cutting-piece-summary-v507"><span>Piece ${escapeHtml(index + 1)} of ${escapeHtml(total)}${generationMeta}</span><b>${escapeHtml(status.detail)}</b></div>
+    ${orderDetailCuttingLabelV498(item, payload, index + 1, total, generation, entry.sequenceAssignment)}
+  </div>`;
+}
+
 function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
   const cutting = item.cutting || {};
   const generationPlan = cuttingLabelGenerationPlanV502(item);
-  const requestedTotal = generationPlan.total;
-  const renderedTotal = Math.min(requestedTotal, 250);
+  const requestedTotal = Math.max(1, Number(generationPlan.total || 1));
   const history = Array.isArray(cutting.history) ? cutting.history.slice(1, 4) : [];
   const sourceNote = cutting.inferredFromFabrication
     ? `Cut confirmed by downstream ${String(cutting.fabricationMachine || "fabrication").trim()} evidence.`
     : cutting.dataAvailable === false ? "No synchronized A+W cutting generation is stored yet." : "A+W production evidence";
-  const labels = generationPlan.plan.slice(0, renderedTotal).map((entry, index) => {
-    const piece = index + 1;
-    const generation = entry.generation || cutting;
-    const status = cuttingGenerationPresentationV502(generation);
-    const generationMeta = Number(generation.keyIndex || 0) > 0
-      ? ` · Remake ${escapeHtml(generation.keyIndex)}`
-      : "";
-    return `<details class="production-cutting-piece-v501" ${piece === 1 ? "open" : ""}>
-      <summary><span>Piece ${escapeHtml(piece)} of ${escapeHtml(requestedTotal)}${generationMeta}</span><b>${escapeHtml(status.detail)}</b></summary>
-      ${orderDetailCuttingLabelV498(item, payload, piece, requestedTotal, generation)}
-    </details>`;
-  }).join("");
+  const itemKey = String(item.item || "");
+  const selector = requestedTotal > 1
+    ? `<label class="production-cutting-piece-selector-v507"><span>Piece</span><select data-cutting-label-piece-select-v507="${escapeHtml(itemKey)}">${Array.from({ length: requestedTotal }, (_, index) => `<option value="${index + 1}">${index + 1} / ${requestedTotal}</option>`).join("")}</select></label>`
+    : "";
+  // v0.507: render one physical label, not hundreds of hidden SVG/barcodes.
   return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v502" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
-    <header><div><small>CUTTING LABELS</small><strong>${escapeHtml(requestedTotal)} physical piece${requestedTotal === 1 ? "" : "s"}</strong></div><span>${escapeHtml(sourceNote)}</span></header>
-    <div class="production-cutting-piece-list-v501">${labels}</div>
-    ${requestedTotal > renderedTotal ? `<p class="production-cutting-label-limit-v501">Showing the first ${escapeHtml(renderedTotal)} labels to protect browser performance. Quantity: ${escapeHtml(requestedTotal)}.</p>` : ""}
+    <header><div><small>CUTTING LABEL</small><strong>${escapeHtml(requestedTotal)} physical piece${requestedTotal === 1 ? "" : "s"}</strong></div><span>${escapeHtml(sourceNote)}</span>${selector}</header>
+    <div class="production-cutting-piece-list-v501" data-cutting-label-piece-body-v507="${escapeHtml(itemKey)}">${cuttingLabelPieceHtmlV507(item, payload, 1)}</div>
     ${history.length ? `<div class="production-cutting-history-v498"><small>Prior generations</small>${history.map((row) => `<span>Batch <b>${escapeHtml(row.batch || "—")}</b>${row.optimization ? ` · Opt <b>${escapeHtml(row.optimization)}</b>` : ""}</span>`).join("")}</div>` : ""}
   </section>`;
 }
@@ -24302,6 +24763,7 @@ function orderDetailInternalAwRejectsV485(rejects = []) {
 function renderOrderDetailV470(payload = {}) {
   const body = document.getElementById("productionExplorerBodyV470");
   if (!body) return;
+  state.orderDetailRenderedPayloadV507 = payload;
   const items = Array.isArray(payload.items) ? payload.items : [];
   const orderFiles = payload.orderProductionFiles || { hardware: [], sketches: [] };
   const productionLoaded = payload.productionLoaded !== false;
@@ -24352,7 +24814,79 @@ function renderOrderDetailV470(payload = {}) {
         }).join("") || `<div class="production-file-empty-v470">No active items found for this order.</div>`}
       </div>
     </div>`;
+  hydrateOrderDetailSketchesV507();
   if (state.orderDetailFocusItemV477) focusOrderDetailItemV477(state.orderDetailFocusItemV477);
+}
+
+function mergeOrderProductionDetailV507(core = {}, production = {}) {
+  const productionByItem = new Map((production.items || []).map((item) => [normalizedOrderDetailItemV477(item.item), item]));
+  const mergedItems = (core.items || []).map((item) => {
+    const productionItem = productionByItem.get(normalizedOrderDetailItemV477(item.item)) || {};
+    const productionFiles = productionItem.productionFiles || item.productionFiles || {};
+    let cutting = { ...(item.cutting || {}) };
+    const fabrication = productionFiles.fabrication || {};
+    if (fabrication.fabricated === true && !cutting.complete) {
+      cutting = {
+        ...cutting,
+        state: "cut", label: "Cut", complete: true, released: false, needsRecutting: false,
+        inferredFromFabrication: true, evidenceSource: "downstream_fabrication",
+        fabricationMachine: String(fabrication.actualMachine || fabrication.machine || ""),
+      };
+    }
+    return { ...item, productionFiles, cutting };
+  });
+  return {
+    ...core,
+    items: mergedItems,
+    productionLoaded: Boolean(production.productionLoaded),
+    orderProductionFiles: production.orderProductionFiles || core.orderProductionFiles || { hardware: [], sketches: [] },
+    productionFileAvailability: production.productionFileAvailability || core.productionFileAvailability || {},
+  };
+}
+
+function cachedOrderDetailPayloadV507(order) {
+  const coreEntry = state.orderDetailCacheV474.get(order);
+  if (!coreEntry?.payload) return null;
+  const productionEntry = state.orderDetailProductionCacheV507.get(order);
+  return productionEntry?.payload
+    ? mergeOrderProductionDetailV507(coreEntry.payload, productionEntry.payload)
+    : coreEntry.payload;
+}
+
+function fetchOrderDetailCoreV507(order, force = false) {
+  const cached = state.orderDetailCacheV474.get(order);
+  const age = cached ? Date.now() - Number(cached.at || 0) : Infinity;
+  if (!force && cached?.payload && age < 15000) return Promise.resolve(cached.payload);
+  if (state.orderDetailCorePendingV507.has(order)) return state.orderDetailCorePendingV507.get(order);
+  const request = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=0`)
+    .then((payload) => {
+      state.orderDetailCacheV474.set(order, { at: Date.now(), payload });
+      return payload;
+    })
+    .finally(() => state.orderDetailCorePendingV507.delete(order));
+  state.orderDetailCorePendingV507.set(order, request);
+  return request;
+}
+
+function fetchOrderDetailProductionV507(order, force = false) {
+  const cached = state.orderDetailProductionCacheV507.get(order);
+  const age = cached ? Date.now() - Number(cached.at || 0) : Infinity;
+  if (!force && cached?.payload && age < 120000) return Promise.resolve(cached.payload);
+  if (state.orderDetailProductionPendingV507.has(order)) return state.orderDetailProductionPendingV507.get(order);
+  const request = fetchJson(`/api/orders/production-detail?order=${encodeURIComponent(order)}`)
+    .then((payload) => {
+      state.orderDetailProductionCacheV507.set(order, { at: Date.now(), payload });
+      for (const item of payload.items || []) {
+        const status = item.productionFiles?.fabrication;
+        if (status) state.fabricationStatusCacheV474.set(
+          fabricationStatusKeyV474(item.order || order, item.item, item.job, item.lastRejectedAt), status
+        );
+      }
+      return payload;
+    })
+    .finally(() => state.orderDetailProductionPendingV507.delete(order));
+  state.orderDetailProductionPendingV507.set(order, request);
+  return request;
 }
 
 async function openOrderDetailV470(orderNo, options = {}) {
@@ -24360,47 +24894,38 @@ async function openOrderDetailV470(orderNo, options = {}) {
   if (!order) return;
   state.orderDetailOpenOrderV474 = order;
   state.orderDetailFocusItemV477 = String(options.focusItem || "").trim();
-  showProductionExplorerV470({ mode: options.mode || "order", title: `Order ${order}`, description: "Items, exact sketch pages, programs, hardware, and fabrication history." });
+  showProductionExplorerV470({ mode: options.mode || "order", title: `Order ${order}`, description: "Items, Batch/Optimization/Cutting, sketches, programs, and hardware." });
   const body = document.getElementById("productionExplorerBodyV470");
-  const cached = state.orderDetailCacheV474.get(order);
-  if (cached && Date.now() - Number(cached.at || 0) < 30000) {
-    renderOrderDetailV470(cached.payload);
+  const cached = cachedOrderDetailPayloadV507(order);
+  if (cached) {
+    renderOrderDetailV470(cached);
   } else if (body) {
     body.innerHTML = `<div class="production-explorer-loading-v470">Loading order ${escapeHtml(order)}…</div>`;
   }
 
-  // Start both requests together: the lightweight database-only payload paints
-  // first, while production-share/PDF work hydrates the already-visible GUI.
-  const corePromise = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=0`);
-  const productionPromise = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=1`);
+  // Paint authoritative SQLite/A+W state first. Reopening the same Order reuses
+  // the cached payload immediately while stale-while-revalidate refreshes quietly.
   try {
-    const core = await corePromise;
+    const core = await fetchOrderDetailCoreV507(order, false);
+    const productionCached = state.orderDetailProductionCacheV507.get(order)?.payload;
     if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
-      renderOrderDetailV470(core);
+      renderOrderDetailV470(productionCached ? mergeOrderProductionDetailV507(core, productionCached) : core);
     }
   } catch (error) {
     if (!cached && body) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Order details could not be loaded.")}</div>`;
+    return;
   }
 
-  try {
-    const full = await productionPromise;
-    state.orderDetailCacheV474.set(order, { at: Date.now(), payload: full });
-    for (const item of full.items || []) {
-      const status = item.productionFiles?.fabrication;
-      if (status) state.fabricationStatusCacheV474.set(
-        fabricationStatusKeyV474(item.order || order, item.item, item.job, item.lastRejectedAt),
-        status
-      );
-    }
+  // Network-share media is a separate failure boundary and may finish later.
+  fetchOrderDetailProductionV507(order, false).then((production) => {
+    const core = state.orderDetailCacheV474.get(order)?.payload;
+    if (!core) return;
     if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
-      renderOrderDetailV470(full);
+      renderOrderDetailV470(mergeOrderProductionDetailV507(core, production));
     }
-  } catch (error) {
-    if (!cached && state.orderDetailOpenOrderV474 === order && body) {
-      const existing = body.querySelector(".production-order-detail-v474");
-      if (!existing) body.innerHTML = `<div class="production-file-empty-v470 is-error">${escapeHtml(error.message || "Production files could not be loaded.")}</div>`;
-    }
-  }
+  }).catch((error) => {
+    console.warn("Production-file hydration did not complete for Order Details.", error);
+  });
 }
 
 async function searchHardwareExplorerV470(queryValue = "") {
@@ -24465,6 +24990,17 @@ function printProductionAssetV470(assetId, pageNumber = 0) {
   try { popup.addEventListener("load", () => { try { popup.print(); } catch (_error) {} }, { once: true }); } catch (_error) {}
 }
 
+document.addEventListener("change", (event) => {
+  const selector = event.target.closest?.("[data-cutting-label-piece-select-v507]");
+  if (!selector) return;
+  const payload = state.orderDetailRenderedPayloadV507 || {};
+  const itemKey = String(selector.dataset.cuttingLabelPieceSelectV507 || "");
+  const item = (payload.items || []).find((candidate) => String(candidate.item || "") === itemKey);
+  const body = document.querySelector(`[data-cutting-label-piece-body-v507="${CSS.escape(itemKey)}"]`);
+  if (!item || !body) return;
+  body.innerHTML = cuttingLabelPieceHtmlV507(item, payload, Number(selector.value || 1));
+});
+
 // v0.470 production-file controls are delegated because the Order/Hardware GUI
 // is intentionally created only when requested, keeping initial page weight low.
 document.addEventListener("dblclick", (event) => {
@@ -24514,7 +25050,7 @@ document.addEventListener("click", (event) => {
   }
   const openProgram = event.target.closest("[data-production-open-asset-v470]");
   if (openProgram) {
-    openProductionProgramV470(openProgram.dataset.productionOpenAssetV470 || "").catch((error) => showInlineError(error.message, true));
+    openProductionProgramV470(openProgram.dataset.productionOpenAssetV470 || "").catch((error) => failDeferredAdminModalOpenV507(kind, error));
   }
 });
 
@@ -26561,7 +27097,7 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
   const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.502", window.location.href).href;
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.507", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
@@ -27437,8 +27973,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260903-v0.502", window.location.href).href,
-    new URL("static/css/print.css?v=20260903-v0.502", window.location.href).href,
+    new URL("static/css/styles.css?v=20260903-v0.507", window.location.href).href,
+    new URL("static/css/print.css?v=20260903-v0.507", window.location.href).href,
   ];
 }
 
@@ -27516,7 +28052,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.502";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260903-v0.507";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
@@ -30410,6 +30946,44 @@ function applyAdminModalProfile(kind, options = null) {
 }
 
 /**
+ * v0.507: every Settings/Admin launcher opens its shell immediately. Workspaces
+ * that still need an API read show this small busy state instead of making the
+ * button appear unresponsive while the request is in flight.
+ */
+function adminModalLoadingHtmlV507(kind = "") {
+  const profile = adminModalProfile(kind);
+  const title = translatedUiValue(profile?.title || "Settings");
+  return `
+    <div class="admin-modal-loading-v507" role="status" aria-live="polite" aria-busy="true">
+      <span class="admin-modal-loading-spinner-v507" aria-hidden="true"></span>
+      <span class="admin-modal-loading-copy-v507">
+        <strong>${escapeHtml(translatedUiValue("Loading settings..."))}</strong>
+        <small>${escapeHtml(title)}</small>
+      </span>
+    </div>
+  `;
+}
+
+function adminModalLoadErrorHtmlV507(error) {
+  const message = String(error?.message || error || translatedUiValue("Settings could not be loaded."));
+  return `<div class="admin-empty review"><strong>${escapeHtml(translatedUiValue("Settings could not be loaded."))}</strong><span>${escapeHtml(message)}</span></div>`;
+}
+
+function finishDeferredAdminModalOpenV507(kind) {
+  if (!els.adminModal || els.adminModal.hidden || els.adminModal.dataset.kind !== kind) return false;
+  openAdminModal(kind);
+  return true;
+}
+
+function failDeferredAdminModalOpenV507(kind, error) {
+  if (els.adminModal && !els.adminModal.hidden && els.adminModal.dataset.kind === kind && els.adminModalBody) {
+    els.adminModalBody.innerHTML = adminModalLoadErrorHtmlV507(error);
+    applyLanguageToRoot(els.adminModalBody);
+  }
+  showInlineError(error?.message || String(error || "Settings could not be loaded."), true);
+}
+
+/**
  * Purpose: Open the open admin modal workflow using the existing shared UI state.
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
@@ -30463,9 +31037,17 @@ function openAdminModal(kind, options = null) {
     els.adminModalBackdrop.setAttribute("aria-hidden", "false");
   }
   updateModalScrollLock();
-  const needsRoleDirectory = ["roles", "users"].includes(kind) && (!state.adminRoles.length || !state.allPermissions.length);
+  const callerOwnsDeferredHydration = options?.body != null;
+  const needsRoleDirectory = !callerOwnsDeferredHydration
+    && ["roles", "users"].includes(kind)
+    && (!state.adminRoles.length || !state.allPermissions.length);
   const canReadRoleDirectory = hasAnyPermission(["manage_roles", "manage_user_assignments", "manage_users"]);
   if (needsRoleDirectory && canReadRoleDirectory) {
+    // v0.507: Users/Roles can be opened before the role directory has warmed.
+    // Replace an incomplete empty editor with the same immediate busy state used
+    // by the other network-backed Settings workspaces instead of looking frozen.
+    els.adminModalBody.innerHTML = adminModalLoadingHtmlV507(kind);
+    applyLanguageToRoot(els.adminModalBody);
     fetchJson("/api/admin/roles")
       .then((payload) => {
         state.adminRoles = payload.roles || [];
@@ -30475,7 +31057,7 @@ function openAdminModal(kind, options = null) {
         if (kind === "roles") wireRolePermissionControls();
         if (kind === "users") wireUserManagerControls();
       })
-      .catch((error) => showInlineError(error.message, true));
+      .catch((error) => failDeferredAdminModalOpenV507(kind, error));
   }
 }
 
@@ -41625,10 +42207,6 @@ function wireV135OperationsEvents() {
     }
   });
 
-  document.addEventListener("click", (event) => {
-    const rejectSettingsButton = event.target.closest('[data-admin-modal="rejectSettings"]');
-    if (rejectSettingsButton) window.setTimeout(() => loadRejectSettingsModal().catch((error) => showInlineError(error.message, true)), 0);
-  });
 }
 
 
@@ -41640,20 +42218,13 @@ function wireV135OperationsEvents() {
 function startPolling() {
   stopPolling();
   state.pollTimer = window.setInterval(async () => {
-    // v0.354: do not rerender the Scan/Bay page underneath a modal while the
-    // operator is scrolling or interacting with it. The next normal poll runs
-    // after the GUI closes, preserving live behavior without hidden paint work.
+    // v0.507: the revision-aware catalog heartbeat owns Scan-page change
+    // detection. The former unconditional 12-second activateList() loop fetched
+    // a complete list + line flags even when nothing changed, competing with
+    // Order Details and scans. Keep only the Bay-specific live summary here.
     if (!state.backend || document.hidden || appModalUiIsOpen()) return;
     try {
-      if (state.page === "bays") {
-        await refreshBayRouteSummary();
-        return;
-      }
-      if (state.page !== "scan" || !state.activeListId) return;
-      const activeElement = document.activeElement;
-      if (activeElement === els.manualOrderInput || activeElement === els.manualItemInput) return;
-      await activateList(state.activeListId, false);
-      if (activeElement === els.scanInput) els.scanInput.focus();
+      if (state.page === "bays") await refreshBayRouteSummary();
     } catch {
       // Keep polling quiet so scanning is not interrupted.
     }
@@ -41692,7 +42263,12 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
       state.scanPageInitialized = true;
     }
   }
-  loadHomeReportSummary();
+  // v0.507: report aggregation is useful but not required for first paint.
+  // Defer it until the browser is idle so login/bootstrap and Scan/Home controls
+  // remain responsive on large historical databases.
+  const warmHomeReport = () => loadHomeReportSummary().catch?.(() => {});
+  if ("requestIdleCallback" in window) window.requestIdleCallback(warmHomeReport, { timeout: 2500 });
+  else window.setTimeout(warmHomeReport, 700);
   if (params.get("list")) {
     showPage("scan");
   } else {
@@ -42112,10 +42688,14 @@ function wireEvents() {
     syncSidebarState();
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
+    if (document.getElementById("dailyProductionEmailPreviewV505") && !document.getElementById("dailyProductionEmailPreviewV505").hidden) closeDailyProductionEmailPreviewV505();
     if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
+  els.statisticsDailyProductionEmailBtn?.addEventListener("click", () => {
+    draftDailyProductionEmailV506().catch((error) => showFloatingNotice(error?.message || "Could not build the daily production email.", "error"));
+  });
   els.statisticsRefreshBtn?.addEventListener("click", async () => {
     const button = els.statisticsRefreshBtn;
     if (button) {
@@ -44140,28 +44720,84 @@ function wireEvents() {
       const modalKind = adminModalButton.dataset.adminModal || "";
 
       if (modalKind === "lookups") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         ensureManualEditLookupsLoaded()
-          .then(() => openAdminModal("lookups"))
-          .catch((error) => showInlineError(error.message, true));
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "customerRoutes") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         fetchJson("/api/admin/customer-route-rules")
           .then((payload) => {
             state.adminCustomerRouteRules = payload.rules || [];
-            openAdminModal("customerRoutes");
+            finishDeferredAdminModalOpenV507(modalKind);
           })
-          .catch((error) => showInlineError(error.message, true));
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "customerEmails") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         refreshCustomerEmailSettings(false)
-          .then(() => openAdminModal("customerEmails"))
-          .catch((error) => showInlineError(error.message, true));
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "supersededOrders") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         loadSupersededOrderReviews()
-          .then(() => openAdminModal("supersededOrders"))
-          .catch((error) => showInlineError(error.message, true));
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "productionFiles") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         refreshProductionFileSettingsV472(false)
-          .then(() => openAdminModal("productionFiles"))
-          .catch((error) => showInlineError(error.message, true));
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "bayScannerRules") {
+        // v0.507: Settings launchers must never render stale/default controls while
+        // the Admin dashboard's background warm-up is still in flight. Open the
+        // shell immediately, then hydrate both Bay-rule tabs from authoritative
+        // settings endpoints before exposing editable values.
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        Promise.all([
+          fetchJson("/api/admin/bay-scanner-rules"),
+          fetchJson("/api/admin/bay-auto-assigner"),
+        ])
+          .then(([rules, autoAssign]) => {
+            state.bayScannerSettings = rules || state.bayScannerSettings || { manualRules: [], barcodeRules: [] };
+            state.bayAutoAssignSettings = autoAssign || state.bayAutoAssignSettings;
+            finishDeferredAdminModalOpenV507(modalKind);
+          })
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "crossDateScanning") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        fetchJson("/api/admin/cross-date-scan-settings")
+          .then((payload) => {
+            state.crossDateScanSettings = payload || state.crossDateScanSettings;
+            finishDeferredAdminModalOpenV507(modalKind);
+          })
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "users") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        Promise.all([
+          fetchJson("/api/admin/users"),
+          fetchJson("/api/admin/roles"),
+        ])
+          .then(([users, roles]) => {
+            state.adminUsers = users?.users || [];
+            state.adminRoles = roles?.roles || [];
+            state.allPermissions = roles?.permissions || [];
+            finishDeferredAdminModalOpenV507(modalKind);
+          })
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "roles") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        fetchJson("/api/admin/roles")
+          .then((roles) => {
+            state.adminRoles = roles?.roles || [];
+            state.allPermissions = roles?.permissions || [];
+            finishDeferredAdminModalOpenV507(modalKind);
+          })
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "rejectSettings") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        loadRejectSettingsModal()
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "deliveryLists" || modalKind === "deliveryActions") {
         // v0.339: open immediately and request only the visible three-week Admin
         // catalog page. The rich Home/scanner catalog is intentionally not
@@ -45291,7 +45927,7 @@ init().catch((error) => {
     if (deliveryCatalogRefreshInFlight || document.visibilityState === "hidden") return;
     deliveryCatalogRefreshInFlight = true;
     try {
-      const response = await fetch("/api/delivery-lists", {
+      const response = await fetch("/api/delivery-lists?compact=1", {
         credentials: "same-origin",
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -46036,12 +46672,13 @@ init().catch((error) => {
             <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Performance &amp; history</strong>
-                <span>Production SQL is bounded to orders already present in the direct delivery payload and split into small batches so live logs keep moving.</span>
+                <span>Production SQL stays bounded, but also covers recently delivered A+W orders so Order Details keeps Batch/Optimization/Cutting evidence after a delivery date leaves the normal incremental window.</span>
               </div>
               <div class="automation-settings-grid">
                 <label><span>Orders per SQL batch</span><input id="automationProductionQueryBatchSize" type="number" min="10" max="150" step="5"></label>
                 <label><span>SQL timeout</span><div class="automation-number-unit"><input id="automationProductionQueryTimeout" type="number" min="20" max="300" step="5"><b>seconds</b></div></label>
                 <label><span>Cut booking lookback</span><div class="automation-number-unit"><input id="automationProductionCutLookback" type="number" min="14" max="730"><b>days</b></div></label>
+                <label><span>Order coverage lookback</span><div class="automation-number-unit"><input id="automationProductionOrderLookback" type="number" min="1" max="90"><b>days</b></div><small>Only expands Batch/Optimization/Cutting enrichment; it does not import extra delivery-list dates.</small></label>
                 <label><span>Generations refreshed per item</span><div class="automation-number-unit"><input id="automationProductionHistoryDepth" type="number" min="1" max="12"><b>generations</b></div></label>
               </div>
             </div>
@@ -46053,7 +46690,7 @@ init().catch((error) => {
               <div class="automation-status-summary automation-aw-production-source-v499">
                 <span><small>Generations / batch</small><strong>PROD_JOBITEM + PROD_JOB</strong></span>
                 <span><small>Optimization membership</small><strong>PROD_OPTI_SEQUENCE</strong></span>
-                <span><small>Optimization lifecycle</small><strong>100 Optimized · 200 Cutting · 500 Booked</strong></span>
+                <span><small>Optimization lifecycle</small><strong>100 Optimized · 200 Cutting · 460/500 Booked</strong></span>
                 <span><small>Cut confirmation</small><strong>FS_BOOK_HISTORY · Automatic Cutting</strong></span>
               </div>
             </div>
@@ -46380,6 +47017,7 @@ init().catch((error) => {
     modal.querySelector("#automationScheduleProductionSync").checked = settings.productionScheduledEnabled !== false;
     modal.querySelector("#automationProductionIncludeCutting").checked = settings.productionIncludeCuttingBookings !== false;
     modal.querySelector("#automationProductionCutLookback").value = settings.productionCuttingBookingLookbackDays ?? 120;
+    modal.querySelector("#automationProductionOrderLookback").value = settings.productionOrderLookbackDays ?? 14;
     modal.querySelector("#automationProductionQueryBatchSize").value = settings.productionQueryBatchSize ?? 60;
     modal.querySelector("#automationProductionQueryTimeout").value = settings.productionQueryTimeoutSeconds ?? 75;
     modal.querySelector("#automationProductionHistoryDepth").value = settings.productionGenerationHistoryDepth ?? 4;
@@ -46409,7 +47047,10 @@ init().catch((error) => {
   function renderStatus(dashboard) {
     lastDashboard = dashboard;
     const last = dashboard.lastRun || {};
-    const running = Boolean(dashboard.running || last.running);
+    // v0.503: dashboard.running is derived from a live child process or the shared
+    // automation lock. Persisted lastRun.running is historical only and must not
+    // resurrect an orphaned "Update running" banner after a crash/restart.
+    const running = Boolean(dashboard.running);
     const succeeded = last.succeeded;
     const state = running ? "Automation is running" : succeeded === true ? "Update completed" : succeeded === false ? "Update failed" : "Not run yet";
     const stateClass = running ? "is-running" : succeeded === true ? "is-success" : succeeded === false ? "is-error" : "";
@@ -46569,6 +47210,7 @@ init().catch((error) => {
       productionScheduledEnabled: modal.querySelector("#automationScheduleProductionSync").checked,
       productionIncludeCuttingBookings: modal.querySelector("#automationProductionIncludeCutting").checked,
       productionCuttingBookingLookbackDays: modal.querySelector("#automationProductionCutLookback").value,
+      productionOrderLookbackDays: modal.querySelector("#automationProductionOrderLookback").value,
       productionQueryBatchSize: modal.querySelector("#automationProductionQueryBatchSize").value,
       productionQueryTimeoutSeconds: modal.querySelector("#automationProductionQueryTimeout").value,
       productionGenerationHistoryDepth: modal.querySelector("#automationProductionHistoryDepth").value,

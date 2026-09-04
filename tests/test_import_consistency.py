@@ -10,7 +10,7 @@ import shutil
 import os
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.config import load_config
@@ -1027,6 +1027,62 @@ class ImportConsistencyTests(unittest.TestCase):
                 payload["rejectFullPastDays"] = 10
                 with self.assertRaisesRegex(ValueError, "cannot be shorter"):
                     controller.save_settings(payload, "admin")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_automation_dashboard_recovers_orphaned_web_gui_running_state(self) -> None:
+        """A dead manual child must not keep Status & Logs yellow forever."""
+        verification_root = ROOT / "_verification_automation_stale_run_v503"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        config_dir = verification_root / "automation" / "sql_delivery_export"
+        runtime_root = verification_root / "runtime"
+        state_dir = runtime_root / "State"
+        logs_dir = runtime_root / "Logs"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        state_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        source_config = ROOT / "automation" / "sql_delivery_export" / "sql-export.config.json"
+        config_payload = json.loads(source_config.read_text(encoding="utf-8"))
+        config_payload["WorkingRoot"] = str(runtime_root)
+        config_path = config_dir / "sql-export.config.json"
+        config_path.write_text(json.dumps(config_payload, indent=2) + "\n", encoding="utf-8")
+
+        task_id = "stale503test"
+        log_path = logs_dir / f"web-gui-{task_id}.log"
+        log_path.write_text("controller launched PowerShell\n", encoding="utf-8")
+        stale_status = {
+            "taskId": task_id,
+            "running": True,
+            "action": "sql-export-and-import",
+            "startedAt": "2026-09-03T14:44:36+00:00",
+            "message": "Delivery-list automation started.",
+            "currentStep": "Reading A+W delivery rows for 2026-09-10",
+            "logPath": str(log_path),
+            "summaryPath": str(state_dir / "web-gui-summary.json"),
+            "runOrigin": "manual",
+        }
+        (state_dir / "web-gui-run.json").write_text(
+            json.dumps(stale_status, indent=2) + "\n", encoding="utf-8"
+        )
+
+        base = load_config(ROOT)
+        scanner_config = replace(base, root=verification_root, data_dir=verification_root / "data")
+        try:
+            with mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
+                 mock.patch.object(DeliveryAutomationController, "_schedule_installed", return_value=False):
+                controller = DeliveryAutomationController(verification_root, scanner_config, None)
+                dashboard = controller.get_dashboard()
+
+            self.assertFalse(dashboard["running"])
+            self.assertFalse(dashboard["lastRun"]["running"])
+            self.assertFalse(dashboard["lastRun"]["succeeded"])
+            self.assertTrue(dashboard["lastRun"]["recoveredStaleRun"])
+            self.assertIn("stale Running status was cleared automatically", dashboard["lastRun"]["currentStep"])
+
+            persisted = json.loads((state_dir / "web-gui-run.json").read_text(encoding="utf-8"))
+            self.assertFalse(persisted["running"])
+            self.assertTrue(persisted["recoveredStaleRun"])
+            self.assertIn("stale Running status was cleared automatically", log_path.read_text(encoding="utf-8"))
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -3180,6 +3236,96 @@ class ImportConsistencyTests(unittest.TestCase):
             if verification_root.exists():
                 shutil.rmtree(verification_root)
 
+    def test_v0506_production_count_groups_actual_pieces_by_glass_and_excludes_yield_percentage(self) -> None:
+        """Production Count deduplicates stage copies and keeps Yield Percentage out of statistics/email rows."""
+        verification_root = ROOT / "_verification_v0505_production_count"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            new_item = imported_item("281001", "1", 4, "v0505-new:1")
+            new_item["customer"] = "NEW GLASS CUSTOMER"
+            new_item["dimensions"] = '48" x 72"'
+            second_new_item = imported_item("281004", "1", 5, "v0506-new-mirror:1")
+            second_new_item["customer"] = "MIRROR CUSTOMER"
+            second_new_item["product"] = '1/4" Mirror'
+            second_new_item["dimensions"] = '22" x 36"'
+            remake_item = imported_item("281002", "2", 2, "v0505-remake:2")
+            remake_item["processState"] = "External Remake"
+            remake_item["queueState"] = "RM"
+            remake_item["customer"] = "REMAKE CUSTOMER"
+            remake_item["dimensions"] = '36" x 60"'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-06", "items": [new_item, second_new_item, remake_item]},
+                "fileName": "Delivery List 11-06-2026.xlsx",
+                "user": "admin",
+            })
+            # Same-day A+W correction: Production Count must use the latest Qty
+            # for an item that first arrived today instead of freezing Qty 4.
+            corrected_new_item = dict(new_item)
+            corrected_new_item["qty"] = 6
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-06", "items": [corrected_new_item, second_new_item, remake_item]},
+                "fileName": "Delivery List 11-06-2026.xlsx",
+                "user": "admin",
+            })
+
+            with store.connect() as connection:
+                # One logical imported Order/Item creates notices for synchronized
+                # workflow stages. Move all of those notices onto one controlled
+                # first-seen date so the regression proves stage-copy deduplication.
+                connection.execute(
+                    "UPDATE line_update_notices SET created_at = '2026-11-05T08:00:00+00:00'"
+                )
+                connection.execute(
+                    """
+                    INSERT INTO reject_events (
+                        delivery_date, order_no, item_no, qty, customer, product,
+                        reason_label, location_label, rejected_at, rejected_by
+                    ) VALUES ('2026-11-06','281001','001',1,'NEW GLASS CUSTOMER','3/8 Clear Tempered',
+                              'Scratch','Tempering','2026-11-05T09:15:00+00:00','Operator One')
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO reject_events (
+                        delivery_date, order_no, item_no, qty, customer, product,
+                        reason_label, location_label, rejected_at, rejected_by
+                    ) VALUES ('2026-11-06','281003','001',3,'YIELD CUSTOMER','3/8 Clear Tempered',
+                              'Yield Percentage','Cutting','2026-11-05T10:30:00+00:00','Operator Two')
+                    """
+                )
+                connection.commit()
+
+            report = store.reports_summary({"dateFrom": "2026-11-05", "dateTo": "2026-11-05"})
+            activity = report["productionActivity"]
+            self.assertEqual(activity["newProduction"]["pieces"], 11)
+            self.assertEqual(activity["newProduction"]["itemCount"], 2)
+            self.assertEqual(activity["newProduction"]["orderCount"], 2)
+            self.assertEqual(activity["newProduction"]["rows"][0]["order"], "281001")
+            by_glass = {row["glassType"]: row for row in activity["newProduction"]["byGlass"]}
+            self.assertEqual(by_glass['1/4 Mirror']["pieces"], 5)
+            self.assertEqual(by_glass['1/4 Mirror']["itemCount"], 1)
+            self.assertEqual(by_glass['3/8" Clear Tempered']["pieces"], 6)
+            self.assertEqual(by_glass['3/8" Clear Tempered']["deliveryDates"], ["2026-11-06"])
+            self.assertEqual(activity["externalRemakes"]["pieces"], 2)
+            self.assertEqual(activity["externalRemakes"]["itemCount"], 1)
+            self.assertEqual(activity["externalRemakes"]["rows"][0]["order"], "281002")
+            self.assertEqual(activity["internalRejects"]["pieces"], 1)
+            self.assertEqual(activity["internalRejects"]["eventCount"], 1)
+            self.assertEqual(activity["internalRejects"]["rows"][0]["reason"], "Scratch")
+            self.assertEqual(activity["internalRejects"]["rows"][0]["glassType"], '3/8" Clear Tempered')
+            self.assertEqual(activity["internalRejects"]["rows"][0]["dimensions"], '48" x 72"')
+            self.assertGreater(activity["internalRejects"]["rows"][0]["sqft"], 0)
+            self.assertEqual(activity["yieldPercentageExcluded"]["pieces"], 3)
+            self.assertEqual(activity["yieldPercentageExcluded"]["eventCount"], 1)
+            # Yield Percentage is not just omitted from the email detail payload;
+            # it is also excluded from the existing breakage/statistics totals.
+            self.assertEqual(report["breakage"]["internalRejects"]["pieces"], 1)
+            self.assertEqual(report["breakage"]["internalRejects"]["eventCount"], 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_aw_cutting_generations_follow_latest_remake_and_reject_cutoff(self) -> None:
         verification_root = ROOT / "_verification_aw_cutting_v498"
         shutil.rmtree(verification_root, ignore_errors=True)
@@ -3314,10 +3460,15 @@ class ImportConsistencyTests(unittest.TestCase):
                 "keyIndex": 1, "batchJobNumber": "9179", "batchStatusCode": 500,
                 "batchDescription": "Reject batch Brandon Smith 09/03/2026",
                 "batchCreatedAt": "2026-09-03T08:06:32", "optimizationNumber": 8366,
-                "optimizationStatusCode": 0, "optimizationSequence": 4, "optimizationPlateNumber": 1,
-                "optimizationPlateCut": 1, "optimizationPlateStockBooked": 1,
+                "optimizationStatusCode": 0, "optimizationSequence": 4, "optimizationSequenceRowId": "seq-8366-4",
+                "optimizationPlateNumber": 1, "optimizationPlateCut": 1, "optimizationPlateStockBooked": 1,
                 "optimizationPlateLastChangedAt": "2026-09-03T09:31:12",
                 "optimizationPlateLastChangedUser": "Intermac Cutting",
+                "optimizationSheetCount": 1, "shapeNumber": 99,
+                "processRows": [
+                    {"workTypeId": 10, "workType": "Automatic Cutting", "workSequence": 1, "machine": "Cutting"},
+                    {"workTypeId": 20, "workType": "Polishing", "workSequence": 2, "edgeData": "11110000", "machine": "Kodiak (Polisher)"},
+                ],
                 "quantity": 1, "cutQuantity": 1, "aggregateId": 1000, "lastAggregateId": 2000,
             }]
             probe_sync = store.sync_aw_cutting_rows(probe_rows)
@@ -3330,10 +3481,626 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(probe_state["optimizationPlateNumber"], 1)
             self.assertTrue(probe_state["optimizationPlateCut"])
             self.assertTrue(probe_state["optimizationPlateStockBooked"])
+            self.assertEqual(probe_state["optimizationSheetCount"], 1)
+            self.assertEqual(probe_state["shapeNumber"], 99)
+            self.assertEqual(probe_state["sequenceAssignments"][0]["sequence"], 4)
+            self.assertEqual(probe_state["sequenceAssignments"][0]["plateNumber"], 1)
+            self.assertEqual(probe_state["processRows"][1]["edgeData"], "11110000")
             self.assertEqual(probe_state["evidenceSource"], "optimization_plate_cut")
             post_probe_reject = store.aw_cutting_state("238330", "1", "2026-09-03T10:00:00")
             self.assertEqual(post_probe_reject["state"], "needs_recut")
             self.assertFalse(post_probe_reject["complete"])
+
+
+            # v0.504 live regression: Order 238076 / Item 1 is Batch 6455,
+            # Optimization 8286 and A+W reports the optimization as Booked with
+            # raw status 460. That status must be retained and interpreted as Cut.
+            status_460_rows = [{
+                "sourceRowId": "238076-booked-460", "orderNr": "238076", "itemNr": "1", "bomId": 0,
+                "keyIndex": 0, "batchJobNumber": "6455", "batchStatusCode": 500,
+                "batchCreatedAt": "2026-08-29T08:00:00", "optimizationNumber": 8286,
+                "optimizationStatusCode": 460, "optimizationStatusSource": "PROD_OPTI_STATISTICS", "optimizationSequence": 7,
+                "optimizationSequenceRowId": "seq-8286-7", "optimizationPlateNumber": 2,
+                "optimizationPlateCut": 1, "optimizationPlateStockBooked": 1,
+                "quantity": 1, "cutQuantity": 1, "aggregateId": 1000,
+            }]
+            store.sync_aw_cutting_rows(status_460_rows)
+            status_460_state = store.aw_cutting_state("238076", "001")
+            self.assertEqual(status_460_state["batch"], "6455")
+            self.assertEqual(status_460_state["optimization"], 8286)
+            self.assertEqual(status_460_state["optimizationStatusCode"], 460)
+            self.assertEqual(status_460_state["optimizationStatusSource"], "PROD_OPTI_STATISTICS")
+            self.assertEqual(status_460_state["state"], "cut")
+            self.assertTrue(status_460_state["complete"])
+            self.assertEqual(status_460_state["evidenceSource"], "optimization_status_460")
+            status_460_item = imported_item("238076", "1", 1, "v0504-status-460-order:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-03", "items": [status_460_item]},
+                "fileName": "Delivery List 09-03-2026.xlsx",
+                "user": "admin",
+            })
+            status_460_detail = store.get_order_detail("238076", include_production=False)
+            detail_cutting = status_460_detail["items"][0]["cutting"]
+            self.assertEqual(detail_cutting["batch"], "6455")
+            self.assertEqual(detail_cutting["optimization"], 8286)
+            self.assertEqual(detail_cutting["optimizationStatusCode"], 460)
+            self.assertEqual(detail_cutting["state"], "cut")
+            self.assertEqual(detail_cutting["sequenceAssignments"][0]["sequence"], 7)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0507_runtime_indexes_compact_catalog_and_focused_summaries(self) -> None:
+        verification_root = ROOT / "_verification_v0507_runtime"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            payload = {
+                "payload": {
+                    "deliveryDate": "2026-09-04",
+                    "items": [
+                        imported_item("507101", "1", 3, "v507-runtime:1"),
+                        imported_item("507102", "2", 2, "v507-runtime:2"),
+                    ],
+                },
+                "fileName": "Delivery List 09-04-2026.xlsx",
+                "user": "admin",
+            }
+            store.import_delivery_list(payload)
+            with store.connect() as con:
+                installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
+                indexes = {str(row["name"]) for row in con.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+            self.assertEqual(installed, 17)
+            for name in {
+                "idx_line_items_active_order_item_v507",
+                "idx_delivery_lists_active_date_revision_v507",
+                "idx_scan_events_list_recent_v507",
+                "idx_line_update_notices_list_recent_v507",
+                "idx_aw_cutting_order_item_recent_v507",
+            }:
+                self.assertIn(name, indexes)
+
+            full = {row["id"]: row for row in store.get_delivery_lists()}
+            compact = {row["id"]: row for row in store.get_delivery_lists_compact()}
+            self.assertEqual(set(compact), set(full))
+            for list_id, row in compact.items():
+                self.assertEqual(row["totalQty"], full[list_id]["totalQty"])
+                self.assertEqual(row["scannedQty"], full[list_id]["scannedQty"])
+                self.assertEqual(row["itemCount"], full[list_id]["itemCount"])
+                self.assertTrue(row["compact"])
+
+            wanted = sorted(full)[:2]
+            focused = {row["id"]: row for row in store.get_delivery_list_summaries(wanted)}
+            self.assertEqual(set(focused), set(wanted))
+            for list_id in wanted:
+                self.assertEqual(focused[list_id]["totalQty"], full[list_id]["totalQty"])
+                self.assertIn("sourceTotalQty", focused[list_id])
+                self.assertIn("latestUpdateAt", focused[list_id])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0507_order_detail_core_preserves_aw_cutting_without_touching_network_share(self) -> None:
+        verification_root = ROOT / "_verification_v0507_order_detail"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-04", "items": [imported_item("238076", "1", 1, "v507-238076:1")]},
+                "fileName": "Delivery List 09-04-2026.xlsx",
+                "user": "admin",
+            })
+            store.sync_aw_cutting_rows([{
+                "sourceRowId": "238076-v507", "orderNr": "238076", "itemNr": "1",
+                "bomId": 0, "keyIndex": 0, "batchJobNumber": "6455", "batchStatusCode": 500,
+                "batchCreatedAt": "2026-08-29T08:00:00", "optimizationNumber": 8286,
+                "optimizationStatusCode": 460, "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                "optimizationLastChangedAt": "2026-08-30T12:00:00", "quantity": 1, "cutQuantity": 1,
+                "aggregateId": 1000,
+            }], source_window={"coverage": {"requestedOrderCount": 1, "matchedOrderCount": 1, "missingOrderCount": 0}})
+
+            fake_service = mock.Mock()
+            fake_service.item_assets.side_effect = AssertionError("core Order Details must not touch production shares")
+            fake_service.order_assets.side_effect = AssertionError("core Order Details must not touch production shares")
+            store.production_files = fake_service
+            detail = store.get_order_detail("238076", include_production=False)
+            cutting = detail["items"][0]["cutting"]
+            self.assertEqual(cutting["batch"], "6455")
+            self.assertEqual(cutting["optimization"], 8286)
+            self.assertEqual(cutting["optimizationStatusCode"], 460)
+            self.assertEqual(cutting["optimizationStatusSource"], "PROD_OPTI_STATISTICS")
+            self.assertEqual(cutting["state"], "cut")
+            self.assertTrue(cutting["complete"])
+            fake_service.item_assets.assert_not_called()
+            fake_service.order_assets.assert_not_called()
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+
+    def test_v0507_mod13_crystal_edge_parameters_round_trip(self) -> None:
+        verification_root = ROOT / "_verification_v0507_mod13_label"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-10", "items": [imported_item("238375", "3", 1, "v507-mod13:1")]},
+                "fileName": "Delivery List 09-10-2026.xlsx",
+                "user": "admin",
+            })
+            store.sync_aw_cutting_rows([{
+                "sourceRowId": "238375-mod13", "orderNr": "238375", "itemNr": "3",
+                "bomId": 0, "keyIndex": 0, "batchJobNumber": "6508", "batchStatusCode": 500,
+                "optimizationNumber": 8363, "optimizationStatusCode": 500,
+                "shapeNumber": 13, "shapeParameterUnitsPerInch": 32,
+                "shapeParameters": [1880, 1878, 1444, 1438, 0, 0, 0, 0],
+                "quantity": 1, "cutQuantity": 1, "aggregateId": 1000,
+            }])
+            detail = store.get_order_detail("238375", include_production=False)
+            cutting = detail["items"][0]["cutting"]
+            self.assertEqual(cutting["shapeNumber"], 13)
+            self.assertEqual(cutting["shapeParameterUnitsPerInch"], 32)
+            self.assertEqual(cutting["shapeParameters"][:4], [1880.0, 1878.0, 1444.0, 1438.0])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v0507_end_to_end_cutting_rush_rack_bay_reject_and_recut_workflow(self) -> None:
+        """Run one physical order from A+W Cutting through Rush, rack, IT bay, reject and recut.
+
+        This deliberately crosses the same store methods used by the scanner, Racks,
+        Bay Map, Rejects and Order Details pages so a regression cannot pass by testing
+        isolated helpers while the operator workflow is broken.
+        """
+        verification_root = ROOT / "_verification_v0507_full_floor_workflow"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            with store.connect() as con:
+                store.seed_bays(con)
+                store.seed_bay_auto_assign_settings(con)
+                store.seed_racks(con)
+                con.commit()
+                rack = con.execute(
+                    "SELECT rack_code FROM racks WHERE active=1 AND LOWER(status)='open' ORDER BY id LIMIT 1"
+                ).fetchone()
+            self.assertIsNotNone(rack)
+            rack_code = str(rack["rack_code"])
+
+            delivery_date = "2026-09-18"
+            item = imported_item("289701", "1", 2, "v0507-floor:1")
+            item["customer"] = "V0507 FLOOR CUSTOMER"
+            item["dimensions"] = '58 3/4" x 45 1/8"'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": delivery_date, "items": [item]},
+                "fileName": "Delivery List 09-18-2026.xlsx",
+                "user": "admin",
+            })
+
+            # A+W physical lifecycle: Optimized -> Released/Cutting -> Booked/Cut.
+            base_cutting = {
+                "sourceRowId": "v0507-floor-generation-0", "orderNr": "289701", "itemNr": "1",
+                "bomId": 0, "keyIndex": 0, "batchJobNumber": "9701", "batchStatusCode": 200,
+                "batchCreatedAt": "2026-09-03T07:00:00+00:00", "optimizationNumber": 89701,
+                "optimizationStatusSource": "PROD_OPTIMIZATION", "optimizationSequence": 4,
+                "optimizationSequenceRowId": "v0507-seq-0", "optimizationPlateNumber": 1,
+                "quantity": 2, "cutQuantity": 0, "aggregateId": 1000,
+            }
+            store.sync_aw_cutting_rows([{**base_cutting, "optimizationStatusCode": 100}])
+            detail = store.get_order_detail("289701", include_production=False)
+            self.assertEqual(detail["items"][0]["cutting"]["state"], "optimized")
+            self.assertEqual(detail["items"][0]["cutting"]["batch"], "9701")
+            self.assertEqual(detail["items"][0]["cutting"]["optimization"], 89701)
+
+            store.sync_aw_cutting_rows([{**base_cutting, "optimizationStatusCode": 200}])
+            self.assertEqual(store.aw_cutting_state("289701", "001")["state"], "released")
+
+            store.sync_aw_cutting_rows([{
+                **base_cutting,
+                "optimizationStatusCode": 460,
+                "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                "optimizationLastChangedAt": "2026-09-03T08:00:00+00:00",
+                "optimizationPlateCut": 1,
+                "optimizationPlateStockBooked": 1,
+                "optimizationPlateLastChangedAt": "2026-09-03T08:00:00+00:00",
+                "optimizationPlateLastChangedUser": "Intermac Cutting",
+                "cutQuantity": 2,
+            }])
+            cut_detail = store.get_order_detail("289701", include_production=False)["items"][0]["cutting"]
+            self.assertEqual(cut_detail["state"], "cut")
+            self.assertTrue(cut_detail["complete"])
+            self.assertEqual(cut_detail["optimizationStatusCode"], 460)
+            self.assertEqual(cut_detail["optimizationStatusSource"], "PROD_OPTI_STATISTICS")
+
+            # Apply an operator Rush to the already-imported order. It must be visible
+            # across synchronized stage copies without changing physical quantities.
+            rush = store.submit_priority_work({
+                "priorityType": "Rush",
+                "jobNumber": str(item["job"]).split()[0],
+                "deliveryDate": "2026-09-17",
+                "reason": "End-to-end workflow verification",
+                "responsible": "Workflow Tester",
+                "emailMode": "none",
+            }, "admin")
+            self.assertTrue(rush["ok"])
+            self.assertEqual(rush["action"], "applied")
+            inbound_id = f"{delivery_date}-inbound-indian-trail"
+            rush_item = store.get_delivery_list(inbound_id)["items"][0]
+            self.assertEqual(rush_item["priorityBanner"]["kind"], "rush")
+            self.assertEqual(rush_item["priorityDeliveryDate"], "2026-09-17")
+
+            staging_id = f"{delivery_date}-staging-airport"
+            outbound_id = f"{delivery_date}-outbound-airport"
+            for _ in range(2):
+                staged = store.record_scan({
+                    "listId": staging_id, "barcode": item["barcode"], "rackCode": rack_code,
+                    "user": "admin", "station": "Airport Rd",
+                })
+            self.assertEqual(staged["items"][0]["scanned"], 2)
+
+            completed = store.complete_rack({"rackCode": rack_code}, "admin")
+            completed_rack = next(row for row in completed["racks"] if row["code"] == rack_code)
+            self.assertEqual(str(completed_rack["status"]).lower(), "closed")
+
+            # Marking On The Way performs the maintained rack-level Outbound scan.
+            departed = store.mark_rack_on_way({"rackCode": rack_code}, "admin")
+            departed_rack = next(row for row in departed["racks"] if row["code"] == rack_code)
+            self.assertEqual(str(departed_rack["status"]).lower(), "in transit")
+            self.assertEqual(store.get_delivery_list(outbound_id)["items"][0]["scanned"], 2)
+
+            # Not On The Way must reverse only this rack's Outbound evidence, reopen
+            # the rack, and allow the exact same complete/depart sequence again.
+            reopened = store.not_on_way_rack({"rackCode": rack_code}, "admin")
+            self.assertEqual(reopened["undonePieceQty"], 2)
+            self.assertEqual(store.get_delivery_list(outbound_id)["items"][0]["scanned"], 0)
+            store.complete_rack({"rackCode": rack_code}, "admin")
+            store.mark_rack_on_way({"rackCode": rack_code}, "admin")
+            self.assertEqual(store.get_delivery_list(outbound_id)["items"][0]["scanned"], 2)
+
+            inbound_before = store.get_delivery_list(inbound_id)
+            self.assertEqual(inbound_before["items"][0]["bayStatus"], "PreAssigned")
+            preassigned_bay = inbound_before["items"][0]["bayCode"]
+            self.assertTrue(preassigned_bay)
+
+            for _ in range(2):
+                received = store.receive_indian_trail_scan(
+                    {"listId": inbound_id, "barcode": item["barcode"], "station": "Indian Trail"},
+                    "admin",
+                )
+                self.assertTrue(received["ok"])
+            received_item = store.get_delivery_list(inbound_id)["items"][0]
+            self.assertEqual(received_item["scanned"], 2)
+            self.assertEqual(received_item["bayStatus"], "Received")
+            self.assertEqual(received_item["rackCode"], "")
+            assignment_id = int(received_item["bayAssignmentId"])
+
+            # Exercise Bay Map policy states without deleting physical history.
+            bays = store.get_bays()
+            alternate = next(
+                row for row in bays
+                if row["bayCode"] != preassigned_bay and str(row.get("status") or "").lower() == "empty"
+            )
+            alternate_code = str(alternate["bayCode"])
+            store.set_bay_status({"bayCode": alternate_code, "status": "ManualAssign", "reason": "Workflow test hold"}, "admin")
+            self.assertEqual(next(row for row in store.get_bays() if row["bayCode"] == alternate_code)["sourceStatus"], "ManualAssign")
+            store.set_bay_status({"bayCode": alternate_code, "status": "ScanBlocked", "reason": "Workflow test block"}, "admin")
+            self.assertEqual(next(row for row in store.get_bays() if row["bayCode"] == alternate_code)["sourceStatus"], "ScanBlocked")
+            store.set_bay_status({"bayCode": alternate_code, "status": "Available", "reason": "Workflow test release"}, "admin")
+
+            moved = store.move_bay_assignment({
+                "assignmentId": assignment_id, "newBayCode": alternate_code, "reason": "Workflow test move",
+            }, "admin")
+            self.assertTrue(moved["ok"])
+            self.assertEqual(moved["status"], "Received")
+            self.assertEqual(store.get_delivery_list(inbound_id)["items"][0]["bayCode"], alternate_code)
+
+            # Clear/restore must be reversible and preserve the exact assignment.
+            store.clear_bay_assignment({"assignmentId": assignment_id, "reason": "Workflow test clear"}, "admin")
+            cleared_item = store.get_delivery_list(inbound_id)["items"][0]
+            self.assertEqual(cleared_item["bayCode"], "")
+            self.assertEqual(cleared_item["lastBayCode"], alternate_code)
+            restored = store.restore_bay_assignment({"assignmentId": assignment_id, "reason": "Workflow test restore"}, "admin")
+            self.assertEqual(restored["bayCode"], alternate_code)
+
+            # Old Bay review, per-user notification claim and snooze all operate on
+            # the same active assignment and must not change the physical bay.
+            old_assigned_at = (datetime.now(timezone.utc) - timedelta(days=12)).isoformat(timespec="seconds")
+            with store.connect() as con:
+                con.execute("UPDATE bay_assignments SET assigned_at=? WHERE id=?", (old_assigned_at, assignment_id))
+                con.commit()
+            stale = store.get_stale_bay_orders()
+            stale_row = next(row for row in stale if int(row["assignmentId"]) == assignment_id)
+            self.assertGreaterEqual(stale_row["daysOld"], 11)
+            first_claim = store.claim_stale_bay_alert("workflow.tester", len(stale))
+            second_claim = store.claim_stale_bay_alert("workflow.tester", len(stale))
+            self.assertTrue(first_claim["shouldNotify"])
+            self.assertFalse(second_claim["shouldNotify"])
+            snoozed = store.snooze_stale_bay_orders({"assignmentId": assignment_id, "days": 2}, "admin")
+            self.assertTrue(snoozed["ok"])
+            self.assertFalse(any(int(row["assignmentId"]) == assignment_id for row in store.get_stale_bay_orders()))
+            self.assertTrue(any(int(row["assignmentId"]) == assignment_id for row in store.get_stale_bay_orders(include_snoozed=True)))
+
+            # Reject only one of the two physical pieces. Every synchronized stage and
+            # the live bay allocation must lose exactly one piece, not the whole line.
+            reject = operations.create_reject({
+                "deliveryDate": delivery_date, "order": "289701", "item": "1", "qty": 1,
+                "reason": "Workflow Test Breakage", "location": "Tempering",
+            }, "workflow.tester")
+            self.assertTrue(reject["ok"])
+            for list_id in (staging_id, outbound_id, inbound_id):
+                self.assertEqual(store.get_delivery_list(list_id)["items"][0]["scanned"], 1)
+            with store.connect() as con:
+                bay_after_reject = con.execute(
+                    "SELECT assigned_qty,status FROM bay_assignments WHERE id=?", (assignment_id,)
+                ).fetchone()
+            self.assertEqual(int(bay_after_reject["assigned_qty"] or 0), 1)
+            self.assertNotIn(str(bay_after_reject["status"]), {"Cleared", "Cancelled"})
+            rejected_detail = store.get_order_detail("289701", include_production=False)["items"][0]
+            self.assertEqual(rejected_detail["cutting"]["state"], "needs_recut")
+            replacement_time = (datetime.fromisoformat(rejected_detail["lastRejectedAt"]) + timedelta(minutes=1)).isoformat(timespec="seconds")
+
+            # A replacement generation is independent from the prior Cut evidence.
+            replacement = {
+                "sourceRowId": "v0507-floor-generation-1", "orderNr": "289701", "itemNr": "1",
+                "bomId": 0, "keyIndex": 1, "batchJobNumber": "9702", "batchStatusCode": 200,
+                "batchCreatedAt": replacement_time,
+                "optimizationNumber": 89702, "optimizationStatusSource": "PROD_OPTIMIZATION",
+                "optimizationSequence": 1, "optimizationSequenceRowId": "v0507-seq-1",
+                "optimizationPlateNumber": 1, "quantity": 1, "cutQuantity": 0, "aggregateId": 1000,
+            }
+            store.sync_aw_cutting_rows([{**replacement, "optimizationStatusCode": 100}])
+            self.assertEqual(store.aw_cutting_state("289701", "1")["state"], "optimized")
+            store.sync_aw_cutting_rows([{
+                **replacement, "optimizationStatusCode": 500, "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                "optimizationPlateCut": 1, "optimizationPlateStockBooked": 1, "cutQuantity": 1,
+                "optimizationLastChangedAt": replacement_time,
+            }])
+            final_cutting = store.get_order_detail("289701", include_production=False)["items"][0]["cutting"]
+            self.assertEqual(final_cutting["batch"], "9702")
+            self.assertEqual(final_cutting["optimization"], 89702)
+            self.assertEqual(final_cutting["state"], "cut")
+
+            # Statistics uses physical first-seen/reject quantities, not multiplied
+            # synchronized stage copies or the Rush banner itself.
+            report_day = datetime.now(timezone.utc).date().isoformat()
+            report = store.reports_summary({"dateFrom": report_day, "dateTo": report_day})
+            activity = report["productionActivity"]
+            self.assertEqual(activity["newProduction"]["pieces"], 2)
+            self.assertEqual(activity["newProduction"]["itemCount"], 1)
+            self.assertEqual(activity["internalRejects"]["pieces"], 1)
+            self.assertEqual(activity["internalRejects"]["eventCount"], 1)
+
+            # Scan the remaining good piece out of its bay and prove the old-bay
+            # history survives while no active assignment remains for it.
+            scanned_out = store.scan_out_bay_item({"barcode": item["barcode"], "station": "Bay Map"}, "admin")
+            self.assertTrue(scanned_out["ok"])
+            final_inbound = store.get_delivery_list(inbound_id)["items"][0]
+            self.assertEqual(final_inbound["bayCode"], "")
+            self.assertEqual(final_inbound["lastBayCode"], alternate_code)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0507_rack_return_and_bay_map_editor_workflow(self) -> None:
+        """Cover rack return plus Bay Map create/move/layout/status/delete administration."""
+        verification_root = ROOT / "_verification_v0507_rack_bay_editor"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                store.seed_bays(con)
+                store.seed_bay_auto_assign_settings(con)
+                store.seed_racks(con)
+                con.commit()
+                racks = con.execute(
+                    "SELECT rack_code FROM racks WHERE active=1 AND LOWER(status)='open' ORDER BY id LIMIT 2"
+                ).fetchall()
+            self.assertGreaterEqual(len(racks), 2)
+            rack_code = str(racks[0]["rack_code"])
+            second_rack_code = str(racks[1]["rack_code"])
+
+            item = imported_item("289702", "1", 1, "v0507-return:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-19", "items": [item]},
+                "fileName": "Delivery List 09-19-2026.xlsx", "user": "admin",
+            })
+            store.record_scan({
+                "listId": "2026-09-19-staging-airport", "barcode": item["barcode"],
+                "rackCode": rack_code, "user": "admin", "station": "Airport Rd",
+            })
+            with store.connect() as con:
+                rack_item = con.execute(
+                    "SELECT ri.id FROM rack_items ri JOIN racks r ON r.id=ri.rack_id "
+                    "WHERE r.rack_code=? AND ri.status='Active' LIMIT 1",
+                    (rack_code,),
+                ).fetchone()
+            self.assertIsNotNone(rack_item)
+            store.move_rack_item({"rackItemId": int(rack_item["id"]), "targetRackCode": second_rack_code}, "admin")
+            with store.connect() as con:
+                moved_code = con.execute(
+                    "SELECT r.rack_code FROM rack_items ri JOIN racks r ON r.id=ri.rack_id WHERE ri.id=?",
+                    (int(rack_item["id"]),),
+                ).fetchone()[0]
+            self.assertEqual(str(moved_code), second_rack_code)
+
+            moved_back = store.move_rack_contents({
+                "sourceRackCode": second_rack_code,
+                "targetRackCode": rack_code,
+                "deliveryDate": "2026-09-19",
+            }, "admin")
+            self.assertTrue(moved_back["ok"])
+            self.assertEqual(int(moved_back["movedPieceQty"]), 1)
+            with store.connect() as con:
+                moved_back_code = con.execute(
+                    "SELECT r.rack_code FROM rack_items ri JOIN racks r ON r.id=ri.rack_id WHERE ri.id=?",
+                    (int(rack_item["id"]),),
+                ).fetchone()[0]
+            self.assertEqual(str(moved_back_code), rack_code)
+
+            store.complete_rack({"rackCode": rack_code}, "admin")
+            returned = store.return_rack({"rackCode": rack_code}, "admin")
+            returned_rack = next(row for row in returned["racks"] if row["code"] == rack_code)
+            self.assertEqual(str(returned_rack["status"]).lower(), "open")
+            with store.connect() as con:
+                active_qty = con.execute(
+                    "SELECT COALESCE(SUM(ri.qty),0) FROM rack_items ri JOIN racks r ON r.id=ri.rack_id WHERE r.rack_code=? AND ri.status='Active'",
+                    (rack_code,),
+                ).fetchone()[0]
+            self.assertEqual(int(active_qty or 0), 0)
+
+            created = store.create_bays({
+                "mapSection": "V0507 TEST GROUP", "bayCategory": "Standard", "prefix": "V507", "count": 2,
+                "layoutRow": 40, "layoutCol": 40,
+            }, "admin")
+            self.assertEqual(len(created["created"]), 2)
+            first_code, second_code = created["created"]
+            self.assertTrue(any(row.get("mapSection") == "V0507 TEST GROUP" for row in store.get_bays()))
+
+            store.update_bay_layout({
+                "bayCode": first_code, "displayName": "V507 Primary", "mapSection": "V0507 TEST GROUP",
+                "bayCategory": "Oversize", "layoutRow": 41, "layoutCol": 42, "capacityQty": 3, "active": True,
+            }, "admin")
+            updated = next(row for row in store.get_bays() if row["bayCode"] == first_code)
+            self.assertEqual(updated["displayName"], "V507 Primary")
+            self.assertEqual(updated["bayCategory"], "Oversize")
+            self.assertEqual(int(updated["capacityQty"]), 3)
+
+            positioned = store.set_bay_group_position({
+                "mapSection": "V0507 TEST GROUP", "layoutRow": 45, "layoutCol": 46,
+            }, "admin")
+            self.assertTrue(positioned["ok"])
+            moved = store.move_bay_group({
+                "mapSection": "V0507 TEST GROUP", "rowDelta": 2, "colDelta": -1,
+            }, "admin")
+            self.assertEqual(moved["moved"], 2)
+
+            store.set_bay_status({"bayCode": second_code, "status": "ManualAssign", "reason": "Editor test"}, "admin")
+            store.set_bay_status({"bayCode": second_code, "status": "Available", "reason": "Editor test complete"}, "admin")
+            deleted_one = store.delete_bay({"bayCode": second_code}, "admin")
+            self.assertTrue(deleted_one["ok"])
+            deleted_group = store.delete_bay_group({"mapSection": "V0507 TEST GROUP"}, "admin")
+            self.assertEqual(deleted_group["deletedCount"], 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v0507_route_destination_scan_matrix_and_statistics_dedupe(self) -> None:
+        """Exercise every maintained delivery route through staging/outbound/destination scans.
+
+        The test intentionally imports CPU, DTC, Greenville and Indian Trail together so
+        shared Staging/Outbound lists must contain all physical work while each destination
+        list contains only its own route. Statistics must still count each Order/Item once.
+        """
+        verification_root = ROOT / "_verification_v0507_route_matrix"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                store.seed_racks(con)
+                store.seed_bays(con)
+                store.seed_bay_auto_assign_settings(con)
+                con.commit()
+                rack_rows = con.execute(
+                    "SELECT rack_code FROM racks WHERE active=1 AND LOWER(status)='open' ORDER BY id LIMIT 4"
+                ).fetchall()
+            self.assertGreaterEqual(len(rack_rows), 4)
+            rack_codes = [str(row["rack_code"]) for row in rack_rows]
+
+            delivery_date = datetime.now(timezone.utc).date().isoformat()
+            route_specs = [
+                ("CPU", "customer-pickup", "cpu", 1),
+                ("DTC", "dtc", "dtc", 2),
+                ("GNV", "bfs-greenville", "greenville", 3),
+                ("IT", "inbound-indian-trail", "indian_trail", 4),
+            ]
+            items = []
+            for index, (route, _suffix, _preset, qty) in enumerate(route_specs, start=1):
+                item = imported_item(f"28971{index}", "1", qty, f"v0507-route:{route.lower()}")
+                item["route"] = route
+                item["sourceRoute"] = route
+                item["product"] = '1/4" Clear Annealed'
+                item["dimensions"] = f'{30 + index}" x {40 + index}"'
+                items.append(item)
+
+            store.import_delivery_list({
+                "payload": {"deliveryDate": delivery_date, "items": items},
+                "fileName": f"Delivery List {delivery_date}.xlsx",
+                "user": "admin",
+            })
+
+            staging_id = f"{delivery_date}-staging-airport"
+            outbound_id = f"{delivery_date}-outbound-airport"
+            staging = store.get_delivery_list(staging_id)
+            outbound = store.get_delivery_list(outbound_id)
+            self.assertEqual({row["order"] for row in staging["items"]}, {row["order"] for row in items})
+            self.assertEqual({row["order"] for row in outbound["items"]}, {row["order"] for row in items})
+
+            for route_index, (item, (route, suffix, expected_preset, qty)) in enumerate(zip(items, route_specs)):
+                rack_code = rack_codes[route_index]
+                destination_id = f"{delivery_date}-{suffix}"
+                destination = store.get_delivery_list(destination_id)
+                self.assertEqual(destination["meta"]["stagePreset"], expected_preset)
+                self.assertEqual(len(destination["items"]), 1)
+                self.assertEqual(destination["items"][0]["order"], item["order"])
+                self.assertEqual(destination["items"][0]["qty"], qty)
+
+                for _ in range(qty):
+                    store.record_scan({
+                        "listId": staging_id,
+                        "barcode": item["barcode"],
+                        "rackCode": rack_code,
+                        "user": "admin",
+                        "station": "Airport Rd",
+                    })
+                    store.record_scan({
+                        "listId": outbound_id,
+                        "barcode": item["barcode"],
+                        "user": "admin",
+                        "station": "Airport Rd",
+                    })
+
+                if route == "IT":
+                    for _ in range(qty):
+                        result = store.receive_indian_trail_scan({
+                            "listId": destination_id,
+                            "barcode": item["barcode"],
+                            "station": "Indian Trail",
+                        }, "admin")
+                        self.assertTrue(result["ok"])
+                else:
+                    for _ in range(qty):
+                        store.record_scan({
+                            "listId": destination_id,
+                            "barcode": item["barcode"],
+                            "user": "admin",
+                            "station": route,
+                        })
+
+                final_destination = store.get_delivery_list(destination_id)["items"][0]
+                self.assertEqual(final_destination["scanned"], qty)
+                detail = store.get_order_detail(item["order"], include_production=False)["items"][0]
+                stage_by_id = {row["listId"]: row for row in detail["stages"]}
+                self.assertEqual(stage_by_id[staging_id]["scanned"], qty)
+                self.assertEqual(stage_by_id[outbound_id]["scanned"], qty)
+                self.assertEqual(stage_by_id[destination_id]["scanned"], qty)
+
+            # 1 + 2 + 3 + 4 = 10 physical pieces. Synchronized stage copies must not
+            # multiply the production ledger or the per-glass total.
+            report = store.reports_summary({
+                "dateFrom": delivery_date,
+                "dateTo": delivery_date,
+                "detailRows": "0",
+            })
+            production = report["productionActivity"]["newProduction"]
+            self.assertEqual(production["pieces"], 10)
+            self.assertEqual(production["itemCount"], 4)
+            self.assertEqual(production["orderCount"], 4)
+            self.assertEqual(sum(int(row["pieces"]) for row in production["byGlass"]), 10)
+            self.assertEqual(production["rows"], [])
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 

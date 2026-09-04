@@ -164,8 +164,71 @@ def check_database(database_path: str | Path) -> dict[str, Any]:
             if rows:
                 duplicate_results[name] = rows
         report["checks"]["duplicateBusinessKeys"] = duplicate_results
-        if duplicate_results:
-            add_issue(report, "warnings", "duplicate_business_keys", "Potential duplicate business keys found", results=duplicate_results)
+
+        # v0.507: the historical scanner can contain two physically different A+W
+        # rows that happen to share a legacy list_id/source_id identity. Those are
+        # source-identity collisions, not safe deletion candidates. Classify them
+        # separately so a cleanup audit never suggests deleting valid glass.
+        line_item_identity_details: list[dict[str, Any]] = []
+        for key, count in duplicate_results.get("line_items_list_source", []):
+            list_id, _, source_id = str(key or "").partition("|")
+            item_rows = connection.execute(
+                """
+                SELECT id, order_no, item_no, qty, dimensions, customer, route, job, product,
+                       process_state, queue_state, barcode
+                FROM line_items
+                WHERE is_deleted = 0 AND list_id = ? AND source_id = ?
+                ORDER BY id
+                """,
+                (list_id, source_id),
+            ).fetchall()
+            signatures = {
+                tuple(str(value or "").strip() for value in row[1:])
+                for row in item_rows
+            }
+            line_item_identity_details.append({
+                "key": str(key),
+                "count": int(count or 0),
+                "classification": "exact_duplicate" if len(signatures) <= 1 else "source_identity_collision",
+                "rows": [
+                    {
+                        "id": row[0], "order": row[1], "item": row[2], "qty": row[3],
+                        "dimensions": row[4], "customer": row[5], "route": row[6],
+                        "job": row[7], "product": row[8], "processState": row[9],
+                        "queueState": row[10], "barcode": row[11],
+                    }
+                    for row in item_rows[:10]
+                ],
+            })
+        report["checks"]["lineItemSourceIdentityDetails"] = line_item_identity_details
+
+        exact_line_item_duplicates = [
+            row for row in line_item_identity_details if row["classification"] == "exact_duplicate"
+        ]
+        identity_collisions = [
+            row for row in line_item_identity_details if row["classification"] == "source_identity_collision"
+        ]
+        other_duplicate_results = {
+            key: value for key, value in duplicate_results.items() if key != "line_items_list_source"
+        }
+        if exact_line_item_duplicates:
+            add_issue(
+                report, "warnings", "exact_duplicate_line_items",
+                "Exact active line-item duplicates were found and should be reviewed before cleanup",
+                results=exact_line_item_duplicates,
+            )
+        if identity_collisions:
+            add_issue(
+                report, "warnings", "line_item_source_identity_collision",
+                "Different active glass rows share a historical source identity; records were preserved",
+                results=identity_collisions,
+            )
+        if other_duplicate_results:
+            add_issue(
+                report, "warnings", "duplicate_business_keys",
+                "Potential duplicate business keys found outside line-item source identities",
+                results=other_duplicate_results,
+            )
 
         malformed_timestamps: dict[str, list[dict[str, Any]]] = {}
         for table, columns in TIMESTAMP_COLUMNS.items():

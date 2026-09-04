@@ -124,6 +124,12 @@ MIGRATIONS = (
         "Persist A+W production batch/optimization generations for reject-aware Cutting progress and label context; v498-r1",
         "_migration_016_v498_aw_cutting_progress",
     ),
+    Migration(
+        17,
+        "v507_runtime_read_indexes",
+        "Targeted active Order/Item, catalog heartbeat, scan history, line-update, and A+W Cutting read indexes; v507-r1",
+        "_migration_017_v507_runtime_read_indexes",
+    ),
 )
 
 
@@ -812,6 +818,31 @@ def _migration_016_v498_aw_cutting_progress(connection: Any) -> None:
             ON aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC);
         CREATE INDEX IF NOT EXISTS idx_aw_cutting_batch_v498
             ON aw_cutting_generations(batch_job_number, optimization_number);
+        """
+    )
+
+
+def _migration_017_v507_runtime_read_indexes(connection: Any) -> None:
+    """Add focused indexes for the high-frequency interactive read paths.
+
+    These indexes deliberately avoid broad duplicate coverage.  They target the
+    exact predicates used by Order Details, the compact catalog heartbeat, scan
+    history, and per-list update checks so large synchronized stage catalogs do
+    not force table scans during normal browser interaction.
+    """
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_line_items_active_order_item_v507
+            ON line_items(order_no, item_no, list_id)
+            WHERE COALESCE(is_deleted, 0) = 0;
+        CREATE INDEX IF NOT EXISTS idx_delivery_lists_active_date_revision_v507
+            ON delivery_lists(status, delivery_date DESC, revision, id);
+        CREATE INDEX IF NOT EXISTS idx_scan_events_list_recent_v507
+            ON scan_events(list_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_line_update_notices_list_recent_v507
+            ON line_update_notices(list_id, id DESC, change_token, change_type);
+        CREATE INDEX IF NOT EXISTS idx_aw_cutting_order_item_recent_v507
+            ON aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC);
         """
     )
 

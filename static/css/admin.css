@@ -22127,3 +22127,42 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   font-weight: 700;
   line-height: 1.55;
 }
+
+/* v0.507: Settings/Admin workspaces open immediately and show a lightweight
+   in-modal busy state while their first API read completes. This keeps slow or
+   unavailable network-backed settings from making the launcher feel frozen. */
+.admin-modal-loading-v507 {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 34px 22px;
+  color: #52677f;
+  text-align: left;
+}
+.admin-modal-loading-spinner-v507 {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 3px solid rgba(26, 89, 153, .16);
+  border-top-color: #1d67ae;
+  border-radius: 50%;
+  animation: admin-modal-loading-spin-v507 .8s linear infinite;
+}
+.admin-modal-loading-copy-v507 {
+  display: grid;
+  gap: 3px;
+}
+.admin-modal-loading-copy-v507 strong {
+  color: #173d68;
+  font-size: 14px;
+}
+.admin-modal-loading-copy-v507 small {
+  color: #71839a;
+  font-size: 12px;
+}
+@keyframes admin-modal-loading-spin-v507 { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-modal-loading-spinner-v507 { animation: none; border-top-color: #1d67ae; }
+}

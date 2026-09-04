@@ -1,17 +1,105 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.502**. SQLite remains the active/default backend.
+Current maintained release: **v0.507**. SQLite remains the active/default backend.
 
-v0.502 focuses on the long-running manual **Sync A+W Directly** workflow, uses the live Order 238330 probe to make Cutting completion more authoritative, and turns the reconstructed Crystal Cutting Label into a small true-proportion thumbnail with a maximized view.
+v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It separates fast Order Details data from slow production-share media, caches/reuses recent details, virtualizes heavy Cutting Label/sketch content, replaces high-frequency full-catalog polling with compact revision-aware reads, reduces importer/catalog contention, broadens A+W production coverage by recent production activity, and removes obsolete static-test debt. SQLite advances to schema **17** for targeted read-path indexes.
 
-## Install v0.502
+## Install v0.507
 
-1. Stop the Delivery List Scanner server.
-2. Copy the v0.502 changed files over the matching paths in your current project.
-3. Start the server. SQLite remains schema **16**; no database migration or reset is required from v0.501.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.502 cache keys are used.
-5. Run **Sync A+W Directly** once. Status & Logs should now continue printing the Python importer phase instead of appearing frozen after the PowerShell handoff.
-6. Re-open Order Details for a recent item such as Order 238330 / Item 1. Its newest A+W generation can be confirmed Cut from the verified Optimization plate and cut-quantity evidence even if another Cutting lifecycle field is late.
+1. Stop the Delivery List Scanner server before copying files.
+2. Copy the v0.507 changed files over the matching project paths.
+3. Start the server and allow the normal SQLite migration to advance schema **16 -> 17**. Do not replace the database.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.507 cache keys are loaded.
+5. Open **Automation Control Center > Status & Logs** and run **Sync A+W Directly** once. The production synchronization log now reports matched/missing Order coverage so Batch/Optimization gaps can be diagnosed directly.
+6. Verify a known A+W example in Order Details, such as Order **238076 / Item 1** (Batch **6455**, Optimization **8286**, raw status **460**, already Cut). Core Order Details should open before network-share sketches finish hydrating, and reopening the same Order should display from cache immediately.
+7. Use the Scan, Home, Statistics, Rejects, Racks/Bays, Settings/Admin, and Automation workflows normally; v0.507 removes duplicate background reloads rather than changing their operator-facing workflow.
+
+## v0.507 highlights
+
+- **Order Details is split into fast core data and deferred production-share media.** A+W Batch/Optimization/Cutting rows, reject context, and scanner data render first. Sketch/fabrication files hydrate separately and can fail without erasing core A+W data. Recent Order Details use stale-while-revalidate caching with in-flight request deduplication, so closing and immediately reopening the same Order no longer starts the whole workflow over.
+- **Heavy Order Details DOM/network work is lazy.** Sketch iframes load only near the visible viewport. Cutting Labels render one selected physical piece at a time instead of constructing up to hundreds of barcode/SVG labels that are hidden inside collapsed controls.
+- **The Scan page no longer has two competing refresh loops.** The legacy unconditional 12-second full active-list reload was removed. The maintained revision/signature heartbeat remains authoritative and refreshes detail only when the source revision changes.
+- **The recurring delivery catalog heartbeat is compact.** `/api/delivery-lists?compact=1` returns the list revision/totals needed for change detection without glass/timing/update-detail fan-out. Local verification reduced this hot read from roughly 111-130 ms for a full catalog to about 30-35 ms on the representative 331-list database.
+- **SQLite startup/read contention is reduced.** WAL mode is established once during initialization rather than re-issued on every connection, duplicate startup rack seeding was removed, and schema 17 adds targeted indexes for Order/Item lookup, active list rows, scan-event history, delivery status/date reads, and line-update notices.
+- **Manual A+W reconciliation avoids repeated full-catalog reads.** The importer now requests focused active-stage summaries for only the list IDs being reconciled instead of rebuilding the entire delivery catalog per date.
+- **A+W Batch/Optimization/Cutting coverage is broader and more diagnosable.** Production enrichment now includes recent production activity from `PROD_JOBITEM`/`PROD_JOB`, not only planned delivery dates. Optimization state prefers the freshest A+W status row, preserves which source supplied it, and logs matched/missing coverage with a sample of unresolved Orders.
+- **Fixed a production-process enrichment SQL defect and payload duplication.** The duplicate `WHERE` clause in the label-process lookup was removed, expensive label-process enrichment is limited to the current direct-delivery population, and process rows are attached once per physical generation instead of repeated across every BOM row.
+- **Startup is less front-loaded.** Home reporting warm-up waits until browser idle instead of competing with the first interactive paint.
+- **Crystal MOD 13 edge dimensions are now evidence-based.** The verified `PROD_JOBITEMSHAPE.MOD_PARAM1..4` values use 32 A+W units per inch and reproduce the physical Crystal label callouts exactly for the supplied 238375/3 example. Other shape modes, including SHAPE 99, remain unguessed unless A+W exposes equivalent parameters.
+- **Settings/Admin launchers paint immediately.** Every maintained Settings modal opens its shell before network hydration; network-backed editors show a spinner/error state instead of appearing frozen. Delivery List Management retains its purpose-built paged loading shell, and Statistics shows an explicit loading state while aggregate data is requested.
+- **Legacy static-test debt was removed rather than carried forward.** Obsolete tests tied to retired v0.158-v0.461 structures were pruned; the confirmed duplicate `bayLocationDisplayLabel()` implementation was removed; current behavioral workflows and maintained structure contracts remain covered. Potential definition-only JavaScript helpers were audited but not bulk-deleted without runtime proof.
+
+### v0.507 release-candidate audit
+
+- **266/266 automated tests passed:** 62 behavioral/auth/backend tests plus 204 maintained static/structure contracts. There are no accepted legacy failures in the current suite.
+- The focused floor workflow passes Cutting `100 -> 200 -> 460/500`, Rush, rack assignment/move/complete/depart/return, Outbound reversal, Indian Trail receipt, Bay preassignment/manual scan/move/clear/restore, Old Bay notification/snooze, Qty-accurate Internal Reject rollback, replacement-generation recut, and Statistics reconciliation.
+- The route matrix passes CPU, DTC, Greenville, and Indian Trail from shared Staging/Outbound through their correct destination stages while proving Statistics counts the physical pieces once rather than multiplying synchronized stage copies.
+- A schema-16 production database copy migrated to schema **17** in about **71 ms**, passed SQLite `integrity_check` and foreign-key validation, and uses the new A+W Cutting index in `EXPLAIN QUERY PLAN`. Two historical `231704-001` source-identity collisions were inspected and preserved because the rows represent materially different glass, not safe duplicates.
+- Authenticated HTTP verification on the representative 331-list database measured approximately **39 ms** for the compact catalog, **5-6 ms** for core Order Details on a populated Order, **52 ms** for a seven-day aggregate Statistics report, and **3-38 ms** for individual Settings data endpoints. An 11-endpoint concurrent page/settings stress pass completed 55/55 requests successfully with an overall median near **100 ms** and a maximum under **200 ms** in the local test environment.
+
+v0.506 turns Production Count into a true piece-by-glass daily ledger and replaces the plain-text-only daily email preview with a polished, Outlook-friendly formatted draft while preserving Internal Reject and External Remake accounting rules.
+
+## Install v0.506
+
+1. Stop the Delivery List Scanner server before copying files.
+2. Copy the v0.506 changed files over the matching project paths.
+3. Start the server. SQLite remains schema **16**; no database migration or reset is required.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.506 cache keys are loaded.
+5. Open **Statistics** and choose the reporting day/range. **Production count** now shows the actual newly imported piece total broken down by canonical glass type.
+6. Use **Draft daily email** to reload today's authoritative activity and open the formatted Production Count preview. **Copy formatted email** places both HTML and plain text on the clipboard so Outlook can retain the professional table layout when pasted.
+7. Internal Reject totals/email rows continue to exclude Yield Percentage reasons while the Rejects audit history remains unchanged.
+
+## v0.506 highlights
+
+- **Production Count is now piece-first and glass-first.** The large New Production panel shows the actual physical piece total and a per-glass breakdown with pieces, item count, and contributing delivery dates. Stage copies remain deduplicated, external remakes remain excluded from New Production, and a same-day A+W quantity correction refreshes the first-seen row so a transient earlier Qty cannot understate today's count.
+- **Daily email now mirrors the established operating format without looking like an exported spreadsheet.** It opens with a branded Daily Production Count header and three summary totals, then provides a New Orders glass-type table, an Internal Rejects table, and an External Remakes table with clean hierarchy and consistent spacing.
+- **Formatted Outlook copy is supported.** The review modal renders the real HTML email and **Copy formatted email** writes `text/html` plus `text/plain` to the browser clipboard. The existing mail-app launch remains available as a plain-text fallback because `mailto:` cannot reliably carry HTML.
+- **Internal Reject detail is more useful.** Production email rows now carry the best matching scanner glass identity, dimensions, calculated rejected SQFT, customer/job context, reason, machine, reporter, and delivery date. Yield Percentage rows stay excluded from accounting/email totals.
+- **No schema change.** All new grouping and email rendering are derived from the existing first-seen notices, reject history, and lookup aliases.
+- Final verification: **56/56 behavioral/backend tests pass** and static structure is **203 pass / 129 known legacy failures**, with **0 new failures**.
+
+## v0.505 highlights
+
+- **Added selected-range Production Count to Statistics.** New production is counted by the first-seen import timestamp from the durable `line_update_notices` ledger, so future-delivery work belongs to the day it actually came into the scanner. Stage copies are deduplicated by source lineage. External remakes and Internal Rejects are intentionally separate categories rather than inflating the new-production number.
+- **Added separate Internal Reject and External Remake activity totals.** Internal Reject activity uses the actual reject incident timestamp and rejected quantity. External remake activity uses the first import as REMAKE, or the first update where an existing source item transitions to REMAKE.
+- **Yield Percentage is now a statistical exclusion.** Rejects whose reason is `Yield Percentage`, `Yield Percent`, or `Yield %` remain in the immutable Rejects history but are excluded from Internal Reject Statistics totals and the daily production-count email. The excluded piece/event totals remain visible for reconciliation.
+- **Added a daily Production Count email draft.** The Statistics button reloads today's range, opens a review modal, and includes every new production item, non-yield Internal Reject, and external remake with Order/Item/Qty and useful production details. Operators can copy the body or open it in their default email application; very long drafts are copied first to avoid Windows `mailto:` truncation.
+- **Resolved two remaining A+W label markers from the supplied physical labels.** `@` consistently follows Diamon/Diamond Fusion process rows, while `#` consistently follows Back Mitre process rows. The rebuilt label now places those marks with the triggering process instead of inventing a generic symbol position.
+- **Moved SHAPE to the physical A+W location beside the dimensions.** It is no longer attached to the first process row.
+- **Kept the remaining right-side edge-length callouts evidence-driven.** The Crystal designer exposes `Dim_LengthInfo`, `Mitre`, cut/end-dimension helpers, and the physical labels show edge-numbered measurements. v0.505 extends `Probe-AWGlassLabels.ps1` with outputs **61-65** for A+W shape/edge-shift metadata and SQL module references so those formulas can be reconstructed from real values rather than guessed.
+- SQLite remains schema **16**.
+- Final verification: **56/56 behavioral/backend tests pass** and static structure is **202 pass / 129 known legacy failures**, with **0 new failures**.
+
+## v0.504 highlights
+
+- **Recent Order Details no longer lose A+W production enrichment when their delivery date leaves the normal incremental sync window.** Production sync supplements the current direct-delivery order set with a configurable, bounded recent-delivery order-number lookback (default 14 days) without importing additional delivery-list dates.
+- **Raw A+W Optimization status 460 is accepted as Booked/Cut evidence alongside 500.** The live Order 238076 / Item 1 example (Batch 6455 / Optimization 8286) establishes this additional Booked state; raw codes remain stored for auditability.
+- **Piece-level Optimization membership is preserved.** All matching `PROD_OPTI_SEQUENCE` rows now travel into the generation snapshot instead of collapsing to one sequence/plate. Cutting Labels can therefore show the A+W `PLATENR / SEQUENCE` pair for each physical piece.
+- **Cutting Label process rows now come from A+W's selected production route.** A separate bounded `ZW_AUFTR_ZEIT` read enriches each Order/Item with work type, product/process description, aggregate machine, edge-side data, and route sequence without multiplying the main `PROD_JOBITEM` query.
+- **The rebuilt label follows the supplied A+W examples much more closely.** Customer and delivery date share the header, CPU renders `CUSTOMER PICK UP`, DTC renders `DELIVERY TO CUSTOMER`, IT is suppressed, Batch/Optimization are right-aligned together, process operations sit below dimensions, REMAKE is vertical on the right, and weight/sqft plus plate/sequence occupy the lower-right block.
+- **The compact Order Details presentation remains small with a native-size maximize view.** The label itself keeps the fixed 436 x 519 reference geometry and only its thumbnail is scaled.
+- SQLite remains schema **16**.
+- Final verification: **55/55 behavioral/backend tests pass** and static structure is **201 pass / 129 known legacy failures**, with **0 new failures**.
+
+v0.503 fixes the Automation Control Center's orphaned **Update running** state. The live process/lock is now authoritative; a stale `web-gui-run.json` snapshot can no longer keep the UI yellow forever after the PowerShell updater exits or the scanner server restarts.
+
+## Install v0.503
+
+1. The A+W updater shown in the reported stuck state is already gone when no `C:\DeliveryListAutomation` / runner process is present and the shared run lock is free. Stop the Delivery List Scanner server normally before copying files.
+2. Copy the v0.503 changed files over the matching paths in your current project.
+3. Start the server. SQLite remains schema **16**; no database migration or reset is required from v0.502.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.503 cache keys are used.
+5. Open **Automation Control Center > Status & Logs**. Any orphaned prior browser run is repaired automatically and should show a terminal failed/recovered status rather than **Update running**. You do not need to delete `web-gui-run.json` or `web-gui-summary.json`.
+6. Only after the stale banner has cleared, run **Sync A+W Directly** again if you want to test the v0.502/v0.503 live logging path.
+
+## v0.503 highlights
+
+- **Found the exact stale-status source.** The durable browser state is `C:\DeliveryListAutomation\State\web-gui-run.json`. Renaming `web-gui-summary.json` cannot clear the banner because the UI was also treating `lastRun.running` from the persisted run snapshot as proof of liveness.
+- **Live liveness is now authoritative.** `dashboard.running` is true only when the web server owns a live PowerShell child or the cross-process `run.lock` is genuinely locked by an external/scheduled automation process. Merely having a `run.lock` file or a JSON file with `running=true` does not count.
+- **Automatic stale-run recovery.** If `web-gui-run.json` says running while no child process and no shared lock exist, the controller first tries to recover a matching final summary. If none exists, it preserves the log/audit fields, closes the orphaned run as failed, writes a recovery diagnostic to the run log, and persists `running=false`.
+- **Restart-safe browser rendering.** The Automation Control Center now trusts only the backend's live `dashboard.running` value. Historical `lastRun.running` can no longer resurrect **Update running** after a server restart or hard refresh.
+- SQLite remains schema **16**. No database migration is required.
+- Final verification: **55/55 behavioral/backend tests pass** and static structure is **200 pass / 129 known legacy failures**, with **0 new failures**.
 
 ## v0.502 highlights
 

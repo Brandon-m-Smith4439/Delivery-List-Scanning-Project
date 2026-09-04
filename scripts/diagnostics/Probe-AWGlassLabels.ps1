@@ -1243,6 +1243,95 @@ WHERE CONVERT(nvarchar(64),z.AUFNR)=@OrderNumber
 ORDER BY z.BOM_ID, z.ARBFOLGE, z.ARBART, z.AGG;
 "@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
             Export-ProbeTable -Table $orderProductionRoute -Path (Join-Path $OutputFolder "60-selected-order-process-after-cutting-v501.csv")
+
+            # v0.505: the remaining Crystal-only gap is the right-side edge-length
+            # block (the RPT Formula Workshop names it Dim_LengthInfo). Capture the
+            # live shape/edge sources and any SQL modules that calculate from them
+            # without guessing a formula in the scanner.
+            $dimensionGeometryColumns = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (1200)
+       s.name AS SchemaName, o.name AS ObjectName, o.type_desc AS ObjectType,
+       c.column_id AS ColumnOrder, c.name AS ColumnName, ty.name AS DataType, c.max_length AS MaxLength
+FROM sys.objects o
+JOIN sys.schemas s ON s.schema_id=o.schema_id
+JOIN sys.columns c ON c.object_id=o.object_id
+JOIN sys.types ty ON ty.user_type_id=c.user_type_id
+WHERE s.name=@Schema
+  AND o.type IN ('U','V')
+  AND (
+       UPPER(o.name) LIKE 'PROD_JOBITEMSHAPE%'
+       OR UPPER(o.name)='PROD_JOBITEMEDGESHIFT'
+       OR UPPER(o.name)='PROD_JOBITEMFRAME'
+       OR UPPER(o.name)='PROD_JOBITEM'
+      )
+  AND (
+       UPPER(c.name) LIKE '%EDGE%'
+       OR UPPER(c.name) LIKE '%KANTE%'
+       OR UPPER(c.name) LIKE '%SHIFT%'
+       OR UPPER(c.name) LIKE '%DELETE%'
+       OR UPPER(c.name) LIKE '%STEP%'
+       OR UPPER(c.name) LIKE '%DIM%'
+       OR UPPER(c.name) LIKE '%LENGTH%'
+       OR UPPER(c.name) LIKE '%LAENGE%'
+       OR UPPER(c.name) LIKE '%WIDTH%'
+       OR UPPER(c.name) LIKE '%HEIGHT%'
+       OR UPPER(c.name) LIKE '%BREITE%'
+       OR UPPER(c.name) LIKE '%HOEHE%'
+       OR UPPER(c.name) LIKE '%ANGLE%'
+       OR UPPER(c.name) LIKE '%WINKEL%'
+       OR UPPER(c.name) LIKE '%RADIUS%'
+       OR UPPER(c.name) LIKE '%SHAPE%'
+       OR UPPER(c.name) LIKE '%MOD_NUMMER%'
+      )
+ORDER BY o.name, c.column_id;
+"@ -Parameters @{ Schema=$schema }
+            Export-ProbeTable -Table $dimensionGeometryColumns -Path (Join-Path $OutputFolder "61-dim-length-info-source-columns-v505.csv")
+
+            $shapeRowsV505 = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (300) *
+FROM SYSADM.PROD_JOBITEMSHAPE
+WHERE CONVERT(nvarchar(64),AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),POSNR)=@ItemNumber)
+ORDER BY JOBNUMBER DESC;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $shapeRowsV505 -Path (Join-Path $OutputFolder "62-selected-order-jobitem-shape-v505.csv")
+
+            $shapeInfoRowsV505 = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (300) *
+FROM SYSADM.PROD_JOBITEMSHAPEINFO
+WHERE CONVERT(nvarchar(64),AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),POSNR)=@ItemNumber)
+ORDER BY JOBNUMBER DESC;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $shapeInfoRowsV505 -Path (Join-Path $OutputFolder "63-selected-order-jobitem-shape-info-v505.csv")
+
+            $edgeShiftRowsV505 = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (300) *
+FROM SYSADM.PROD_JOBITEMEDGESHIFT
+WHERE CONVERT(nvarchar(64),AUFNR)=@OrderNumber
+  AND (@ItemNumber='' OR CONVERT(nvarchar(64),POSNR)=@ItemNumber)
+ORDER BY KEYINDEX DESC, JOBNUMBER DESC;
+"@ -Parameters @{ OrderNumber=$OrderNumber; ItemNumber=$ItemNumber }
+            Export-ProbeTable -Table $edgeShiftRowsV505 -Path (Join-Path $OutputFolder "64-selected-order-jobitem-edge-shift-v505.csv")
+
+            $dimensionModuleRefsV505 = Invoke-ProbeQuery -Connection $connection -Query @"
+SELECT TOP (500)
+       s.name AS SchemaName, o.name AS ObjectName, o.type_desc AS ObjectType,
+       LEFT(REPLACE(REPLACE(m.definition, CHAR(13), ' '), CHAR(10), ' '), 12000) AS DefinitionPreview
+FROM sys.sql_modules m
+JOIN sys.objects o ON o.object_id=m.object_id
+JOIN sys.schemas s ON s.schema_id=o.schema_id
+WHERE s.name=@Schema
+  AND (
+       UPPER(m.definition) LIKE '%EDGESHIFT%'
+       OR UPPER(m.definition) LIKE '%EDGEDELETION%'
+       OR UPPER(m.definition) LIKE '%MOD_NUMMER_CUT%'
+       OR UPPER(m.definition) LIKE '%BREITE_CUT%'
+       OR UPPER(m.definition) LIKE '%HOEHE_CUT%'
+      )
+ORDER BY o.type_desc, o.name;
+"@ -Parameters @{ Schema=$schema }
+            Export-ProbeTable -Table $dimensionModuleRefsV505 -Path (Join-Path $OutputFolder "65-dimension-calculation-module-references-v505.csv")
         }
 
         # The prior query incorrectly required PROD_JOBITEM.OPTIMIZATION to be
@@ -1574,7 +1663,7 @@ ORDER BY ZEITSTEMPEL, ID, SEQUENZ_NR;
         "Capture Cutting Labels Screen action: $captureScreen",
         "Locate Crystal report on configured UNC roots: $LocateCrystalReport",
         "Safety: SELECT-only; READ UNCOMMITTED; no A+W writes.",
-        "Best next label evidence: 55-selected-order-crystal-header-anchors.csv through 60-selected-order-process-after-cutting-v501.csv. For an Order Details Cutting mismatch, outputs 58-60 are the priority because they do not require a known Optimization number and expose the Order/Item -> generation -> Batch -> PROD_OPTI_SEQUENCE bridge plus downstream process route. The admin-provided RPT designer screenshot proves AH_NAME1 / BEST_TEXT1 / OR_TOUR / PROD_BEZ1-style anchors. The supplied physical label also aligns with the scanner's canonical T200 Order/Item barcode in Code 39. The exact report remains Prodman_CuttingLabel_Optimisation.rpt (DR_REPORTE ID 846 / print point 846)."
+        "Best next label evidence: 61-dim-length-info-source-columns-v505.csv through 65-dimension-calculation-module-references-v505.csv; these target Crystal Dim_LengthInfo and the remaining edge-length callouts directly. Outputs 55-60 remain useful for the main label fields and production route. For an Order Details Cutting mismatch, outputs 58-60 are the priority because they do not require a known Optimization number and expose the Order/Item -> generation -> Batch -> PROD_OPTI_SEQUENCE bridge plus downstream process route. The admin-provided RPT designer screenshot proves AH_NAME1 / BEST_TEXT1 / OR_TOUR / PROD_BEZ1-style anchors. The supplied physical label also aligns with the scanner's canonical T200 Order/Item barcode in Code 39. The exact report remains Prodman_CuttingLabel_Optimisation.rpt (DR_REPORTE ID 846 / print point 846)."
     ) | Set-Content -LiteralPath (Join-Path $OutputFolder "README.txt") -Encoding UTF8
 
     Write-Host ""

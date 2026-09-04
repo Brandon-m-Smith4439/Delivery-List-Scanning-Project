@@ -1631,3 +1631,272 @@ body button.app-primary-button.production-detail-action-v476.is-secondary { back
   .cutting-label-preview-body-v502 { justify-content:start; }
   .cutting-label-preview-body-v502 .production-cutting-label-v502.is-maximized-v502 { transform:scale(.82); transform-origin:top left; margin-right:-78px; margin-bottom:-94px; }
 }
+
+/* ========================================================================== */
+/* v0.504 A+W Cutting Label parity + compact Order Details presentation       */
+/* ========================================================================== */
+/* The reference labels supplied from A+W are approximately 436 x 519 px.
+   Keep that native geometry here and scale only the Order Details thumbnail. */
+.production-cutting-label-set-v502 {
+  width:min(100%,264px);
+  padding:6px;
+}
+.production-cutting-label-frame-v502 {
+  width:242px;
+  height:289px;
+  margin:0 5px 7px;
+}
+.production-cutting-label-scale-v502 {
+  width:436px;
+  height:519px;
+  transform:scale(.552);
+}
+.production-cutting-label-maximize-v502 {
+  top:4px;
+  left:4px;
+  width:21px;
+  height:21px;
+  border-radius:4px;
+  opacity:.64;
+}
+.production-cutting-label-maximize-v502 svg { width:13px; height:13px; }
+
+.production-cutting-label-v504 .production-cutting-label-title-v500 {
+  top:3px;
+  left:9px;
+  right:12px;
+  height:24px;
+}
+.production-cutting-label-v504 .production-cutting-label-title-v500 > strong {
+  width:318px;
+  font-size:19px;
+  line-height:22px;
+  font-weight:500;
+}
+.production-cutting-label-v504 .production-cutting-label-title-v500 > time {
+  top:1px;
+  right:0;
+  font-size:13px;
+  line-height:18px;
+}
+.production-cutting-label-v504 .production-cutting-label-route-v500 {
+  top:28px;
+  left:8px;
+  right:8px;
+  height:21px;
+  padding:0 58px;
+}
+.production-cutting-label-v504 .production-cutting-label-route-v500 > b {
+  font-size:18px;
+  line-height:20px;
+  font-weight:800;
+}
+.production-cutting-label-v504 .production-cutting-label-barcode-v500 {
+  top:53px;
+  left:10px;
+  width:360px;
+  height:48px;
+}
+.production-cutting-label-v504 .production-cutting-label-identifiers-v500 {
+  top:113px;
+  left:10px;
+  right:144px;
+  height:51px;
+  font-size:16px;
+  line-height:25px;
+}
+.production-cutting-label-v504 .production-cutting-label-identifiers-v500 > span {
+  grid-template-columns:40px minmax(0,1fr);
+  gap:3px;
+}
+.production-cutting-label-v504 .production-cutting-label-identifiers-v500 small {
+  font-size:13px;
+  line-height:22px;
+}
+.production-cutting-label-v504 .production-cutting-label-identifiers-v500 b {
+  overflow:hidden;
+  font-size:17px;
+  line-height:22px;
+  font-weight:800;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.production-cutting-label-production-meta-v504 {
+  position:absolute;
+  top:139px;
+  right:13px;
+  width:151px;
+  display:grid;
+  gap:3px;
+  color:#111;
+  font-size:15px;
+  line-height:20px;
+  text-align:right;
+  white-space:nowrap;
+}
+.production-cutting-label-production-meta-v504 > span {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 48px;
+  align-items:baseline;
+  gap:7px;
+}
+.production-cutting-label-production-meta-v504 strong {
+  min-width:43px;
+  font-size:17px;
+  font-weight:800;
+  text-align:right;
+}
+.production-cutting-label-v504 .production-cutting-label-glass-v500 {
+  top:191px;
+  left:10px;
+  right:10px;
+  font-size:21px;
+  line-height:25px;
+}
+.production-cutting-label-v504 .production-cutting-label-size-v500 {
+  top:224px;
+  left:10px;
+  right:10px;
+  font-size:21px;
+  line-height:25px;
+}
+.production-cutting-label-v504 .production-cutting-label-process-v500 {
+  top:263px;
+  left:13px;
+  right:15px;
+  max-height:188px;
+  min-height:0;
+  gap:5px;
+  overflow:hidden;
+  font-size:10px;
+  line-height:15px;
+}
+.production-cutting-label-v504 .production-cutting-label-process-v500 > span {
+  position:relative;
+  display:block;
+  min-height:15px;
+  padding-right:125px;
+  white-space:nowrap;
+}
+.production-cutting-label-shape-v504 {
+  position:absolute;
+  top:0;
+  right:1px;
+  font-size:12px;
+  line-height:15px;
+  font-weight:500;
+}
+.production-cutting-label-remake-v504 {
+  position:absolute;
+  z-index:2;
+  top:220px;
+  right:15px;
+  color:#080a0b;
+  font-size:19px;
+  line-height:21px;
+  font-style:normal;
+  font-weight:900;
+  letter-spacing:.01em;
+  writing-mode:vertical-rl;
+  transform:rotate(180deg);
+}
+.production-cutting-label-v504 .production-cutting-label-metrics-v500 {
+  right:14px;
+  bottom:82px;
+  width:110px;
+  gap:1px;
+}
+.production-cutting-label-v504 .production-cutting-label-metrics-v500 > span {
+  grid-template-columns:65px 38px;
+  gap:7px;
+  font-size:17px;
+  line-height:22px;
+}
+.production-cutting-label-v504 .production-cutting-label-metrics-v500 > span b {
+  font-size:18px;
+  text-align:right;
+}
+.production-cutting-label-v504 .production-cutting-label-metrics-v500 > span strong {
+  font-size:17px;
+  text-align:right;
+}
+.production-cutting-label-v504 .production-cutting-label-piece-counter-v501 {
+  margin-top:-1px;
+}
+
+/* ========================================================================== */
+/* v0.505 Crystal label markers and shape placement                           */
+/* ========================================================================== */
+/* Physical labels place SHAPE beside the dimensions, not beside Cutting. */
+.production-cutting-label-shape-v505 {
+  position:absolute;
+  top:224px;
+  right:45px;
+  color:#111;
+  font-size:12px;
+  line-height:25px;
+  font-weight:500;
+  white-space:nowrap;
+}
+/* Admin-supplied label samples consistently pair # with Back mitre and @ with
+   Diamon Fusion. Keep the mark on its owning process row so variable-length
+   process lists preserve the same vertical relationship as Crystal Reports. */
+.production-cutting-label-process-marker-v505 {
+  position:absolute;
+  top:0;
+  right:82px;
+  color:#050505;
+  font-size:20px;
+  line-height:15px;
+  font-weight:950;
+}
+/* The A+W samples place the wider @ slightly farther left than #. */
+.production-cutting-label-process-marker-v505.is-at { right:105px; }
+.production-cutting-label-process-marker-v505.is-hash { right:82px; }
+
+/* v0.507: exact Crystal Dim_LengthInfo placement for the verified MOD 13
+   shape. The source values remain raw A+W 1/32-inch units in the payload; JS
+   formats them only for MOD 13, where probe data matches the physical label. */
+.production-cutting-label-edge-dims-v507 {
+  position:absolute;
+  z-index:2;
+  top:262px;
+  right:15px;
+  width:105px;
+  display:grid;
+  gap:0;
+  color:#111;
+  font-size:11px;
+  line-height:16px;
+  font-weight:500;
+  text-align:left;
+  white-space:nowrap;
+}
+.production-cutting-label-edge-dims-v507 > span { display:block; }
+
+/* ========================================================================== */
+/* v0.507 virtualized physical Cutting Label selector                         */
+/* ========================================================================== */
+.production-cutting-piece-selector-v507 {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:7px;
+  margin:0 5px 5px;
+  color:#506378;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.production-cutting-piece-selector-v507 select {
+  min-width:82px;
+  height:25px;
+  border:1px solid #c8d5e3;
+  border-radius:6px;
+  background:#fff;
+  color:#183f5e;
+  font-size:10px;
+  font-weight:850;
+  padding:0 22px 0 7px;
+}

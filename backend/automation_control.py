@@ -549,6 +549,75 @@ class DeliveryAutomationController:
             enriched["currentStep"] = log_text.splitlines()[-1]
         return enriched
 
+    def _recover_stale_browser_run(
+        self,
+        config: dict[str, Any],
+        gui_run: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Clear a persisted browser-run ``running`` flag when no run exists.
+
+        ``web-gui-run.json`` is durable so Status & Logs survives a browser or
+        server restart.  A hard server/process exit can therefore leave its last
+        snapshot at ``running=true`` even though the PowerShell process and the
+        shared runtime lock are both gone.  That stale bit must never be treated
+        as liveness.  Recover a matching final summary when one exists; otherwise
+        preserve the audit/log data and close the orphaned run as failed.
+        """
+        stored = dict(gui_run or {})
+        if not stored or not bool(stored.get("running")):
+            return stored
+
+        paths = self._runtime_paths(config)
+        summary_path_text = str(stored.get("summaryPath") or "").strip()
+        summary_path = Path(summary_path_text) if summary_path_text else paths["gui_summary"]
+        runtime_summary = self._read_json_file(summary_path)
+        request_id = str(stored.get("taskId") or stored.get("requestId") or "").strip()
+        summary_request_id = str(runtime_summary.get("requestId") or runtime_summary.get("taskId") or "").strip()
+        summary_matches = bool(runtime_summary) and (not request_id or request_id == summary_request_id)
+
+        if summary_matches and runtime_summary.get("running") is not True:
+            recovered = {
+                **stored,
+                **runtime_summary,
+                "running": False,
+                "recoveredStaleRun": True,
+                "message": str(
+                    runtime_summary.get("message")
+                    or "The previous manual update finished while the web server was unavailable."
+                ),
+            }
+            recovered.setdefault("completedAt", utc_now())
+        else:
+            recovered = self._attach_complete_log(stored)
+            recovery_note = (
+                "No active automation process or shared runtime lock was found. "
+                "The stale Running status was cleared automatically."
+            )
+            log_path_text = str(recovered.get("logPath") or "").strip()
+            if log_path_text:
+                self._append_run_log_line(Path(log_path_text), recovery_note, "ERROR")
+                recovered = self._attach_complete_log(recovered)
+            recovered.update({
+                "running": False,
+                "succeeded": False,
+                "completedAt": str(recovered.get("completedAt") or utc_now()),
+                "message": "Previous manual update stopped before reporting completion.",
+                "currentStep": recovery_note,
+                "error": str(recovered.get("error") or recovery_note),
+                "recoveredStaleRun": True,
+            })
+
+        self._write_gui_status(config, recovered)
+        return recovered
+
+    @staticmethod
+    def _stored_run_without_live_flag(run: dict[str, Any]) -> dict[str, Any]:
+        """Return historical status without allowing a stale flag to imply liveness."""
+        normalized = dict(run or {})
+        if normalized:
+            normalized["running"] = False
+        return normalized
+
     def _schedule_installed(self) -> bool:
         if os.name != "nt":
             return False
@@ -575,15 +644,49 @@ class DeliveryAutomationController:
         runtime_paths = self._runtime_paths(config) if config else {}
         with self._state_lock:
             live_status = dict(self._active_status)
-            running = bool(self._active_process and self._active_process.poll() is None)
+            active_process = self._active_process
+            browser_process_running = bool(active_process and active_process.poll() is None)
+
+        # v0.503: liveness comes from a real child process or the cross-process
+        # run.lock, never from a persisted JSON ``running`` flag.  The latter is
+        # only historical state and can survive a crash/restart indefinitely.
+        runtime_lock_busy = bool(config and self._runtime_lock_busy(config))
+        running = browser_process_running or runtime_lock_busy
+
         gui_run = self._read_json_file(runtime_paths.get("gui_run", Path("missing"))) if runtime_paths else {}
         scheduled_run = self._read_json_file(runtime_paths.get("last_run", Path("missing"))) if runtime_paths else {}
+
+        # If this server does not own a live browser child and the shared lock is
+        # free, a durable web-gui-run.json that still says running is orphaned.
+        # Recover it once and persist the repaired terminal state so restarting or
+        # hard-refreshing cannot resurrect the yellow Update running indicator.
+        if config and not running and active_process is None and bool(gui_run.get("running")):
+            gui_run = self._recover_stale_browser_run(config, gui_run)
+
+        # Historical files are never allowed to override current liveness.  This
+        # also protects scheduled last-run.json files left mid-write by a killed
+        # task; if the shared lock is free, they are history, not an active run.
+        if not running:
+            gui_run = self._stored_run_without_live_flag(gui_run)
+            scheduled_run = self._stored_run_without_live_flag(scheduled_run)
+
         stored_runs = [row for row in (gui_run, scheduled_run) if row]
         stored_runs.sort(
             key=lambda row: str(row.get("completedAt") or row.get("startedAt") or ""),
             reverse=True,
         )
-        last_run = live_status if running and live_status else (stored_runs[0] if stored_runs else live_status)
+        # v0.487 compatibility contract originally used:
+        # last_run = live_status if running and live_status else persisted_status
+        # v0.503 deliberately separates browser-process liveness from the shared
+        # runtime lock so a scheduled task can still be shown as active safely.
+        if browser_process_running and live_status:
+            last_run = live_status
+        elif running:
+            running_rows = [row for row in stored_runs if bool(row.get("running"))]
+            last_run = running_rows[0] if running_rows else (stored_runs[0] if stored_runs else live_status)
+        else:
+            last_run = stored_runs[0] if stored_runs else live_status
+
         # v0.487: live browser runs already stream output in memory. Re-reading
         # the entire growing log file on every one-second dashboard poll becomes
         # progressively more expensive during large A+W syncs. Read the full
@@ -623,6 +726,7 @@ class DeliveryAutomationController:
                 "productionScheduledEnabled": bool(production_sync.get("ScheduledEnabled", True)),
                 "productionIncludeCuttingBookings": bool(production_sync.get("IncludeCuttingBookings", True)),
                 "productionCuttingBookingLookbackDays": int(production_sync.get("CuttingBookingLookbackDays") or 120),
+                "productionOrderLookbackDays": int(production_sync.get("OrderLookbackDays") or 14),
                 "productionQueryBatchSize": int(production_sync.get("QueryBatchSize") or 60),
                 "productionQueryTimeoutSeconds": int(production_sync.get("QueryTimeoutSeconds") or 75),
                 "productionGenerationHistoryDepth": int(production_sync.get("GenerationHistoryDepth") or 4),
@@ -1670,6 +1774,10 @@ class DeliveryAutomationController:
         production_sync["CuttingBookingLookbackDays"] = bounded_int(
             data.get("productionCuttingBookingLookbackDays", production_sync.get("CuttingBookingLookbackDays", 120)),
             14, 730, "A+W Cutting booking lookback",
+        )
+        production_sync["OrderLookbackDays"] = bounded_int(
+            data.get("productionOrderLookbackDays", production_sync.get("OrderLookbackDays", 14)),
+            1, 90, "A+W production order coverage lookback",
         )
         production_sync["QueryBatchSize"] = bounded_int(
             data.get("productionQueryBatchSize", production_sync.get("QueryBatchSize", 60)),
