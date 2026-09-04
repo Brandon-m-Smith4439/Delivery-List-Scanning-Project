@@ -279,7 +279,16 @@ function Get-OptionalProperty {
         $DefaultValue = $null
     )
 
-    if ($null -eq $Object -or -not ($Object.PSObject.Properties.Name -contains $Name)) {
+    if ($null -eq $Object) {
+        return $DefaultValue
+    }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) {
+            return $Object[$Name]
+        }
+        return $DefaultValue
+    }
+    if (-not ($Object.PSObject.Properties.Name -contains $Name)) {
         return $DefaultValue
     }
     return $Object.$Name
@@ -953,7 +962,11 @@ function Get-AwCuttingSyncPayload {
     # population. Crystal-label process enrichment is useful only for the active
     # direct delivery payload and is considerably heavier than core Cutting state.
     $directOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($envelope in @($DirectPayloads)) {
+    # Windows PowerShell 5.1 cannot wrap Generic.List[object] directly in an
+    # array subexpression; it raises "Argument types do not match" before any
+    # A+W production query runs. Materialize through the pipeline first.
+    $directPayloadSnapshot = @($DirectPayloads | ForEach-Object { $_ })
+    foreach ($envelope in $directPayloadSnapshot) {
         $payload = Get-OptionalProperty -Object $envelope -Name "payload" -DefaultValue $null
         foreach ($row in @(Get-OptionalProperty -Object $payload -Name "rows" -DefaultValue @())) {
             $orderNumber = ([string](Get-OptionalProperty -Object $row -Name "order" -DefaultValue "")).Trim()
@@ -1144,35 +1157,6 @@ ShapeDisplayRanked AS (
            ) AS RN
     FROM SYSADM.PROD_JOBITEMSHAPE sh
     WHERE sh.AUFNR IN ($orderSql) AND ISNULL(sh.TYPE,0)=0
-),
-CandidateOptimizations AS (
-    SELECT DISTINCT ResolvedOptimization AS OPTIMIZATION
-    FROM ResolvedJobItems
-    WHERE ResolvedOptimization > 0
-),
-OptimizationRanked AS (
-    SELECT u.OPTIMIZATION,u.STATUS,u.OPTIMODE,u.OPTIDATE,u.SHEETCOUNT,u.LASTCHANGEDATE,u.SourceName,
-           ROW_NUMBER() OVER (
-               PARTITION BY u.OPTIMIZATION
-               ORDER BY CASE WHEN u.LASTCHANGEDATE IS NULL THEN 1 ELSE 0 END, u.LASTCHANGEDATE DESC, u.SourceRank
-           ) AS RN
-    FROM (
-        SELECT 0 AS SourceRank,CAST('PROD_OPTIMIZATION' AS nvarchar(40)) AS SourceName,
-               o.OPTIMIZATION,o.STATUS,o.OPTIMODE,o.OPTIDATE,o.SHEETCOUNT,o.LASTCHANGEDATE
-        FROM SYSADM.PROD_OPTIMIZATION o
-        INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=o.OPTIMIZATION
-        UNION ALL
-        SELECT 1 AS SourceRank,CAST('PROD_OPTI_STATISTICS' AS nvarchar(40)) AS SourceName,
-               s.OPTIMIZATION,s.STATUS,s.OPTIMODE,s.OPTIDATE,s.SHEETCOUNT,s.LASTCHANGEDATE
-        FROM SYSADM.PROD_OPTI_STATISTICS s
-        INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=s.OPTIMIZATION
-    ) u
-),
-PlateRanked AS (
-    SELECT p.OPTIMIZATION,p.PLATENR,p.CUT,p.STOCKBOOKED,p.LASTCHANGEDATE,p.LASTCHANGEUSER,
-           ROW_NUMBER() OVER (PARTITION BY p.OPTIMIZATION,p.PLATENR ORDER BY p.LASTCHANGEDATE DESC) AS RN
-    FROM SYSADM.PROD_OPTI_PLATES p
-    INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=p.OPTIMIZATION
 )
 $cuttingCte
 SELECT
@@ -1217,8 +1201,27 @@ LEFT JOIN SYSADM.BW_AUFTR_POS_EX posx ON posx.ID=ji.AUFNR AND posx.POS_NR=ji.POS
 LEFT JOIN SYSADM.BW_AUFTR_STKL stkl ON stkl.ID=ji.AUFNR AND stkl.POS_NR=ji.POSNR AND stkl.BOM_ID=ji.BOM_ID
 LEFT JOIN ShapeDisplayRanked shape ON shape.AUFNR=ji.AUFNR AND shape.POSNR=ji.POSNR
  AND shape.JOBNUMBER=ISNULL(ji.JOBNUMBER,0) AND shape.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND shape.RN=1
-LEFT JOIN OptimizationRanked opti ON opti.OPTIMIZATION=ji.ResolvedOptimization AND opti.RN=1
-LEFT JOIN PlateRanked plate ON plate.OPTIMIZATION=ji.ResolvedOptimization AND plate.PLATENR=ji.ResolvedPlateNumber AND plate.RN=1
+OUTER APPLY (
+    SELECT TOP 1 u.STATUS,u.OPTIMODE,u.OPTIDATE,u.SHEETCOUNT,u.LASTCHANGEDATE,u.SourceName
+    FROM (
+        SELECT 0 AS SourceRank,CAST('PROD_OPTIMIZATION' AS nvarchar(40)) AS SourceName,
+               o.STATUS,o.OPTIMODE,o.OPTIDATE,o.SHEETCOUNT,o.LASTCHANGEDATE
+        FROM SYSADM.PROD_OPTIMIZATION o
+        WHERE o.OPTIMIZATION=ji.ResolvedOptimization
+        UNION ALL
+        SELECT 1 AS SourceRank,CAST('PROD_OPTI_STATISTICS' AS nvarchar(40)) AS SourceName,
+               s.STATUS,s.OPTIMODE,s.OPTIDATE,s.SHEETCOUNT,s.LASTCHANGEDATE
+        FROM SYSADM.PROD_OPTI_STATISTICS s
+        WHERE s.OPTIMIZATION=ji.ResolvedOptimization
+    ) u
+    ORDER BY CASE WHEN u.LASTCHANGEDATE IS NULL THEN 1 ELSE 0 END,u.LASTCHANGEDATE DESC,u.SourceRank
+) opti
+OUTER APPLY (
+    SELECT TOP 1 p.CUT,p.STOCKBOOKED,p.LASTCHANGEDATE,p.LASTCHANGEUSER
+    FROM SYSADM.PROD_OPTI_PLATES p
+    WHERE p.OPTIMIZATION=ji.ResolvedOptimization AND p.PLATENR=ji.ResolvedPlateNumber
+    ORDER BY p.LASTCHANGEDATE DESC
+) plate
 $cuttingJoin
 ORDER BY ji.AUFNR,ji.POSNR,ji.KEYINDEX,ji.JOBNUMBER,ji.BOM_ID
 OPTION (RECOMPILE);

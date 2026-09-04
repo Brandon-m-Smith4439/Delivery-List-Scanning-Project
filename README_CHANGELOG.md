@@ -1,6 +1,8 @@
 ## v0.507 - Runtime Performance Recovery, A+W Cutting Coverage, and Legacy Cleanup
 
 ### A+W Batch / Optimization / Cutting reliability
+- Fixed the Windows PowerShell 5.1 `Generic.List[object]` materialization failure that stopped production synchronization before its first A+W query. Ordered payload dictionaries are now read through the shared property helper, so production coverage diagnostics use the actual `orderNr` values instead of reporting valid rows as unmatched.
+- Replaced full-table Optimization and Plate ranking CTEs with indexed per-generation `OUTER APPLY TOP 1` lookups. A live scheduled-style validation synchronized 7,526 `PROD_JOBITEM` rows into 1,574 durable generations, matched 833 of 834 bounded coverage Orders, and completed the full export/import workflow successfully without the previous SQL timeout.
 - Expanded production-only Order coverage beyond planned-delivery dates by unioning recent `PROD_JOBITEM` / `PROD_JOB` production activity into the bounded A+W enrichment population. Recently cut/remade work therefore remains eligible for Batch/Optimization/Cutting synchronization even after its delivery date leaves the short incremental delivery-list window.
 - Changed optimization-state ranking to prefer the freshest A+W change timestamp before source precedence. `PROD_OPTIMIZATION` and `PROD_OPTI_STATISTICS` remain auditable sources, and the selected source is retained as `optimizationStatusSource` in the generation snapshot/public payload.
 - Added explicit production-coverage diagnostics to every direct-sync payload: requested Order count, matched generation Order count, missing count, and a bounded missing-Order sample. This makes a live **NO A+W DATA** case diagnosable from the normal Automation Control Center log instead of requiring guesswork.
@@ -38,6 +40,7 @@
 - Release migration/integrity audit: a schema-16 representative database migrated to schema 17 in approximately **71 ms**, `PRAGMA integrity_check` returned `ok`, foreign-key validation passed, all v0.507 indexes were present, and Order Details Cutting lookup used `idx_aw_cutting_order_item_recent_v507`.
 - Historical `231704-001` same-source-key pairs were classified as **source identity collisions**, not duplicate glass: customer/job/product/dimensions differ materially, so v0.507 preserves them and reports the condition instead of deleting production data.
 - Representative authenticated HTTP timings after the final cleanup: compact catalog ~**39 ms** median, core Order Details ~**5-6 ms** median, seven-day aggregate Statistics ~**52 ms**, and Settings endpoints ~**3-38 ms** individually. A concurrent 11-endpoint stress pass completed **55/55** requests with no errors, ~**100 ms** overall median, and <**200 ms** maximum locally.
+- Final live A+W verification on September 4, 2026 completed the scheduled-style production sync and scanner reconciliation in approximately **27 seconds**, including 14 bounded SQL batches and direct-store verification. The one unmatched coverage candidate had no `PROD_JOBITEM` generation and remained explicitly reported rather than being treated as synchronized.
 
 ## v0.506 - Piece-by-Glass Production Count and Formatted Daily Email
 

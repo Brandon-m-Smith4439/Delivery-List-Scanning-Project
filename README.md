@@ -2,7 +2,7 @@
 
 Current maintained release: **v0.507**. SQLite remains the active/default backend.
 
-v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It separates fast Order Details data from slow production-share media, caches/reuses recent details, virtualizes heavy Cutting Label/sketch content, replaces high-frequency full-catalog polling with compact revision-aware reads, reduces importer/catalog contention, broadens A+W production coverage by recent production activity, and removes obsolete static-test debt. SQLite advances to schema **17** for targeted read-path indexes.
+v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It separates fast Order Details data from slow production-share media, caches/reuses recent details, virtualizes heavy Cutting Label/sketch content, replaces high-frequency full-catalog polling with compact revision-aware reads, reduces importer/catalog contention, broadens A+W production coverage by recent production activity, and removes obsolete static-test debt. Its production synchronizer uses bounded, indexed Optimization/Plate lookups that avoid the former A+W SQL timeout and supports Windows PowerShell 5.1 ordered payloads correctly. SQLite advances to schema **17** for targeted read-path indexes.
 
 ## Install v0.507
 

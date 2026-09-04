@@ -8460,11 +8460,13 @@ def test_v502_manual_sync_observability_cut_evidence_and_compact_label_contracts
     assert 'only changed/drifted dates will be rewritten' in runner
     assert '$forceImportDates = @($sourceDates)' not in runner
 
-    # Optimization status ranking is constrained to this order batch, and the
-    # live 238330 plate evidence is transported into the durable source snapshot.
-    assert 'CandidateOptimizations AS (' in runner
-    assert 'INNER JOIN CandidateOptimizations wanted ON wanted.OPTIMIZATION=o.OPTIMIZATION' in runner
-    assert 'PlateRanked AS (' in runner
+    # Optimization and Plate status use indexed per-generation lookups. Ranking
+    # both complete A+W tables through CTEs caused the real SQL Server to time out.
+    assert 'WHERE o.OPTIMIZATION=ji.ResolvedOptimization' in runner
+    assert 'WHERE s.OPTIMIZATION=ji.ResolvedOptimization' in runner
+    assert 'WHERE p.OPTIMIZATION=ji.ResolvedOptimization AND p.PLATENR=ji.ResolvedPlateNumber' in runner
+    assert 'CandidateOptimizations AS (' not in runner
+    assert 'PlateRanked AS (' not in runner
     assert 'OptimizationPlateCut' in runner and 'OptimizationPlateStockBooked' in runner
     assert 'version="v502-aw-production-3"' in runner
     assert 'optimization_plate_cut' in store
@@ -8708,6 +8710,11 @@ def test_v507_runtime_performance_aw_cutting_coverage_and_order_detail_split_con
     assert 'optimizationStatusSource' in store
     assert 'requestedOrderCount' in runner and 'missingOrderSample' in runner
     assert 'version="v507-aw-production-5"' in runner
+    assert '$directPayloadSnapshot = @($DirectPayloads | ForEach-Object { $_ })' in runner
+    assert 'foreach ($envelope in $directPayloadSnapshot)' in runner
+    assert 'foreach ($envelope in @($DirectPayloads))' not in runner
+    assert '$Object -is [System.Collections.IDictionary]' in runner
+    assert 'return $Object[$Name]' in runner
     assert '$processAttachedGenerations' in runner
     assert 'ShapeDisplayRanked AS (' in runner and 'ISNULL(sh.TYPE,0)=0' in runner
     assert 'shapeParameterUnitsPerInch=32' in runner and 'shapeParameters=@(' in runner
