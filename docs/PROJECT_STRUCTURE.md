@@ -39,6 +39,7 @@ backend/
   automation_control.py  delivery automation control service
   import_safety.py       guarded import integration
   operations.py          operational feature service
+  production_files.py    production-share index, live evidence, and durable observed EGL history
 ```
 
 `database` owns database-specific contracts and migration tooling.
@@ -115,7 +116,9 @@ from accumulating.
 
 - `scripts/windows` contains PowerShell implementations launched by the
   user-facing root BAT files.
-- `scripts/diagnostics` contains optional manual diagnostics.
+- `scripts/diagnostics` contains optional SELECT-only A+W diagnostics, including `Probe-AWBdeBreakage.ps1` for validating the live breakage contract.
+- A+W breakage synchronization is configured from Automated Import > **A+W Rejects**. Raw A+W rows remain read-only source evidence; logical events mirror into Internal Reject history.
+- `data/production-file-index.json` also retains exact `.egl` files that the index has observed. Historical EGL entries are evidence-only and are not treated as live/openable network files.
 - `resources/aw` contains retained A+W source material that is not loaded by the
   web app.
 
@@ -135,3 +138,5 @@ commit:
 
 Never delete `data`, active automation configuration, encrypted secrets, or
 recent backups as part of source cleanup.
+
+- `scripts/diagnostics/Probe-AWGlassLabels.ps1` - SELECT-only A+W optimization/glass-label discovery; v0.488 follows Order/Item -> `PROD_JOBITEM.OPTIMIZATION` -> `PROD_OPTI_SEQUENCE` and now drills into the observed `FS_POOL` `STSL*.ASC` / `STSD*.ASC` / `PRODBDAZ.000` output families plus label-control and generator-module metadata.

@@ -29193,3 +29193,68 @@ body.bay-move-mode .bay-layout-drop-zone {
 .bay-flow-side-card .flow-card-icon.inbound { color: #268642 !important; }
 .transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-outbound,
 .transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer-inbound { overflow: visible !important; }
+
+
+/* ========================================================================== */
+/* v0.479 Bay tool icon ownership + smoother transit motion                   */
+/* ========================================================================== */
+/* v0.470 changed #bayActionButtons from the old bay-action-buttons-v150 class
+   to bay-tool-card-grid-v470. The older pseudo glyph rules therefore escaped
+   the v0.338 cleanup selector and painted black shapes over the maintained SVGs. */
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338::before,
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338::after {
+  content: none !important;
+  display: none !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338 > svg {
+  position: relative; z-index: 2; display: block !important;
+}
+/* JS owns pane opacity from frame zero so a newly rendered route never flashes
+   all glass at once before its fade-in keyframes are installed. */
+.transit-animation-truck.has-transit-glass-v467 .transit-rack-transfer > i { opacity: 0; }
+/* Keep the maintained inline SVGs on the same stroke/fill contract they had
+   before the v0.470 wrapper-class change. Without this late owner the browser's
+   default SVG fill paints several of the new glyphs as solid black shapes. */
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338 > svg {
+  width: 17px !important;
+  height: 17px !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 1.75 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338.sdi > svg {
+  fill: currentColor !important;
+  stroke: none !important;
+}
+
+/* ========================================================================== */
+/* v0.480 Bay tool icon centering                                             */
+/* ========================================================================== */
+/* The v0.479 layer removed the stale pseudo glyphs; this final owner also
+   normalizes the icon box itself so every maintained SVG is geometrically
+   centered regardless of the legacy icon class attached to that tool. */
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338 {
+  width: 34px !important;
+  height: 34px !important;
+  display: grid !important;
+  place-items: center !important;
+  align-items: center !important;
+  justify-items: center !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  overflow: hidden;
+}
+#bayActionButtons.bay-tool-card-grid-v470 .bay-action-icon-v338 > svg {
+  position: static !important;
+  inset: auto !important;
+  margin: 0 !important;
+  transform: none !important;
+  transform-origin: center !important;
+  align-self: center !important;
+  justify-self: center !important;
+}

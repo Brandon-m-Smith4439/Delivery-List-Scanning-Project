@@ -70,6 +70,47 @@ function Get-DeliveryScannerHealth {
     return $null
 }
 
+# Purpose: Resolve the database identity this project folder is expected to use.
+# Effects: Reads configuration only; it does not open or modify the database.
+# Flow: Mirrors backend/config.py path handling so another worktree is not mistaken for this app.
+function Get-ExpectedDatabasePath {
+    $configuredPath = [string]$env:DLS_DATABASE_PATH
+    if (-not $configuredPath) {
+        $configuredPath = Join-Path $AppRoot "data\delivery-scanner-pilot.db"
+    } elseif (-not [System.IO.Path]::IsPathRooted($configuredPath)) {
+        $configuredPath = Join-Path $AppRoot $configuredPath
+    }
+
+    return [System.IO.Path]::GetFullPath($configuredPath).TrimEnd('\', '/')
+}
+
+# Purpose: Confirm that an existing healthy server belongs to this project instance.
+# Effects: Performs an in-memory identity comparison only.
+# Flow: SQLite instances match by normalized database path; other configured modes match by mode.
+function Test-HealthMatchesApplication {
+    param([object]$Health)
+
+    if (-not $Health) {
+        return $false
+    }
+
+    $expectedMode = if ($env:DLS_DATABASE_TYPE) { [string]$env:DLS_DATABASE_TYPE } else { "sqlite" }
+    if (-not [string]::Equals([string]$Health.mode, $expectedMode, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+    if (-not [string]::Equals($expectedMode, "sqlite", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    try {
+        $reportedPath = [System.IO.Path]::GetFullPath([string]$Health.database).TrimEnd('\', '/')
+        $expectedPath = Get-ExpectedDatabasePath
+        return [string]::Equals($reportedPath, $expectedPath, [System.StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
 # Purpose: Open the verified local web address without making browser launch a startup dependency.
 # Effects: Starts the default browser or prints the URL when Windows cannot open it.
 # Flow: Browser failures are logged but never stop an already healthy server.
@@ -235,20 +276,21 @@ try {
 
     Write-LauncherLog "Starting Delivery List Scanner from $AppRoot"
 
-    $existingHealth = $null
-    if (-not (Test-PortAvailable -CandidatePort $Port)) {
-        $existingHealth = Get-DeliveryScannerHealth -CandidatePort $Port
-    }
-
-    if ($existingHealth) {
-        $url = "http://127.0.0.1:$Port/"
-        Write-LauncherLog "Delivery List Scanner is already running on port $Port using $($existingHealth.mode)."
-        Open-DeliveryScannerBrowser -Url $url
-        exit 0
-    }
-
     while (-not (Test-PortAvailable -CandidatePort $Port)) {
-        Write-LauncherLog "Port $Port is being used by another program. Trying port $($Port + 1)."
+        $existingHealth = Get-DeliveryScannerHealth -CandidatePort $Port
+        if (Test-HealthMatchesApplication -Health $existingHealth) {
+            $url = "http://127.0.0.1:$Port/"
+            Write-LauncherLog "This Delivery List Scanner is already running on port $Port using $($existingHealth.mode)."
+            Open-DeliveryScannerBrowser -Url $url
+            exit 0
+        }
+
+        $occupant = if ($existingHealth) {
+            "another Delivery List Scanner instance using $($existingHealth.database)"
+        } else {
+            "another program"
+        }
+        Write-LauncherLog "Port $Port is being used by $occupant. Trying port $($Port + 1)."
         $Port += 1
     }
 
@@ -267,7 +309,7 @@ try {
     Import-MicrosoftGraphEmailConfiguration
 
     $url = "http://127.0.0.1:$Port/"
-    $databasePath = Join-Path $AppRoot "data\delivery-scanner-pilot.db"
+    $databasePath = Get-ExpectedDatabasePath
 
     Remove-Item -LiteralPath $StandardOutputLog -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $StandardErrorLog -Force -ErrorAction SilentlyContinue

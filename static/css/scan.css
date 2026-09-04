@@ -6319,3 +6319,871 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 }
 .scan-progress-step-v475.is-no-fab-v478 b { font-size: 8px !important; font-weight: 750 !important; }
 .scan-progress-step-v475.is-no-fab-v478 strong { display: none !important; }
+
+
+/* ========================================================================== */
+/* v0.479 compact-but-readable order grouping                                 */
+/* ========================================================================== */
+/* Generic Scan cells own a legacy 54px height. The group row must explicitly
+   opt out of that height or padding changes alone cannot make it compact. */
+.scan-page .delivery-table .scan-order-group-v477 > td {
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 2px 7px !important;
+  background: #f6f9fb !important;
+  border-top: 1px solid #dbe5ed !important;
+  border-bottom: 1px solid #e7edf2 !important;
+}
+.scan-order-group-v477 > td > div,
+.mobile-order-group-header-v477 {
+  min-height: 24px !important;
+  gap: 10px !important;
+}
+.scan-order-group-fields-v479 {
+  flex: 1 1 auto;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0 !important;
+  overflow: hidden;
+}
+.scan-order-group-field-v479 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 0 10px;
+  border-right: 1px solid #d8e2ea;
+  white-space: nowrap;
+}
+.scan-order-group-field-v479:first-child { padding-left: 1px; }
+.scan-order-group-field-v479:last-child { border-right: 0; }
+.scan-order-group-field-v479 small {
+  color: #718596 !important;
+  font-size: 8px !important;
+  font-weight: 900 !important;
+  letter-spacing: .055em !important;
+  text-transform: uppercase;
+}
+.scan-order-group-field-v479 strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #173f62 !important;
+  font-size: 11px !important;
+  font-weight: 850 !important;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+}
+.scan-order-group-field-v479:nth-child(1) strong { color: #135f94 !important; font-size: 11.5px !important; }
+.scan-order-group-count-v477 {
+  margin-left: 0 !important;
+  color: #4e687e !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+}
+.scan-order-detail-button-v477 {
+  min-height: 23px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 2px 8px !important;
+  font-size: 9px !important;
+  border-radius: 5px !important;
+}
+.scan-order-detail-button-v477 .global-result-chip-icon-v433 { width: 12px; height: 12px; flex: 0 0 12px; }
+@media (max-width: 960px) {
+  .scan-order-group-field-v479:nth-child(2) { display: none; }
+}
+@media (max-width: 760px) {
+  .mobile-order-group-header-v477 { min-height: 30px !important; padding: 4px 2px !important; }
+  .scan-order-group-fields-v479 { flex-wrap: wrap; row-gap: 2px !important; }
+  .scan-order-group-field-v479 { padding-inline: 6px; }
+}
+
+/* ========================================================================== */
+/* v0.480 Order-group priority ownership + contextual No Fab                  */
+/* ========================================================================== */
+/* Priority now belongs to the grouped order strip. The strip remains compact,
+   but flagged orders use the same space for the flag, order identity, and reason
+   instead of injecting separate full-width ribbons above individual pieces. */
+.scan-order-group-v477,
+.mobile-order-group-header-v477 {
+  --order-group-priority-v480: #2f6e9f;
+  --order-group-priority-soft-v480: #eef5fa;
+  --order-group-priority-border-v480: #c7d9e7;
+}
+.scan-order-group-v477.has-priority-v480.is-rush,
+.mobile-order-group-header-v477.has-priority-v480.is-rush {
+  --order-group-priority-v480: #b32838;
+  --order-group-priority-soft-v480: #fff1f3;
+  --order-group-priority-border-v480: #efc2c8;
+}
+.scan-order-group-v477.has-priority-v480.is-remake,
+.mobile-order-group-header-v477.has-priority-v480.is-remake {
+  --order-group-priority-v480: #252b32;
+  --order-group-priority-soft-v480: #f1f3f5;
+  --order-group-priority-border-v480: #c9ced4;
+}
+.scan-order-group-v477.has-priority-v480.is-both,
+.mobile-order-group-header-v477.has-priority-v480.is-both {
+  --order-group-priority-v480: #6844a6;
+  --order-group-priority-soft-v480: #f5f0ff;
+  --order-group-priority-border-v480: #d8c9ef;
+}
+.scan-page .delivery-table .scan-order-group-v477.has-priority-v480 > td {
+  background: linear-gradient(90deg, var(--order-group-priority-soft-v480), #fbfcfd 38%) !important;
+  border-top-color: var(--order-group-priority-border-v480) !important;
+  border-bottom-color: var(--order-group-priority-border-v480) !important;
+  box-shadow: inset 4px 0 0 var(--order-group-priority-v480);
+}
+.scan-order-group-flag-v480 {
+  min-height: 21px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--order-group-priority-v480) 36%, white);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--order-group-priority-v480) 10%, white);
+  color: var(--order-group-priority-v480);
+}
+.scan-order-group-flag-v480 .global-result-chip-icon-v433 { width: 12px; height: 12px; flex: 0 0 12px; }
+.scan-order-group-flag-v480 b { font-size: 9px; font-weight: 950; white-space: nowrap; }
+.scan-order-group-reason-v480 {
+  min-width: 110px;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 0 1 260px;
+  padding-left: 10px;
+  border-left: 1px solid var(--order-group-priority-border-v480);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.scan-order-group-reason-v480 small {
+  color: #788a99;
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.scan-order-group-reason-v480 b {
+  overflow: hidden;
+  color: var(--order-group-priority-v480);
+  font-size: 9.5px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+}
+/* Job Nr. is now the first/primary identifier, followed by order and customer. */
+.scan-order-group-field-v479:nth-child(1) strong { color: #135f94 !important; font-size: 11.5px !important; }
+.scan-order-group-field-v479:nth-child(2) strong { color: #173f62 !important; }
+@media (max-width: 1100px) {
+  .scan-order-group-reason-v480 { max-width: 170px; flex-basis: 170px; }
+}
+@media (max-width: 900px) {
+  .scan-order-group-reason-v480 { display: none; }
+}
+
+/* No Fab is a quiet note over the real next step, not a second progress card. */
+.scan-progress-stack-v475.is-no-fab-context-v480 {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start !important;
+  gap: 2px !important;
+}
+.scan-progress-stack-v475.is-no-fab-context-v480 .scan-progress-step-v475 {
+  width: 100%;
+  min-width: 0;
+}
+.scan-no-fab-note-v480 {
+  padding-left: 4px;
+  color: #8a939c;
+  font-size: 7.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
+/* Preserve Job Nr. + Order at tablet widths after v0.480 reordered the fields.
+   The older v0.479 responsive rule hid field two, which is now Order. */
+@media (max-width: 960px) {
+  .scan-order-group-field-v479:nth-child(2) { display: inline-flex !important; }
+  .scan-order-group-field-v479:nth-child(3) { display: none !important; }
+}
+
+/* Denver/WaterJet pending fabrication keeps its configured machine color. The
+   older generic prior-step rule remains neutral for genuinely unknown work. */
+.scan-progress-stack-v476 .scan-progress-step-v475.is-prior-pending-v475.is-fabrication-pending-v480 {
+  --progress-step-color: var(--progress-left) !important;
+  border-color: color-mix(in srgb, var(--progress-step-color) 55%, #cbd5e1) !important;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--progress-step-color) 17%, white), color-mix(in srgb, var(--progress-step-color) 7%, white)) !important;
+  color: color-mix(in srgb, var(--progress-step-color) 76%, #17324d) !important;
+  box-shadow: inset 4px 0 0 var(--progress-step-color) !important;
+}
+
+/* ========================================================================== */
+/* v0.481 line-owned priority rail + horizontal workflow progress             */
+/* ========================================================================== */
+/* Flags no longer consume a dedicated table column or order-group header.
+   Exact Rush/Remake ownership is attached to the left edge of each line so a
+   mixed order can communicate priority without repeating reasons on Scan. */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 18.5% !important; }
+.scan-page .delivery-table th:nth-child(2),
+.scan-page .delivery-table td:nth-child(2) { width: 7% !important; min-width: 68px !important; }
+.scan-page .delivery-table th:nth-child(3),
+.scan-page .delivery-table td:nth-child(3) { width: 4.5% !important; min-width: 44px !important; }
+.scan-page .delivery-table th:nth-child(4),
+.scan-page .delivery-table td:nth-child(4) { width: 4.5% !important; }
+.scan-page .delivery-table th:nth-child(5),
+.scan-page .delivery-table td:nth-child(5) { width: 12% !important; }
+.scan-page .delivery-table th:nth-child(6),
+.scan-page .delivery-table td:nth-child(6) { width: 16.5% !important; }
+.scan-page .delivery-table th:nth-child(7),
+.scan-page .delivery-table td:nth-child(7) { width: 5.5% !important; }
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) { width: 9% !important; }
+.scan-page .delivery-table th:nth-child(9),
+.scan-page .delivery-table td:nth-child(9) { width: 22.5% !important; }
+
+/* The old ninth/tenth-column location/progress rules were written for the
+   removed Flags column. Re-assert ownership after the column shift. */
+.scan-page .delivery-table td:nth-child(8) {
+  overflow: visible !important;
+  padding-inline: 5px !important;
+}
+.scan-page .delivery-table td:nth-child(9) {
+  overflow: visible !important;
+  padding-inline: 6px 9px !important;
+}
+.scan-page .delivery-table td:nth-child(7) .route-tag {
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .delivery-table td:nth-child(8) .line-rack-location-control,
+.scan-page .delivery-table td:nth-child(8) .line-bay-location-control-v449,
+.scan-page .delivery-table td:nth-child(8) .location-rack-state-stack-v448 {
+  width: 100%;
+  min-width: 0;
+}
+
+.scan-page .delivery-table .job-cell-v157.has-priority-rail-v481 {
+  position: relative;
+  padding-left: 29px !important;
+}
+.scan-priority-rail-v481 {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 23px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+  border-right: 1px solid rgba(255,255,255,.52);
+  border-radius: 0;
+  background: #b42336;
+  color: #fff;
+  box-shadow: inset -1px 0 0 rgba(95,17,31,.15);
+  z-index: 2;
+}
+.scan-priority-rail-v481 > b {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: 3px;
+  color: inherit;
+  font-size: 6.8px;
+  font-weight: 950;
+  line-height: .92;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  white-space: nowrap;
+}
+.scan-priority-rail-v481.is-remake { background: #2e343b; }
+.scan-priority-rail-v481.is-both {
+  width: 28px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #fff;
+}
+.scan-page .delivery-table .job-cell-v157:has(.scan-priority-rail-v481.is-both) {
+  padding-left: 34px !important;
+}
+.scan-priority-rail-v481.is-both > b { font-size: 5.8px; letter-spacing: .02em; }
+.scan-priority-rail-v481.is-both > .is-rush { background: #b42336; color: #fff; }
+.scan-priority-rail-v481.is-both > .is-remake { background: #2e343b; color: #fff; }
+
+.scan-row-inline-markers-v481 {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  display: inline-flex;
+  gap: 3px;
+  z-index: 3;
+}
+.scan-row-inline-markers-v481 .row-marker {
+  width: auto !important;
+  min-width: 20px !important;
+  min-height: 15px !important;
+  margin: 0 !important;
+  padding: 1px 4px !important;
+  font-size: 7px !important;
+  line-height: 1 !important;
+}
+
+/* Group rows return to identity-only context. Remove the v0.480 priority wash
+   in case older cached markup is momentarily present during a repaint. */
+.scan-page .delivery-table .scan-order-group-v477 > td {
+  background: #f6f9fb !important;
+  border-top-color: #dbe5ed !important;
+  border-bottom-color: #e7edf2 !important;
+  box-shadow: none !important;
+}
+
+/* Progress uses the width recovered from Flags. Manufacturing and scanner steps
+   read left-to-right with stage icons; only completed checkpoints replace their
+   icon with the maintained green circled check. */
+.scan-progress-flow-v481:not(.is-no-fab-context-v480) {
+  width: 100%;
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+.scan-progress-flow-v481:not(.is-no-fab-context-v480) > i {
+  flex: 0 0 auto;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  color: #8090a0;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+}
+.scan-progress-flow-v481 .scan-progress-step-v475 {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 31px !important;
+  display: grid !important;
+  grid-template-columns: 15px minmax(0,1fr) auto !important;
+  gap: 5px !important;
+  padding: 5px 7px !important;
+}
+.scan-progress-flow-v481 .scan-progress-step-v475 .global-result-chip-icon-v433 {
+  width: 15px;
+  height: 15px;
+  color: var(--progress-step-color);
+}
+.scan-progress-flow-v481 .scan-progress-step-v475.is-complete-v475 .global-result-chip-icon-v433 {
+  color: #2f9f5c !important;
+}
+.scan-progress-flow-v481 .scan-progress-step-v475 b {
+  font-size: 11.5px !important;
+  line-height: 1.05 !important;
+}
+.scan-progress-flow-v481 .scan-progress-step-v475 strong {
+  font-size: 12px !important;
+}
+.scan-progress-flow-v481.is-no-fab-context-v480 {
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) !important;
+  gap: 3px !important;
+}
+.scan-progress-flow-v481.is-no-fab-context-v480 .scan-no-fab-note-v480 {
+  padding-left: 5px;
+  font-size: 8px;
+  color: #89939d;
+}
+
+@media (max-width: 1100px) {
+  .scan-page .delivery-table th:nth-child(1),
+  .scan-page .delivery-table td:nth-child(1) { width: 19% !important; }
+  .scan-page .delivery-table th:nth-child(6),
+  .scan-page .delivery-table td:nth-child(6) { width: 15% !important; }
+  .scan-page .delivery-table th:nth-child(9),
+  .scan-page .delivery-table td:nth-child(9) { width: 23.5% !important; }
+  .scan-progress-flow-v481 .scan-progress-step-v475 b { font-size: 10.5px !important; }
+}
+
+/* v0.481 mobile parity: exact-piece priority uses the same narrow side rail. */
+.mobile-list-card.has-priority-rail-v481 {
+  position: relative;
+  overflow: hidden;
+  padding-left: 31px !important;
+}
+.mobile-list-card.has-priority-rail-v481 .scan-priority-rail-v481 {
+  width: 24px;
+}
+.mobile-list-card.has-priority-rail-v481:has(.scan-priority-rail-v481.is-both) {
+  padding-left: 36px !important;
+}
+.mobile-list-card.has-priority-rail-v481 .scan-priority-rail-v481.is-both {
+  width: 29px;
+}
+
+/* ========================================================================== */
+/* v0.482 external priority gutter + stable fabrication workflow              */
+/* ========================================================================== */
+/* Priority belongs beside the row, not inside the product cell. Reserve a
+   narrow gutter inside the Scan panel so the vertical flag sits outside the
+   table content without being clipped by the table wrapper. */
+.scan-page .table-wrap {
+  padding-left: 30px !important;
+}
+.scan-page .delivery-table .job-cell-v157.has-priority-rail-v481 {
+  position: relative;
+  padding-left: 8px !important;
+  overflow: visible !important;
+}
+.scan-page .delivery-table .scan-priority-rail-v481 {
+  inset: -1px auto -1px -28px !important;
+  width: 24px !important;
+  border: 1px solid color-mix(in srgb, var(--priority-rail-color-v482, #b42336) 70%, #fff);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--priority-rail-color-v482, #b42336) 88%, #152235) 0%,
+    var(--priority-rail-color-v482, #b42336) 100%) !important;
+  box-shadow:
+    7px 0 12px color-mix(in srgb, var(--priority-rail-color-v482, #b42336) 16%, transparent),
+    inset -1px 0 0 rgba(255,255,255,.24);
+}
+.scan-page .delivery-table .scan-priority-rail-v481.is-both {
+  left: -32px !important;
+  width: 28px !important;
+  background: #fff !important;
+  border-color: #6d4b98;
+}
+.scan-page .delivery-table .scan-priority-rail-v481.is-rush { --priority-rail-color-v482: #b42336; }
+.scan-page .delivery-table .scan-priority-rail-v481.is-remake { --priority-rail-color-v482: #343a40; }
+
+/* A flagged piece gets one restrained wash that dissipates as the eye moves
+   across the row. The declining per-column strength avoids nine repeated
+   gradients while preserving normal table geometry and readability. */
+.scan-order-item-v477.has-priority-rail-v482 { --priority-row-v482: #b42336; }
+.scan-order-item-v477.is-priority-remake-v482 { --priority-row-v482: #343a40; }
+.scan-order-item-v477.is-priority-both-v482 { --priority-row-v482: #6d4b98; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td {
+  border-bottom-color: color-mix(in srgb, var(--priority-row-v482) 15%, #e1e8ee) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(1) { background: color-mix(in srgb, var(--priority-row-v482) 10%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(2) { background: color-mix(in srgb, var(--priority-row-v482) 8.5%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(3) { background: color-mix(in srgb, var(--priority-row-v482) 7%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(4) { background: color-mix(in srgb, var(--priority-row-v482) 5.8%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(5) { background: color-mix(in srgb, var(--priority-row-v482) 4.7%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(6) { background: color-mix(in srgb, var(--priority-row-v482) 3.7%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(7) { background: color-mix(in srgb, var(--priority-row-v482) 2.8%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(8) { background: color-mix(in srgb, var(--priority-row-v482) 1.8%, #fff) !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(9) { background: color-mix(in srgb, var(--priority-row-v482) .8%, #fff) !important; }
+
+/* v0.482 fabrication colors are authoritative inline values. This final rule
+   intentionally outranks the older generic "prior pending" gray/blue rules so
+   Settings navigation cannot repaint Denver/WJ as a scanner stage. */
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480:not(.is-complete-v475) {
+  --progress-step-color: var(--progress-left) !important;
+  border-color: color-mix(in srgb, var(--progress-step-color) 55%, #cbd5e1) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--progress-step-color) 18%, white),
+    color-mix(in srgb, var(--progress-step-color) 7%, white)) !important;
+  color: color-mix(in srgb, var(--progress-step-color) 78%, #17324d) !important;
+  box-shadow: inset 4px 0 0 var(--progress-step-color) !important;
+}
+
+@media (max-width: 760px) {
+  /* Mobile cards already own their own in-card rail; do not reserve a desktop
+     table gutter when the responsive list replaces the table. */
+  .scan-page .table-wrap { padding-left: 0 !important; }
+}
+
+/* ========================================================================== */
+/* v0.483 true outside priority rail + full fabrication labels                */
+/* ========================================================================== */
+/* v0.482 reserved 30px *inside* the Scan list panel. v0.483 keeps the table
+   itself at its original full width and extends only the scroll wrapper into
+   the panel's left margin. The vertical RUSH/REMAKE rail therefore lives
+   genuinely outside the Scan content border instead of shrinking Job/Progress. */
+@media (min-width: 761px) {
+  .scan-page .list-panel {
+    overflow: visible !important;
+  }
+  .scan-page .table-wrap {
+    width: calc(100% + 30px) !important;
+    max-width: none !important;
+    margin-left: -30px !important;
+    padding-left: 0 !important;
+  }
+  .scan-page .delivery-table {
+    width: calc(100% - 30px) !important;
+    max-width: calc(100% - 30px) !important;
+    margin-left: 30px !important;
+  }
+  .scan-page .delivery-table .scan-priority-rail-v481 {
+    left: -28px !important;
+  }
+  .scan-page .delivery-table .scan-priority-rail-v481.is-both {
+    left: -32px !important;
+  }
+}
+
+/* v0.483 recovered horizontal space and prevented Denver from ellipsizing.
+   v0.484 keeps this historical layer but supersedes its unequal fabrication
+   sizing below when the full Water Jet label is restored. */
+.scan-page .delivery-table th:nth-child(6),
+.scan-page .delivery-table td:nth-child(6) { width: 14.5% !important; }
+.scan-page .delivery-table th:nth-child(9),
+.scan-page .delivery-table td:nth-child(9) { width: 24.5% !important; }
+.scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 1.18 1 0 !important;
+  min-width: 88px !important;
+  grid-template-columns: 15px minmax(38px, 1fr) auto !important;
+}
+.scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 b {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(6),
+  .scan-page .delivery-table td:nth-child(6) { width: 13.5% !important; }
+  .scan-page .delivery-table th:nth-child(9),
+  .scan-page .delivery-table td:nth-child(9) { width: 25.5% !important; }
+  .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 { min-width: 84px !important; }
+}
+
+/* ========================================================================== */
+/* v0.484 Scan line identity + normalized workflow cells                      */
+/* ========================================================================== */
+/* The order strip now owns only order-wide identity (Job Nr. + Customer).
+   Individual rows own the operational fields operators act on: Glass Type,
+   Order, Item, Qty, Dimensions, Route, Location, and Progress. */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 20.5% !important; }
+.scan-page .delivery-table th:nth-child(2),
+.scan-page .delivery-table td:nth-child(2) { width: 8% !important; min-width: 68px !important; }
+.scan-page .delivery-table th:nth-child(3),
+.scan-page .delivery-table td:nth-child(3) { width: 5% !important; min-width: 44px !important; }
+.scan-page .delivery-table th:nth-child(4),
+.scan-page .delivery-table td:nth-child(4) { width: 5% !important; }
+.scan-page .delivery-table th:nth-child(5),
+.scan-page .delivery-table td:nth-child(5) { width: 14% !important; }
+.scan-page .delivery-table th:nth-child(6),
+.scan-page .delivery-table td:nth-child(6) { width: 6% !important; }
+.scan-page .delivery-table th:nth-child(7),
+.scan-page .delivery-table td:nth-child(7) { width: 11.5% !important; }
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) { width: 30% !important; }
+
+/* First-column glass identity is intentionally one clean label. Job Nr. stays
+   in the group header and is not repeated on every piece. */
+.scan-page .delivery-table .scan-glass-type-cell-v484 {
+  position: relative;
+  overflow: visible !important;
+  padding: 6px 8px !important;
+}
+.scan-page .delivery-table .scan-glass-type-copy-v484 {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  color: #153a5a;
+  line-height: 1.15;
+}
+.scan-page .delivery-table .scan-glass-type-copy-v484 > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+
+/* IT is the explicit default Scan route. Non-Scan screens keep the historical
+   empty-route fallback semantics through routeLabel(). */
+.scan-page .delivery-table .route-tag.it {
+  border-color: #9fc9bd !important;
+  background: #e8f5f1 !important;
+  color: #226b5b !important;
+}
+.scan-page .delivery-table td:nth-child(6) .route-tag {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.scan-page .delivery-table td:nth-child(7) {
+  overflow: visible !important;
+  padding-inline: 5px !important;
+}
+.scan-page .delivery-table td:nth-child(7) .line-rack-location-control,
+.scan-page .delivery-table td:nth-child(7) .line-bay-location-control-v449,
+.scan-page .delivery-table td:nth-child(7) .location-rack-state-stack-v448 {
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .delivery-table td:nth-child(8) {
+  overflow: visible !important;
+  padding-inline: 6px 9px !important;
+}
+
+/* Denver, Water Jet, and scanner stages use one equal checkpoint geometry.
+   The removed Customer column gives Progress enough room to show full machine
+   names without a one-off oversized fabrication card. */
+.scan-page .scan-progress-flow-v481:not(.is-no-fab-context-v480) {
+  gap: 5px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 1 1 0 !important;
+  min-width: 108px !important;
+  max-width: none !important;
+  grid-template-columns: 15px minmax(52px, 1fr) auto !important;
+  gap: 4px !important;
+  padding: 5px 6px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 b,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 b {
+  overflow: visible !important;
+  font-size: 11.5px !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+/* v0.479 hid the second group field on narrower desktop layouts when that
+   field was Order. It is Customer in v0.484, so keep it visible. */
+@media (max-width: 960px) and (min-width: 761px) {
+  .scan-order-group-field-v479:nth-child(2) { display: inline-flex !important; }
+}
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(1),
+  .scan-page .delivery-table td:nth-child(1) { width: 19.5% !important; }
+  .scan-page .delivery-table th:nth-child(2),
+  .scan-page .delivery-table td:nth-child(2) { width: 8% !important; }
+  .scan-page .delivery-table th:nth-child(3),
+  .scan-page .delivery-table td:nth-child(3) { width: 5% !important; }
+  .scan-page .delivery-table th:nth-child(4),
+  .scan-page .delivery-table td:nth-child(4) { width: 5% !important; }
+  .scan-page .delivery-table th:nth-child(5),
+  .scan-page .delivery-table td:nth-child(5) { width: 13% !important; }
+  .scan-page .delivery-table th:nth-child(6),
+  .scan-page .delivery-table td:nth-child(6) { width: 6% !important; }
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 10.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 33% !important; }
+}
+
+/* ========================================================================== */
+/* v0.485 date-wide Scan workflow + priority/completion polish                */
+/* ========================================================================== */
+/* Stage choice is intentionally removed from the operator workflow. Keep the
+   compatibility select unavailable to both native and custom-select layouts. */
+.scan-page #deliveryStageSelect,
+.scan-page .scanner-panel-stage-select-v196 {
+  display: none !important;
+}
+
+/* The exact-piece priority rail still hangs outside the white Scan surface,
+   but the word itself is now one contiguous label instead of upright letters. */
+.scan-page .delivery-table .scan-priority-rail-v481 > b {
+  position: absolute !important;
+  inset: 50% auto auto 50% !important;
+  width: max-content !important;
+  max-width: none !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  transform: translate(-50%, -50%) rotate(-90deg) !important;
+  letter-spacing: 0 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+.scan-page .delivery-table .scan-priority-rail-v481.is-both > b {
+  font-size: 6px !important;
+  letter-spacing: 0 !important;
+}
+
+/* A flagged order gets a compact context cue without moving priority reasons
+   back into the Scan table. Exact reasons remain in Order Details. */
+.scan-order-group-priority-icon-v485 {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c9d7e2;
+  border-radius: 5px;
+  background: #fff;
+  color: #315f82;
+  box-shadow: 0 1px 2px rgb(27 61 86 / 8%);
+}
+.scan-order-group-priority-icon-v485 .global-result-chip-icon-v433 {
+  width: 11px;
+  height: 11px;
+  margin: 0 !important;
+}
+.scan-page .delivery-table .scan-order-group-v477.has-priority-v485 > td {
+  border-top-color: var(--order-group-priority-border-v485, #d4dee6) !important;
+  border-bottom-color: var(--order-group-priority-border-v485, #d4dee6) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--order-group-priority-v485, #315f82) 14%, #fff) 0%,
+    color-mix(in srgb, var(--order-group-priority-v485, #315f82) 6%, #fff) 42%,
+    #f8fafc 100%) !important;
+  box-shadow: inset 4px 0 0 var(--order-group-priority-v485, #315f82) !important;
+}
+.scan-order-group-v477.is-rush-v485,
+.mobile-order-group-header-v477.is-rush-v485 {
+  --order-group-priority-v485: #b42336;
+  --order-group-priority-border-v485: #e7b7bf;
+}
+.scan-order-group-v477.is-remake-v485,
+.mobile-order-group-header-v477.is-remake-v485 {
+  --order-group-priority-v485: #222830;
+  --order-group-priority-border-v485: #bfc6cd;
+}
+.scan-order-group-v477.is-both-v485,
+.mobile-order-group-header-v477.is-both-v485 {
+  --order-group-priority-v485: #633a78;
+  --order-group-priority-border-v485: #ceb9d9;
+}
+.scan-order-group-v477.has-priority-v485 .scan-order-group-priority-icon-v485,
+.mobile-order-group-header-v477.has-priority-v485 .scan-order-group-priority-icon-v485 {
+  border-color: color-mix(in srgb, var(--order-group-priority-v485) 34%, #fff);
+  background: color-mix(in srgb, var(--order-group-priority-v485) 10%, #fff);
+  color: var(--order-group-priority-v485);
+}
+.mobile-order-group-header-v477.has-priority-v485 {
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--order-group-priority-v485) 13%, #fff),
+    #f8fafc 78%);
+  box-shadow: inset 4px 0 0 var(--order-group-priority-v485);
+}
+
+/* Give date-wide progress enough room to read, while reclaiming a little Scan
+   table width. Checkpoints share one compact target footprint (~20% below the
+   former 108px card) and may shrink evenly on narrower desktop windows. */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 20.5% !important; }
+.scan-page .delivery-table th:nth-child(5),
+.scan-page .delivery-table td:nth-child(5) { width: 14% !important; }
+.scan-page .delivery-table th:nth-child(7),
+.scan-page .delivery-table td:nth-child(7) { width: 12.5% !important; }
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) { width: 29% !important; }
+.scan-page .scan-progress-flow-v485 {
+  width: 100%;
+  min-width: 0;
+}
+.scan-page .scan-progress-flow-line-v485 {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.scan-page .scan-progress-flow-line-v485::-webkit-scrollbar { display: none; }
+.scan-page .scan-progress-flow-line-v485 > i {
+  width: 7px;
+  flex: 0 0 7px;
+  color: #8a9baa;
+  font-size: 10px;
+  text-align: center;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 0 0 84px !important;
+  width: 84px !important;
+  min-width: 84px !important;
+  max-width: 84px !important;
+  min-height: 30px !important;
+  grid-template-columns: 13px minmax(0, 1fr) auto !important;
+  gap: 3px !important;
+  padding: 4px 5px !important;
+  border-radius: 6px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 .global-result-chip-icon-v433 {
+  width: 13px !important;
+  height: 13px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 b,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 b {
+  min-width: 0;
+  overflow: visible !important;
+  font-size: 10px !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 strong {
+  font-size: 9px !important;
+  white-space: nowrap;
+}
+
+/* The timestamp belongs to Glass Type as secondary metadata. Flow it below the
+   glass label so it cannot overlap that identity when rows become compact. */
+.scan-page .delivery-table .scan-order-item-v477.has-scan-time-pill-v157 > td.scan-glass-type-cell-v484 {
+  padding-bottom: 6px !important;
+}
+.scan-page .delivery-table .scan-glass-type-cell-v484 .last-scan-pill-v157 {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 17px !important;
+  height: auto !important;
+  margin: 3px 0 0 !important;
+  box-sizing: border-box;
+}
+
+/* IT/Inbound are active workflow states, not success. Teal keeps them distinct
+   from the stronger green reserved for a line that reaches its final route step. */
+.scan-page .delivery-table .route-tag.it {
+  border-color: #8fc0d1 !important;
+  background: #e6f3f7 !important;
+  color: #176783 !important;
+}
+
+/* A row is green only when its projected final checkpoint is complete. This
+   rule intentionally outranks the priority wash; the external priority rail
+   remains visible so completion and Rush/Remake can coexist. */
+.scan-page .delivery-table .scan-order-item-v477.is-complete > td,
+.scan-page .delivery-table .scan-order-item-v477.is-complete.has-priority-rail-v482 > td {
+  border-top-color: #a8d8b7 !important;
+  border-bottom-color: #a8d8b7 !important;
+  background: linear-gradient(90deg, #dff4e5 0%, #eaf8ee 48%, #f3fbf5 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-complete > td:first-child {
+  box-shadow: inset 4px 0 0 #35a35d !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-complete .scan-glass-type-copy-v484 {
+  color: #184f2d !important;
+}
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(1),
+  .scan-page .delivery-table td:nth-child(1) { width: 20% !important; }
+  .scan-page .delivery-table th:nth-child(5),
+  .scan-page .delivery-table td:nth-child(5) { width: 13.5% !important; }
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 11.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 31% !important; }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    flex-basis: 80px !important;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+  }
+}

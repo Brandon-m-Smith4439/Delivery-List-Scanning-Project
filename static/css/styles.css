@@ -30171,9 +30171,10 @@ body button.app-primary-button.global-result-action-v475 {
   --step-color:#43a96b !important;
   color:#24633e !important;
 }
+/* v0.480: machine-assigned fabrication is operational state, not a neutral
+   placeholder. Its inline configured Denver/WaterJet color remains visible. */
 .header-search-results .global-result-progress-step-v476.is-fabrication-pending-v477 {
-  --step-color:#929da8 !important;
-  color:#56636f !important;
+  color:color-mix(in srgb, var(--step-color) 76%, #18334c) !important;
 }
 @media (max-width: 520px) {
   body button.app-primary-button.global-result-action-v475 { width:104px !important; min-width:104px !important; }

@@ -888,3 +888,241 @@ IF NOT EXISTS (
     CREATE INDEX idx_superseded_order_reviews_orders
         ON dbo.superseded_order_reviews(delivery_date, original_order_no, replacement_order_no);
 GO
+
+-- v0.484: Durable read-only A+W reject synchronization. Raw PROD_BREAKAGE
+-- source rows are retained by external ROWID while BOM fan-out is grouped into
+-- one logical scanner-facing event.
+IF OBJECT_ID(N'dbo.aw_reject_events', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.aw_reject_events (
+        event_key nvarchar(128) NOT NULL PRIMARY KEY,
+        order_no nvarchar(120) NOT NULL,
+        item_no nvarchar(120) NOT NULL,
+        breakage_date nvarchar(64) NOT NULL,
+        quantity int NOT NULL DEFAULT (1),
+        original_job_number nvarchar(120) NOT NULL DEFAULT (N''),
+        replacement_job_number nvarchar(120) NOT NULL DEFAULT (N''),
+        reason_code int NOT NULL DEFAULT (0),
+        reason_label nvarchar(500) NOT NULL DEFAULT (N''),
+        location_code int NOT NULL DEFAULT (0),
+        location_label nvarchar(500) NOT NULL DEFAULT (N''),
+        from_scanner int NOT NULL DEFAULT (0),
+        breakage_user nvarchar(255) NOT NULL DEFAULT (N''),
+        timeline_employee nvarchar(255) NOT NULL DEFAULT (N''),
+        work_type_id int NOT NULL DEFAULT (0),
+        work_type nvarchar(500) NOT NULL DEFAULT (N''),
+        registration_point_id int NOT NULL DEFAULT (0),
+        registration_point nvarchar(500) NOT NULL DEFAULT (N''),
+        machine nvarchar(500) NOT NULL DEFAULT (N''),
+        scan_mode nvarchar(40) NOT NULL DEFAULT (N''),
+        booking_message nvarchar(40) NOT NULL DEFAULT (N''),
+        source_row_count int NOT NULL DEFAULT (0),
+        source_last_changed_at nvarchar(64) NOT NULL DEFAULT (N''),
+        source_last_changed_user nvarchar(255) NOT NULL DEFAULT (N''),
+        first_seen_at nvarchar(64) NOT NULL,
+        last_seen_at nvarchar(64) NOT NULL,
+        source_payload_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        CONSTRAINT ck_aw_reject_events_quantity_v484 CHECK (quantity >= 0),
+        CONSTRAINT ck_aw_reject_events_scanner_v484 CHECK (from_scanner IN (0, 1)),
+        CONSTRAINT ck_aw_reject_events_source_count_v484 CHECK (source_row_count >= 0),
+        CONSTRAINT ck_aw_reject_events_payload_v484 CHECK (ISJSON(source_payload_json) = 1)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'dbo.aw_reject_source_rows', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.aw_reject_source_rows (
+        aw_row_id nvarchar(128) NOT NULL PRIMARY KEY,
+        event_key nvarchar(128) NOT NULL,
+        order_no nvarchar(120) NOT NULL,
+        item_no nvarchar(120) NOT NULL,
+        bom_id int NOT NULL DEFAULT (0),
+        key_index int NOT NULL DEFAULT (0),
+        sub_position int NOT NULL DEFAULT (0),
+        bom_node int NOT NULL DEFAULT (0),
+        quantity int NOT NULL DEFAULT (0),
+        breakage_date nvarchar(64) NOT NULL,
+        original_job_number nvarchar(120) NOT NULL DEFAULT (N''),
+        replacement_job_number nvarchar(120) NOT NULL DEFAULT (N''),
+        is_breakage int NOT NULL DEFAULT (1),
+        reason_code int NOT NULL DEFAULT (0),
+        location_code int NOT NULL DEFAULT (0),
+        from_scanner int NOT NULL DEFAULT (0),
+        last_changed_at nvarchar(64) NOT NULL DEFAULT (N''),
+        last_changed_user nvarchar(255) NOT NULL DEFAULT (N''),
+        synced_at nvarchar(64) NOT NULL,
+        source_payload_json nvarchar(max) NOT NULL DEFAULT (N'{}'),
+        CONSTRAINT fk_aw_reject_source_rows_event_v484
+            FOREIGN KEY (event_key) REFERENCES dbo.aw_reject_events(event_key) ON DELETE CASCADE,
+        CONSTRAINT ck_aw_reject_source_rows_quantity_v484 CHECK (quantity >= 0),
+        CONSTRAINT ck_aw_reject_source_rows_breakage_v484 CHECK (is_breakage IN (0, 1)),
+        CONSTRAINT ck_aw_reject_source_rows_scanner_v484 CHECK (from_scanner IN (0, 1)),
+        CONSTRAINT ck_aw_reject_source_rows_payload_v484 CHECK (ISJSON(source_payload_json) = 1)
+    );
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_events')
+      AND name = N'idx_aw_reject_events_order_item_time'
+)
+    CREATE INDEX idx_aw_reject_events_order_item_time
+        ON dbo.aw_reject_events(order_no, item_no, breakage_date DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_events')
+      AND name = N'idx_aw_reject_events_time'
+)
+    CREATE INDEX idx_aw_reject_events_time
+        ON dbo.aw_reject_events(breakage_date DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_source_rows')
+      AND name = N'idx_aw_reject_source_rows_event'
+)
+    CREATE INDEX idx_aw_reject_source_rows_event
+        ON dbo.aw_reject_source_rows(event_key, bom_id, key_index);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_source_rows')
+      AND name = N'idx_aw_reject_source_rows_time'
+)
+    CREATE INDEX idx_aw_reject_source_rows_time
+        ON dbo.aw_reject_source_rows(breakage_date DESC);
+GO
+
+-- v0.485 / schema 13: A+W rejects are Internal Rejects with source-linked display mappings.
+IF COL_LENGTH('dbo.reject_events', 'source_type') IS NULL
+    ALTER TABLE dbo.reject_events ADD source_type nvarchar(32) NOT NULL CONSTRAINT df_reject_events_source_type_v485 DEFAULT N'scanner';
+IF COL_LENGTH('dbo.reject_events', 'source_external_key') IS NULL
+    ALTER TABLE dbo.reject_events ADD source_external_key nvarchar(128) NOT NULL CONSTRAINT df_reject_events_source_external_v485 DEFAULT N'';
+IF COL_LENGTH('dbo.reject_events', 'source_reason_code') IS NULL
+    ALTER TABLE dbo.reject_events ADD source_reason_code int NOT NULL CONSTRAINT df_reject_events_reason_code_v485 DEFAULT 0;
+IF COL_LENGTH('dbo.reject_events', 'source_location_code') IS NULL
+    ALTER TABLE dbo.reject_events ADD source_location_code int NOT NULL CONSTRAINT df_reject_events_location_code_v485 DEFAULT 0;
+IF COL_LENGTH('dbo.reject_events', 'manual_override_json') IS NULL
+    ALTER TABLE dbo.reject_events ADD manual_override_json nvarchar(max) NOT NULL CONSTRAINT df_reject_events_override_json_v485 DEFAULT N'{}';
+
+-- v0.486 / schema 14: imported A+W Internal Rejects replay operational rollback once.
+IF COL_LENGTH('dbo.aw_reject_source_rows', 'rollback_applied_at') IS NULL
+    ALTER TABLE dbo.aw_reject_source_rows ADD rollback_applied_at nvarchar(64) NOT NULL CONSTRAINT df_aw_reject_source_rollback_v486 DEFAULT N'';
+IF COL_LENGTH('dbo.aw_reject_source_rows', 'rollback_scan_qty_reduced') IS NULL
+    ALTER TABLE dbo.aw_reject_source_rows ADD rollback_scan_qty_reduced int NOT NULL CONSTRAINT df_aw_reject_source_rollback_qty_v486 DEFAULT 0;
+IF COL_LENGTH('dbo.reject_events', 'operational_rollback_applied_at') IS NULL
+    ALTER TABLE dbo.reject_events ADD operational_rollback_applied_at nvarchar(64) NOT NULL CONSTRAINT df_reject_events_operational_rollback_v486 DEFAULT N'';
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_source_rows')
+      AND name = N'idx_aw_reject_source_rows_rollback_pending_v486'
+)
+    CREATE INDEX idx_aw_reject_source_rows_rollback_pending_v486
+        ON dbo.aw_reject_source_rows(event_key, rollback_applied_at);
+
+IF OBJECT_ID(N'dbo.reject_value_mappings', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.reject_value_mappings (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        source_system nvarchar(32) NOT NULL CONSTRAINT df_reject_value_mappings_system_v485 DEFAULT N'aw',
+        kind nvarchar(16) NOT NULL,
+        source_code int NOT NULL,
+        source_label nvarchar(160) NOT NULL CONSTRAINT df_reject_value_mappings_source_label_v485 DEFAULT N'',
+        mapped_label nvarchar(160) NOT NULL CONSTRAINT df_reject_value_mappings_mapped_label_v485 DEFAULT N'',
+        updated_by nvarchar(160) NOT NULL CONSTRAINT df_reject_value_mappings_updated_by_v485 DEFAULT N'',
+        created_at nvarchar(64) NOT NULL,
+        updated_at nvarchar(64) NOT NULL,
+        CONSTRAINT uq_reject_value_mappings_v485 UNIQUE (source_system, kind, source_code),
+        CONSTRAINT ck_reject_value_mappings_kind_v485 CHECK (kind IN (N'reason', N'location'))
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.reject_events') AND name = N'idx_reject_events_source_external'
+)
+    CREATE UNIQUE INDEX idx_reject_events_source_external
+        ON dbo.reject_events(source_type, source_external_key)
+        WHERE source_external_key <> N'';
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.reject_events') AND name = N'idx_reject_events_source_codes'
+)
+    CREATE INDEX idx_reject_events_source_codes
+        ON dbo.reject_events(source_type, source_reason_code, source_location_code, rejected_at DESC);
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.reject_value_mappings') AND name = N'idx_reject_value_mappings_kind_code'
+)
+    CREATE INDEX idx_reject_value_mappings_kind_code
+        ON dbo.reject_value_mappings(source_system, kind, source_code);
+
+-- v0.487 / schema 15: reject timeline/statistics performance after A+W history sync.
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.reject_events') AND name = N'idx_reject_events_rejected_at_v487'
+)
+    CREATE INDEX idx_reject_events_rejected_at_v487
+        ON dbo.reject_events(rejected_at DESC, id DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.reject_events') AND name = N'idx_reject_events_source_time_v487'
+)
+    CREATE INDEX idx_reject_events_source_time_v487
+        ON dbo.reject_events(source_type, rejected_at DESC, id DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_source_rows') AND name = N'idx_aw_reject_source_rows_row_event_v487'
+)
+    CREATE INDEX idx_aw_reject_source_rows_row_event_v487
+        ON dbo.aw_reject_source_rows(aw_row_id, event_key, rollback_applied_at);
+GO
+
+-- v0.498 / schema 16: A+W cutting generation history for Order Details.
+IF OBJECT_ID(N'dbo.aw_cutting_generations', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.aw_cutting_generations (
+        order_no nvarchar(255) NOT NULL,
+        item_no nvarchar(255) NOT NULL,
+        key_index int NOT NULL CONSTRAINT df_aw_cutting_key_v498 DEFAULT 0,
+        batch_job_number nvarchar(255) NOT NULL,
+        batch_status_code int NOT NULL CONSTRAINT df_aw_cutting_batch_status_v498 DEFAULT 0,
+        batch_description nvarchar(500) NOT NULL CONSTRAINT df_aw_cutting_batch_desc_v498 DEFAULT N'',
+        batch_creation_at nvarchar(64) NOT NULL CONSTRAINT df_aw_cutting_batch_created_v498 DEFAULT N'',
+        batch_employee nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_batch_employee_v498 DEFAULT N'',
+        batch_last_changed_at nvarchar(64) NOT NULL CONSTRAINT df_aw_cutting_batch_changed_v498 DEFAULT N'',
+        batch_last_changed_user nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_batch_changed_user_v498 DEFAULT N'',
+        optimization_number int NOT NULL CONSTRAINT df_aw_cutting_opti_v498 DEFAULT 0,
+        optimization_status_code int NOT NULL CONSTRAINT df_aw_cutting_opti_status_v498 DEFAULT 0,
+        optimization_mode int NOT NULL CONSTRAINT df_aw_cutting_opti_mode_v498 DEFAULT 0,
+        optimization_date nvarchar(64) NOT NULL CONSTRAINT df_aw_cutting_opti_date_v498 DEFAULT N'',
+        optimization_last_changed_at nvarchar(64) NOT NULL CONSTRAINT df_aw_cutting_opti_changed_v498 DEFAULT N'',
+        cutting_booking_at nvarchar(64) NOT NULL CONSTRAINT df_aw_cutting_booked_v498 DEFAULT N'',
+        cutting_booking_employee nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_booked_by_v498 DEFAULT N'',
+        cutting_booking_row_id nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_booking_row_v498 DEFAULT N'',
+        item_barcode_start nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_item_barcode_v498 DEFAULT N'',
+        cutting_barcode_start nvarchar(255) NOT NULL CONSTRAINT df_aw_cutting_cut_barcode_v498 DEFAULT N'',
+        weight decimal(18,4) NOT NULL CONSTRAINT df_aw_cutting_weight_v498 DEFAULT 0,
+        surface_area decimal(18,4) NOT NULL CONSTRAINT df_aw_cutting_area_v498 DEFAULT 0,
+        source_row_count int NOT NULL CONSTRAINT df_aw_cutting_source_count_v498 DEFAULT 0,
+        source_payload_json nvarchar(max) NOT NULL CONSTRAINT df_aw_cutting_payload_v498 DEFAULT N'{}',
+        first_seen_at nvarchar(64) NOT NULL,
+        last_seen_at nvarchar(64) NOT NULL,
+        synced_at nvarchar(64) NOT NULL,
+        CONSTRAINT pk_aw_cutting_generations_v498 PRIMARY KEY(order_no, item_no, key_index, batch_job_number),
+        CONSTRAINT ck_aw_cutting_payload_v498 CHECK (ISJSON(source_payload_json) = 1)
+    );
+END;
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.aw_cutting_generations') AND name = N'idx_aw_cutting_order_item_generation_v498'
+)
+    CREATE INDEX idx_aw_cutting_order_item_generation_v498
+        ON dbo.aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.aw_cutting_generations') AND name = N'idx_aw_cutting_batch_v498'
+)
+    CREATE INDEX idx_aw_cutting_batch_v498
+        ON dbo.aw_cutting_generations(batch_job_number, optimization_number);

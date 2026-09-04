@@ -32,6 +32,7 @@ RUN_ACTIONS = {
     "folder-import-only": "FolderImportOnly",
     "sql-export-only": "SqlExportOnly",
     "sql-export-and-import": "SqlExportAndImport",
+    "reject-sync-only": "RejectSyncOnly",
 }
 
 # The browser control plane refreshes the complete installed automation runtime
@@ -102,6 +103,10 @@ class DeliveryAutomationController:
             "synchronizedFiles": [],
             "error": "",
         }
+        # Import History supplements durable database rows with immutable
+        # PowerShell run summaries. Cache the parsed archive briefly so opening
+        # or paging the modal cannot repeatedly parse hundreds of JSON files.
+        self._import_history_archive_cache: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 
         # Scheduled tasks execute the installed runtime under
         # C:\DeliveryListAutomation\Scripts without passing through start_run().
@@ -544,6 +549,75 @@ class DeliveryAutomationController:
             enriched["currentStep"] = log_text.splitlines()[-1]
         return enriched
 
+    def _recover_stale_browser_run(
+        self,
+        config: dict[str, Any],
+        gui_run: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Clear a persisted browser-run ``running`` flag when no run exists.
+
+        ``web-gui-run.json`` is durable so Status & Logs survives a browser or
+        server restart.  A hard server/process exit can therefore leave its last
+        snapshot at ``running=true`` even though the PowerShell process and the
+        shared runtime lock are both gone.  That stale bit must never be treated
+        as liveness.  Recover a matching final summary when one exists; otherwise
+        preserve the audit/log data and close the orphaned run as failed.
+        """
+        stored = dict(gui_run or {})
+        if not stored or not bool(stored.get("running")):
+            return stored
+
+        paths = self._runtime_paths(config)
+        summary_path_text = str(stored.get("summaryPath") or "").strip()
+        summary_path = Path(summary_path_text) if summary_path_text else paths["gui_summary"]
+        runtime_summary = self._read_json_file(summary_path)
+        request_id = str(stored.get("taskId") or stored.get("requestId") or "").strip()
+        summary_request_id = str(runtime_summary.get("requestId") or runtime_summary.get("taskId") or "").strip()
+        summary_matches = bool(runtime_summary) and (not request_id or request_id == summary_request_id)
+
+        if summary_matches and runtime_summary.get("running") is not True:
+            recovered = {
+                **stored,
+                **runtime_summary,
+                "running": False,
+                "recoveredStaleRun": True,
+                "message": str(
+                    runtime_summary.get("message")
+                    or "The previous manual update finished while the web server was unavailable."
+                ),
+            }
+            recovered.setdefault("completedAt", utc_now())
+        else:
+            recovered = self._attach_complete_log(stored)
+            recovery_note = (
+                "No active automation process or shared runtime lock was found. "
+                "The stale Running status was cleared automatically."
+            )
+            log_path_text = str(recovered.get("logPath") or "").strip()
+            if log_path_text:
+                self._append_run_log_line(Path(log_path_text), recovery_note, "ERROR")
+                recovered = self._attach_complete_log(recovered)
+            recovered.update({
+                "running": False,
+                "succeeded": False,
+                "completedAt": str(recovered.get("completedAt") or utc_now()),
+                "message": "Previous manual update stopped before reporting completion.",
+                "currentStep": recovery_note,
+                "error": str(recovered.get("error") or recovery_note),
+                "recoveredStaleRun": True,
+            })
+
+        self._write_gui_status(config, recovered)
+        return recovered
+
+    @staticmethod
+    def _stored_run_without_live_flag(run: dict[str, Any]) -> dict[str, Any]:
+        """Return historical status without allowing a stale flag to imply liveness."""
+        normalized = dict(run or {})
+        if normalized:
+            normalized["running"] = False
+        return normalized
+
     def _schedule_installed(self) -> bool:
         if os.name != "nt":
             return False
@@ -570,19 +644,60 @@ class DeliveryAutomationController:
         runtime_paths = self._runtime_paths(config) if config else {}
         with self._state_lock:
             live_status = dict(self._active_status)
-            running = bool(self._active_process and self._active_process.poll() is None)
+            active_process = self._active_process
+            browser_process_running = bool(active_process and active_process.poll() is None)
+
+        # v0.503: liveness comes from a real child process or the cross-process
+        # run.lock, never from a persisted JSON ``running`` flag.  The latter is
+        # only historical state and can survive a crash/restart indefinitely.
+        runtime_lock_busy = bool(config and self._runtime_lock_busy(config))
+        running = browser_process_running or runtime_lock_busy
+
         gui_run = self._read_json_file(runtime_paths.get("gui_run", Path("missing"))) if runtime_paths else {}
         scheduled_run = self._read_json_file(runtime_paths.get("last_run", Path("missing"))) if runtime_paths else {}
+
+        # If this server does not own a live browser child and the shared lock is
+        # free, a durable web-gui-run.json that still says running is orphaned.
+        # Recover it once and persist the repaired terminal state so restarting or
+        # hard-refreshing cannot resurrect the yellow Update running indicator.
+        if config and not running and active_process is None and bool(gui_run.get("running")):
+            gui_run = self._recover_stale_browser_run(config, gui_run)
+
+        # Historical files are never allowed to override current liveness.  This
+        # also protects scheduled last-run.json files left mid-write by a killed
+        # task; if the shared lock is free, they are history, not an active run.
+        if not running:
+            gui_run = self._stored_run_without_live_flag(gui_run)
+            scheduled_run = self._stored_run_without_live_flag(scheduled_run)
+
         stored_runs = [row for row in (gui_run, scheduled_run) if row]
         stored_runs.sort(
             key=lambda row: str(row.get("completedAt") or row.get("startedAt") or ""),
             reverse=True,
         )
-        last_run = live_status if running and live_status else (stored_runs[0] if stored_runs else live_status)
-        last_run = self._attach_complete_log(last_run)
+        # v0.487 compatibility contract originally used:
+        # last_run = live_status if running and live_status else persisted_status
+        # v0.503 deliberately separates browser-process liveness from the shared
+        # runtime lock so a scheduled task can still be shown as active safely.
+        if browser_process_running and live_status:
+            last_run = live_status
+        elif running:
+            running_rows = [row for row in stored_runs if bool(row.get("running"))]
+            last_run = running_rows[0] if running_rows else (stored_runs[0] if stored_runs else live_status)
+        else:
+            last_run = stored_runs[0] if stored_runs else live_status
+
+        # v0.487: live browser runs already stream output in memory. Re-reading
+        # the entire growing log file on every one-second dashboard poll becomes
+        # progressively more expensive during large A+W syncs. Read the full
+        # persisted log only for completed/stored runs.
+        if not running:
+            last_run = self._attach_complete_log(last_run)
         automation = config.get("Automation") or {}
         schedule = config.get("Schedule") or {}
         notifications = config.get("Notifications") or {}
+        reject_sync = config.get("RejectSync") or {}
+        production_sync = config.get("ProductionSync") or {}
         database = config.get("Database") or {}
         return {
             "ok": True,
@@ -604,6 +719,18 @@ class DeliveryAutomationController:
                 "destinationFolder": str(config.get("DestinationFolder") or ""),
                 "notificationsEnabled": bool(notifications.get("Enabled", True)),
                 "notifyOnNoChanges": bool(notifications.get("NotifyOnNoChanges", True)),
+                "rejectSyncEnabled": bool(reject_sync.get("Enabled", True)),
+                "rejectIncrementalPastDays": int(reject_sync.get("IncrementalPastDays") or 30),
+                "rejectFullPastDays": int(reject_sync.get("FullPastDays") or 365),
+                "productionSyncEnabled": bool(production_sync.get("Enabled", True)),
+                "productionScheduledEnabled": bool(production_sync.get("ScheduledEnabled", True)),
+                "productionIncludeCuttingBookings": bool(production_sync.get("IncludeCuttingBookings", True)),
+                "productionCuttingBookingLookbackDays": int(production_sync.get("CuttingBookingLookbackDays") or 120),
+                "productionQueryBatchSize": int(production_sync.get("QueryBatchSize") or 60),
+                "productionQueryTimeoutSeconds": int(production_sync.get("QueryTimeoutSeconds") or 75),
+                "productionGenerationHistoryDepth": int(production_sync.get("GenerationHistoryDepth") or 4),
+                "productionCrystalReportFile": str(production_sync.get("CrystalReportFile") or "Prodman_CuttingLabel_Optimisation.rpt"),
+                "productionCrystalReportPrintPointId": int(production_sync.get("CrystalReportPrintPointId") or 846),
             },
             "source": {
                 "server": str(database.get("Server") or ""),
@@ -765,6 +892,16 @@ class DeliveryAutomationController:
         gap for unchanged checks, failures, and runs that happened while an older
         ProjectRoot was still configured.
         """
+        clean_limit = max(1, min(int(maximum_runs or 2000), 10000))
+        archive_cache = getattr(self, "_import_history_archive_cache", None)
+        if not isinstance(archive_cache, dict):
+            archive_cache = {}
+            self._import_history_archive_cache = archive_cache
+        cached = archive_cache.get(clean_limit)
+        now_monotonic = time.monotonic()
+        if cached and now_monotonic - cached[0] < 5.0:
+            return [dict(item) for item in cached[1]]
+
         config = self._read_config(required=False, persist_repairs=False)
         if not config:
             return []
@@ -777,7 +914,7 @@ class DeliveryAutomationController:
                 (path for path in history_dir.glob("run-*.json") if path.is_file()),
                 key=lambda path: path.name,
                 reverse=True,
-            )[:max(1, min(int(maximum_runs or 2000), 10000))]
+            )[:clean_limit]
         except OSError:
             return []
 
@@ -913,6 +1050,7 @@ class DeliveryAutomationController:
                     "changeSummary": item,
                     "historySource": "run_archive",
                 })
+        archive_cache[clean_limit] = (now_monotonic, [dict(item) for item in archived])
         return archived
 
     def _latest_automation_import_items(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1160,18 +1298,14 @@ class DeliveryAutomationController:
         ).lower()
 
     def get_latest_import_result(self) -> dict[str, Any]:
-        """Return the complete newest import run for live Admin synchronization."""
+        """Return the newest import run without republishing the full list catalog.
+
+        The Admin UI already maintains delivery-list state through the dedicated
+        ``/api/delivery-lists`` heartbeat. Fetching the same catalog here made
+        every Automation Control Center refresh perform an unrelated full-list
+        query and then repaint catalog consumers across the application.
+        """
         latest_items, latest_summary = self._latest_automation_import_items()
-        lists: list[dict[str, Any]] = []
-        store = self.scanner_store
-        getter = getattr(store, "get_delivery_lists", None) if store is not None else None
-        if callable(getter):
-            try:
-                lists = list(getter() or [])
-            except TypeError:
-                lists = list(getter(None) or [])
-            except Exception:
-                lists = []
 
         completed_at = str(latest_summary.get("completedAt") or latest_summary.get("startedAt") or "")
         run_action = str(latest_summary.get("runAction") or latest_summary.get("action") or "")
@@ -1185,7 +1319,7 @@ class DeliveryAutomationController:
             "ok": True,
             "latestImportResults": latest_items,
             "recentImports": latest_items,
-            "lists": lists,
+            "lists": [],
             "lastCheckedAt": completed_at,
             "latestRunKey": run_key,
             "latestRun": {
@@ -1202,6 +1336,7 @@ class DeliveryAutomationController:
                 "runAction": run_action,
                 "error": str(latest_summary.get("error") or ""),
                 "resultCount": len(latest_items),
+                "awRejectSync": dict(latest_summary.get("awRejectSync") or {}),
             },
         }
 
@@ -1239,9 +1374,24 @@ class DeliveryAutomationController:
         if clean_date_from and clean_date_to and clean_date_from > clean_date_to:
             raise ValueError("History start date cannot be after the end date")
 
-        database_items = self._database_import_history_items()
+        filters_requested = bool(clean_query or clean_classification or clean_date_from or clean_date_to)
+        # The Control Center renders a three-week operating window, so parsing
+        # thousands of older database/import archive records on every ordinary
+        # open only adds latency. Keep the normal browse path bounded; explicit
+        # search/filter requests retain the deeper audit scan.
+        database_limit = 5000 if filters_requested or clean_page_mode != "control_center" else 1500
+        archive_limit = 2000 if filters_requested or clean_page_mode != "control_center" else 250
+        try:
+            database_items = self._database_import_history_items(maximum_rows=database_limit)
+        except TypeError:
+            # Compatibility for lightweight test doubles / older controller hooks.
+            database_items = self._database_import_history_items()
         latest_items, latest_summary = self._latest_automation_import_items()
-        archived_items = self._archived_automation_import_items()
+        try:
+            archived_items = self._archived_automation_import_items(maximum_runs=archive_limit)
+        except TypeError:
+            # Compatibility for lightweight test doubles / older controller hooks.
+            archived_items = self._archived_automation_import_items()
         runtime_items = [*latest_items, *archived_items]
 
         def parsed_timestamp(value: Any) -> datetime | None:
@@ -1516,16 +1666,23 @@ class DeliveryAutomationController:
             latest_summary.get("completedAt") or latest_summary.get("startedAt") or ""
         )
 
+        # Import History is audit data, not a delivery-list catalog refresh. The
+        # Control Center used to fetch every delivery-list summary here and then
+        # force-publish that catalog in the browser, which could trigger a large
+        # app-wide repaint just from opening the History tab. Keep the legacy
+        # payload for older row-mode callers, but omit it from the maintained
+        # Control Center path; its dedicated catalog heartbeat handles freshness.
         lists: list[dict[str, Any]] = []
-        store = self.scanner_store
-        getter = getattr(store, "get_delivery_lists", None) if store is not None else None
-        if callable(getter):
-            try:
-                lists = list(getter() or [])
-            except TypeError:
-                lists = list(getter(None) or [])
-            except Exception:
-                lists = []
+        if clean_page_mode != "control_center":
+            store = self.scanner_store
+            getter = getattr(store, "get_delivery_lists", None) if store is not None else None
+            if callable(getter):
+                try:
+                    lists = list(getter() or [])
+                except TypeError:
+                    lists = list(getter(None) or [])
+                except Exception:
+                    lists = []
 
         return {
             "ok": True,
@@ -1593,6 +1750,44 @@ class DeliveryAutomationController:
         notifications = config.setdefault("Notifications", {})
         notifications["Enabled"] = bool(data.get("notificationsEnabled", True))
         notifications["NotifyOnNoChanges"] = bool(data.get("notifyOnNoChanges", True))
+        reject_sync = config.setdefault("RejectSync", {})
+        reject_sync["Enabled"] = bool(data.get("rejectSyncEnabled", reject_sync.get("Enabled", True)))
+        reject_sync["IncrementalPastDays"] = bounded_int(
+            data.get("rejectIncrementalPastDays", reject_sync.get("IncrementalPastDays", 30)),
+            1,
+            3650,
+            "A+W reject incremental lookback",
+        )
+        reject_sync["FullPastDays"] = bounded_int(
+            data.get("rejectFullPastDays", reject_sync.get("FullPastDays", 365)),
+            1,
+            3650,
+            "A+W reject full lookback",
+        )
+        if reject_sync["FullPastDays"] < reject_sync["IncrementalPastDays"]:
+            raise ValueError("A+W reject full lookback cannot be shorter than the incremental lookback")
+        production_sync = config.setdefault("ProductionSync", {})
+        production_sync["Enabled"] = bool(data.get("productionSyncEnabled", production_sync.get("Enabled", True)))
+        production_sync["ScheduledEnabled"] = bool(data.get("productionScheduledEnabled", production_sync.get("ScheduledEnabled", True)))
+        production_sync["IncludeCuttingBookings"] = bool(data.get("productionIncludeCuttingBookings", production_sync.get("IncludeCuttingBookings", True)))
+        production_sync["CuttingBookingLookbackDays"] = bounded_int(
+            data.get("productionCuttingBookingLookbackDays", production_sync.get("CuttingBookingLookbackDays", 120)),
+            14, 730, "A+W Cutting booking lookback",
+        )
+        production_sync["QueryBatchSize"] = bounded_int(
+            data.get("productionQueryBatchSize", production_sync.get("QueryBatchSize", 60)),
+            10, 150, "A+W production SQL batch size",
+        )
+        production_sync["QueryTimeoutSeconds"] = bounded_int(
+            data.get("productionQueryTimeoutSeconds", production_sync.get("QueryTimeoutSeconds", 75)),
+            20, 300, "A+W production SQL timeout",
+        )
+        production_sync["GenerationHistoryDepth"] = bounded_int(
+            data.get("productionGenerationHistoryDepth", production_sync.get("GenerationHistoryDepth", 4)),
+            1, 12, "A+W production generation history depth",
+        )
+        production_sync["CrystalReportFile"] = "Prodman_CuttingLabel_Optimisation.rpt"
+        production_sync["CrystalReportPrintPointId"] = 846
         config["Version"] = "v121"
         config.setdefault("Import", {})["Mode"] = "direct-store"
         self._write_config(config)
@@ -1612,10 +1807,12 @@ class DeliveryAutomationController:
         paths = self._runtime_paths(config)
         action = str(data.get("action") or "").strip().lower()
         if action not in RUN_ACTIONS:
-            raise ValueError("Choose folder import, SQL export only, or SQL export and import")
+            raise ValueError("Choose folder import, SQL export only, or direct A+W synchronization")
         range_mode = str(data.get("rangeMode") or "custom").strip().lower()
         if range_mode not in {"one-date", "custom", "incremental", "full"}:
             raise ValueError("Choose a valid date range mode")
+        if action == "reject-sync-only" and range_mode not in {"incremental", "full"}:
+            raise ValueError("A+W reject checks use either the Normal or Full reject lookback window")
         date_from = clean_date(data.get("dateFrom"), "From date", required=range_mode in {"one-date", "custom"})
         date_to = clean_date(data.get("dateTo"), "Through date", required=False)
         if range_mode == "one-date":
@@ -1737,6 +1934,15 @@ class DeliveryAutomationController:
                 command.extend(["-DateFrom", date_from])
             if date_to:
                 command.extend(["-DateTo", date_to])
+            command_line = subprocess.list2cmdline(command)
+            status["commandLine"] = command_line
+            self._active_status = status
+            self._write_gui_status(config, status)
+            self._append_run_log_line(
+                log_path,
+                f"COMMAND | {command_line}",
+                "INFO",
+            )
             self._append_run_log_line(
                 log_path,
                 (
@@ -1744,6 +1950,10 @@ class DeliveryAutomationController:
                     f"TaskId={task_id} SummaryPath={summary_path}."
                 ),
             )
+            status["commandOutput"] = self._read_text_file(log_path).rstrip()
+            status["outputLineCount"] = len(status["commandOutput"].splitlines()) if status["commandOutput"] else 0
+            self._active_status = status
+            self._write_gui_status(config, status)
             try:
                 process = subprocess.Popen(
                     command,
@@ -1790,7 +2000,7 @@ class DeliveryAutomationController:
         initial_status: dict[str, Any],
     ) -> None:
         """Stream every runner line into the Status & Logs page until completion."""
-        output_lines: list[str] = []
+        output_lines: list[str] = str(initial_status.get("commandOutput") or "").splitlines()
         stream = getattr(process, "stdout", None)
 
         if stream is not None and callable(getattr(stream, "readline", None)):
