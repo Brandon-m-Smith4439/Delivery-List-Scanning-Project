@@ -7187,3 +7187,52 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
     max-width: 80px !important;
   }
 }
+/* ========================================================================== */
+/* Main Scan layout restoration: compact eight-column workflow table          */
+/* ========================================================================== */
+.scan-page .delivery-table th:nth-child(1),
+.scan-page .delivery-table td:nth-child(1) { width: 22.5% !important; }
+.scan-page .delivery-table th:nth-child(2),
+.scan-page .delivery-table td:nth-child(2) { width: 9% !important; }
+.scan-page .delivery-table th:nth-child(5),
+.scan-page .delivery-table td:nth-child(5) { width: 15% !important; }
+.scan-page .delivery-table th:nth-child(7),
+.scan-page .delivery-table td:nth-child(7) { width: 14.5% !important; }
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) { width: 23% !important; }
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(1),
+  .scan-page .delivery-table td:nth-child(1) { width: 22% !important; }
+  .scan-page .delivery-table th:nth-child(5),
+  .scan-page .delivery-table td:nth-child(5) { width: 14.5% !important; }
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 14.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 25% !important; }
+}
+
+/* Date-wide Scan owns exactly two visible context controls: date and station. */
+.scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+  width: min(100%, 390px) !important;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) !important;
+  gap: 9px !important;
+}
+.scan-page .scanner-panel-date-select-v196,
+.scan-page .scanner-panel-station-v196 {
+  grid-column: auto !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+@media (max-width: 560px) {
+  .scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+    width: 100% !important;
+    grid-template-columns: 1fr !important;
+  }
+  .scan-page .scanner-panel-date-select-v196,
+  .scan-page .scanner-panel-station-v196 { grid-column: 1 !important; }
+  .scan-page .scanner-panel-date-select-v196 { grid-row: 1 !important; }
+  .scan-page .scanner-panel-station-v196 { grid-row: 2 !important; }
+}

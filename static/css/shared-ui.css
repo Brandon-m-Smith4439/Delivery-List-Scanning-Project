@@ -47,7 +47,7 @@ body button.app-primary-button:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):i
   font-size: var(--app-primary-font-size, 13px) !important;
   font-weight: 850 !important;
   line-height: 1.1 !important;
-  letter-spacing: .01em !important;
+  letter-spacing: 0 !important;
   text-align: center !important;
   text-decoration: none !important;
   text-shadow: 0 1px 0 rgba(0, 0, 0, .25) !important;
@@ -123,6 +123,61 @@ body button.app-primary-button.app-icon-primary:is(#_sharedPrimaryA, *):is(#_sha
 
 body button.app-primary-button.app-icon-primary:is(#_sharedPrimaryA, *):is(#_sharedPrimaryB, *):is(#_sharedPrimaryC, *) :is(.undo-icon, .redo-icon, small) {
   color: inherit !important;
+}
+
+/* Blue-outline companion for secondary navigation and selectable helper
+   prompts. It shares the primary component's sizing and interaction language
+   without competing visually with the forward action. */
+body button.app-secondary-button:is(#_sharedSecondaryA, *):is(#_sharedSecondaryB, *):is(#_sharedSecondaryC, *) {
+  min-width: 0 !important;
+  min-height: var(--app-secondary-min-height, 38px) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  max-width: 100% !important;
+  padding: var(--app-secondary-padding, 7px 13px) !important;
+  border: 1px solid #8fb1cf !important;
+  border-bottom-color: #6f96b9 !important;
+  border-radius: var(--app-secondary-radius, 8px) !important;
+  background: linear-gradient(180deg, #fff 0%, #eef6fc 100%) !important;
+  color: #0a3568 !important;
+  font: inherit !important;
+  font-size: var(--app-secondary-font-size, 12px) !important;
+  font-weight: 850 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0 !important;
+  text-align: center !important;
+  text-decoration: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 2px 5px rgba(18, 67, 108, .12) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+body button.app-secondary-button:is(#_sharedSecondaryA, *):is(#_sharedSecondaryB, *):is(#_sharedSecondaryC, *):hover:not(:disabled),
+body button.app-secondary-button:is(#_sharedSecondaryA, *):is(#_sharedSecondaryB, *):is(#_sharedSecondaryC, *):focus-visible:not(:disabled) {
+  border-color: #467fae !important;
+  background: #e5f2fc !important;
+  color: #052b5d !important;
+  outline: 3px solid rgba(44, 131, 207, .16) !important;
+  outline-offset: 1px !important;
+}
+
+body button.app-secondary-button:is(#_sharedSecondaryA, *):is(#_sharedSecondaryB, *):is(#_sharedSecondaryC, *):active:not(:disabled) {
+  background: #d9eaf8 !important;
+  box-shadow: inset 0 2px 4px rgba(17, 65, 105, .16) !important;
+}
+
+body button.app-secondary-button:is(#_sharedSecondaryA, *):is(#_sharedSecondaryB, *):is(#_sharedSecondaryC, *):disabled {
+  border-color: #c7d3de !important;
+  background: #f1f4f7 !important;
+  color: #8292a1 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
 }
 
 
@@ -1630,6 +1685,253 @@ body button.app-primary-button.production-detail-action-v476.is-secondary { back
   .production-cutting-label-set-v502 { width:min(100%,268px); }
   .cutting-label-preview-body-v502 { justify-content:start; }
   .cutting-label-preview-body-v502 .production-cutting-label-v502.is-maximized-v502 { transform:scale(.82); transform-origin:top left; margin-right:-78px; margin-bottom:-94px; }
+}
+
+/* Shared Help Center and guided page tutorials. */
+.help-center-button { position: relative; }
+
+.help-center-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.help-center-backdrop {
+  position: fixed;
+  z-index: 23980;
+  inset: 0;
+  background: rgba(5, 20, 42, .56);
+  backdrop-filter: blur(3px);
+}
+
+.help-center-panel {
+  position: fixed;
+  z-index: 23990;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(780px, calc(100vh - 32px));
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  border: 1px solid #b8c8d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #102b49;
+  box-shadow: 0 24px 72px rgba(4, 22, 48, .34);
+}
+
+.help-center-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 17px;
+  border-bottom: 1px solid #d9e3ec;
+  background: #f7fafc;
+}
+
+.help-center-header > div > span,
+.help-chat header small,
+.help-tutorial-launcher small {
+  color: #17619b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.help-center-header h2,
+.help-tutorial-launcher h3,
+.help-chat h3 {
+  margin: 3px 0 0;
+  letter-spacing: 0;
+}
+
+.help-center-header h2 { font-size: 22px; }
+.help-center-header p,
+.help-tutorial-launcher p { margin: 5px 0 0; color: #60758a; }
+
+.help-center-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 18px;
+}
+
+.help-tutorial-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 16px;
+  border: 1px solid #bfd3e5;
+  border-radius: 7px;
+  background: #f2f8fd;
+}
+
+.help-tutorial-launcher h3,
+.help-chat h3 { font-size: 16px; }
+.help-tutorial-launcher .app-primary-button { flex: 0 0 auto; }
+
+.help-chat {
+  display: grid;
+  grid-template-rows: auto auto minmax(150px, 1fr) auto;
+  gap: 10px;
+  min-height: 320px;
+  padding: 15px;
+  border: 1px solid #d5e0e9;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.help-chat > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.help-chat > header > span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e8f5eb;
+  color: #23743a;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.help-question-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.help-question-chips .app-secondary-button {
+  --app-secondary-min-height: 34px;
+  --app-secondary-padding: 6px 9px;
+  --app-secondary-radius: 999px;
+  --app-secondary-font-size: 11px;
+}
+
+.help-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 150px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 11px;
+  border: 1px solid #dce5ec;
+  background: #f8fafc;
+}
+
+.help-chat-message {
+  max-width: 86%;
+  padding: 9px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.help-chat-message.is-assistant {
+  align-self: flex-start;
+  border: 1px solid #cbdce9;
+  background: #fff;
+  color: #25435d;
+}
+
+.help-chat-message.is-user { align-self: flex-end; background: #0a3568; color: #fff; }
+
+.help-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+
+.help-chat-form input {
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #b8c9d8;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.page-tutorial-spotlight {
+  position: fixed;
+  z-index: 24000;
+  pointer-events: none;
+  border: 3px solid #2c83cf;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(3, 17, 36, .66), 0 0 0 5px rgba(255, 255, 255, .92);
+  transition: left 150ms ease, top 150ms ease, width 150ms ease, height 150ms ease;
+}
+
+.page-tutorial-coach {
+  position: fixed;
+  z-index: 24010;
+  width: min(380px, calc(100vw - 24px));
+  padding: 16px;
+  border: 1px solid #aac2d8;
+  border-radius: 8px;
+  background: #fff;
+  color: #102b49;
+  box-shadow: 0 20px 55px rgba(3, 19, 42, .38);
+}
+
+.page-tutorial-coach > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+}
+
+.page-tutorial-coach > header > span {
+  color: #17619b;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.page-tutorial-coach h2 { margin: 7px 0 5px; font-size: 19px; letter-spacing: 0; }
+.page-tutorial-coach p { margin: 0; color: #526a80; font-size: 13px; line-height: 1.5; }
+.page-tutorial-coach footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px; }
+.page-tutorial-coach footer button { min-width: 82px !important; }
+
+@media (max-width: 620px) {
+  .help-center-panel { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .help-center-header { padding: 15px 14px 13px; }
+  .help-center-body { padding: 11px; }
+  .help-tutorial-launcher { align-items: stretch; flex-direction: column; gap: 10px; }
+  .help-tutorial-launcher .app-primary-button { width: 100%; }
+  .help-chat { min-height: 0; padding: 11px; }
+  .help-chat-log { min-height: 120px; max-height: 190px; }
+  .help-chat-form { grid-template-columns: 1fr; }
+  .help-chat-form button { width: 100%; }
+  .page-tutorial-spotlight { transition: none; }
+  .page-tutorial-coach { width: calc(100vw - 20px); }
+  .page-tutorial-coach footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .page-tutorial-coach footer button {
+    width: 100%;
+    min-width: 0 !important;
+    min-height: 44px !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .help-question-chips .app-secondary-button {
+    --app-secondary-min-height: 42px;
+    flex: 1 1 min(145px, 100%);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-tutorial-spotlight { transition: none; }
 }
 
 /* ========================================================================== */

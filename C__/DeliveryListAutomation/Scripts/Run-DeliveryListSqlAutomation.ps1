@@ -1,10 +1,10 @@
-﻿# File: automation/sql_delivery_export/Run-DeliveryListSqlAutomation.ps1
+# File: automation/sql_delivery_export/Run-DeliveryListSqlAutomation.ps1
 [CmdletBinding()]
 param(
     [ValidateSet("RuntimeTest", "Test", "Incremental", "Full", "Custom", "FolderImport")]
     [string]$Mode = "Incremental",
 
-    [ValidateSet("Configured", "SqlExportOnly", "SqlExportAndImport", "FolderImportOnly", "RejectSyncOnly")]
+    [ValidateSet("Configured", "SqlExportOnly", "SqlExportAndImport", "FolderImportOnly")]
     [string]$RunAction = "Configured",
 
     [string]$DeliveryDate = "",
@@ -27,8 +27,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# $LogPath is a script parameter, so it already lives in script scope. Do not
-# overwrite it here: browser-started runs pass the log watched by the web GUI.
+$script:LogPath = $null
 $script:PendingLogLines = New-Object System.Collections.Generic.List[string]
 $script:Config = $null
 $script:LockStream = $null
@@ -38,11 +37,6 @@ $script:PublishedDates = New-Object System.Collections.Generic.List[datetime]
 $script:PendingImportDates = New-Object System.Collections.Generic.List[datetime]
 $script:ImportedDates = New-Object System.Collections.Generic.List[datetime]
 $script:ImportResults = @()
-$script:DirectImportPayloads = New-Object System.Collections.Generic.List[object]
-$script:AwRejectSyncPayload = $null
-$script:AwRejectSyncResult = $null
-$script:AwCuttingSyncPayload = $null
-$script:AwCuttingSyncResult = $null
 $script:ResolvedAction = $RunAction
 $script:StartedAt = (Get-Date).ToUniversalTime().ToString("o")
 $script:RunId = $(if ([string]::IsNullOrWhiteSpace([string]$RequestId)) { "scheduled-$($script:StartedAt)" } else { [string]$RequestId })
@@ -280,16 +274,7 @@ function Get-OptionalProperty {
         $DefaultValue = $null
     )
 
-    if ($null -eq $Object) {
-        return $DefaultValue
-    }
-    if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.Contains($Name)) {
-            return $Object[$Name]
-        }
-        return $DefaultValue
-    }
-    if (-not ($Object.PSObject.Properties.Name -contains $Name)) {
+    if ($null -eq $Object -or -not ($Object.PSObject.Properties.Name -contains $Name)) {
         return $DefaultValue
     }
     return $Object.$Name
@@ -761,648 +746,6 @@ function Get-SupersededOrderCandidates {
     return @($candidates.ToArray())
 }
 
-function Get-AwRejectSyncPayload {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$RunMode,
-        [bool]$ForceEnabled = $false
-    )
-
-    $settings = Get-OptionalProperty -Object $Config -Name "RejectSync" -DefaultValue $null
-    $enabled = [bool](Get-OptionalProperty -Object $settings -Name "Enabled" -DefaultValue $true)
-    if (-not $enabled -and -not $ForceEnabled) {
-        Write-AutomationLog -Message "A+W reject synchronization is disabled by configuration."
-        return $null
-    }
-    if (-not $enabled -and $ForceEnabled) {
-        Write-AutomationLog -Message "Manual complete A+W sync is overriding the disabled scheduled Reject enrichment setting for this explicit run."
-    }
-
-    $pastDays = if ($RunMode -eq "Full") {
-        [int](Get-OptionalProperty -Object $settings -Name "FullPastDays" -DefaultValue 365)
-    }
-    else {
-        [int](Get-OptionalProperty -Object $settings -Name "IncrementalPastDays" -DefaultValue 30)
-    }
-    $pastDays = [Math]::Max($pastDays, 1)
-    $windowStart = (Get-Date).AddDays(-1 * $pastDays)
-    $windowEnd = (Get-Date).AddMinutes(5)
-
-    $connection = New-SqlConnection -Config $Config
-    $table = New-Object System.Data.DataTable
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    try {
-        $connection.Open()
-        $command = $connection.CreateCommand()
-        $command.CommandTimeout = [int]$Config.Database.QueryTimeoutSeconds
-        $command.CommandText = @"
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-SELECT
-    CONVERT(nvarchar(64), pb.ROWID) AS AwRowId,
-    pb.AUFNR AS OrderNr,
-    pb.POSNR AS ItemNr,
-    ISNULL(pb.BOM_ID, 0) AS BomId,
-    ISNULL(pb.KEYINDEX, 0) AS KeyIndex,
-    ISNULL(pb.SUB_POS, 0) AS SubPosition,
-    ISNULL(pb.BOM_NODE, 0) AS BomNode,
-    ISNULL(pb.MENGE, 0) AS Quantity,
-    pb.BREAKAGEDATE AS BreakageDate,
-    ISNULL(pb.JOBNUMBER_ORG, 0) AS OriginalJobNumber,
-    ISNULL(pb.JOBNUMBER_NEW, 0) AS ReplacementJobNumber,
-    ISNULL(pb.BREAKAGE_REASON, 0) AS ReasonCode,
-    LTRIM(RTRIM(ISNULL(reason.BEZ, ''))) AS ReasonLabel,
-    ISNULL(pb.BREAKAGE_REGISTRATION, 0) AS LocationCode,
-    LTRIM(RTRIM(ISNULL(location.BEZ, ''))) AS LocationLabel,
-    ISNULL(pb.BREAKAGE_FROMSCANNER, 0) AS FromScanner,
-    LTRIM(RTRIM(CASE
-        WHEN ISNULL(book.MITARB_ID, '') <> '' THEN book.MITARB_ID
-        ELSE ISNULL(pb.LASTCHANGEUSER, '')
-    END)) AS BreakageUser,
-    pb.LASTCHANGEDATE AS SourceLastChangedAt,
-    LTRIM(RTRIM(ISNULL(pb.LASTCHANGEUSER, ''))) AS SourceLastChangedUser,
-    LTRIM(RTRIM(ISNULL(book.MITARB_ID, ''))) AS TimelineEmployee,
-    ISNULL(book.WORK_TYPE, 0) AS WorkTypeId,
-    LTRIM(RTRIM(ISNULL(worktype.BEA_TYPBEZ, ''))) AS WorkType,
-    ISNULL(book.REG_POINT, 0) AS RegistrationPointId,
-    LTRIM(RTRIM(ISNULL(point.BEZ, ''))) AS RegistrationPoint,
-    LTRIM(RTRIM(ISNULL(machine.AGG_BEZ, ''))) AS Machine,
-    CASE ISNULL(book.ORIGIN, -1) WHEN 0 THEN 'Explicit' WHEN 2 THEN 'Implicit' ELSE '' END AS ScanMode,
-    CASE ISNULL(book.BOOK_TYPE, -1) WHEN 1 THEN 'Reject' WHEN 0 THEN 'Ready' ELSE '' END AS BookingMessage,
-    ISNULL(book.SecondsFromBreakage, 2147483647) AS ActorSecondsFromBreakage
-FROM SYSADM.PROD_BREAKAGE pb
-LEFT JOIN SYSADM.KA_REKLA_GRND reason ON reason.NUMMER = pb.BREAKAGE_REASON
-LEFT JOIN SYSADM.KA_REKLA_ORT location ON location.NUMMER = pb.BREAKAGE_REGISTRATION
-OUTER APPLY (
-    SELECT TOP (1)
-        b.MITARB_ID, b.WORK_TYPE, b.REG_POINT, b.ORIGIN, b.BOOK_TYPE,
-        ABS(DATEDIFF(second, b.SCANTIME, pb.BREAKAGEDATE)) AS SecondsFromBreakage
-    FROM SYSADM.FS_BOOK_HISTORY b
-    WHERE b.ID = pb.AUFNR
-      AND b.POSNR = pb.POSNR
-      AND b.BOOK_TYPE = 1
-      -- A+W can commit PROD_BREAKAGE and the explicit Reject booking several
-      -- seconds apart. Restrict to the same Order/Item and a short event window,
-      -- then rank by the native reason/cause codes before falling back to time.
-      AND b.SCANTIME >= DATEADD(second, -60, pb.BREAKAGEDATE)
-      AND b.SCANTIME <= DATEADD(second, 60, pb.BREAKAGEDATE)
-    ORDER BY
-        CASE WHEN ISNULL(b.BREAKAGE_REASON, -1) = ISNULL(pb.BREAKAGE_REASON, -2) THEN 0 ELSE 1 END,
-        CASE WHEN ISNULL(b.BREAKAGE_CAUSER, -1) = ISNULL(pb.BREAKAGE_REGISTRATION, -2) THEN 0 ELSE 1 END,
-        CASE WHEN b.ORIGIN = 0 THEN 0 ELSE 1 END,
-        CASE WHEN b.BOMID = pb.BOM_ID THEN 0 ELSE 1 END,
-        ABS(DATEDIFF(second, b.SCANTIME, pb.BREAKAGEDATE)),
-        b.SCANTIME DESC
-) book
-LEFT JOIN SYSADM.ZW_BEATYPEN worktype ON worktype.BEA_TYP = book.WORK_TYPE
-LEFT JOIN SYSADM.PD_PROD_POINT point ON point.FREMD_KEY = book.REG_POINT
-OUTER APPLY (
-    SELECT
-        CASE WHEN COUNT(*) = 1 THEN MAX(candidate.AGG_BEZ) ELSE '' END AS AGG_BEZ
-    FROM (
-        SELECT DISTINCT LTRIM(RTRIM(ISNULL(za.AGG_BEZ, ''))) AS AGG_BEZ
-        FROM SYSADM.ZW_AGGREGATE za
-        WHERE za.BARC = point.NUMMER
-          AND LTRIM(RTRIM(ISNULL(za.AGG_BEZ, ''))) <> ''
-    ) candidate
-) machine
-WHERE pb.IS_BREAKAGE = 1
-  AND pb.BREAKAGEDATE >= @WindowStart
-  AND pb.BREAKAGEDATE < @WindowEnd
-ORDER BY pb.BREAKAGEDATE, pb.AUFNR, pb.POSNR, pb.KEYINDEX, pb.BOM_ID;
-"@
-        $startParameter = $command.Parameters.Add("@WindowStart", [System.Data.SqlDbType]::DateTime)
-        $startParameter.Value = $windowStart
-        $endParameter = $command.Parameters.Add("@WindowEnd", [System.Data.SqlDbType]::DateTime)
-        $endParameter.Value = $windowEnd
-        $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
-        [void]$adapter.Fill($table)
-        $adapter.Dispose()
-        $command.Dispose()
-    }
-    finally {
-        if ($connection.State -ne [System.Data.ConnectionState]::Closed) {
-            $connection.Close()
-        }
-        $connection.Dispose()
-    }
-    $timer.Stop()
-
-    $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($row in $table.Rows) {
-        $replacementJob = if ($row.ReplacementJobNumber -eq [DBNull]::Value -or [int64]$row.ReplacementJobNumber -eq 0) { "" } else { [string][int64]$row.ReplacementJobNumber }
-        $rows.Add([ordered]@{
-            awRowId = [string]$row.AwRowId
-            orderNr = [string][int64]$row.OrderNr
-            itemNr = [string][int]$row.ItemNr
-            bomId = [int]$row.BomId
-            keyIndex = [int]$row.KeyIndex
-            subPosition = [int]$row.SubPosition
-            bomNode = [int]$row.BomNode
-            quantity = [int][decimal]$row.Quantity
-            breakageDate = ([datetime]$row.BreakageDate).ToString("o")
-            originalJobNumber = $(if ([int64]$row.OriginalJobNumber -eq 0) { "" } else { [string][int64]$row.OriginalJobNumber })
-            replacementJobNumber = $replacementJob
-            reasonCode = [int]$row.ReasonCode
-            reasonLabel = [string]$row.ReasonLabel
-            locationCode = [int]$row.LocationCode
-            locationLabel = [string]$row.LocationLabel
-            fromScanner = [int]$row.FromScanner
-            breakageUser = [string]$row.BreakageUser
-            sourceLastChangedAt = $(if ($row.SourceLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.SourceLastChangedAt).ToString("o") })
-            sourceLastChangedUser = [string]$row.SourceLastChangedUser
-            timelineEmployee = [string]$row.TimelineEmployee
-            workTypeId = [int]$row.WorkTypeId
-            workType = [string]$row.WorkType
-            registrationPointId = [int]$row.RegistrationPointId
-            registrationPoint = [string]$row.RegistrationPoint
-            machine = [string]$row.Machine
-            scanMode = [string]$row.ScanMode
-            bookingMessage = [string]$row.BookingMessage
-            actorSecondsFromBreakage = [int]$row.ActorSecondsFromBreakage
-        })
-    }
-
-    Write-AutomationLog -Message (
-        "A+W reject query returned {0} raw PROD_BREAKAGE row(s) for {1} through {2} in {3} ms." -f
-        [int]$rows.Count,
-        $windowStart.ToString("yyyy-MM-dd HH:mm:ss"),
-        $windowEnd.ToString("yyyy-MM-dd HH:mm:ss"),
-        [Math]::Round($timer.Elapsed.TotalMilliseconds)
-    )
-    return [ordered]@{
-        version = "v484-aw-reject-1"
-        source = "SYSADM.PROD_BREAKAGE"
-        windowStart = $windowStart.ToUniversalTime().ToString("o")
-        windowEnd = $windowEnd.ToUniversalTime().ToString("o")
-        rows = @($rows.ToArray())
-    }
-}
-
-function Get-AwCuttingSyncPayload {
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$DirectPayloads,
-        [bool]$ForceEnabled = $false
-    )
-
-    $settings = Get-OptionalProperty -Object $Config -Name "ProductionSync" -DefaultValue $null
-    $enabled = [bool](Get-OptionalProperty -Object $settings -Name "Enabled" -DefaultValue $true)
-    $scheduledEnabled = [bool](Get-OptionalProperty -Object $settings -Name "ScheduledEnabled" -DefaultValue $true)
-    $isManual = -not [string]::IsNullOrWhiteSpace([string]$RequestId)
-    if (-not $enabled -and -not $ForceEnabled) {
-        Write-AutomationLog -Message "A+W production synchronization is disabled in Automation Control Center settings." -Level "INFO"
-        return $null
-    }
-    if (-not $isManual -and -not $scheduledEnabled -and -not $ForceEnabled) {
-        Write-AutomationLog -Message "A+W production synchronization is disabled for scheduled runs; delivery-list reconciliation will continue without Batch/Optimization enrichment." -Level "INFO"
-        return $null
-    }
-
-    $orderSet = New-Object 'System.Collections.Generic.HashSet[string]'
-    # Keep direct-delivery Orders separate from the broader production coverage
-    # population. Crystal-label process enrichment is useful only for the active
-    # direct delivery payload and is considerably heavier than core Cutting state.
-    $directOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
-    # Windows PowerShell 5.1 cannot wrap Generic.List[object] directly in an
-    # array subexpression; it raises "Argument types do not match" before any
-    # A+W production query runs. Materialize through the pipeline first.
-    $directPayloadSnapshot = @($DirectPayloads | ForEach-Object { $_ })
-    foreach ($envelope in $directPayloadSnapshot) {
-        $payload = Get-OptionalProperty -Object $envelope -Name "payload" -DefaultValue $null
-        foreach ($row in @(Get-OptionalProperty -Object $payload -Name "rows" -DefaultValue @())) {
-            $orderNumber = ([string](Get-OptionalProperty -Object $row -Name "order" -DefaultValue "")).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($orderNumber)) {
-                [void]$orderSet.Add($orderNumber)
-                [void]$directOrderSet.Add($orderNumber)
-            }
-        }
-    }
-    $batchSize = [int](Get-OptionalProperty -Object $settings -Name "QueryBatchSize" -DefaultValue 60)
-    $batchSize = [Math]::Max(10, [Math]::Min(150, $batchSize))
-    $queryTimeout = [int](Get-OptionalProperty -Object $settings -Name "QueryTimeoutSeconds" -DefaultValue 75)
-    $queryTimeout = [Math]::Max(20, [Math]::Min(300, $queryTimeout))
-    $cutLookbackDays = [int](Get-OptionalProperty -Object $settings -Name "CuttingBookingLookbackDays" -DefaultValue 120)
-    $cutLookbackDays = [Math]::Max(14, [Math]::Min(730, $cutLookbackDays))
-    $includeCutting = [bool](Get-OptionalProperty -Object $settings -Name "IncludeCuttingBookings" -DefaultValue $true)
-    $generationHistoryDepth = [int](Get-OptionalProperty -Object $settings -Name "GenerationHistoryDepth" -DefaultValue 4)
-    $generationHistoryDepth = [Math]::Max(1, [Math]::Min(12, $generationHistoryDepth))
-    $orderLookbackDays = [int](Get-OptionalProperty -Object $settings -Name "OrderLookbackDays" -DefaultValue 14)
-    $orderLookbackDays = [Math]::Max(1, [Math]::Min(90, $orderLookbackDays))
-
-    # v0.504: Cutting/label enrichment cannot be limited only to the delivery dates
-    # selected for this particular run. Order Details can remain active after its
-    # delivery date falls outside the normal two-day incremental window. Recover a
-    # small bounded set of recently delivered A+W order numbers so older active
-    # scanner orders (for example a pane cut several days ago) still receive their
-    # Batch/Optimization evidence without widening the full delivery import window.
-    $coverageConnection = New-SqlConnection -Config $Config
-    $coverageTable = New-Object System.Data.DataTable
-    try {
-        $coverageConnection.Open()
-        $coverageCommand = $coverageConnection.CreateCommand()
-        $coverageCommand.CommandTimeout = [Math]::Min($queryTimeout, 60)
-        $coverageCommand.CommandText = @"
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-SELECT DISTINCT coverage.OrderNr
-FROM (
-    SELECT h.ID AS OrderNr
-    FROM SYSADM.BW_AUFTR_KOPF h
-    WHERE h.DATUM_LIEFER_PLAN >= DATEADD(day,-@OrderLookbackDays,CAST(GETDATE() AS date))
-      AND h.DATUM_LIEFER_PLAN < DATEADD(day,1,CAST(GETDATE() AS date))
-
-    UNION
-
-    SELECT ji.AUFNR AS OrderNr
-    FROM SYSADM.PROD_JOBITEM ji
-    INNER JOIN SYSADM.PROD_JOB j ON j.JOBNUMBER=ji.JOBNUMBER
-    WHERE COALESCE(j.LASTCHANGEDATE,j.CREATIONDATE) >= DATEADD(day,-@OrderLookbackDays,GETDATE())
-) coverage
-WHERE coverage.OrderNr IS NOT NULL;
-"@
-        $coverageParameter = $coverageCommand.Parameters.Add("@OrderLookbackDays", [System.Data.SqlDbType]::Int)
-        $coverageParameter.Value = $orderLookbackDays
-        $coverageAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($coverageCommand)
-        [void]$coverageAdapter.Fill($coverageTable)
-        $coverageAdapter.Dispose(); $coverageCommand.Dispose()
-        $beforeCoverage = $orderSet.Count
-        foreach ($coverageRow in $coverageTable.Rows) {
-            $coverageOrder = ([string]$coverageRow.OrderNr).Trim()
-            if ($coverageOrder -match '^\d+$') { [void]$orderSet.Add($coverageOrder) }
-        }
-        $addedCoverage = $orderSet.Count - $beforeCoverage
-        if ($addedCoverage -gt 0) {
-            Write-AutomationLog -Message (
-                "Expanded A+W production coverage by {0} recent delivery/production order(s) from the last {1} day(s)." -f
-                $addedCoverage, $orderLookbackDays
-            )
-        }
-    }
-    finally {
-        $coverageTable.Dispose()
-        if ($coverageConnection.State -ne [System.Data.ConnectionState]::Closed) { $coverageConnection.Close() }
-        $coverageConnection.Dispose()
-    }
-    $orders = @($orderSet | Sort-Object)
-    if ($orders.Count -eq 0) {
-        Write-AutomationDebug -Message "A+W production sync skipped because no direct or recent-delivery orders were found."
-        return $null
-    }
-
-    $rows = New-Object System.Collections.Generic.List[object]
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $totalBatches = [int][Math]::Ceiling($orders.Count / [double]$batchSize)
-    Write-AutomationLog -Message (
-        "A+W production sync starting for {0} covered order(s) in {1} SQL batch(es). BatchSize={2} QueryTimeoutSeconds={3} CuttingBookingLookbackDays={4}." -f
-        [int]$orders.Count, $totalBatches, $batchSize, $queryTimeout, $cutLookbackDays
-    )
-    Write-AutomationDebug -Message ("A+W production generation history depth={0}; CuttingBookingEvidence={1}." -f $generationHistoryDepth, $includeCutting)
-
-    for ($offset = 0; $offset -lt $orders.Count; $offset += $batchSize) {
-        $end = [Math]::Min($offset + $batchSize - 1, $orders.Count - 1)
-        $batchOrders = @($orders[$offset..$end])
-        $batchNumber = [int]([Math]::Floor($offset / $batchSize) + 1)
-        $batchTimer = [System.Diagnostics.Stopwatch]::StartNew()
-        Write-AutomationStep -Message ("Reading A+W Batch/Optimization/Cutting state ({0}/{1}) for {2} order(s)." -f $batchNumber, $totalBatches, $batchOrders.Count)
-
-        $connection = New-SqlConnection -Config $Config
-        $table = New-Object System.Data.DataTable
-        $processTable = New-Object System.Data.DataTable
-        try {
-            $connection.Open()
-            $command = $connection.CreateCommand()
-            $command.CommandTimeout = $queryTimeout
-            $placeholders = New-Object System.Collections.Generic.List[string]
-            for ($index = 0; $index -lt $batchOrders.Count; $index++) {
-                $name = "@Order$index"
-                $placeholders.Add($name)
-                $parameter = $command.Parameters.Add($name, [System.Data.SqlDbType]::Int)
-                $parameter.Value = [int]$batchOrders[$index]
-            }
-            $lookbackParameter = $command.Parameters.Add("@CutLookbackDays", [System.Data.SqlDbType]::Int)
-            $lookbackParameter.Value = $cutLookbackDays
-            $historyDepthParameter = $command.Parameters.Add("@GenerationHistoryDepth", [System.Data.SqlDbType]::Int)
-            $historyDepthParameter.Value = $generationHistoryDepth
-            $orderSql = [string]::Join(",", $placeholders.ToArray())
-            $cuttingJoin = if ($includeCutting) { @"
-LEFT JOIN CuttingBookingRanked cut
-  ON cut.ID=ji.AUFNR AND cut.POSNR=ji.POSNR AND cut.BOMID=ji.BOM_ID AND cut.RN=1
- AND (job.CREATIONDATE IS NULL OR cut.SCANTIME >= DATEADD(minute,-5,job.CREATIONDATE))
-"@ } else { "" }
-            $cuttingCte = if ($includeCutting) { @"
-,CuttingBookingRanked AS (
-    SELECT b.ID,b.POSNR,b.BOMID,b.SCANTIME,b.MITARB_ID,b.ROWID,
-           ROW_NUMBER() OVER (PARTITION BY b.ID,b.POSNR,b.BOMID ORDER BY b.SCANTIME DESC) AS RN
-    FROM SYSADM.FS_BOOK_HISTORY b
-    WHERE b.ID IN ($orderSql)
-      AND b.BOOK_TYPE = 0 AND b.WORK_TYPE = 10 AND b.REG_POINT = 1000 AND b.AMOUNT > 0
-      AND b.SCANTIME >= DATEADD(day,-@CutLookbackDays,GETDATE())
-)
-"@ } else { "" }
-            $cuttingSelect = if ($includeCutting) {
-                "cut.SCANTIME AS CuttingBookingAt, LTRIM(RTRIM(ISNULL(cut.MITARB_ID,''))) AS CuttingBookingEmployee, CONVERT(nvarchar(64),cut.ROWID) AS CuttingBookingRowId"
-            } else {
-                "CAST(NULL AS datetime) AS CuttingBookingAt, CAST('' AS nvarchar(80)) AS CuttingBookingEmployee, CAST('' AS nvarchar(64)) AS CuttingBookingRowId"
-            }
-            $command.CommandText = @"
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-;WITH JobItemsRanked AS (
-    SELECT ji.*,
-           DENSE_RANK() OVER (PARTITION BY ji.AUFNR,ji.POSNR ORDER BY ISNULL(ji.KEYINDEX,0) DESC,ISNULL(ji.JOBNUMBER,0) DESC) AS GenerationRank
-    FROM SYSADM.PROD_JOBITEM ji
-    WHERE ji.AUFNR IN ($orderSql)
-),
-JobItems AS (
-    SELECT * FROM JobItemsRanked WHERE GenerationRank <= @GenerationHistoryDepth
-),
-SeqCurrentOptimization AS (
-    SELECT os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0) AS BOM_ID,ISNULL(os.KEYINDEX,0) AS KEYINDEX,
-           MAX(ISNULL(os.OPTIMIZATION,0)) AS SequenceOptimization
-    FROM SYSADM.PROD_OPTI_SEQUENCE os
-    WHERE os.AUFNR IN ($orderSql)
-    GROUP BY os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0),ISNULL(os.KEYINDEX,0)
-),
-ResolvedJobItems AS (
-    SELECT ji.*,
-           ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION,0),NULLIF(seqopt.SequenceOptimization,0)),0) AS ResolvedOptimization
-    FROM JobItems ji
-    LEFT JOIN SeqCurrentOptimization seqopt
-      ON seqopt.AUFNR=ji.AUFNR AND seqopt.POSNR=ji.POSNR
-     AND seqopt.BOM_ID=ISNULL(ji.BOM_ID,0) AND seqopt.KEYINDEX=ISNULL(ji.KEYINDEX,0)
-),
-ResolvedSequenceRows AS (
-    SELECT ji.*,
-           ISNULL(seq.SEQUENCE,0) AS ResolvedOptimizationSequence,
-           ISNULL(seq.PLATENR,0) AS ResolvedPlateNumber,
-           CONVERT(nvarchar(64),seq.ROWID) AS OptimizationSequenceRowId
-    FROM ResolvedJobItems ji
-    LEFT JOIN SYSADM.PROD_OPTI_SEQUENCE seq
-      ON seq.AUFNR=ji.AUFNR AND seq.POSNR=ji.POSNR
-     AND ISNULL(seq.BOM_ID,0)=ISNULL(ji.BOM_ID,0) AND ISNULL(seq.KEYINDEX,0)=ISNULL(ji.KEYINDEX,0)
-     AND seq.OPTIMIZATION=ji.ResolvedOptimization
-),
--- v0.507: Probe outputs 61-65 proved that Crystal's numbered edge-length
--- callouts for the verified MOD 13 label come from the active TYPE=0
--- PROD_JOBITEMSHAPE row. Rank one shape row per physical generation and keep
--- the raw 1/32-inch parameters; the browser only interprets MOD 13, where the
--- relationship is proven by the supplied physical label.
-ShapeDisplayRanked AS (
-    SELECT sh.AUFNR,sh.POSNR,ISNULL(sh.JOBNUMBER,0) AS JOBNUMBER,ISNULL(sh.KEYINDEX,0) AS KEYINDEX,
-           ISNULL(sh.MOD_NUMMER,0) AS MOD_NUMMER,
-           ISNULL(sh.MOD_PARAM1,0) AS MOD_PARAM1,ISNULL(sh.MOD_PARAM2,0) AS MOD_PARAM2,
-           ISNULL(sh.MOD_PARAM3,0) AS MOD_PARAM3,ISNULL(sh.MOD_PARAM4,0) AS MOD_PARAM4,
-           ISNULL(sh.MOD_PARAM5,0) AS MOD_PARAM5,ISNULL(sh.MOD_PARAM6,0) AS MOD_PARAM6,
-           ISNULL(sh.MOD_PARAM7,0) AS MOD_PARAM7,ISNULL(sh.MOD_PARAM8,0) AS MOD_PARAM8,
-           ROW_NUMBER() OVER (
-               PARTITION BY sh.AUFNR,sh.POSNR,ISNULL(sh.JOBNUMBER,0),ISNULL(sh.KEYINDEX,0)
-               ORDER BY CASE WHEN ISNULL(sh.BOM_ID,0)=0 THEN 0 ELSE 1 END, ISNULL(sh.BOM_ID,0), sh.ROWID
-           ) AS RN
-    FROM SYSADM.PROD_JOBITEMSHAPE sh
-    WHERE sh.AUFNR IN ($orderSql) AND ISNULL(sh.TYPE,0)=0
-)
-$cuttingCte
-SELECT
-    CONVERT(nvarchar(64),ji.ROWID) AS SourceRowId,
-    ji.AUFNR AS OrderNr,ji.POSNR AS ItemNr,ISNULL(ji.BOM_ID,0) AS BomId,ISNULL(ji.KEYINDEX,0) AS KeyIndex,
-    ISNULL(ji.JOBNUMBER,0) AS BatchJobNumber,ISNULL(job.STATUS,0) AS BatchStatusCode,
-    LTRIM(RTRIM(ISNULL(job.DESCRIPTION,''))) AS BatchDescription,job.CREATIONDATE AS BatchCreatedAt,
-    LTRIM(RTRIM(ISNULL(job.MITARB_ID,''))) AS BatchEmployee,job.LASTCHANGEDATE AS BatchLastChangedAt,
-    LTRIM(RTRIM(ISNULL(job.LASTCHANGEUSER,''))) AS BatchLastChangedUser,
-    ji.ResolvedOptimization AS OptimizationNumber,
-    ISNULL(opti.STATUS,0) AS OptimizationStatusCode,ISNULL(opti.OPTIMODE,0) AS OptimizationMode,
-    LTRIM(RTRIM(ISNULL(opti.SourceName,''))) AS OptimizationStatusSource,
-    opti.OPTIDATE AS OptimizationDate,ISNULL(opti.SHEETCOUNT,0) AS OptimizationSheetCount,opti.LASTCHANGEDATE AS OptimizationLastChangedAt,
-    ISNULL(ji.SEQUENCE_OPTIRUN,0) AS OptimizationRunSequence,ji.ResolvedOptimizationSequence AS OptimizationSequence,
-    ISNULL(ji.OptimizationSequenceRowId,'') AS OptimizationSequenceRowId,
-    ji.ResolvedPlateNumber AS OptimizationPlateNumber,ISNULL(plate.CUT,0) AS OptimizationPlateCut,
-    ISNULL(plate.STOCKBOOKED,0) AS OptimizationPlateStockBooked,plate.LASTCHANGEDATE AS OptimizationPlateLastChangedAt,
-    LTRIM(RTRIM(ISNULL(plate.LASTCHANGEUSER,''))) AS OptimizationPlateLastChangedUser,
-    ISNULL(ji.STACKNUMBER,0) AS StackNumber,
-    ISNULL(ji.STACKPOSITION,0) AS StackPosition,
-    ISNULL(NULLIF(shape.MOD_NUMMER,0),ISNULL(ji.MOD_NUMMER,0)) AS ShapeNumber,
-    ISNULL(shape.MOD_PARAM1,0) AS ShapeParam1,ISNULL(shape.MOD_PARAM2,0) AS ShapeParam2,
-    ISNULL(shape.MOD_PARAM3,0) AS ShapeParam3,ISNULL(shape.MOD_PARAM4,0) AS ShapeParam4,
-    ISNULL(shape.MOD_PARAM5,0) AS ShapeParam5,ISNULL(shape.MOD_PARAM6,0) AS ShapeParam6,
-    ISNULL(shape.MOD_PARAM7,0) AS ShapeParam7,ISNULL(shape.MOD_PARAM8,0) AS ShapeParam8,
-    ISNULL(ji.MENGE,0) AS Quantity,ISNULL(ji.MENGE_CUT,0) AS CutQuantity,
-    ISNULL(ji.AGG,0) AS AggregateId,ISNULL(ji.LASTAGG,0) AS LastAggregateId,
-    $cuttingSelect,
-    LTRIM(RTRIM(ISNULL(posx.BARCODE_START,''))) AS ItemBarcodeStart,
-    LTRIM(RTRIM(ISNULL(stkl.BARCODE_START,''))) AS BomBarcodeStart,
-    ISNULL(pos.PP_GEWICHT,0) AS Weight,ISNULL(pos.PP_QM,0) AS SurfaceArea,
-    LTRIM(RTRIM(ISNULL(head.AH_NAME1,''))) AS CustomerName,
-    LTRIM(RTRIM(ISNULL(head.BEST_TEXT1,''))) AS SgBestText1,
-    LTRIM(RTRIM(ISNULL(head.OR_TOUR,''))) AS RouteText,
-    LTRIM(RTRIM(ISNULL(pos.PROD_BEZ1,''))) AS ProductDescription,
-    ISNULL(pos.PP_MENGE,0) AS PositionQuantity,ISNULL(pos.PP_BREITE,0) AS PositionWidth,ISNULL(pos.PP_HOEHE,0) AS PositionHeight
-FROM ResolvedSequenceRows ji
-INNER JOIN SYSADM.PROD_JOB job ON job.JOBNUMBER=ji.JOBNUMBER
-LEFT JOIN SYSADM.BW_AUFTR_KOPF head ON head.ID=ji.AUFNR
-LEFT JOIN SYSADM.BW_AUFTR_POS pos ON pos.ID=ji.AUFNR AND pos.POS_NR=ji.POSNR
-LEFT JOIN SYSADM.BW_AUFTR_POS_EX posx ON posx.ID=ji.AUFNR AND posx.POS_NR=ji.POSNR
-LEFT JOIN SYSADM.BW_AUFTR_STKL stkl ON stkl.ID=ji.AUFNR AND stkl.POS_NR=ji.POSNR AND stkl.BOM_ID=ji.BOM_ID
-LEFT JOIN ShapeDisplayRanked shape ON shape.AUFNR=ji.AUFNR AND shape.POSNR=ji.POSNR
- AND shape.JOBNUMBER=ISNULL(ji.JOBNUMBER,0) AND shape.KEYINDEX=ISNULL(ji.KEYINDEX,0) AND shape.RN=1
-OUTER APPLY (
-    SELECT TOP 1 u.STATUS,u.OPTIMODE,u.OPTIDATE,u.SHEETCOUNT,u.LASTCHANGEDATE,u.SourceName
-    FROM (
-        SELECT 0 AS SourceRank,CAST('PROD_OPTIMIZATION' AS nvarchar(40)) AS SourceName,
-               o.STATUS,o.OPTIMODE,o.OPTIDATE,o.SHEETCOUNT,o.LASTCHANGEDATE
-        FROM SYSADM.PROD_OPTIMIZATION o
-        WHERE o.OPTIMIZATION=ji.ResolvedOptimization
-        UNION ALL
-        SELECT 1 AS SourceRank,CAST('PROD_OPTI_STATISTICS' AS nvarchar(40)) AS SourceName,
-               s.STATUS,s.OPTIMODE,s.OPTIDATE,s.SHEETCOUNT,s.LASTCHANGEDATE
-        FROM SYSADM.PROD_OPTI_STATISTICS s
-        WHERE s.OPTIMIZATION=ji.ResolvedOptimization
-    ) u
-    ORDER BY CASE WHEN u.LASTCHANGEDATE IS NULL THEN 1 ELSE 0 END,u.LASTCHANGEDATE DESC,u.SourceRank
-) opti
-OUTER APPLY (
-    SELECT TOP 1 p.CUT,p.STOCKBOOKED,p.LASTCHANGEDATE,p.LASTCHANGEUSER
-    FROM SYSADM.PROD_OPTI_PLATES p
-    WHERE p.OPTIMIZATION=ji.ResolvedOptimization AND p.PLATENR=ji.ResolvedPlateNumber
-    ORDER BY p.LASTCHANGEDATE DESC
-) plate
-$cuttingJoin
-ORDER BY ji.AUFNR,ji.POSNR,ji.KEYINDEX,ji.JOBNUMBER,ji.BOM_ID
-OPTION (RECOMPILE);
-"@
-            $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
-            [void]$adapter.Fill($table)
-            $adapter.Dispose(); $command.Dispose()
-
-            # v0.504: the Crystal Cutting Label prints the actual planned process
-            # route beneath the dimensions. Read the authoritative A+W route once
-            # per bounded order batch rather than multiplying PROD_JOBITEM rows by
-            # ZW_AUFTR_ZEIT in the primary query. Process-label enrichment is
-            # supplemental: if an older A+W install cannot resolve one display
-            # join, preserve Batch/Optimization/Cutting synchronization.
-            try {
-                $processBatchOrders = @($batchOrders | Where-Object { $directOrderSet.Contains([string]$_) })
-                if ($processBatchOrders.Count -gt 0) {
-                    $processCommand = $connection.CreateCommand()
-                    $processCommand.CommandTimeout = $queryTimeout
-                    $processPlaceholders = New-Object System.Collections.Generic.List[string]
-                    for ($index = 0; $index -lt $processBatchOrders.Count; $index++) {
-                        $name = "@ProcessOrder$index"
-                        $processPlaceholders.Add($name)
-                        $parameter = $processCommand.Parameters.Add($name, [System.Data.SqlDbType]::Int)
-                        $parameter.Value = [int]$processBatchOrders[$index]
-                    }
-                    $processOrderSql = [string]::Join(",", $processPlaceholders.ToArray())
-                    $processCommand.CommandText = @"
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-SELECT
-    z.AUFNR AS OrderNr,z.POSNR AS ItemNr,ISNULL(z.BOM_ID,0) AS BomId,ISNULL(z.BOM_NODE,0) AS BomNode,
-    ISNULL(z.ARBART,0) AS WorkTypeId,LTRIM(RTRIM(ISNULL(wt.BEA_TYPBEZ,''))) AS WorkType,
-    ISNULL(z.AGG,0) AS AggregateId,ISNULL(z.ARBFOLGE,0) AS WorkSequence,
-    LTRIM(RTRIM(ISNULL(z.KANTEN,''))) AS EdgeData,ISNULL(z.STUECK,0) AS PlannedPieces,
-    ISNULL(z.FERTIG,0) AS CompletedPieces,ISNULL(z.KZ_SELECTED,0) AS IsSelected,ISNULL(z.KZ_NOP,0) AS IsNoOperation,
-    LTRIM(RTRIM(ISNULL(prod.BA_BEZ1,''))) AS ProcessProductDescription,
-    LTRIM(RTRIM(ISNULL(machine.AGG_BEZ,''))) AS Machine,
-    CONVERT(nvarchar(64),z.ROWID) AS ProcessRowId
-FROM SYSADM.ZW_AUFTR_ZEIT z
-LEFT JOIN SYSADM.ZW_BEATYPEN wt ON wt.BEA_TYP=z.ARBART
-LEFT JOIN SYSADM.BA_PRODUKTE_BEZ prod ON prod.BA_PRODUKT=z.BOM_PRODUKT AND prod.SPRACH_ID=0
-OUTER APPLY (
-    SELECT CASE WHEN COUNT(*)=1 THEN MAX(candidate.AGG_BEZ) ELSE '' END AS AGG_BEZ
-    FROM (
-        SELECT DISTINCT LTRIM(RTRIM(ISNULL(za.AGG_BEZ,''))) AS AGG_BEZ
-        FROM SYSADM.ZW_AGGREGATE za
-        WHERE za.BARC=z.AGG AND LTRIM(RTRIM(ISNULL(za.AGG_BEZ,'')))<>''
-    ) candidate
-) machine
-WHERE z.AUFNR IN ($processOrderSql)
-  AND ISNULL(z.KZ_SELECTED,0)=1
-  AND ISNULL(z.KZ_NOP,0)=0
-ORDER BY z.AUFNR,z.POSNR,z.ARBFOLGE,z.BOM_ID,z.ARBART,z.AGG
-OPTION (RECOMPILE);
-"@
-                    $processAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($processCommand)
-                    [void]$processAdapter.Fill($processTable)
-                    $processAdapter.Dispose(); $processCommand.Dispose()
-                }
-            }
-            catch {
-                Write-AutomationLog -Message (
-                    "A+W Cutting Label process-route enrichment failed for production batch {0}/{1}; Batch/Optimization/Cutting evidence will continue without process text: {2}" -f
-                    $batchNumber, $totalBatches, $_.Exception.Message
-                ) -Level "WARN"
-                $processTable.Clear()
-            }
-        }
-        finally {
-            if ($connection.State -ne [System.Data.ConnectionState]::Closed) { $connection.Close() }
-            $connection.Dispose()
-        }
-
-        $processLookup = @{}
-        foreach ($processRow in $processTable.Rows) {
-            $processKey = "{0}|{1}" -f ([string][int64]$processRow.OrderNr),([string][int]$processRow.ItemNr)
-            if (-not $processLookup.ContainsKey($processKey)) {
-                $processLookup[$processKey] = New-Object System.Collections.Generic.List[object]
-            }
-            $processLookup[$processKey].Add([ordered]@{
-                bomId=[int]$processRow.BomId; bomNode=[int]$processRow.BomNode;
-                workTypeId=[int]$processRow.WorkTypeId; workType=[string]$processRow.WorkType;
-                aggregateId=[int]$processRow.AggregateId; workSequence=[int]$processRow.WorkSequence;
-                edgeData=[string]$processRow.EdgeData; plannedPieces=[int]$processRow.PlannedPieces;
-                completedPieces=[int]$processRow.CompletedPieces; processProductDescription=[string]$processRow.ProcessProductDescription;
-                machine=[string]$processRow.Machine; processRowId=[string]$processRow.ProcessRowId
-            })
-        }
-
-        # Process rows describe the physical generation, not each BOM/sequence
-        # source row. Attach the array once per generation so large Orders do not
-        # inflate the JSON payload with identical Crystal-label process metadata.
-        $processAttachedGenerations = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($row in $table.Rows) {
-            $rowProcessKey = "{0}|{1}" -f ([string][int64]$row.OrderNr),([string][int]$row.ItemNr)
-            $generationProcessKey = "{0}|{1}|{2}|{3}|{4}" -f (
-                [string][int64]$row.OrderNr, [string][int]$row.ItemNr, [int]$row.KeyIndex,
-                [string][int64]$row.BatchJobNumber, [int]$row.OptimizationNumber
-            )
-            $rowProcessRows = @()
-            if ($processLookup.ContainsKey($rowProcessKey) -and $processAttachedGenerations.Add($generationProcessKey)) {
-                $rowProcessRows = @($processLookup[$rowProcessKey].ToArray())
-            }
-            $rows.Add([ordered]@{
-                sourceRowId=[string]$row.SourceRowId; orderNr=[string][int64]$row.OrderNr; itemNr=[string][int]$row.ItemNr;
-                bomId=[int]$row.BomId; keyIndex=[int]$row.KeyIndex; batchJobNumber=[string][int64]$row.BatchJobNumber;
-                batchStatusCode=[int]$row.BatchStatusCode; batchDescription=[string]$row.BatchDescription;
-                batchCreatedAt=$(if ($row.BatchCreatedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.BatchCreatedAt).ToString("o") });
-                batchEmployee=[string]$row.BatchEmployee; batchLastChangedAt=$(if ($row.BatchLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.BatchLastChangedAt).ToString("o") });
-                batchLastChangedUser=[string]$row.BatchLastChangedUser; optimizationNumber=[int]$row.OptimizationNumber;
-                optimizationStatusCode=[int]$row.OptimizationStatusCode; optimizationMode=[int]$row.OptimizationMode;
-                optimizationStatusSource=[string]$row.OptimizationStatusSource;
-                optimizationDate=$(if ($row.OptimizationDate -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationDate).ToString("o") });
-                optimizationSheetCount=[int]$row.OptimizationSheetCount;
-                optimizationLastChangedAt=$(if ($row.OptimizationLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationLastChangedAt).ToString("o") });
-                optimizationRunSequence=[int]$row.OptimizationRunSequence; optimizationSequence=[int]$row.OptimizationSequence;
-                optimizationSequenceRowId=[string]$row.OptimizationSequenceRowId;
-                optimizationPlateNumber=[int]$row.OptimizationPlateNumber; optimizationPlateCut=[int]$row.OptimizationPlateCut;
-                optimizationPlateStockBooked=[int]$row.OptimizationPlateStockBooked;
-                optimizationPlateLastChangedAt=$(if ($row.OptimizationPlateLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.OptimizationPlateLastChangedAt).ToString("o") });
-                optimizationPlateLastChangedUser=[string]$row.OptimizationPlateLastChangedUser;
-                stackNumber=[int]$row.StackNumber; stackPosition=[int]$row.StackPosition; shapeNumber=[int]$row.ShapeNumber;
-                # A+W shape parameters are raw 1/32-inch units. Keep the source
-                # values intact so only evidence-backed label formulas interpret them.
-                shapeParameterUnitsPerInch=32;
-                shapeParameters=@(
-                    [decimal]$row.ShapeParam1
-                    [decimal]$row.ShapeParam2
-                    [decimal]$row.ShapeParam3
-                    [decimal]$row.ShapeParam4
-                    [decimal]$row.ShapeParam5
-                    [decimal]$row.ShapeParam6
-                    [decimal]$row.ShapeParam7
-                    [decimal]$row.ShapeParam8
-                );
-                quantity=[decimal]$row.Quantity; cutQuantity=[decimal]$row.CutQuantity; aggregateId=[int]$row.AggregateId; lastAggregateId=[int]$row.LastAggregateId;
-                cuttingBookingAt=$(if ($row.CuttingBookingAt -eq [DBNull]::Value) { "" } else { ([datetime]$row.CuttingBookingAt).ToString("o") });
-                cuttingBookingEmployee=[string]$row.CuttingBookingEmployee; cuttingBookingRowId=[string]$row.CuttingBookingRowId;
-                itemBarcodeStart=[string]$row.ItemBarcodeStart; bomBarcodeStart=[string]$row.BomBarcodeStart;
-                weight=[decimal]$row.Weight; surfaceArea=[decimal]$row.SurfaceArea;
-                customerName=[string]$row.CustomerName; sgBestText1=[string]$row.SgBestText1; routeText=[string]$row.RouteText;
-                productDescription=[string]$row.ProductDescription; positionQuantity=[decimal]$row.PositionQuantity;
-                positionWidth=[decimal]$row.PositionWidth; positionHeight=[decimal]$row.PositionHeight;
-                processRows=$rowProcessRows
-            })
-        }
-        $batchTimer.Stop()
-        Write-AutomationLog -Message ("A+W production batch {0}/{1} completed. Orders={2} ProductionRows={3} ProcessRows={4} DurationMs={5}." -f $batchNumber,$totalBatches,$batchOrders.Count,$table.Rows.Count,$processTable.Rows.Count,[Math]::Round($batchTimer.Elapsed.TotalMilliseconds))
-        $table.Dispose(); $processTable.Dispose()
-    }
-    $timer.Stop()
-    $matchedOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($productionRow in $rows) {
-        $matchedOrder = ([string](Get-OptionalProperty -Object $productionRow -Name "orderNr" -DefaultValue "")).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($matchedOrder)) { [void]$matchedOrderSet.Add($matchedOrder) }
-    }
-    $missingOrders = @($orders | Where-Object { -not $matchedOrderSet.Contains([string]$_) })
-    $missingSample = @($missingOrders | Select-Object -First 20)
-    $coverage = [ordered]@{
-        requestedOrderCount = [int]$orders.Count
-        directDeliveryOrderCount = [int]$directOrderSet.Count
-        matchedOrderCount = [int]$matchedOrderSet.Count
-        missingOrderCount = [int]$missingOrders.Count
-        missingOrderSample = @($missingSample)
-        orderLookbackDays = [int]$orderLookbackDays
-    }
-    Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1}/{2} covered order(s) in {3} ms. MissingOrders={4}." -f [int]$rows.Count,[int]$matchedOrderSet.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds),[int]$missingOrders.Count)
-    if ($missingSample.Count -gt 0) {
-        Write-AutomationLog -Message ("A+W production coverage missing Order sample: {0}" -f ([string]::Join(", ", @($missingSample)))) -Level "WARN"
-    }
-    # Compatibility markers retained for historical regression contracts:
-    # v499-aw-production-1 / version="v501-aw-production-2" / version="v502-aw-production-3".
-    # Historical SQL spelling retained for contract search only:
-    # COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION)
-    return [ordered]@{
-        version="v507-aw-production-5"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
-        orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; orderLookbackDays=$orderLookbackDays; generationHistoryDepth=$generationHistoryDepth; coverage=$coverage; rows=@($rows.ToArray())
-    }
-}
-
 function Get-DeliveryRows {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1701,24 +1044,14 @@ function Invoke-ConfiguredPython {
         $text = [string]$_
         if ($text -match '\s') { '"{0}"' -f $text.Replace('"', '\"') } else { $text }
     }) -join " "
-    Write-AutomationLog -Message "Launching Python subprocess." -Level "DEBUG"
-    Write-AutomationLog -Message ("COMMAND | Python | {0} {1}" -f $pythonPath, $argumentPreview) -Level "INFO"
+    Write-AutomationDebug -Message ("Launching Python subprocess. Executable={0} Arguments={1}" -f $pythonPath, $argumentPreview)
     $pythonTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    $commandOutput = New-Object System.Collections.Generic.List[string]
-
-    # v0.502: do not wrap the child process in an array subexpression. The old
-    # @(& python ...) form buffered every stdout line until Python exited, which
-    # made a healthy long importer look frozen in Status & Logs for many minutes.
-    # import_delivery_folder.py flushes its [IMPORT] progress lines, so consume
-    # the pipeline as it is produced and mirror every line into the authoritative
-    # automation log immediately.
-    & $pythonPath @allArguments 2>&1 | ForEach-Object {
-        $outputLine = [string]$_
-        $commandOutput.Add($outputLine)
-        Write-AutomationLog -Message ("Python: {0}" -f $outputLine)
-    }
+    $commandOutput = @(& $pythonPath @allArguments 2>&1)
     $exitCode = $LASTEXITCODE
     $pythonTimer.Stop()
+    foreach ($outputLine in $commandOutput) {
+        Write-AutomationLog -Message ("Python: {0}" -f [string]$outputLine)
+    }
     Write-AutomationDebug -Message (
         "Python subprocess finished. ExitCode={0} DurationMs={1} OutputLines={2}" -f
         $exitCode,
@@ -1855,8 +1188,6 @@ function Publish-AutomationNotification {
         safetyDeferredDates = $deferredDates
         safetyDeferredDetails = $safetyDeferredDetailSnapshot
         importResults = $importResultSnapshot
-        awRejectSync = $script:AwRejectSyncResult
-        awCuttingSync = $script:AwCuttingSyncResult
         affectedListIds = $affectedListIds
         runAction = $RunAction
         completedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -2091,31 +1422,6 @@ function Export-DeliveryDate {
     }
     $hashText = $hashPayload | ConvertTo-Json -Depth 8 -Compress
     $dataHash = Get-Sha256Text -Text $hashText
-
-    # Website version 4: keep the canonical SQL rows in memory for direct scanner
-    # reconciliation. The XLSX generated below remains a human-readable fallback
-    # and export artifact; it is no longer required as the SQL import transport.
-    $directSourcePath = (
-        "aw-sql://{0}/{1}/{2}/{3}+{4}/{5}" -f
-        [string]$Config.Database.Server,
-        [string]$Config.Database.Database,
-        [string]$Config.SourceMapping.Schema,
-        [string]$Config.SourceMapping.HeaderTable,
-        [string]$Config.SourceMapping.ItemTable,
-        $dateKey
-    )
-    $script:DirectImportPayloads.Add([ordered]@{
-        deliveryDate = $dateKey
-        sourceName = "A+W SQL $dateKey"
-        sourcePath = $directSourcePath
-        sourceHash = $dataHash
-        payload = $payload
-    })
-    Write-AutomationDebug -Message (
-        "Queued direct A+W scanner payload for {0}. Rows={1} SourceHash={2}" -f
-        $dateKey, [int]$rows.Count, $dataHash
-    )
-
     $fileName = [string]::Format([Globalization.CultureInfo]::InvariantCulture, [string]$Config.Report.OutputNameFormat, $Date)
     $destinationPath = Join-Path ([string]$Config.DestinationFolder) $fileName
     $statePath = Get-StatePath -Config $Config -Date $Date
@@ -2247,12 +1553,11 @@ function Invoke-ScannerImport {
         [Parameter(Mandatory = $false)][AllowEmptyCollection()][datetime[]]$Dates = @(),
         [Parameter(Mandatory = $false)][AllowEmptyCollection()][datetime[]]$ForceDates = @(),
         [bool]$Force = $false,
-        [bool]$SelectiveSqlSync = $false,
-        [bool]$RejectOnly = $false
+        [bool]$SelectiveSqlSync = $false
     )
 
     $importMode = [string](Get-OptionalProperty -Object $Config.Import -Name "Mode" -DefaultValue "disabled")
-    if (($null -eq $Dates -or $Dates.Count -eq 0) -and -not $RejectOnly) {
+    if ($null -eq $Dates -or $Dates.Count -eq 0) {
         Write-AutomationLog -Message "No delivery-list workbooks require scanner verification or import."
         return
     }
@@ -2312,18 +1617,14 @@ function Invoke-ScannerImport {
     }
 
     $importerPath = Join-Path $PSScriptRoot "import_delivery_folder.py"
-    $dateFrom = if ($targetDates.Count -gt 0) { ($targetDates | Select-Object -First 1).ToString("yyyy-MM-dd") } else { (Get-Date).ToString("yyyy-MM-dd") }
-    $dateTo = if ($targetDates.Count -gt 0) { ($targetDates | Select-Object -Last 1).ToString("yyyy-MM-dd") } else { $dateFrom }
+    $dateFrom = ($targetDates | Select-Object -First 1).ToString("yyyy-MM-dd")
+    $dateTo = ($targetDates | Select-Object -Last 1).ToString("yyyy-MM-dd")
     $resultPath = Join-Path $Config.WorkingRoot ("State\import-result-{0}.json" -f [guid]::NewGuid().ToString("N"))
     $syncRequestPath = Join-Path $Config.WorkingRoot ("State\import-sync-request-{0}.json" -f [guid]::NewGuid().ToString("N"))
-    $directPayloadPath = Join-Path $Config.WorkingRoot ("State\direct-sql-payload-{0}.json" -f [guid]::NewGuid().ToString("N"))
-    Write-AutomationDebug -Message (
-        "Scanner import temporary files. Result={0} SyncRequest={1} DirectPayload={2}" -f
-        $resultPath, $syncRequestPath, $directPayloadPath
-    )
+    Write-AutomationDebug -Message ("Scanner import temporary files. Result={0} SyncRequest={1}" -f $resultPath, $syncRequestPath)
 
     if ($SelectiveSqlSync) {
-        Write-AutomationLog -Message "Verifying direct A+W SQL rows against scanner stage lists for $dateFrom through $dateTo. Generated workbooks are fallback/export artifacts."
+        Write-AutomationLog -Message "Verifying generated workbooks and scanner stage lists for $dateFrom through $dateTo"
     }
     else {
         Write-AutomationLog -Message "Importing workbooks from the Temp Delivery Lists folder for $dateFrom through $dateTo"
@@ -2340,8 +1641,7 @@ function Invoke-ScannerImport {
             "--run-id", [string]$script:RunId,
             "--run-started-at", [string]$script:StartedAt,
             "--initialize-store", ([bool](Get-OptionalProperty -Object $Config.Import -Name "InitializeStore" -DefaultValue $true)).ToString().ToLowerInvariant(),
-            "--result-path", $resultPath,
-            "--reject-only", $RejectOnly.ToString().ToLowerInvariant()
+            "--result-path", $resultPath
         )
         if (-not [string]::IsNullOrWhiteSpace($expectedStoreMode)) {
             $arguments += @("--expected-store-mode", $expectedStoreMode)
@@ -2353,40 +1653,9 @@ function Invoke-ScannerImport {
             $arguments += @("--expected-store-server", $expectedStoreServer)
         }
         if ($SelectiveSqlSync) {
-            $targetDateKeys = @($targetDates | ForEach-Object { $_.ToString("yyyy-MM-dd") })
-            $directPayloads = @(
-                $script:DirectImportPayloads | Where-Object {
-                    $targetDateKeys -contains [string]$_.deliveryDate
-                }
-            )
-            $rejectSyncRowCount = if ($null -ne $script:AwRejectSyncPayload) { @($script:AwRejectSyncPayload.rows).Count } else { 0 }
-            $cuttingSyncRowCount = if ($null -ne $script:AwCuttingSyncPayload) { @($script:AwCuttingSyncPayload.rows).Count } else { 0 }
-            if ($directPayloads.Count -gt 0 -or $rejectSyncRowCount -gt 0 -or $cuttingSyncRowCount -gt 0 -or $RejectOnly) {
-                $directRequest = [ordered]@{
-                    # Compatibility marker retained for older diagnostics/tests: v484-aw-direct-reject-1
-                    version = "v498-aw-direct-production-1"
-                    generatedAt = (Get-Date).ToUniversalTime().ToString("o")
-                    payloads = @($directPayloads)
-                    rejectSync = $script:AwRejectSyncPayload
-                    cuttingSync = $script:AwCuttingSyncPayload
-                }
-                Write-AutomationStep -Message "Serializing the direct A+W delivery/reject/production payload for the scanner importer."
-                $directRequest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $directPayloadPath -Encoding UTF8
-                $directPayloadBytes = $(if (Test-Path -LiteralPath $directPayloadPath -PathType Leaf) { (Get-Item -LiteralPath $directPayloadPath).Length } else { 0 })
-                $arguments += @("--direct-payload-path", $directPayloadPath)
-                Write-AutomationLog -Message (
-                    "Passing {0} direct A+W delivery payload(s), {1} raw A+W breakage row(s), and {2} A+W production row(s) to the scanner importer. PayloadBytes={3}." -f
-                    [int]$directPayloads.Count, [int]$rejectSyncRowCount, [int]$cuttingSyncRowCount, [int64]$directPayloadBytes
-                )
-            }
-            else {
-                Write-AutomationLog -Message "No direct SQL delivery or reject payloads were available for this selective run; compatibility workbook verification will be used." -Level "WARN"
-            }
-
             $syncRequest = [ordered]@{
-                targetDates = $targetDateKeys
+                targetDates = @($targetDates | ForEach-Object { $_.ToString("yyyy-MM-dd") })
                 forceImportDates = @($forcedDates | ForEach-Object { $_.ToString("yyyy-MM-dd") })
-                sourceMode = $(if ($directPayloads.Count -gt 0) { "aw-sql-direct" } else { "workbook-compatibility" })
                 allowSourceRemovals = $false
                 supersededOrderCandidates = @($script:SupersededOrderCandidates | ForEach-Object { $_ })
                 verifiedExcludedOrderItems = @(
@@ -2402,7 +1671,6 @@ function Invoke-ScannerImport {
             }
             $syncRequest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $syncRequestPath -Encoding UTF8
             $arguments += @("--sync-request-path", $syncRequestPath)
-            Write-AutomationDebug -Message ("Scanner sync request prepared. Path={0}" -f $syncRequestPath)
         }
 
         $pythonImportFailure = $null
@@ -2451,56 +1719,6 @@ function Invoke-ScannerImport {
         $lastImportResultPath = Join-Path $Config.WorkingRoot "State\last-import-result.json"
         Copy-Item -LiteralPath $resultPath -Destination $lastImportResultPath -Force
         $script:ImportResults = @($script:ImportResults + @($result.files))
-        $awRejectSyncResult = Get-OptionalProperty -Object $result -Name "awRejectSync" -DefaultValue $null
-        if ($null -ne $awRejectSyncResult) {
-            $script:AwRejectSyncResult = $awRejectSyncResult
-            $rejectSyncOk = [bool](Get-OptionalProperty -Object $awRejectSyncResult -Name "ok" -DefaultValue $true)
-            if (-not $rejectSyncOk) {
-                Write-AutomationLog -Message (
-                    "A+W reject synchronization was skipped after an error; delivery-list reconciliation completed independently: {0}" -f
-                    [string](Get-OptionalProperty -Object $awRejectSyncResult -Name "error" -DefaultValue "Unknown reject synchronization error")
-                ) -Level "WARN"
-            }
-            Write-AutomationLog -Message (
-                "A+W Internal Reject sync result: sourceRows={0}, logicalEvents={1}, mirroredInternalRejects={2}, insertedSourceRows={3}, updatedSourceRows={4}, unchangedSourceRows={5}." -f
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "sourceRows" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "logicalEvents" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "mirroredInternalRejects" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "insertedSourceRows" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "updatedSourceRows" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awRejectSyncResult -Name "unchangedSourceRows" -DefaultValue 0)
-            )
-        }
-        $awCuttingSyncResult = Get-OptionalProperty -Object $result -Name "awCuttingSync" -DefaultValue $null
-        if ($null -ne $awCuttingSyncResult) {
-            $script:AwCuttingSyncResult = $awCuttingSyncResult
-            $cuttingSyncOk = [bool](Get-OptionalProperty -Object $awCuttingSyncResult -Name "ok" -DefaultValue $true)
-            if (-not $cuttingSyncOk) {
-                Write-AutomationLog -Message (
-                    "A+W Cutting synchronization was skipped after an error; delivery-list reconciliation completed independently: {0}" -f
-                    [string](Get-OptionalProperty -Object $awCuttingSyncResult -Name "error" -DefaultValue "Unknown Cutting synchronization error")
-                ) -Level "WARN"
-            }
-            Write-AutomationLog -Message (
-                "A+W Cutting sync result: sourceRows={0}, generations={1}, inserted={2}, updated={3}, unchanged={4}, durationMs={5}." -f
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "sourceRows" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "generations" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "inserted" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "updated" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "unchanged" -DefaultValue 0),
-                [int](Get-OptionalProperty -Object $awCuttingSyncResult -Name "durationMs" -DefaultValue 0)
-            )
-            $cuttingCoverage = Get-OptionalProperty -Object $awCuttingSyncResult -Name "coverage" -DefaultValue $null
-            if ($null -ne $cuttingCoverage) {
-                Write-AutomationLog -Message (
-                    "A+W Cutting coverage: matchedOrders={0}/{1}, missingOrders={2}, sample=[{3}]." -f
-                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "matchedOrderCount" -DefaultValue 0),
-                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "requestedOrderCount" -DefaultValue 0),
-                    [int](Get-OptionalProperty -Object $cuttingCoverage -Name "missingOrderCount" -DefaultValue 0),
-                    ([string]::Join(", ", @((Get-OptionalProperty -Object $cuttingCoverage -Name "missingOrderSample" -DefaultValue @()))))
-                )
-            }
-        }
         $pendingSupersededReviews = [int](Get-OptionalProperty -Object $result -Name "pendingSupersededOrderReviews" -DefaultValue 0)
         $candidateReviewSummary = Get-OptionalProperty -Object $result -Name "supersededOrderReview" -DefaultValue $null
         $candidateReviewWarning = [string](Get-OptionalProperty -Object $result -Name "supersededOrderReviewWarning" -DefaultValue "")
@@ -2583,7 +1801,7 @@ function Invoke-ScannerImport {
             $failedMessage = if ($failedErrors.Count -gt 0) { $failedErrors -join " | " } elseif (-not [string]::IsNullOrWhiteSpace($failedReason)) { $failedReason } else { "No detailed error was returned." }
             Write-AutomationLog -Message ("Failed workbook {0} ({1}): {2}" -f $failedName, $failedDate, $failedMessage) -Level "WARN"
             if ($failedName -match '\.(xlsx|xlsm)$') {
-                Write-AutomationLog -Message ("Repair guidance for {0}: on a SQL-authorized computer, run Sync A+W Directly for this delivery date to rebuild and republish the workbook before retrying Folder Import Only." -f $failedDate) -Level "WARN"
+                Write-AutomationLog -Message ("Repair guidance for {0}: on a SQL-authorized computer, run Query SQL, Export & Import for this delivery date to rebuild and republish the workbook before retrying Folder Import Only." -f $failedDate) -Level "WARN"
             }
         }
         if ([int]$result.failedFileCount -gt 0) {
@@ -2646,7 +1864,6 @@ function Invoke-ScannerImport {
         Write-AutomationDebug -Message "Removing scanner-import temporary request/result files."
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $syncRequestPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $directPayloadPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -2905,14 +2122,6 @@ try {
         exit 0
     }
 
-    if ($resolvedAction -eq "RejectSyncOnly") {
-        Write-AutomationStep -Message "Querying A+W breakage history only; delivery-list export/import is skipped."
-        $script:AwRejectSyncPayload = Get-AwRejectSyncPayload -Config $script:Config -RunMode $Mode -ForceEnabled $true
-        Write-AutomationStep -Message "Synchronizing A+W breakage history into standard Internal Rejects."
-        Invoke-ScannerImport -Config $script:Config -Dates @() -Force $true -SelectiveSqlSync $true -RejectOnly $true
-        Write-AutomationStep -Message "A+W reject-only synchronization completed."
-    }
-    else {
     Write-AutomationStep -Message "Resolving the delivery-date window for this run."
     $dates = @(Get-DateRange -Config $script:Config -RunMode $Mode -RequestedDate $DeliveryDate -RequestedDateFrom $DateFrom -RequestedDateTo $DateTo)
     Write-AutomationDebug -Message ("Resolved {0} delivery date(s): {1}" -f [int]$dates.Count, (Get-AutomationDateListText -Dates $dates))
@@ -2931,49 +2140,18 @@ try {
             Write-AutomationDebug -Message ("Finished delivery date {0}. DurationMs={1}" -f $dateKey, [Math]::Round($dateTimer.Elapsed.TotalMilliseconds))
         }
         if ($resolvedAction -eq "SqlExportAndImport") {
-            Write-AutomationStep -Message "Querying recent A+W breakage history for scanner reject synchronization."
-            try {
-                $script:AwRejectSyncPayload = Get-AwRejectSyncPayload -Config $script:Config -RunMode $Mode -ForceEnabled (-not [string]::IsNullOrWhiteSpace([string]$RequestId))
-            }
-            catch {
-                $script:AwRejectSyncPayload = $null
-                $script:AwRejectSyncResult = [ordered]@{
-                    ok = $false
-                    sourceRows = 0
-                    logicalEvents = 0
-                    error = $_.Exception.Message
-                }
-                Write-AutomationLog -Message (
-                    "A+W reject synchronization query failed and was skipped; delivery-list reconciliation will continue: {0}" -f
-                    $_.Exception.Message
-                ) -Level "WARN"
-            }
-            Write-AutomationStep -Message "Querying A+W production batch/optimization state for Cutting progress."
-            try {
-                $script:AwCuttingSyncPayload = Get-AwCuttingSyncPayload -Config $script:Config -DirectPayloads $script:DirectImportPayloads -ForceEnabled (-not [string]::IsNullOrWhiteSpace([string]$RequestId))
-            }
-            catch {
-                $script:AwCuttingSyncPayload = $null
-                $script:AwCuttingSyncResult = [ordered]@{ ok = $false; sourceRows = 0; generations = 0; error = $_.Exception.Message }
-                Write-AutomationLog -Message (
-                    "A+W Cutting synchronization query failed and was skipped; delivery-list reconciliation will continue: {0}" -f $_.Exception.Message
-                ) -Level "WARN"
-            }
-            Write-AutomationStep -Message "Preparing direct scanner reconciliation for queried A+W delivery dates."
+            Write-AutomationStep -Message "Preparing scanner reconciliation for exported A+W delivery dates."
             $sourceDates = @($script:SourceDates | Sort-Object -Unique)
-            # v0.502: manual Sync A+W Directly still queries every requested date and
-            # the Python verifier compares every direct payload against the live scanner.
-            # Do not force-write every date merely because the operator clicked Run.
-            # That old behavior could rewrite 15-20 already synchronized dates and make
-            # a healthy manual refresh run for many minutes. Changed exports are still
-            # forced, and scanner_stage_drift independently catches database drift even
-            # when the source hash itself did not change.
-            $forceImportDates = @($script:PendingImportDates | Sort-Object -Unique)
+            # A browser-started Custom run is an explicit operator request to reconcile
+            # the scanner with A+W, even when the exported workbook hash is unchanged.
+            # Scheduled runs may retain their incremental optimization because the Python
+            # verifier also compares current scanner source rows with the workbook.
             if ($Mode -eq "Custom") {
-                Write-AutomationLog -Message (
-                    "Manual update requested; all selected A+W dates will be verified, while only changed/drifted dates will be rewritten. SourceChangedDates={0}." -f
-                    [int]$forceImportDates.Count
-                )
+                $forceImportDates = @($sourceDates)
+                Write-AutomationLog -Message "Manual update requested; forcing authoritative scanner reconciliation for every selected delivery date."
+            }
+            else {
+                $forceImportDates = @($script:PendingImportDates | Sort-Object -Unique)
             }
             if ($sourceDates.Count -gt 0) {
                 Write-AutomationDebug -Message (
@@ -2981,7 +2159,7 @@ try {
                     (Get-AutomationDateListText -Dates $sourceDates),
                     (Get-AutomationDateListText -Dates $forceImportDates)
                 )
-                Write-AutomationStep -Message "Running scanner verification/import for the selected SQL dates. Direct A+W payload transport is enabled when available."
+                Write-AutomationStep -Message "Running scanner verification/import for the selected SQL dates."
                 Invoke-ScannerImport `
                     -Config $script:Config `
                     -Dates $sourceDates `
@@ -2989,26 +2167,16 @@ try {
                     -Force $true `
                     -SelectiveSqlSync $true
             }
-            elseif ($null -ne $script:AwRejectSyncPayload -or $null -ne $script:AwCuttingSyncPayload) {
-                # Reject synchronization is independent of delivery-list drift. A
-                # quiet delivery window must not strand a successfully queried
-                # PROD_BREAKAGE payload before it reaches the scanner database.
-                # Historical log wording retained as a searchable compatibility marker:
-                # No delivery rows require reconciliation; synchronizing the A+W reject payload independently.
-                Write-AutomationStep -Message "No delivery rows require reconciliation; synchronizing available A+W reject/production payloads independently."
-                Invoke-ScannerImport -Config $script:Config -Dates @() -Force $true -SelectiveSqlSync $true -RejectOnly $true
-            }
             elseif ($script:SafetyDeferredDates.Count -gt 0) {
                 Write-AutomationLog -Message "No delivery dates were safe to import in this run. Existing workbooks and scanner data were preserved for all deferred dates." -Level "WARN"
             }
             else {
-                Write-AutomationLog -Message "No A+W delivery rows, reject payloads, or production payloads were found for scanner reconciliation."
+                Write-AutomationLog -Message "No A+W delivery rows were found, so there are no generated workbooks to verify or import."
             }
         }
         else {
             Write-AutomationLog -Message "SQL export-only action completed. Generated workbooks remain in the Temp Delivery Lists folder until imported."
         }
-    }
     }
     Write-AutomationStep -Message "Applying automation retention cleanup."
     Remove-OldAutomationFiles -Config $script:Config

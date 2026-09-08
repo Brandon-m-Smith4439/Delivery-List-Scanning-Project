@@ -95,6 +95,7 @@ class DeliveryAutomationController:
         self._scanner_store_identity_cache: dict[str, str] = {}
         self._state_lock = threading.Lock()
         self._config_lock = threading.Lock()
+        self._gui_status_lock = threading.Lock()
         self._active_process: subprocess.Popen[str] | None = None
         self._active_status: dict[str, Any] = {}
         self._runtime_sync_status: dict[str, Any] = {
@@ -1800,12 +1801,51 @@ class DeliveryAutomationController:
         dashboard["message"] = f"Automation settings saved by {user}."
         return dashboard
 
-    def _write_gui_status(self, config: dict[str, Any], status: dict[str, Any]) -> None:
+    def _write_gui_status(self, config: dict[str, Any], status: dict[str, Any]) -> bool:
+        """Persist browser-run status without ever blocking the output reader.
+
+        Windows antivirus and a simultaneous dashboard read can briefly deny an
+        atomic replace. A fixed ``.tmp`` name also lets concurrent recovery and
+        worker writes collide. Serialize local writers, use a unique temporary
+        file, and bound retries so a status-file problem cannot fill the child
+        stdout pipe and suspend an otherwise healthy automation run.
+        """
         path = self._runtime_paths(config)["gui_run"]
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary, path)
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
+        )
+        payload = json.dumps(status, indent=2) + "\n"
+        status_lock = getattr(self, "_gui_status_lock", None)
+        if status_lock is None:
+            status_lock = threading.Lock()
+            self._gui_status_lock = status_lock
+
+        try:
+            with status_lock:
+                temporary.write_text(payload, encoding="utf-8")
+                for attempt in range(6):
+                    try:
+                        os.replace(temporary, path)
+                        return True
+                    except OSError as exc:
+                        retryable = (
+                            exc.errno in {errno.EACCES, errno.EBUSY}
+                            or getattr(exc, "winerror", None) in {5, 32, 33}
+                        )
+                        if not retryable or attempt >= 5:
+                            return False
+                        time.sleep(0.025 * (attempt + 1))
+        except OSError:
+            return False
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+        return False
 
     def start_run(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         config = self._read_config(required=True)

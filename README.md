@@ -1,14 +1,43 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.507**. SQLite remains the active/default backend.
+Current maintained release: **v0.510**. SQLite remains the active/default backend.
 
-v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It separates fast Order Details data from slow production-share media, caches/reuses recent details, virtualizes heavy Cutting Label/sketch content, replaces high-frequency full-catalog polling with compact revision-aware reads, reduces importer/catalog contention, broadens A+W production coverage by recent production activity, and removes obsolete static-test debt. Its production synchronizer uses bounded, indexed Optimization/Plate lookups that avoid the former A+W SQL timeout and supports Windows PowerShell 5.1 ordered payloads correctly. SQLite advances to schema **17** for targeted read-path indexes.
+v0.510 repairs the manual automation completion handoff and the Scan page's delivery-date recovery. The PowerShell runner and web controller now share one authoritative log, transient Windows status-file locks cannot suspend output consumption, and the single Scan date selector remains synchronized after compact catalog refreshes. SQLite remains schema **18**; no migration or database reset is required.
+
+## Install v0.510
+
+1. Stop the Delivery List Scanner server before copying files.
+2. Extract the v0.510 changed-files ZIP into the current project root with overwrite enabled. The ZIP must preserve its directories and must not contain `data` or a database.
+3. Start the server. SQLite remains schema **18** and existing scans, racks, bays, users, and settings remain in place.
+4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.510 JavaScript is loaded.
+5. On a TC22 or phone, verify the navigation drawer, each main page, Print/Export, All Scans, and the Settings dialogs used by that operator role.
+
+## v0.510 highlights
+
+- Browser-started automation writes to the exact log displayed by Status & Logs.
+- Short-lived Windows file locks are retried with unique temporary files and cannot stop the automation output reader.
+- Compact catalog refreshes update the maintained Scan date selector without relying on the removed Stage selector.
+- Initial delivery-list loading retries transient failures before presenting an error.
+- [Future-chat change guide](docs/FUTURE_CHAT_CHANGE_GUIDE.md) continues to define the `.001` version rule, data-safe changed-files ZIP contract, extraction process, and required validation.
+
+### v0.510 validation
+
+- Regression tests cover Windows status replacement retries, stale-run handling, shared automation logging, and the single-selector Scan catalog refresh.
+- The complete maintained suite and isolated browser/API smoke checks are rerun before release; SQLite remains at schema 18.
+
+## v0.509
+
+v0.509 is the mobile tutorial and control-polish release. It keeps the v0.508 compact-device workflow, adds a maintained blue-outline companion for secondary tutorial controls, preserves solid blue styling for primary tutorial commands, and hardens narrow tutorial/help layouts against clipped or overlapping labels.
+
+## v0.507
+
+v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It separates fast Order Details data from slow production-share media, caches/reuses recent details, virtualizes heavy Cutting Label/sketch content, replaces high-frequency full-catalog polling with compact revision-aware reads, reduces importer/catalog contention, broadens A+W production coverage by recent production activity, and removes obsolete static-test debt. Its production synchronizer uses bounded, indexed Optimization/Plate lookups that avoid the former A+W SQL timeout and supports Windows PowerShell 5.1 ordered payloads correctly. SQLite schema **18** also normalizes legacy SQL Server/A+W timestamps to canonical UTC text without changing event identities.
 
 ## Install v0.507
 
 1. Stop the Delivery List Scanner server before copying files.
 2. Copy the v0.507 changed files over the matching project paths.
-3. Start the server and allow the normal SQLite migration to advance schema **16 -> 17**. Do not replace the database.
+3. Start the server and allow the normal SQLite migration to advance through schema **18**. The app creates a verified backup before upgrading; do not replace the database.
 4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.507 cache keys are loaded.
 5. Open **Automation Control Center > Status & Logs** and run **Sync A+W Directly** once. The production synchronization log now reports matched/missing Order coverage so Batch/Optimization gaps can be diagnosed directly.
 6. Verify a known A+W example in Order Details, such as Order **238076 / Item 1** (Batch **6455**, Optimization **8286**, raw status **460**, already Cut). Core Order Details should open before network-share sketches finish hydrating, and reopening the same Order should display from cache immediately.
@@ -28,6 +57,8 @@ v0.507 is a full runtime-performance and A+W Cutting reliability cleanup. It sep
 - **Crystal MOD 13 edge dimensions are now evidence-based.** The verified `PROD_JOBITEMSHAPE.MOD_PARAM1..4` values use 32 A+W units per inch and reproduce the physical Crystal label callouts exactly for the supplied 238375/3 example. Other shape modes, including SHAPE 99, remain unguessed unless A+W exposes equivalent parameters.
 - **Settings/Admin launchers paint immediately.** Every maintained Settings modal opens its shell before network hydration; network-backed editors show a spinner/error state instead of appearing frozen. Delivery List Management retains its purpose-built paged loading shell, and Statistics shows an explicit loading state while aggregate data is requested.
 - **Legacy static-test debt was removed rather than carried forward.** Obsolete tests tied to retired v0.158-v0.461 structures were pruned; the confirmed duplicate `bayLocationDisplayLabel()` implementation was removed; current behavioral workflows and maintained structure contracts remain covered. Potential definition-only JavaScript helpers were audited but not bulk-deleted without runtime proof.
+- **Every page has guided help.** The top-right Help control reopens a short tutorial for Home, Statistics, Scan, Racks, Internal Rejects, Bay Map, or Settings and includes a lightweight local workflow assistant that does not require an external service.
+- **External SQL timestamps are canonical UTC.** Schema 18 repairs offset-free, seven-fractional-digit A+W timestamps transactionally while preserving immutable A+W event keys and source payloads.
 
 ### v0.507 release-candidate audit
 

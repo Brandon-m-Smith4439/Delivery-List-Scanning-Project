@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import unittest
 from unittest import mock
+import errno
 import json
 import shutil
 import os
+import threading
 import time
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.config import load_config
@@ -19,6 +21,8 @@ from automation.sql_delivery_export.import_delivery_folder import direct_sql_syn
 from backend.production_files import ProductionFileService
 from backend.operations import OperationsFeatureService
 from backend.automation_control import DeliveryAutomationController
+from database.migrations import run_sqlite_migrations
+from database.time_utils import normalize_utc_timestamp, parse_utc_timestamp
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +91,69 @@ class ImportConsistencyTests(unittest.TestCase):
         self.assertEqual(item["qty"], 2)
         self.assertEqual(item["dimensions"], '75" x 64"')
         self.assertEqual(item["processState"], "External Remake")
+
+    def test_sql_server_timestamps_are_normalized_and_migration_preserves_event_identity(self) -> None:
+        verification_root = ROOT / "_verification_timestamp_migration"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            source = {
+                "awRowId": "timestamp-row-1",
+                "orderNr": "991001",
+                "itemNr": "1",
+                "bomId": 0,
+                "quantity": 1,
+                "breakageDate": "2026-09-04T10:00:33.2730000",
+                "sourceLastChangedAt": "2026-09-04T10:01:34.1234567",
+                "originalJobNumber": "88001",
+                "reasonCode": 1,
+                "locationCode": 1,
+            }
+            expected_event_key = store._aw_reject_event_key(source)
+            store.sync_aw_reject_rows([source])
+            with store.connect() as con:
+                event = con.execute(
+                    "SELECT event_key, breakage_date, source_last_changed_at FROM aw_reject_events WHERE event_key=?",
+                    (expected_event_key,),
+                ).fetchone()
+                raw = con.execute(
+                    "SELECT event_key, breakage_date, last_changed_at FROM aw_reject_source_rows WHERE aw_row_id=?",
+                    ("timestamp-row-1",),
+                ).fetchone()
+                mirror = con.execute(
+                    "SELECT rejected_at FROM reject_events WHERE source_type='aw' AND source_external_key=?",
+                    (expected_event_key,),
+                ).fetchone()
+            self.assertEqual(event["event_key"], expected_event_key)
+            self.assertEqual(raw["event_key"], expected_event_key)
+            for value in (event["breakage_date"], event["source_last_changed_at"], raw["breakage_date"], raw["last_changed_at"], mirror["rejected_at"]):
+                self.assertTrue(str(value).endswith("+00:00"), value)
+                self.assertEqual(parse_utc_timestamp(value).utcoffset(), timezone.utc.utcoffset(None))
+
+            # Simulate one pre-schema-18 database row and prove the numbered
+            # migration repairs values without changing immutable event IDs.
+            with store.connect() as con:
+                con.execute("UPDATE aw_reject_events SET breakage_date=? WHERE event_key=?", (source["breakageDate"], expected_event_key))
+                con.execute("UPDATE aw_reject_source_rows SET last_changed_at=? WHERE aw_row_id=?", (source["sourceLastChangedAt"], "timestamp-row-1"))
+                con.execute("DELETE FROM schema_migrations WHERE version=18")
+                run_sqlite_migrations(con, store)
+                repaired = con.execute(
+                    "SELECT event_key, breakage_date FROM aw_reject_events WHERE event_key=?",
+                    (expected_event_key,),
+                ).fetchone()
+                repaired_source = con.execute(
+                    "SELECT last_changed_at FROM aw_reject_source_rows WHERE aw_row_id=?",
+                    ("timestamp-row-1",),
+                ).fetchone()
+                installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
+            self.assertEqual(installed, 18)
+            self.assertEqual(repaired["event_key"], expected_event_key)
+            self.assertEqual(repaired["breakage_date"], "2026-09-04T10:00:33+00:00")
+            self.assertEqual(repaired_source["last_changed_at"], "2026-09-04T10:01:34+00:00")
+            self.assertEqual(normalize_utc_timestamp("2026-09-04T10:00:33Z"), "2026-09-04T10:00:33+00:00")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
     def test_aw_workbook_rm_marker_is_external_remake(self) -> None:
         fake_rows = [
@@ -531,23 +598,29 @@ class ImportConsistencyTests(unittest.TestCase):
                 )
                 con.commit()
 
-            first = operations.list_rejects(limit=50, page=1)
-            self.assertEqual(first["dateFrom"], "2026-08-24")
-            self.assertEqual(first["dateTo"], "2026-09-06")
-            self.assertEqual(first["totalCount"], 65)
-            self.assertEqual(first["totalPages"], 2)
-            self.assertEqual(len(first["rejects"]), 50)
-            self.assertEqual(first["summary"]["eventCount"], 65)
-            self.assertNotIn("Old User", first["filterOptions"]["users"])
+            class FixedDate(date):
+                @classmethod
+                def today(cls) -> "FixedDate":
+                    return cls(2026, 9, 6)
 
-            second = operations.list_rejects(limit=50, page=2)
-            self.assertEqual(len(second["rejects"]), 15)
-            self.assertEqual(second["page"], 2)
+            with mock.patch("backend.operations.date", FixedDate):
+                first = operations.list_rejects(limit=50, page=1)
+                self.assertEqual(first["dateFrom"], "2026-08-24")
+                self.assertEqual(first["dateTo"], "2026-09-06")
+                self.assertEqual(first["totalCount"], 65)
+                self.assertEqual(first["totalPages"], 2)
+                self.assertEqual(len(first["rejects"]), 50)
+                self.assertEqual(first["summary"]["eventCount"], 65)
+                self.assertNotIn("Old User", first["filterOptions"]["users"])
 
-            filtered = operations.list_rejects(limit=50, page=1, rejected_by="Operator A")
-            self.assertTrue(filtered["rejects"])
-            self.assertTrue(all(row["rejected_by"] == "Operator A" for row in filtered["rejects"]))
-            self.assertLess(filtered["totalCount"], first["totalCount"])
+                second = operations.list_rejects(limit=50, page=2)
+                self.assertEqual(len(second["rejects"]), 15)
+                self.assertEqual(second["page"], 2)
+
+                filtered = operations.list_rejects(limit=50, page=1, rejected_by="Operator A")
+                self.assertTrue(filtered["rejects"])
+                self.assertTrue(all(row["rejected_by"] == "Operator A" for row in filtered["rejects"]))
+                self.assertLess(filtered["totalCount"], first["totalCount"])
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -1004,7 +1077,8 @@ class ImportConsistencyTests(unittest.TestCase):
         base = load_config(ROOT)
         scanner_config = replace(base, root=verification_root, data_dir=verification_root / "data")
         try:
-            with mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
+            with mock.patch.dict(os.environ, {"DLS_SQL_EXPORT_CONFIG": str(config_path)}), \
+                 mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
                  mock.patch.object(DeliveryAutomationController, "_schedule_installed", return_value=False):
                 controller = DeliveryAutomationController(verification_root, scanner_config, None)
                 dashboard = controller.get_dashboard()
@@ -1068,7 +1142,8 @@ class ImportConsistencyTests(unittest.TestCase):
         base = load_config(ROOT)
         scanner_config = replace(base, root=verification_root, data_dir=verification_root / "data")
         try:
-            with mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
+            with mock.patch.dict(os.environ, {"DLS_SQL_EXPORT_CONFIG": str(config_path)}), \
+                 mock.patch.object(DeliveryAutomationController, "_refresh_runtime_scripts_if_safe", return_value=[]), \
                  mock.patch.object(DeliveryAutomationController, "_schedule_installed", return_value=False):
                 controller = DeliveryAutomationController(verification_root, scanner_config, None)
                 dashboard = controller.get_dashboard()
@@ -1083,6 +1158,44 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertFalse(persisted["running"])
             self.assertTrue(persisted["recoveredStaleRun"])
             self.assertIn("stale Running status was cleared automatically", log_path.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_automation_gui_status_retries_replace_without_losing_valid_json(self) -> None:
+        """A transient Windows file lock must not stop the automation output worker."""
+        verification_root = ROOT / "_verification_automation_status_v510"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        state_dir = verification_root / "State"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        status_path = state_dir / "web-gui-run.json"
+        controller = DeliveryAutomationController.__new__(DeliveryAutomationController)
+        controller._gui_status_lock = threading.Lock()
+        status = {"taskId": "status-v510", "running": True, "currentStep": "Import complete"}
+        real_replace = os.replace
+        attempts = 0
+
+        def transient_replace(source, destination):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError(errno.EACCES, "temporary sharing violation")
+            return real_replace(source, destination)
+
+        try:
+            with mock.patch.object(
+                controller,
+                "_runtime_paths",
+                return_value={"gui_run": status_path},
+            ), mock.patch(
+                "backend.automation_control.os.replace",
+                side_effect=transient_replace,
+            ), mock.patch("backend.automation_control.time.sleep") as mocked_sleep:
+                self.assertTrue(controller._write_gui_status({}, status))
+
+            self.assertEqual(attempts, 2)
+            mocked_sleep.assert_called_once()
+            self.assertEqual(json.loads(status_path.read_text(encoding="utf-8")), status)
+            self.assertEqual(list(state_dir.glob("*.tmp")), [])
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -3550,7 +3663,7 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
                 indexes = {str(row["name"]) for row in con.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
-            self.assertEqual(installed, 17)
+                self.assertEqual(installed, 18)
             for name in {
                 "idx_line_items_active_order_item_v507",
                 "idx_delivery_lists_active_date_revision_v507",

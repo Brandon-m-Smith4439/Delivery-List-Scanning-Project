@@ -2152,6 +2152,21 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"lists": lists, "compact": compact})
             return
 
+        if parsed.path == "/api/scan/date":
+            user = self.require_permission("view_delivery_lists")
+            if not user:
+                return
+            delivery_date = parse_qs(parsed.query).get("deliveryDate", [""])[0]
+            try:
+                bundle = STORE.get_delivery_date_scan_bundle(delivery_date, user=user)
+                for record in bundle.get("records", []):
+                    list_id = str(record.get("list", {}).get("id") or "")
+                    record["flags"] = OPERATIONS.line_flags(list_id, user["username"])
+                self.send_json(bundle)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == "/api/stations":
             if not self.require_permission("use_assigned_stations"):
                 return
@@ -2846,6 +2861,23 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else []
                 self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"]))
+                return
+
+            if parsed.path == "/api/operations/line-flags/batch":
+                user = self.require_permission("view_delivery_lists")
+                if not user:
+                    return
+                requested_ids = [
+                    str(value or "").strip()
+                    for value in (data.get("listIds") or [])
+                    if str(value or "").strip()
+                ][:500]
+                accessible_ids = {
+                    str(row.get("id") or "")
+                    for row in STORE.get_delivery_lists_compact(user)
+                }
+                list_ids = [list_id for list_id in requested_ids if list_id in accessible_ids]
+                self.send_json(OPERATIONS.line_flag_markers(list_ids, user["username"]))
                 return
 
             if parsed.path == "/api/rejects":

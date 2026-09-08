@@ -17,6 +17,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from database.time_utils import normalize_utc_timestamp
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -244,6 +246,134 @@ class OperationsFeatureService:
             "noticeIds": sorted(set(notice_ids)),
             "items": values,
         }
+
+    def line_flag_markers(self, list_ids: list[str], username: str) -> dict[str, Any]:
+        """Return lightweight per-user update markers for many lists at once.
+
+        The date picker only needs unseen-line identities and counts. Reusing
+        ``line_flags`` for every delivery date also loads reject history and
+        opens a new database connection per list, which creates an avoidable
+        request storm during login. This query keeps the same latest-batch and
+        per-user receipt rules while fetching all requested markers in one
+        transaction.
+        """
+        self._require_sqlite()
+        clean_ids = list(dict.fromkeys(
+            clean_text(value, 255)
+            for value in (list_ids or [])
+            if clean_text(value, 255)
+        ))[:500]
+        if not clean_ids:
+            return {"ok": True, "results": {}}
+
+        placeholders = ",".join("?" for _ in clean_ids)
+        with self.store.connect() as con:
+            user_id = self._user_id(con, username)
+            rows = con.execute(
+                f"""
+                WITH ranked_notices AS (
+                    SELECT n.*,
+                           ROW_NUMBER() OVER (PARTITION BY n.list_id ORDER BY n.id DESC) AS batch_rank
+                    FROM line_update_notices n
+                    WHERE n.list_id IN ({placeholders})
+                ), latest_batches AS (
+                    SELECT list_id, source_hash, created_at, change_token
+                    FROM ranked_notices
+                    WHERE batch_rank = 1
+                )
+                SELECT n.list_id,
+                       n.line_item_id,
+                       li.order_no,
+                       li.item_no,
+                       n.id AS notice_id,
+                       n.change_type,
+                       dl.revision AS list_revision,
+                       totals.total_line_count
+                FROM latest_batches lb
+                JOIN line_update_notices n
+                  ON n.list_id = lb.list_id
+                 AND n.source_hash = lb.source_hash
+                 AND n.created_at = lb.created_at
+                 AND (
+                     lower(COALESCE(lb.source_hash, '')) <> 'manual-entry'
+                     OR n.change_token = lb.change_token
+                 )
+                JOIN line_items li
+                  ON li.id = n.line_item_id
+                 AND li.list_id = n.list_id
+                 AND COALESCE(li.is_deleted, 0) = 0
+                JOIN delivery_lists dl ON dl.id = n.list_id
+                JOIN (
+                    SELECT list_id, COUNT(*) AS total_line_count
+                    FROM line_items
+                    WHERE list_id IN ({placeholders})
+                      AND COALESCE(is_deleted, 0) = 0
+                    GROUP BY list_id
+                ) totals ON totals.list_id = n.list_id
+                LEFT JOIN line_update_receipts receipt
+                  ON receipt.notice_id = n.id
+                 AND receipt.user_id = ?
+                WHERE receipt.notice_id IS NULL
+                ORDER BY n.list_id, n.line_item_id, n.id
+                """,
+                (*clean_ids, *clean_ids, user_id),
+            ).fetchall()
+
+        results: dict[str, dict[str, Any]] = {
+            list_id: {
+                "ok": True,
+                "listId": list_id,
+                "pendingLineCount": 0,
+                "newLineCount": 0,
+                "updatedLineCount": 0,
+                "totalLineCount": 0,
+                "listRevision": 1,
+                "isNewStage": False,
+                "noticeIds": [],
+                "items": [],
+            }
+            for list_id in clean_ids
+        }
+        items_by_list: dict[str, dict[str, dict[str, Any]]] = {}
+        for row in rows:
+            list_id = str(row["list_id"] or "")
+            result = results[list_id]
+            result["listRevision"] = int(row["list_revision"] or 1)
+            result["totalLineCount"] = int(row["total_line_count"] or 0)
+            line_item_id = str(row["line_item_id"] or "")
+            item = items_by_list.setdefault(list_id, {}).setdefault(
+                line_item_id,
+                {
+                    "lineItemId": line_item_id,
+                    "order": str(row["order_no"] or ""),
+                    "item": str(row["item_no"] or ""),
+                    "hasUnseenUpdate": True,
+                    "userUpdateState": "",
+                    "userUpdateNoticeIds": [],
+                },
+            )
+            notice_id = as_int(row["notice_id"])
+            if notice_id > 0:
+                item["userUpdateNoticeIds"].append(notice_id)
+                result["noticeIds"].append(notice_id)
+            change_type = str(row["change_type"] or "updated").lower()
+            if change_type == "new" or not item["userUpdateState"]:
+                item["userUpdateState"] = change_type
+
+        for list_id, result in results.items():
+            items = list(items_by_list.get(list_id, {}).values())
+            result["items"] = items
+            result["noticeIds"] = sorted(set(result["noticeIds"]))
+            result["pendingLineCount"] = len(items)
+            result["newLineCount"] = sum(1 for item in items if item["userUpdateState"] == "new")
+            result["updatedLineCount"] = sum(1 for item in items if item["userUpdateState"] == "updated")
+            result["isNewStage"] = bool(
+                items
+                and result["updatedLineCount"] == 0
+                and result["newLineCount"] == result["totalLineCount"]
+                and result["listRevision"] <= 1
+            )
+        return {"ok": True, "results": results}
 
     def _stage_definition(self, stage: Any, scanner: Any) -> dict[str, Any] | None:
         """Resolve one active Stage Editor definition by its current display identity."""
@@ -790,12 +920,9 @@ class OperationsFeatureService:
         if not text:
             raise ValueError("Reject date and time are required")
         try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return normalize_utc_timestamp(text, allow_empty=False)
         except ValueError as exc:
             raise ValueError("Reject date and time are invalid") from exc
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
 
     @staticmethod
     def _sync_reject_line_summary(con: Any, delivery_date: str, order: str, item: str) -> dict[str, Any]:

@@ -1,0 +1,54 @@
+{
+  "version": "v0.244",
+  "purpose": "Temporary exact order/item exclusions verified against the Crystal delivery list while A+W schedule membership is being investigated. Production status is not used for membership decisions.",
+  "entries": [
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236879",
+      "itemNumber": "001",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236879",
+      "itemNumber": "002",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236880",
+      "itemNumber": "001",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236880",
+      "itemNumber": "002",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236881",
+      "itemNumber": "001",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236881",
+      "itemNumber": "002",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236882",
+      "itemNumber": "001",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    },
+    {
+      "deliveryDate": "2026-08-03",
+      "orderNumber": "236882",
+      "itemNumber": "002",
+      "reason": "Verified absent from the 2026-08-03 Crystal delivery list."
+    }
+  ]
+}

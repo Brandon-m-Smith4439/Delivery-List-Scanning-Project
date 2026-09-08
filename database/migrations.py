@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable
 
 from database.contract import APPLICATION_VERSION, CURRENT_SCHEMA_VERSION
+from database.time_utils import normalize_utc_timestamp
 
 
 class MigrationError(RuntimeError):
@@ -129,6 +130,12 @@ MIGRATIONS = (
         "v507_runtime_read_indexes",
         "Targeted active Order/Item, catalog heartbeat, scan history, line-update, and A+W Cutting read indexes; v507-r1",
         "_migration_017_v507_runtime_read_indexes",
+    ),
+    Migration(
+        18,
+        "v507_normalize_external_timestamps",
+        "Normalize legacy SQL Server and A+W timestamps to aware second-precision UTC text without changing event identities; v507-r1",
+        "_migration_018_v507_normalize_external_timestamps",
     ),
 )
 
@@ -845,6 +852,38 @@ def _migration_017_v507_runtime_read_indexes(connection: Any) -> None:
             ON aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC);
         """
     )
+
+
+def _migration_018_v507_normalize_external_timestamps(connection: Any) -> None:
+    """Repair external SQL timestamps while preserving immutable event keys."""
+    timestamp_columns = (
+        ("line_items", "last_rejected_at"),
+        ("reject_events", "rejected_at"),
+        ("aw_reject_events", "breakage_date"),
+        ("aw_reject_events", "source_last_changed_at"),
+        ("aw_reject_source_rows", "breakage_date"),
+        ("aw_reject_source_rows", "last_changed_at"),
+    )
+    for table, column in timestamp_columns:
+        columns = {str(row[1]) for row in connection.execute(f"PRAGMA table_info([{table}])").fetchall()}
+        if column not in columns:
+            continue
+        rows = connection.execute(
+            f"SELECT rowid, [{column}] FROM [{table}] WHERE TRIM(COALESCE([{column}], '')) <> ''"
+        ).fetchall()
+        for row in rows:
+            value = str(row[1] or "").strip()
+            try:
+                normalized = normalize_utc_timestamp(value)
+            except (TypeError, ValueError):
+                # Leave malformed evidence intact so the integrity tool can
+                # identify it rather than silently discarding source history.
+                continue
+            if normalized != value:
+                connection.execute(
+                    f"UPDATE [{table}] SET [{column}] = ? WHERE rowid = ?",
+                    (normalized, row[0]),
+                )
 
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:

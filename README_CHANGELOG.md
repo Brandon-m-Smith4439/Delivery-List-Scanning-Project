@@ -1,4 +1,57 @@
+## v0.510 - Automation Completion and Scan Date Recovery
+
+### Reliability
+- Preserved the browser-provided automation log path so the Automation Control Center follows the same authoritative log written by PowerShell.
+- Serialized browser-run status writes, replaced the shared temporary filename with a unique file, and added bounded Windows sharing-violation retries. A status-file collision can no longer stop stdout consumption and suspend an otherwise completed import.
+- Removed the obsolete Stage-selector dependency from delivery-catalog refreshes. The single Scan delivery-date selector now repaints from the current compact catalog and keeps its custom control synchronized.
+- Added a bounded retry for the initial compact delivery-list catalog request so a transient startup response cannot strand the Scan page without selectable dates.
+
+### Validation
+- Added regression coverage for transient Windows status-file replacement failures, browser log-path preservation, the one-selector Scan catalog contract, and startup catalog retries.
+- SQLite remains schema **18**; this release does not migrate, reset, or replace application data.
+
+## v0.509 - Mobile Tutorial and Shared Control Polish
+
+### Interface
+- Added a reusable blue-outline secondary button companion for tutorial navigation and Help Center question choices while preserving the solid shared blue style for Start, Next, and Ask commands.
+- Added compact-device containment, wrapping, touch sizing, and two-column tutorial navigation rules so long labels remain readable without collisions.
+- Corrected the mobile Settings dialog row layout so its header, tabs, and body cannot overlap, and limited that layout rule to visible dialogs so hidden overlays cannot capture page input.
+- Reset Help Center scrolling and page-specific assistant context whenever the operator opens Help on another page.
+- Increased separation between the Bay Map transit percentages at handheld widths.
+- Kept the complete v0.508 mobile page and dialog layout unchanged outside shared Help/Tutorial controls.
+
+### Validation
+- Rechecked every signed-in page at Zebra TC22, common iPhone, common Android, and short-landscape dimensions for document overflow, clipped controls, and sibling control overlap.
+- Ran the dedicated v0.509 matrix across 28 page layouts and 28 Help panels, then replayed all 35 tutorial steps at TC22 width; no overlap, viewport-overflow, touch-target, or console failures remained.
+- Replayed the broader TC22 workflow across 43 GUI surfaces, 64 internal views, and 19 interactions, including an isolated scan/undo/redo transaction, with no visual, interaction, or console failures.
+- Passed the complete maintained automated suite: **272/272 tests**. The isolated schema-18 verification database passed SQLite integrity and foreign-key validation.
+- SQLite remains schema **18**; this release does not reset or replace application data.
+
+## v0.508 - Complete Handheld Workflow and Safe Change Packaging
+
+### Mobile workflow
+- Added an authoritative compact-device layer for the Zebra TC22, common phone widths, and short landscape screens without changing desktop breakpoints.
+- Reduced initial handheld rendering to five Home delivery dates and ten Scan rows per page while preserving operator-selectable larger page sizes and existing pagination behavior.
+- Moved the Bay Scanner ahead of the physical map in handheld reading order and rebuilt bay-group headers so long names, status, counts, and edit controls remain contained and readable.
+- Replaced the compact recent-scan table dependency with a one-column status card on handhelds, retained the complete All Scans workspace, increased important touch targets, and repaired the navigation drawer's covered close button.
+- Reflowed Home destinations, page KPIs, Roles, Customer Routes, Edit Delivery Lists paging, Print/Export, rack history/details, old-bay controls, and maintained Admin/Operations dialogs for narrow viewports with one dialog-owned scroll region.
+
+### Reliability and maintenance
+- Fixed `rejectSettingsModalHtml()` referencing reject-history collections that were not initialized in that renderer.
+- Added `docs/FUTURE_CHAT_CHANGE_GUIDE.md` with the exact `.001` application-version convention, database-preservation rules, changed-files ZIP layout, safe overwrite installation process, cache-busting requirements, and validation checklist for future ChatGPT changes.
+- Kept SQLite at schema **18**. No database migration, reset, or data replacement is included.
+
+### Validation
+- Passed the final mobile matrix across eight signed-in/authentication states at four compact-device profiles (32 page checks), four navigation drawer checks, and 15 baseline TC22 dialogs with zero layout failures and zero browser console errors.
+- Passed the exhaustive TC22 workflow audit across 43 GUI surfaces, 64 internal tabs/views, all 35 tutorial steps, 19 interactions, predictive search/filter workflows, and an isolated scan/undo/redo transaction with zero visual, interaction, or console failures.
+- Passed the complete maintained automated suite: **272/272 tests**. The isolated schema-18 verification database also passed `integrity_check` and `foreign_key_check`; its known historical source-identity collision remained preserved and reported as a warning.
+
 ## v0.507 - Runtime Performance Recovery, A+W Cutting Coverage, and Legacy Cleanup
+
+### Guided help and database integrity follow-up
+- Added a top-right Help Center with short, page-specific tutorials for every maintained workspace and a local workflow question assistant.
+- Standardized all runtime-created preview dialogs on the shared `gui-close-button` component and retained shared modal scroll locking.
+- Advanced SQLite to schema **18** to normalize legacy SQL Server/A+W timestamps into aware UTC ISO text without changing immutable reject event identities or raw source payloads.
 
 ### A+W Batch / Optimization / Cutting reliability
 - Fixed the Windows PowerShell 5.1 `Generic.List[object]` materialization failure that stopped production synchronization before its first A+W query. Ordered payload dictionaries are now read through the shared property helper, so production coverage diagnostics use the actual `orderNr` values instead of reporting valid rows as unmatched.

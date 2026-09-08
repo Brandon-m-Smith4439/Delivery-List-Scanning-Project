@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/home.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/racks.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/print.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/shell.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260903-v0.507">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260903-v0.507">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/home.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/racks.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/print.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/shell.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260908-v0.510">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -36,7 +36,7 @@
     </button>
     <div class="login-shell">
       <aside class="login-hero-card">
-        <img class="login-hero-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+        <img class="login-hero-logo brand-framed-logo" data-portable-logo-v355 src="assets/barefoot-builders-firstsource-logo.webp" alt="Barefoot Company and Builders FirstSource logo">
         <span class="portable-login-brand-badge-v355" data-portable-brand-initials-v355 aria-hidden="true">BFS</span>
         <strong class="portable-login-company-v355" data-portable-label-v355="companyName">Barefoot Facility Services</strong>
         <span data-portable-label-v355="loginProductName">Glass Delivery Scanner</span>
@@ -108,8 +108,8 @@
     <aside class="app-sidebar" id="appSidebar" aria-label="Application navigation">
       <div class="sidebar-brand-row">
         <div class="brand" aria-label="Barefoot Facility Services Delivery List Scanner" data-portable-aria-v355="{companyName} {applicationName}">
-          <img class="brand-icon brand-icon-collapsed" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
-          <img class="brand-combined-logo brand-framed-logo" data-portable-logo-v355 src="static/images/barefoot-builders-firstsource-logo.png" alt="Barefoot Facility Services logo">
+          <img class="brand-icon brand-icon-collapsed" data-portable-logo-v355 src="assets/barefoot-builders-firstsource-logo.webp" alt="Barefoot Company and Builders FirstSource logo">
+          <img class="brand-combined-logo brand-framed-logo" data-portable-logo-v355 src="assets/barefoot-builders-firstsource-logo.webp" alt="Barefoot Company and Builders FirstSource logo">
           <span class="portable-sidebar-brand-v355" aria-hidden="true"><b data-portable-brand-initials-v355>BFS</b><span><strong data-portable-label-v355="companyName">Barefoot Facility Services</strong><small data-portable-label-v355="applicationName">Delivery List Scanner</small></span></span>
         </div>
         <button class="sidebar-toggle-button" id="sidebarToggleBtn" type="button" aria-controls="appSidebar" aria-expanded="true" title="Collapse navigation">
@@ -184,6 +184,9 @@
       <div class="header-actions">
         <div class="header-quick-actions" aria-label="Application actions">
           <button class="tool-button primary-tool app-primary-button header-action-icon-button print-export-button" id="globalPrintExportBtn" type="button"><span class="button-icon print-export-icon" aria-hidden="true"></span><span>Print/Export</span></button>
+          <button class="tool-button header-utility-button help-center-button" id="helpCenterBtn" type="button" aria-label="Open help and page tutorial" title="Help and page tutorial">
+            <span class="help-center-icon" aria-hidden="true">?</span>
+          </button>
           <button class="tool-button header-utility-button language-toggle-button" id="languageToggleBtn" type="button" aria-label="Cambiar a Español" title="Cambiar a Español">
             <span class="language-globe-icon" aria-hidden="true"></span>
             <span>ES</span>
@@ -277,6 +280,8 @@
             <label class="page-size">
               <span>Lists</span>
               <select id="homePageSize">
+                <option>5</option>
+                <option>10</option>
                 <option>25</option>
                 <option>50</option>
                 <option>100</option>
@@ -625,6 +630,7 @@
     <label class="page-size top-page-size">
       <span>Rows</span>
       <select id="pageSize">
+        <option>10</option>
         <option>25</option>
         <option selected>50</option>
         <option>100</option>
@@ -637,13 +643,11 @@
               <table class="delivery-table">
                 <thead>
                   <tr>
-                    <th data-scan-column="job" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="job">Job Nr.<span data-scan-sort-indicator></span></button></th>
+                    <th data-scan-column="glass" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="glass">Glass Type<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="order" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="order">Order Nr.<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="item" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="item">Item<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="qty" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="qty">Qty.<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="dimensions" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="dimensions">Dimensions<span data-scan-sort-indicator></span></button></th>
-                    <th data-scan-column="customer" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="customer">Customer<span data-scan-sort-indicator></span></button></th>
-                    <th data-scan-column="flags" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="flags">Flags<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="route" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="route">Route<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="location" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="location">Location<span data-scan-sort-indicator></span></button></th>
                     <th data-scan-column="progress" aria-sort="none"><button class="scan-column-sort-v329" type="button" data-scan-sort="progress">Progress<span data-scan-sort-indicator></span></button></th>
@@ -661,6 +665,7 @@
               <label class="page-size bottom-page-size">
                 <span>Rows</span>
                 <select id="pageSizeBottom">
+                  <option>10</option>
                   <option>25</option>
                   <option selected>50</option>
                   <option>100</option>
@@ -680,10 +685,7 @@
                 <div class="scanner-panel-station-v196" aria-label="Current station">
                   <strong id="stationProfileDisplay">No assigned station</strong>
                 </div>
-                <label class="scanner-panel-context-select-v196 scanner-panel-stage-select-v196">
-                  <span class="visually-hidden">Stage</span>
-                  <select id="deliveryStageSelect" aria-label="Delivery stage"></select>
-                </label>
+                <!-- The authenticated station and workflow state route each scan automatically. -->
                 <select id="stationSelect" hidden></select>
                 <input id="operatorInput" class="visually-hidden" type="text" autocomplete="off" value="Scanner">
               </div>
@@ -1641,9 +1643,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.507">
+        <span class="footer-version-v0163" aria-label="Application version 0.510">
           <small>Version</small>
-          <strong>0.507</strong>
+          <strong>0.510</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -1970,9 +1972,59 @@
       </section>
       <div id="adminModalBody"></div>
     </section>
+
+    <!-- SECTION: Shared page tutorials and local workflow help -->
+    <div class="help-center-backdrop" id="helpCenterBackdrop" hidden></div>
+    <section class="help-center-panel" id="helpCenterPanel" role="dialog" aria-modal="true" aria-labelledby="helpCenterTitle" hidden>
+      <header class="help-center-header">
+        <div>
+          <span>WORKFLOW HELP</span>
+          <h2 id="helpCenterTitle">Help Center</h2>
+          <p id="helpCenterPageSummary">Choose a page tutorial or ask a workflow question.</p>
+        </div>
+        <button class="gui-close-button" id="helpCenterCloseBtn" type="button" aria-label="Close help center">&times;</button>
+      </header>
+      <div class="help-center-body">
+        <section class="help-tutorial-launcher" aria-labelledby="helpTutorialHeading">
+          <div>
+            <small>CURRENT PAGE</small>
+            <h3 id="helpTutorialHeading">Page tutorial</h3>
+            <p id="helpTutorialDescription">Walk through the basic workflow and main controls.</p>
+          </div>
+          <button class="app-primary-button" id="helpStartTutorialBtn" type="button">Start tutorial</button>
+        </section>
+        <section class="help-chat" aria-labelledby="helpChatHeading">
+          <header>
+            <div><small>QUICK ANSWERS</small><h3 id="helpChatHeading">Ask the Help Assistant</h3></div>
+            <span>Local guide</span>
+          </header>
+          <div class="help-question-chips" id="helpQuestionChips" aria-label="Common help questions"></div>
+          <div class="help-chat-log" id="helpChatLog" aria-live="polite" aria-label="Help conversation"></div>
+          <form class="help-chat-form" id="helpChatForm">
+            <label for="helpChatInput" class="visually-hidden">Ask a workflow question</label>
+            <input id="helpChatInput" type="text" autocomplete="off" maxlength="240" placeholder="Ask how to scan, print, find an order...">
+            <button class="app-primary-button" type="submit">Ask</button>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <div class="page-tutorial-spotlight" id="pageTutorialSpotlight" aria-hidden="true" hidden></div>
+    <section class="page-tutorial-coach" id="pageTutorialCoach" role="dialog" aria-modal="true" aria-labelledby="pageTutorialTitle" hidden>
+      <header>
+        <span id="pageTutorialCounter">Step 1 of 1</span>
+        <button class="gui-close-button" id="pageTutorialCloseBtn" type="button" aria-label="Close page tutorial">&times;</button>
+      </header>
+      <h2 id="pageTutorialTitle">Page tutorial</h2>
+      <p id="pageTutorialBody"></p>
+      <footer>
+        <button class="app-secondary-button" id="pageTutorialBackBtn" type="button">Back</button>
+        <button class="app-primary-button" id="pageTutorialNextBtn" type="button">Next</button>
+      </footer>
+    </section>
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260903-v0.507"></script>
+  <script src="static/js/app.js?v=20260908-v0.510"></script>
 </body>
 </html>

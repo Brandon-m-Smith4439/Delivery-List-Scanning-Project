@@ -52,6 +52,7 @@ from database.migrations import (
     database_needs_upgrade,
     run_sqlite_migrations,
 )
+from database.time_utils import normalize_utc_timestamp, parse_utc_timestamp as parse_database_utc_timestamp
 
 
 GRAPH_RESOURCE = "https://graph.microsoft.com"
@@ -549,10 +550,7 @@ def now_iso() -> str:
 
 def parse_utc_timestamp(value: str) -> datetime:
     """Parse an ISO timestamp and normalize it to an aware UTC datetime."""
-    parsed = datetime.fromisoformat(str(value or "").strip().replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return parse_database_utc_timestamp(value)
 
 
 def parse_iso(value: str) -> datetime:
@@ -5388,7 +5386,7 @@ class BaseDeliveryStore:
                     "event_key": event_key,
                     "order_no": str(representative.get("orderNr") or "").strip(),
                     "item_no": str(representative.get("itemNr") or "").strip().zfill(3) if str(representative.get("itemNr") or "").strip().isdigit() else str(representative.get("itemNr") or "").strip(),
-                    "breakage_date": str(representative.get("breakageDate") or "").strip(),
+                    "breakage_date": normalize_utc_timestamp(representative.get("breakageDate")),
                     "quantity": quantity,
                     "original_job_number": str(representative.get("originalJobNumber") or "").strip(),
                     "replacement_job_number": str(representative.get("replacementJobNumber") or "").strip(),
@@ -5412,7 +5410,7 @@ class BaseDeliveryStore:
                     "machine": str(representative.get("machine") or "").strip(),
                     "scan_mode": str(representative.get("scanMode") or "").strip(),
                     "booking_message": str(representative.get("bookingMessage") or "").strip(),
-                    "source_last_changed_at": str(latest_source_row.get("sourceLastChangedAt") or "").strip(),
+                    "source_last_changed_at": normalize_utc_timestamp(latest_source_row.get("sourceLastChangedAt")),
                     "source_last_changed_user": str(latest_source_row.get("sourceLastChangedUser") or latest_source_row.get("breakageUser") or "").strip(),
                     "source_payload_json": json.dumps(
                         {
@@ -5578,14 +5576,14 @@ class BaseDeliveryStore:
                     int_field(row, "subPosition"),
                     int_field(row, "bomNode"),
                     max(int_field(row, "quantity"), 0),
-                    str(row.get("breakageDate") or "").strip(),
+                    normalize_utc_timestamp(row.get("breakageDate")),
                     str(row.get("originalJobNumber") or "").strip(),
                     str(row.get("replacementJobNumber") or "").strip(),
                     1,
                     int_field(row, "reasonCode"),
                     int_field(row, "locationCode"),
                     1 if int_field(row, "fromScanner") else 0,
-                    str(row.get("sourceLastChangedAt") or "").strip(),
+                    normalize_utc_timestamp(row.get("sourceLastChangedAt")),
                     str(row.get("sourceLastChangedUser") or row.get("breakageUser") or "").strip(),
                     synced_at,
                     source_payload,
@@ -11760,6 +11758,47 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         with self.connect() as con:
             return self._get_payload(con, list_id, last_scan=last_scan, user=user)
+
+    def get_delivery_date_scan_bundle(
+        self,
+        delivery_date: str,
+        user: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return all accessible workflow-stage payloads for one Scan date."""
+        clean_date = str(delivery_date or "").strip()[:10]
+        if not clean_date:
+            raise ValueError("deliveryDate is required")
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT *
+                FROM delivery_lists
+                WHERE delivery_date = ?
+                  AND status = 'active'
+                ORDER BY
+                    CASE lower(stage)
+                        WHEN 'staging' THEN 10
+                        WHEN 'outbound' THEN 20
+                        WHEN 'inbound' THEN 30
+                        WHEN 'cpu' THEN 30
+                        WHEN 'bfs greenville' THEN 30
+                        WHEN 'dtc' THEN 30
+                        ELSE 40
+                    END,
+                    id
+                """,
+                (clean_date,),
+            ).fetchall()
+            records: list[dict[str, Any]] = []
+            for row in rows:
+                meta = list_meta(row)
+                if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
+                    continue
+                records.append({
+                    "list": meta,
+                    "payload": self._get_payload(con, str(row["id"]), user=user),
+                })
+        return {"deliveryDate": clean_date, "records": records, "listCount": len(records)}
 
     def _get_payload(self, con: sqlite3.Connection, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Read payload for the delivery-list scanner workflow.

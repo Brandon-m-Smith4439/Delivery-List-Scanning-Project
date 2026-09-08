@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "507"
-# Schema version 17 adds targeted read-path indexes for active Order Details,
-# catalog heartbeat, scan history, and line-update lookups.
-CURRENT_SCHEMA_VERSION = 17
+APPLICATION_VERSION = "510"
+# Schema version 18 normalizes legacy SQL Server/A+W timestamp text to the
+# canonical aware UTC representation used by the scanner database contract.
+CURRENT_SCHEMA_VERSION = 18
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
