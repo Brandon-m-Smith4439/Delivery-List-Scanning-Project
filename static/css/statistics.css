@@ -3462,3 +3462,151 @@
 @media (prefers-reduced-motion: reduce) {
   .statistics-chart-loading-spinner-v507 { animation: none; }
 }
+
+/* ========================================================================== */
+/* v0.514 Today production + machine production reporting                     */
+/* ========================================================================== */
+.statistics-production-count-v505 {
+  border-color: #9ec6e5;
+  box-shadow: 0 10px 28px rgba(11, 67, 111, .10);
+}
+.statistics-production-count-heading-v505 h2 { font-size: 24px !important; }
+.statistics-production-count-heading-v505 > div > span b {
+  color: #0b5f96;
+  font-weight: 950;
+}
+.statistics-production-machine-ledger-v514 {
+  margin-top: 10px;
+  border-top: 1px solid #dbe7f0;
+  padding-top: 9px;
+}
+.statistics-production-machine-ledger-v514 > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.statistics-production-machine-ledger-v514 > header span {
+  color: #123f66;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.statistics-production-machine-ledger-v514 > header small {
+  color: #708397;
+  font-size: 8px;
+  font-weight: 850;
+}
+.statistics-production-machine-row-v514 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  border-top: 1px solid #edf2f6;
+  color: #49677f;
+  font-size: 9px;
+  font-weight: 800;
+}
+.statistics-production-machine-row-v514 > span {
+  overflow: hidden;
+  color: #234a6d;
+  font-size: 10px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statistics-production-machine-row-v514 strong { color: #0d527f; font-size: 13px; }
+.statistics-production-machine-row-v514 strong small { font-size: 8px; }
+.statistics-production-machine-row-v514 em { color: #788b9c; font-style: normal; }
+
+.statistics-production-options-v514[hidden] { display: none !important; }
+.statistics-production-options-v514 {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 8px;
+  padding-top: 2px;
+}
+.statistics-production-options-v514 label {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #bfd2e4;
+  border-radius: 9px;
+  background: #fff;
+  padding: 6px 9px;
+  color: #21496f;
+  cursor: pointer;
+}
+.statistics-production-options-v514 input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0c6da5;
+}
+.statistics-production-options-v514 span { min-width: 0; display: grid; gap: 1px; }
+.statistics-production-options-v514 b { font-size: 10px; font-weight: 950; }
+.statistics-production-options-v514 small { color: #72859a; font-size: 8px; font-weight: 800; }
+.statistics-production-report-v514 { min-width: 0; display: grid; gap: 12px; }
+.statistics-production-report-heading-v514,
+.statistics-production-detail-heading-v514 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 2px 0;
+}
+.statistics-production-report-heading-v514 > div { min-width: 0; display: grid; gap: 2px; }
+.statistics-production-report-heading-v514 span {
+  color: #2f6f9c;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.statistics-production-report-heading-v514 strong,
+.statistics-production-detail-heading-v514 strong { color: #0b3158; font-size: 17px; font-weight: 950; }
+.statistics-production-report-heading-v514 small,
+.statistics-production-detail-heading-v514 span { color: #6a7e92; font-size: 9px; font-weight: 800; }
+.statistics-production-report-heading-v514 > b {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e9f5fc;
+  color: #0c659b;
+  padding: 7px 11px;
+  font-size: 13px;
+  font-weight: 950;
+}
+.statistics-production-machine-table-v514 th:not(:first-child),
+.statistics-production-machine-table-v514 td:not(:first-child) { text-align: center; }
+.statistics-production-machine-table-v514 td { font-size: 11px; }
+.statistics-production-detail-table-v514 { min-width: 1680px; }
+.statistics-production-detail-table-v514 th,
+.statistics-production-detail-table-v514 td { white-space: nowrap; }
+.statistics-production-kind-v514 {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #cbd8e4;
+  border-radius: 999px;
+  background: #f5f8fb;
+  padding: 2px 7px;
+  color: #425f79;
+  font-size: 8px;
+  font-weight: 950;
+}
+.statistics-production-kind-v514.is-rush { border-color:#e6b55a; background:#fff8e7; color:#8a5d08; }
+.statistics-production-kind-v514.is-remake { border-color:#d7bee6; background:#fbf5ff; color:#6c3e88; }
+.statistics-production-kind-v514.is-internal-reject { border-color:#e8c0bb; background:#fff5f3; color:#9a4036; }
+@media (max-width: 900px) {
+  .statistics-production-options-v514 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .statistics-production-options-v514 { grid-template-columns: 1fr; }
+  .statistics-production-report-heading-v514 { align-items: flex-start; }
+}

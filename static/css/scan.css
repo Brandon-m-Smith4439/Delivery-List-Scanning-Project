@@ -7236,3 +7236,239 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   .scan-page .scanner-panel-date-select-v196 { grid-row: 1 !important; }
   .scan-page .scanner-panel-station-v196 { grid-row: 2 !important; }
 }
+
+/* ========================================================================== */
+/* v0.511 Scan load parity, Cutting checkpoint, compact reject ribbon/header  */
+/* ========================================================================== */
+/* The pre-date-wide fallback now emits the same v0.485 flow classes as the
+   hydrated view. Keep one checkpoint geometry so first paint cannot flash the
+   old oversized progress cards while the date bundle is still loading. */
+.scan-page .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 {
+  --progress-step-color: #0f80c4 !important;
+}
+.scan-page .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511:not(.is-complete-v475) {
+  border-color: #9fc5e4 !important;
+  background: linear-gradient(90deg, #eef7fd, #f8fbfe) !important;
+  color: #1f5e91 !important;
+  box-shadow: inset 4px 0 0 #0f80c4 !important;
+}
+.scan-page .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 strong {
+  max-width: 40px;
+  overflow: hidden;
+  font-size: 7.5px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Internal Reject context spans Glass Type through Progress but stays visually
+   secondary to the actual piece row. The ribbon remains one compact line on
+   maintained desktop/tablet table widths. */
+.delivery-table tbody .internal-reject-detail-row-v154 > td {
+  padding: 3px 0 0 !important;
+}
+.internal-reject-incident-strip-v154 {
+  min-height: 31px !important;
+  grid-template-columns: auto auto minmax(90px, 1.35fr) minmax(100px, 1.15fr) auto minmax(90px, .85fr) minmax(125px, 1.1fr) !important;
+  gap: 7px !important;
+  padding: 4px 8px 4px 6px !important;
+  border-radius: 7px 7px 0 0 !important;
+  box-shadow: 0 3px 8px rgba(93, 15, 28, .11) !important;
+}
+.internal-reject-incident-badge-v154 {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 6px !important;
+  font-size: 8px !important;
+}
+.internal-reject-incident-title-v154 {
+  font-size: 9.5px !important;
+  letter-spacing: .035em !important;
+}
+.internal-reject-incident-strip-v154 small {
+  font-size: 7px !important;
+}
+.internal-reject-incident-strip-v154 b {
+  font-size: 9.5px !important;
+  line-height: 1.1 !important;
+}
+@media (max-width: 1180px) and (min-width: 761px) {
+  .internal-reject-incident-strip-v154 {
+    grid-template-columns: auto auto minmax(78px, 1.2fr) minmax(88px, 1fr) auto minmax(76px, .8fr) minmax(110px, 1fr) !important;
+    row-gap: 0 !important;
+  }
+  .internal-reject-incident-strip-v154 > span,
+  .internal-reject-incident-strip-v154 > strong {
+    grid-column: auto !important;
+  }
+}
+
+/* Keep Airport Rd mathematically centered in the Scan panel. Delivery date is
+   the adjacent right-hand context control instead of balancing the station as
+   a separate half-width column. Compact phones retain the maintained stacked
+   header below 761px. */
+@media (min-width: 761px) {
+  .scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+    width: 100% !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    gap: 9px !important;
+  }
+  .scan-page .scanner-panel-station-v196 {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: auto !important;
+    min-width: 120px !important;
+    justify-self: center !important;
+    text-align: center !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    width: min(170px, 100%) !important;
+    justify-self: start !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.512 Scan re-entry, production filtering, timestamps, No Fab slot       */
+/* ========================================================================== */
+/* Progress timestamps are secondary metadata inside the existing compact
+   checkpoint cells. The icon spans both rows so adding time never creates the
+   oversized fallback cards retired in v0.511. */
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  min-height: 38px !important;
+  grid-template-columns: 13px minmax(0, 1fr) auto !important;
+  grid-template-rows: auto !important;
+  align-content: center !important;
+  row-gap: 0 !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+}
+.scan-page .scan-progress-step-v475.is-no-fab-slot-v512,
+.scan-page .scan-progress-step-v475.is-no-fab-slot-v512.is-complete-v475 {
+  --progress-step-color: #8b96a0 !important;
+  border-color: #d1d7dc !important;
+  background: linear-gradient(90deg, #f1f3f5, #f8f9fa) !important;
+  color: #68737d !important;
+  box-shadow: inset 4px 0 0 #a2abb3 !important;
+}
+.scan-page .scan-progress-step-v475.is-no-fab-slot-v512 strong { color: #7d8790 !important; }
+
+/* Date returns to the left of the mathematically centered Airport Rd station.
+   The unused right track preserves station centering at desktop/tablet widths. */
+@media (min-width: 761px) {
+  .scan-page .scanner-panel-date-select-v196 {
+    grid-column: 1 !important;
+    justify-self: start !important;
+  }
+  .scan-page .scanner-panel-station-v196 { grid-column: 2 !important; }
+}
+
+.scan-filter-machine-section-v512 .tab {
+  border-color: #cbd9e4;
+}
+
+
+/* ========================================================================== */
+/* v0.513 Attention ordering, paired Route/Machine filters, remake rail       */
+/* ========================================================================== */
+/* Route and Machine share an equal-width row; Glass remains full-width. */
+.scan-page .scan-filter-glass-section { grid-column: 1 / -1 !important; }
+.scan-page .scan-filter-route-section-v465 { grid-column: 1 !important; }
+.scan-page .scan-filter-machine-section-v512 { grid-column: 2 !important; }
+
+/* The previous 6px rotated label was technically present but unreadable on the
+   floor. External remake rows keep the narrow gutter while using larger text. */
+.scan-page .delivery-table .scan-priority-rail-v481.is-remake > b {
+  font-size: 8.4px !important;
+  font-weight: 950 !important;
+  letter-spacing: .01em !important;
+}
+
+@media (max-width: 920px) {
+  .scan-page .scan-filter-route-section-v465,
+  .scan-page .scan-filter-machine-section-v512 { grid-column: 1 !important; }
+}
+
+/* ========================================================================== */
+/* v0.515 Scan progress geometry                                              */
+/* ========================================================================== */
+/* v0.514 removed per-checkpoint timestamps; return the table cells to a true
+   one-row compact geometry. Center icon/label/count and give the transition
+   arrow enough visual weight to read as a workflow connector. */
+.scan-page .scan-progress-flow-line-v485 {
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  min-height: 30px !important;
+  height: 30px !important;
+  grid-template-columns: 13px minmax(0, 1fr) auto !important;
+  grid-template-rows: 1fr !important;
+  align-content: center !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 3px 5px !important;
+  column-gap: 4px !important;
+  text-align: center !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  justify-self: center !important;
+  align-self: center !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b {
+  justify-self: center !important;
+  text-align: center !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong {
+  justify-self: center !important;
+  text-align: center !important;
+}
+.scan-page .scan-progress-flow-line-v485 > i {
+  width: 14px !important;
+  flex: 0 0 14px !important;
+  color: #6f8293 !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+  transform: translateY(-1px);
+}
+
+/* ========================================================================== */
+/* v0.516 wider compact Scan progress checkpoints                             */
+/* ========================================================================== */
+.scan-page .scan-date-wide-progress-v485 > span,
+.scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+.scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+  width: 98px !important;
+  min-width: 98px !important;
+  flex-basis: 98px !important;
+}
+.scan-page .delivery-table th:nth-child(8),
+.scan-page .delivery-table td:nth-child(8) { width: 25% !important; }
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .scan-date-wide-progress-v485 > span,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+    width: 92px !important;
+    min-width: 92px !important;
+    flex-basis: 92px !important;
+  }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 27% !important; }
+}

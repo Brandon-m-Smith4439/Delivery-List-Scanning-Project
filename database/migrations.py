@@ -6,13 +6,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import time
 from typing import Any, Callable
 
 from database.contract import APPLICATION_VERSION, CURRENT_SCHEMA_VERSION
-from database.time_utils import normalize_utc_timestamp
+from database.time_utils import (
+    normalize_aw_plant_timestamp,
+    normalize_utc_timestamp,
+    reinterpret_legacy_aw_utc_clock_as_plant,
+)
 
 
 class MigrationError(RuntimeError):
@@ -136,6 +141,12 @@ MIGRATIONS = (
         "v507_normalize_external_timestamps",
         "Normalize legacy SQL Server and A+W timestamps to aware second-precision UTC text without changing event identities; v507-r1",
         "_migration_018_v507_normalize_external_timestamps",
+    ),
+    Migration(
+        19,
+        "v516_aw_eastern_timestamp_contract",
+        "Interpret offset-free A+W SQL datetime values as America/New_York plant time, repair legacy A+W reject/cutting evidence, and preserve stable event identities; v516-r1",
+        "_migration_019_v516_aw_eastern_timestamp_contract",
     ),
 )
 
@@ -884,6 +895,235 @@ def _migration_018_v507_normalize_external_timestamps(connection: Any) -> None:
                     f"UPDATE [{table}] SET [{column}] = ? WHERE rowid = ?",
                     (normalized, row[0]),
                 )
+
+
+def _migration_019_v516_aw_eastern_timestamp_contract(connection: Any) -> None:
+    """Repair A+W plant-local timestamps and establish the Eastern-time contract.
+
+    A+W SQL ``datetime`` values are Monroe/Charlotte wall-clock times. Migration
+    18 correctly made scanner timestamps aware, but it had no source-specific
+    timezone contract and therefore tagged offset-free A+W reject clocks as UTC.
+    This migration repairs those persisted A+W rows without changing immutable
+    event keys, and normalizes legacy Cutting generation clocks that were still
+    stored without offsets.
+    """
+
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+    # Cutting generations were intentionally left as source text in schema 18.
+    # Offset-free values are safe to localize directly; already-aware values are
+    # absolute and ``normalize_aw_plant_timestamp`` preserves their instant.
+    if "aw_cutting_generations" in tables:
+        cutting_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info([aw_cutting_generations])").fetchall()
+        }
+        timestamp_columns = [
+            column
+            for column in (
+                "batch_creation_at",
+                "batch_last_changed_at",
+                "optimization_date",
+                "optimization_last_changed_at",
+                "cutting_booking_at",
+            )
+            if column in cutting_columns
+        ]
+        payload_available = "source_payload_json" in cutting_columns
+        select_columns = ", ".join(f"[{column}]" for column in timestamp_columns)
+        if payload_available:
+            select_columns = f"{select_columns}, [source_payload_json]" if select_columns else "[source_payload_json]"
+        if select_columns:
+            rows = connection.execute(
+                f"SELECT rowid, {select_columns} FROM [aw_cutting_generations]"
+            ).fetchall()
+            for row in rows:
+                rowid = row[0]
+                values = list(row[1:1 + len(timestamp_columns)])
+                updates: dict[str, str] = {}
+                for column, value in zip(timestamp_columns, values):
+                    text = str(value or "").strip()
+                    if not text:
+                        continue
+                    try:
+                        normalized = normalize_aw_plant_timestamp(text)
+                    except (TypeError, ValueError):
+                        continue
+                    if normalized != text:
+                        updates[column] = normalized
+
+                payload_index = 1 + len(timestamp_columns)
+                raw_payload = row[payload_index] if payload_available else ""
+                payload_text = str(raw_payload or "")
+                payload_changed = False
+                payload: dict[str, Any] = {}
+                if payload_text:
+                    try:
+                        parsed = json.loads(payload_text)
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        payload = {}
+                cut_evidence = payload.get("cutEvidence") if isinstance(payload.get("cutEvidence"), dict) else None
+                if cut_evidence is not None:
+                    plate_changed = str(cut_evidence.get("plateLastChangedAt") or "").strip()
+                    if plate_changed:
+                        try:
+                            normalized_plate = normalize_aw_plant_timestamp(plate_changed)
+                            if normalized_plate != plate_changed:
+                                cut_evidence["plateLastChangedAt"] = normalized_plate
+                                payload_changed = True
+                        except (TypeError, ValueError):
+                            pass
+                    assignments = cut_evidence.get("sequenceAssignments")
+                    if isinstance(assignments, list):
+                        for assignment in assignments:
+                            if not isinstance(assignment, dict):
+                                continue
+                            value = str(assignment.get("plateLastChangedAt") or "").strip()
+                            if not value:
+                                continue
+                            try:
+                                normalized = normalize_aw_plant_timestamp(value)
+                            except (TypeError, ValueError):
+                                continue
+                            if normalized != value:
+                                assignment["plateLastChangedAt"] = normalized
+                                payload_changed = True
+                if payload_changed:
+                    updates["source_payload_json"] = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+                if updates:
+                    assignments = ", ".join(f"[{column}] = ?" for column in updates)
+                    connection.execute(
+                        f"UPDATE [aw_cutting_generations] SET {assignments} WHERE rowid = ?",
+                        (*updates.values(), rowid),
+                    )
+
+    # A+W reject source rows retain the original source payload. Prefer those raw
+    # clock values because migration 18 may already have tagged the persisted
+    # column as +00:00. When an old payload is unavailable, reinterpret only these
+    # known A+W columns' clock components as Eastern exactly once.
+    if "aw_reject_source_rows" in tables:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info([aw_reject_source_rows])").fetchall()
+        }
+        rows = connection.execute(
+            "SELECT rowid, event_key, breakage_date, last_changed_at, source_payload_json "
+            "FROM aw_reject_source_rows"
+        ).fetchall() if {"event_key", "breakage_date", "last_changed_at", "source_payload_json"}.issubset(columns) else []
+        for rowid, _event_key, stored_breakage, stored_changed, payload_text in rows:
+            source_payload: dict[str, Any] = {}
+            try:
+                parsed = json.loads(str(payload_text or "{}"))
+                if isinstance(parsed, dict):
+                    source_payload = parsed
+            except (TypeError, ValueError, json.JSONDecodeError):
+                source_payload = {}
+            raw_breakage = str(source_payload.get("breakageDate") or "").strip()
+            raw_changed = str(source_payload.get("sourceLastChangedAt") or "").strip()
+            try:
+                breakage = (
+                    normalize_aw_plant_timestamp(raw_breakage)
+                    if raw_breakage
+                    else reinterpret_legacy_aw_utc_clock_as_plant(stored_breakage)
+                )
+            except (TypeError, ValueError):
+                breakage = str(stored_breakage or "")
+            try:
+                changed = (
+                    normalize_aw_plant_timestamp(raw_changed)
+                    if raw_changed
+                    else reinterpret_legacy_aw_utc_clock_as_plant(stored_changed)
+                )
+            except (TypeError, ValueError):
+                changed = str(stored_changed or "")
+            if breakage != str(stored_breakage or "") or changed != str(stored_changed or ""):
+                connection.execute(
+                    "UPDATE aw_reject_source_rows SET breakage_date=?, last_changed_at=? WHERE rowid=?",
+                    (breakage, changed, rowid),
+                )
+
+    # Logical A+W events derive their timestamps from the repaired raw source
+    # rows. BOM rows for one logical event share breakage time; the latest source
+    # maintenance clock remains the event's source-last-changed value.
+    if "aw_reject_events" in tables and "aw_reject_source_rows" in tables:
+        connection.execute(
+            """
+            UPDATE aw_reject_events
+            SET breakage_date = COALESCE((
+                    SELECT MIN(src.breakage_date)
+                    FROM aw_reject_source_rows src
+                    WHERE src.event_key = aw_reject_events.event_key
+                      AND TRIM(COALESCE(src.breakage_date, '')) <> ''
+                ), breakage_date),
+                source_last_changed_at = COALESCE((
+                    SELECT MAX(src.last_changed_at)
+                    FROM aw_reject_source_rows src
+                    WHERE src.event_key = aw_reject_events.event_key
+                      AND TRIM(COALESCE(src.last_changed_at, '')) <> ''
+                ), source_last_changed_at)
+            """
+        )
+
+    # Keep the mirrored Internal Reject timestamp aligned with its authoritative
+    # A+W event unless an operator explicitly overrode ``rejectedAt``.
+    if "reject_events" in tables and "aw_reject_events" in tables:
+        rows = connection.execute(
+            """
+            SELECT re.rowid, re.source_external_key, re.rejected_at, re.manual_override_json,
+                   aw.breakage_date
+            FROM reject_events re
+            JOIN aw_reject_events aw ON aw.event_key = re.source_external_key
+            WHERE re.source_type = 'aw' AND TRIM(COALESCE(re.source_external_key, '')) <> ''
+            """
+        ).fetchall()
+        for rowid, _event_key, rejected_at, override_text, aw_breakage in rows:
+            overrides: dict[str, Any] = {}
+            try:
+                parsed = json.loads(str(override_text or "{}"))
+                if isinstance(parsed, dict):
+                    overrides = parsed
+            except (TypeError, ValueError, json.JSONDecodeError):
+                overrides = {}
+            if str(overrides.get("rejectedAt") or "").strip():
+                continue
+            corrected = str(aw_breakage or "").strip()
+            if corrected and corrected != str(rejected_at or ""):
+                connection.execute(
+                    "UPDATE reject_events SET rejected_at=? WHERE rowid=?",
+                    (corrected, rowid),
+                )
+
+    # ``line_items.last_rejected_at`` is a materialized summary. Recompute only
+    # identities that have reject history so current fabrication/recut cutoffs use
+    # the same corrected instant as Rejects and Order Details.
+    if "line_items" in tables and "reject_events" in tables and "delivery_lists" in tables:
+        connection.execute(
+            """
+            UPDATE line_items
+            SET last_rejected_at = COALESCE((
+                SELECT MAX(re.rejected_at)
+                FROM reject_events re
+                JOIN delivery_lists dl ON dl.id = line_items.list_id
+                WHERE re.delivery_date = dl.delivery_date
+                  AND re.order_no = line_items.order_no
+                  AND re.item_no = line_items.item_no
+            ), last_rejected_at)
+            WHERE EXISTS (
+                SELECT 1
+                FROM reject_events re
+                JOIN delivery_lists dl ON dl.id = line_items.list_id
+                WHERE re.delivery_date = dl.delivery_date
+                  AND re.order_no = line_items.order_no
+                  AND re.item_no = line_items.item_no
+            )
+            """
+        )
 
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:

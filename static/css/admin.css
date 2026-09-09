@@ -22166,3 +22166,16 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
 @media (prefers-reduced-motion: reduce) {
   .admin-modal-loading-spinner-v507 { animation: none; border-top-color: #1d67ae; }
 }
+
+
+/* ========================================================================== */
+/* v0.513 Superseded-review count badge visibility                           */
+/* ========================================================================== */
+#adminPage .superseded-review-open[data-admin-gui-launch] {
+  overflow: visible !important;
+}
+#adminPage .superseded-review-open .superseded-review-count {
+  top: -9px !important;
+  right: -9px !important;
+  z-index: 6 !important;
+}

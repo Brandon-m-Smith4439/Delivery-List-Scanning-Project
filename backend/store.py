@@ -52,7 +52,12 @@ from database.migrations import (
     database_needs_upgrade,
     run_sqlite_migrations,
 )
-from database.time_utils import normalize_utc_timestamp, parse_utc_timestamp as parse_database_utc_timestamp
+from database.time_utils import (
+    normalize_aw_plant_timestamp,
+    normalize_utc_timestamp,
+    parse_aw_plant_timestamp,
+    parse_utc_timestamp as parse_database_utc_timestamp,
+)
 
 
 GRAPH_RESOURCE = "https://graph.microsoft.com"
@@ -1973,6 +1978,7 @@ def item_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "bayCode": row["bay_code"] if "bay_code" in row.keys() else "",
         "lastScannedAt": row["last_scanned_at"] if "last_scanned_at" in row.keys() else "",
         "lastScannedStation": row["last_scanned_station"] if "last_scanned_station" in row.keys() else "",
+        "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
         "internalRejectCount": int(row_value(row, "internal_reject_count", 0) or 0),
         "lastRejectReason": str(row_value(row, "last_reject_reason", "") or ""),
     }
@@ -3117,6 +3123,61 @@ class BaseDeliveryStore:
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
         raise NotImplementedError
+
+    def filter_accessible_production_status_requests(
+        self,
+        user: dict[str, Any],
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep production-status lookups inside delivery-list stage access.
+
+        v0.512 lets Scan machine/progress filters use the lightweight fabrication
+        status endpoint even when a custom role omits Global Search. The endpoint
+        still must not become an arbitrary production-file lookup, so validate the
+        requested Order/Item pairs against active delivery-list rows the user can
+        already view. This is one bounded database read for at most 80 requests.
+        """
+        requested = [row for row in (rows or [])[:80] if isinstance(row, dict)]
+        order_numbers = sorted({str(row.get("order") or "").strip() for row in requested if str(row.get("order") or "").strip()})
+        if not order_numbers:
+            return []
+        placeholders = ",".join("?" for _ in order_numbers)
+        with self.connect() as con:
+            matches = con.execute(
+                f"""
+                SELECT DISTINCT li.order_no, li.item_no, dl.stage, dl.scanner
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.status = 'active'
+                  AND COALESCE(li.is_deleted, 0) = 0
+                  AND li.order_no IN ({placeholders})
+                """,
+                tuple(order_numbers),
+            ).fetchall()
+
+        def item_key(value: Any) -> str:
+            text = str(value or "").strip()
+            return text.lstrip("0") or ("0" if text else "")
+
+        allowed_pairs: set[tuple[str, str]] = set()
+        allowed_orders: set[str] = set()
+        for match in matches:
+            if not user_can_access_stage(user, row_value(match, "stage", ""), row_value(match, "scanner", "")):
+                continue
+            order = str(row_value(match, "order_no", "") or "").strip()
+            allowed_orders.add(order)
+            allowed_pairs.add((order, item_key(row_value(match, "item_no", ""))))
+
+        filtered: list[dict[str, Any]] = []
+        for row in requested:
+            order = str(row.get("order") or "").strip()
+            item = item_key(row.get("item"))
+            if order not in allowed_orders:
+                continue
+            if item and (order, item) not in allowed_pairs:
+                continue
+            filtered.append(row)
+        return filtered
 
     def get_stations(self) -> list[str]:
         """Purpose: Read stations for the delivery-list scanner workflow.
@@ -5386,7 +5447,7 @@ class BaseDeliveryStore:
                     "event_key": event_key,
                     "order_no": str(representative.get("orderNr") or "").strip(),
                     "item_no": str(representative.get("itemNr") or "").strip().zfill(3) if str(representative.get("itemNr") or "").strip().isdigit() else str(representative.get("itemNr") or "").strip(),
-                    "breakage_date": normalize_utc_timestamp(representative.get("breakageDate")),
+                    "breakage_date": normalize_aw_plant_timestamp(representative.get("breakageDate")),
                     "quantity": quantity,
                     "original_job_number": str(representative.get("originalJobNumber") or "").strip(),
                     "replacement_job_number": str(representative.get("replacementJobNumber") or "").strip(),
@@ -5410,7 +5471,7 @@ class BaseDeliveryStore:
                     "machine": str(representative.get("machine") or "").strip(),
                     "scan_mode": str(representative.get("scanMode") or "").strip(),
                     "booking_message": str(representative.get("bookingMessage") or "").strip(),
-                    "source_last_changed_at": normalize_utc_timestamp(latest_source_row.get("sourceLastChangedAt")),
+                    "source_last_changed_at": normalize_aw_plant_timestamp(latest_source_row.get("sourceLastChangedAt")),
                     "source_last_changed_user": str(latest_source_row.get("sourceLastChangedUser") or latest_source_row.get("breakageUser") or "").strip(),
                     "source_payload_json": json.dumps(
                         {
@@ -5576,14 +5637,14 @@ class BaseDeliveryStore:
                     int_field(row, "subPosition"),
                     int_field(row, "bomNode"),
                     max(int_field(row, "quantity"), 0),
-                    normalize_utc_timestamp(row.get("breakageDate")),
+                    normalize_aw_plant_timestamp(row.get("breakageDate")),
                     str(row.get("originalJobNumber") or "").strip(),
                     str(row.get("replacementJobNumber") or "").strip(),
                     1,
                     int_field(row, "reasonCode"),
                     int_field(row, "locationCode"),
                     1 if int_field(row, "fromScanner") else 0,
-                    normalize_utc_timestamp(row.get("sourceLastChangedAt")),
+                    normalize_aw_plant_timestamp(row.get("sourceLastChangedAt")),
                     str(row.get("sourceLastChangedUser") or row.get("breakageUser") or "").strip(),
                     synced_at,
                     source_payload,
@@ -5705,12 +5766,7 @@ class BaseDeliveryStore:
         if not text:
             return 0.0
         try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                # A+W SQL datetime values are plant-local.  Use the scanner host's
-                # local zone so they can be compared safely with UTC scanner events.
-                parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
-            return float(parsed.timestamp())
+            return float(parse_aw_plant_timestamp(text).timestamp())
         except (TypeError, ValueError, OverflowError):
             return 0.0
 
@@ -5728,6 +5784,17 @@ class BaseDeliveryStore:
             source_payload = {}
         label_context = source_payload.get("labelContext") if isinstance(source_payload.get("labelContext"), dict) else {}
         cut_evidence = source_payload.get("cutEvidence") if isinstance(source_payload.get("cutEvidence"), dict) else {}
+        optimization_status_code = int(row_value(row, "optimization_status_code", 0) or 0)
+        if optimization_status_code in AW_OPTI_STATUS_BOOKED_CODES:
+            optimization_status_label = "Booked"
+        elif optimization_status_code == AW_OPTI_STATUS_RELEASED:
+            optimization_status_label = "Released"
+        elif optimization_status_code == AW_OPTI_STATUS_OPTIMIZED:
+            optimization_status_label = "Optimized"
+        elif optimization_status_code:
+            optimization_status_label = f"Status {optimization_status_code}"
+        else:
+            optimization_status_label = "Not Optimized"
         return {
             "order": str(row_value(row, "order_no", "") or ""),
             "item": str(row_value(row, "item_no", "") or ""),
@@ -5740,7 +5807,8 @@ class BaseDeliveryStore:
             "batchLastChangedAt": str(row_value(row, "batch_last_changed_at", "") or ""),
             "batchLastChangedUser": str(row_value(row, "batch_last_changed_user", "") or ""),
             "optimization": int(row_value(row, "optimization_number", 0) or 0),
-            "optimizationStatusCode": int(row_value(row, "optimization_status_code", 0) or 0),
+            "optimizationStatusCode": optimization_status_code,
+            "optimizationStatusLabel": optimization_status_label,
             "optimizationStatusSource": str(cut_evidence.get("optimizationStatusSource") or source_payload.get("optimizationStatusSource") or "").strip(),
             "optimizationMode": int(row_value(row, "optimization_mode", 0) or 0),
             "optimizationDate": str(row_value(row, "optimization_date", "") or ""),
@@ -5810,25 +5878,25 @@ class BaseDeliveryStore:
                 "batch": batch,
                 "batchStatusCode": int(raw.get("batchStatusCode") or 0),
                 "batchDescription": str(raw.get("batchDescription") or "").strip(),
-                "batchCreatedAt": str(raw.get("batchCreatedAt") or "").strip(),
+                "batchCreatedAt": normalize_aw_plant_timestamp(raw.get("batchCreatedAt")),
                 "batchEmployee": str(raw.get("batchEmployee") or "").strip(),
-                "batchLastChangedAt": str(raw.get("batchLastChangedAt") or "").strip(),
+                "batchLastChangedAt": normalize_aw_plant_timestamp(raw.get("batchLastChangedAt")),
                 "batchLastChangedUser": str(raw.get("batchLastChangedUser") or "").strip(),
                 "optimization": int(raw.get("optimizationNumber") or 0),
                 "optimizationStatusCode": int(raw.get("optimizationStatusCode") or 0),
                 "optimizationStatusSource": str(raw.get("optimizationStatusSource") or "").strip(),
                 "optimizationMode": int(raw.get("optimizationMode") or 0),
-                "optimizationDate": str(raw.get("optimizationDate") or "").strip(),
+                "optimizationDate": normalize_aw_plant_timestamp(raw.get("optimizationDate")),
                 "optimizationSheetCount": int(raw.get("optimizationSheetCount") or 0),
-                "optimizationLastChangedAt": str(raw.get("optimizationLastChangedAt") or "").strip(),
+                "optimizationLastChangedAt": normalize_aw_plant_timestamp(raw.get("optimizationLastChangedAt")),
                 "optimizationSequence": int(raw.get("optimizationSequence") or 0),
                 "optimizationSequenceRowId": str(raw.get("optimizationSequenceRowId") or "").strip(),
                 "optimizationPlateNumber": int(raw.get("optimizationPlateNumber") or 0),
                 "optimizationPlateCut": int(raw.get("optimizationPlateCut") or 0),
                 "optimizationPlateStockBooked": int(raw.get("optimizationPlateStockBooked") or 0),
-                "optimizationPlateLastChangedAt": str(raw.get("optimizationPlateLastChangedAt") or "").strip(),
+                "optimizationPlateLastChangedAt": normalize_aw_plant_timestamp(raw.get("optimizationPlateLastChangedAt")),
                 "optimizationPlateLastChangedUser": str(raw.get("optimizationPlateLastChangedUser") or "").strip(),
-                "cutCompletedAt": str(raw.get("cuttingBookingAt") or "").strip(),
+                "cutCompletedAt": normalize_aw_plant_timestamp(raw.get("cuttingBookingAt")),
                 "cutCompletedBy": str(raw.get("cuttingBookingEmployee") or "").strip(),
                 "cutBookingRowId": str(raw.get("cuttingBookingRowId") or "").strip(),
                 "itemBarcodeStart": str(raw.get("itemBarcodeStart") or "").strip(),
@@ -6180,7 +6248,14 @@ class BaseDeliveryStore:
         with self.connect() as con:
             rows = con.execute(
                 """
-                SELECT li.*, dl.label AS delivery_list_label, dl.delivery_date, dl.stage, dl.scanner, dl.status AS list_status
+                SELECT li.*, dl.label AS delivery_list_label, dl.delivery_date, dl.stage, dl.scanner, dl.status AS list_status,
+                       (
+                        SELECT se.created_at
+                        FROM scan_events se
+                        WHERE se.line_item_id = li.id AND se.qty_delta > 0
+                        ORDER BY se.created_at DESC, se.id DESC
+                        LIMIT 1
+                       ) AS last_scanned_at
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active'
@@ -6196,6 +6271,13 @@ class BaseDeliveryStore:
             raise ValueError(f"Order {clean_order} was not found in active delivery lists")
 
         with self.connect() as con:
+            # v0.512: Order Details uses the same authoritative Rush/Remake
+            # annotation path as Scan. This preserves operator-entered reasons and
+            # the A+W RM fallback instead of deriving a second UI-only reason.
+            priority_annotations = self.priority_banner_annotations(
+                con,
+                [item_from_row(row) for row in rows],
+            )
             aw_reject_rows = con.execute(
                 "SELECT * FROM aw_reject_events WHERE order_no = ? ORDER BY breakage_date DESC, event_key",
                 (clean_order,),
@@ -6237,6 +6319,9 @@ class BaseDeliveryStore:
             if row_rejected_at > str(item.get("lastRejectedAt") or ""):
                 item["lastRejectedAt"] = row_rejected_at
             item["awRejects"] = aw_rejects_by_item.get(item_no, [])
+            annotation = priority_annotations.get(str(row["id"] or ""))
+            if annotation and not item.get("priorityBanner"):
+                item["priorityBanner"] = dict(annotation)
             item["stages"].append({
                 "listId": str(row["list_id"] or ""),
                 "deliveryList": str(row["delivery_list_label"] or ""),
@@ -6245,6 +6330,7 @@ class BaseDeliveryStore:
                 "scanner": str(row["scanner"] or ""),
                 "scanned": int(row["scanned_qty"] or 0),
                 "qty": int(row["qty"] or 0),
+                "lastScannedAt": str(row_value(row, "last_scanned_at", "") or ""),
             })
         items = sorted(grouped.values(), key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")))
         for item in items:
@@ -6253,6 +6339,37 @@ class BaseDeliveryStore:
             item["cutting"] = self.aw_cutting_state(
                 clean_order, item_no, str(item.get("lastRejectedAt") or ""), aw_cutting_by_item.get(cutting_item, [])
             )
+            cutting_history = [
+                row for row in (item.get("cutting", {}).get("history") or [])
+                if isinstance(row, dict)
+            ]
+            if item.get("awRejects") and cutting_history:
+                enriched_rejects: list[dict[str, Any]] = []
+                for reject in item.get("awRejects") or []:
+                    enriched = dict(reject)
+                    reject_epoch = self._aw_cutting_timestamp_epoch(reject.get("breakageAt"))
+                    eligible = [
+                        generation for generation in cutting_history
+                        if self._aw_cutting_timestamp_epoch(generation.get("batchCreatedAt")) <= reject_epoch
+                    ] if reject_epoch else []
+                    if eligible:
+                        generation = max(
+                            eligible,
+                            key=lambda value: (
+                                self._aw_cutting_timestamp_epoch(value.get("batchCreatedAt")),
+                                int(value.get("keyIndex") or 0),
+                            ),
+                        )
+                        enriched["cuttingGenerationAtReject"] = {
+                            "keyIndex": int(generation.get("keyIndex") or 0),
+                            "batch": str(generation.get("batch") or ""),
+                            "optimization": int(generation.get("optimization") or 0),
+                            "optimizationStatusCode": int(generation.get("optimizationStatusCode") or 0),
+                            "optimizationStatusLabel": str(generation.get("optimizationStatusLabel") or ""),
+                            "batchCreatedAt": str(generation.get("batchCreatedAt") or ""),
+                        }
+                    enriched_rejects.append(enriched)
+                item["awRejects"] = enriched_rejects
         first = items[0]
         service = getattr(self, "production_files", None)
         if include_production and service is not None:
@@ -7864,7 +7981,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         """
         backup_path: Path | None = None
         if database_needs_upgrade(self.database_path):
+            backup_started = time.perf_counter()
+            print("Database upgrade required; creating and verifying a backup...", flush=True)
             backup_path = create_verified_backup(self.database_path)
+            print(f"Verified backup complete in {time.perf_counter() - backup_started:.2f}s. Applying numbered migrations...", flush=True)
         try:
             with self.connect() as con:
                 # v0.507: establish persistent WAL once during startup instead of
@@ -11798,6 +11918,63 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "list": meta,
                     "payload": self._get_payload(con, str(row["id"]), user=user),
                 })
+
+            # v0.511: Scan now displays A+W Cutting as the production checkpoint
+            # immediately before Denver/Waterjet. Load every generation for the
+            # date in bounded order chunks, then resolve states in memory. This
+            # avoids one database call per visible row on the Scan hot path.
+            logical_items: dict[tuple[str, str], dict[str, str]] = {}
+            for record in records:
+                for item in record.get("payload", {}).get("items", []):
+                    order_no = str(item.get("order") or "").strip()
+                    item_no = str(item.get("item") or "").strip()
+                    if item_no.isdigit():
+                        item_no = item_no.zfill(3)
+                    if not order_no or not item_no:
+                        continue
+                    key = (order_no, item_no)
+                    current = logical_items.setdefault(key, {"lastRejectedAt": ""})
+                    rejected_at = str(item.get("lastRejectedAt") or "")
+                    if rejected_at > current["lastRejectedAt"]:
+                        current["lastRejectedAt"] = rejected_at
+
+            cutting_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+            if logical_items:
+                cutting_rows: list[Any] = []
+                orders = sorted({order_no for order_no, _item_no in logical_items})
+                for start in range(0, len(orders), 300):
+                    batch = orders[start:start + 300]
+                    placeholders = ",".join("?" for _ in batch)
+                    cutting_rows.extend(con.execute(
+                        f"""
+                        SELECT *
+                        FROM aw_cutting_generations
+                        WHERE order_no IN ({placeholders})
+                        ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
+                        """,
+                        tuple(batch),
+                    ).fetchall())
+                grouped_cutting: dict[tuple[str, str], list[Any]] = {}
+                for cutting_row in cutting_rows:
+                    order_no = str(row_value(cutting_row, "order_no", "") or "").strip()
+                    item_no = str(row_value(cutting_row, "item_no", "") or "").strip()
+                    if item_no.isdigit():
+                        item_no = item_no.zfill(3)
+                    grouped_cutting.setdefault((order_no, item_no), []).append(cutting_row)
+                for key, context in logical_items.items():
+                    cutting_by_key[key] = self.aw_cutting_state(
+                        key[0], key[1], context.get("lastRejectedAt", ""), grouped_cutting.get(key, []),
+                    )
+                for record in records:
+                    for item in record.get("payload", {}).get("items", []):
+                        order_no = str(item.get("order") or "").strip()
+                        item_no = str(item.get("item") or "").strip()
+                        if item_no.isdigit():
+                            item_no = item_no.zfill(3)
+                        item["cutting"] = dict(cutting_by_key.get((order_no, item_no), {
+                            "state": "unknown", "label": "No A+W Cutting Data", "complete": False,
+                            "dataAvailable": False, "history": [],
+                        }))
         return {"deliveryDate": clean_date, "records": records, "listCount": len(records)}
 
     def _get_payload(self, con: sqlite3.Connection, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -18486,6 +18663,60 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             con.commit()
         return {"ok": True, "id": exception_id, "status": status}
 
+    def attach_cutting_search_states_v513(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach one current A+W Cutting state to each final Smart Search row.
+
+        Search itself remains SQLite/SQL metadata only. This runs after the final
+        20-row match set is known, then loads those Orders in bounded batches so
+        Cutting can render without one query per result or a catalog-wide scan.
+        """
+        if not results:
+            return results
+        contexts: dict[tuple[str, str], str] = {}
+        for result in results:
+            order_no = str(result.get("order") or "").strip()
+            item_no = str(result.get("item") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            if order_no and item_no:
+                contexts[(order_no, item_no)] = str(result.get("lastRejectedAt") or "")
+        if not contexts:
+            return results
+
+        rows: list[Any] = []
+        orders = sorted({order_no for order_no, _item_no in contexts})
+        with self.connect() as con:
+            for start in range(0, len(orders), 300):
+                batch = orders[start:start + 300]
+                placeholders = ",".join("?" for _ in batch)
+                rows.extend(con.execute(
+                    f"""
+                    SELECT * FROM aw_cutting_generations
+                    WHERE order_no IN ({placeholders})
+                    ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
+                    """,
+                    tuple(batch),
+                ).fetchall())
+
+        grouped: dict[tuple[str, str], list[Any]] = {}
+        for row in rows:
+            order_no = str(row_value(row, "order_no", "") or "").strip()
+            item_no = str(row_value(row, "item_no", "") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            grouped.setdefault((order_no, item_no), []).append(row)
+
+        for result in results:
+            order_no = str(result.get("order") or "").strip()
+            item_no = str(result.get("item") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            key = (order_no, item_no)
+            result["cutting"] = self.aw_cutting_state(
+                order_no, item_no, contexts.get(key, ""), grouped.get(key, []),
+            )
+        return results
+
     def global_search(self, query: str, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Purpose: Run the global search workflow for the delivery-list scanner.
 
@@ -18683,6 +18914,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "rackStatus": row["rack_status"],
                 "lastScanTime": row["last_scan_time"],
                 "lastScanUser": row["last_scan_user"],
+                "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
                 "stageLocations": [],
                 "locationText": "Not Scanned Yet",
                 "_rank": (0, "", -1),
@@ -18710,6 +18942,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 result["priorityDeliveryDate"] = priority_delivery_date
             result["_rush"] = bool(result.get("_rush")) or is_rush_item({"processState": row["process_state"], "queueState": row["queue_state"]})
             result["_remake"] = bool(result.get("_remake")) or is_remake_item({"processState": row["process_state"], "queueState": row["queue_state"]})
+            row_rejected_at = str(row_value(row, "last_rejected_at", "") or "")
+            if row_rejected_at > str(result.get("lastRejectedAt") or ""):
+                result["lastRejectedAt"] = row_rejected_at
 
             scanned = int(row["scanned_qty"] or 0)
             kind = stage_kind(row)
@@ -18826,7 +19061,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # v0.451: flag/reason terms become searchable only after the one shared
         # priority annotation pass; every query term must match the same order.
         annotated_results = self.attach_priority_search_annotations(cleaned_results)
-        return [result for result in annotated_results if self.global_search_result_matches(result, terms)][:20]
+        matched_results = [result for result in annotated_results if self.global_search_result_matches(result, terms)][:20]
+        return self.attach_cutting_search_states_v513(matched_results)
 
     def manual_edit_sibling_rows(self, con: sqlite3.Connection, row: sqlite3.Row) -> list[sqlite3.Row]:
         """Purpose: Run the manual edit sibling rows workflow for the delivery-list scanner.
@@ -19953,6 +20189,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "deliveryDate": delivery_date,
                 "firstSeenAt": created_at,
                 "sourceId": source_id,
+                "barcode": str(snapshot.get("barcode") or "").strip(),
+                "processState": str(snapshot.get("processState") or "").strip(),
+                "queueState": str(snapshot.get("queueState") or "").strip(),
+                "reason": str(
+                    snapshot.get("priorityReason")
+                    or snapshot.get("remakeReason")
+                    or snapshot.get("reason")
+                    or ""
+                ).strip(),
+                # v0.514: reporting detail retains priority identity so the
+                # Production Count table can include/exclude Rush work without
+                # re-querying live line items or changing historical activity.
+                "rush": bool(is_rush_item({
+                    "remake": snapshot.get("remake", ""),
+                    "processState": snapshot.get("processState", ""),
+                    "queueState": snapshot.get("queueState", ""),
+                })),
             }
             existing_activity = production_activity_by_kind[activity_kind].get(dedupe_key)
             if refresh_same_day_new and existing_activity is None:

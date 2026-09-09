@@ -34,26 +34,31 @@ const CUSTOMER_ROUTE_OPTIONS = [
   { value: "GNV", label: "GNV / Greenville" },
 ];
 const CUSTOMER_ROUTE_DEFAULT_ADDRESSES = {
-  CPU: "1709 Airport Rd, Monroe, NC 08110",
+  CPU: "1709 Airport Rd, Monroe, NC 28110",
   GNV: "Greenville address pending",
 };
-const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 01;
+const ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS = 21;
 const ADMIN_DELIVERY_LIST_LOAD_MORE_DAYS = 7;
 const ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE = 3;
-const MANUAL_EDIT_PAGE_SIZE = 00;
+const MANUAL_EDIT_PAGE_SIZE = 20;
 const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
-const PRINT_DATE_HISTORY_BATCH_WEEKS = 0;
+const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_FILTER_GROUPS = Object.freeze({
-  // v0.465: New Orders and Errors are operational status states, while the
-  // Attention group is reserved for Rush, Remake, and Internal Reject work.
+  // v0.514: one Status group owns completion. With no Machine selected it
+  // describes the whole required production/scanner workflow; with WaterJet
+  // or Denver selected it describes that fabrication checkpoint specifically.
   status: Object.freeze(["remaining", "partial", "complete", "updated", "errors"]),
+  machine: Object.freeze(["machine-no-fab", "machine-waterjet", "machine-denver"]),
   attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority"]),
   route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
 });
 const SCAN_FILTER_LABELS = Object.freeze({
-  remaining: "Not Scanned",
+  remaining: "Not Complete",
   partial: "Partial",
   complete: "Complete",
+  "machine-no-fab": "No Fab",
+  "machine-waterjet": "WaterJet",
+  "machine-denver": "Denver",
   "internal-rejects": "Internal Rejects",
   remakes: "Remakes",
   rushes: "Rushes",
@@ -65,7 +70,7 @@ const SCAN_FILTER_LABELS = Object.freeze({
   "greenville-route": "Greenville",
 });
 
-// v0.309: Column metadata keeps Scan-page sorting centralized so the desktop
+// v0.329: Column metadata keeps Scan-page sorting centralized so the desktop
 // table and mobile cards always use the same table-wide ordered dataset.
 const SCAN_TABLE_COLUMNS = Object.freeze({
   glass: Object.freeze({ label: "Glass Type", type: "text" }),
@@ -112,6 +117,10 @@ const state = {
   orderDetailProductionPendingV507: new Map(),
   orderDetailRenderedPayloadV507: null,
   orderDetailSketchObserverV507: null,
+  // v0.515: a sketch-only production miss gets at most two background retries.
+  // This recovers a newly copied/temporarily locked network PDF without turning
+  // Order Details into an unbounded production-share polling loop.
+  orderDetailSketchRetryV515: new Map(),
   orderDetailOpenOrderV474: "",
   orderDetailFocusItemV477: "",
   orderDetailFocusTimerV477: 0,
@@ -120,6 +129,10 @@ const state = {
   scanDateWideDateV485: "",
   scanDateWideLoadingV485: false,
   scanDateWideLoadTokenV485: 0,
+  // v0.512: the foreground date request is cancelable. A slow/hung response
+  // must never leave Scan latched in Loading after the operator navigates away.
+  scanDateWideAbortControllerV512: null,
+  scanDateWideLoadStartedAtV512: 0,
   scanDateWidePayloadsV485: new Map(),
   scanDateWideCatalogSignatureV486: "",
   scanDateWideLastLoadMsV486: 0,
@@ -131,7 +144,7 @@ const state = {
   homeStageFilter: "all",
   overviewRange: "30",
   homePageIndex: 1,
-  homePageSize: window.matchMedia("(max-width: 760px)").matches ? 5 : 05,
+  homePageSize: window.matchMedia("(max-width: 760px)").matches ? 5 : 25,
   expandedDeliveryDate: "",
   collapsedGlassTypes: new Set(),
   baySearch: "",
@@ -245,7 +258,7 @@ const state = {
     lookbackDays: 7,
     roots: { hardware: "", sketches: "", programs: "", completedWaterjet: "" },
     machineTerms: { denver: ["DENVER", "DENVER CNC"], waterjet: ["WATER JET", "WATERJET", "WJ"] },
-    machineColors: { denver: "#0563eb", waterjet: "#7c3aed" },
+    machineColors: { denver: "#2563eb", waterjet: "#7c3aed" },
     availability: {},
     index: { refreshing: [], counts: {}, indexedAt: 0, lookbackDays: 7, errors: {} },
   },
@@ -283,9 +296,9 @@ const state = {
   lookupGlassCombineTargetV360: "",
   lookupGlassCombineModeV361: false,
   lookupGlassCombineSelectionV361: [],
-  // v0.360: inverse library-level selection mode for separating manual glass aliases.
-  lookupGlassUncombineModeV360: false,
-  lookupGlassUncombineSelectionV360: [],
+  // v0.362: inverse library-level selection mode for separating manual glass aliases.
+  lookupGlassUncombineModeV362: false,
+  lookupGlassUncombineSelectionV362: [],
   presentationProfile: { ...DEFAULT_PRESENTATION_PROFILE_V355 },
   manualEditLookupLibraryLoadedAt: 0,
   lookupManagerActiveType: "glass_profile",
@@ -330,7 +343,18 @@ const state = {
   homeReportSummaryPromise: null,
   // v0.506: transient HTML/plain-text review payload for the daily production email.
   dailyProductionEmailDraftV506: null,
-  // v0.060: Statistics opens glass-first with a compact top-10 donut.
+  // v0.514: Today's production is range-independent. The analytics Production
+  // Count table owns its own detailed selected-range report and inclusion state.
+  statisticsTodayProductionReportV514: null,
+  statisticsTodayProductionLoadingV514: false,
+  statisticsProductionReportV514: null,
+  statisticsProductionReportRangeV514: "",
+  statisticsProductionReportLoadingV514: false,
+  statisticsProductionIncludeRemakesV514: false,
+  statisticsProductionIncludeRejectsV514: false,
+  statisticsProductionIncludeRushesV514: false,
+  statisticsProductionDetailedV514: false,
+  // v0.260: Statistics opens glass-first with a compact top-10 donut.
   // The external-remake toggle is intentionally independent so machine
   // accountability never silently attributes customer/external remakes.
   homeChartMetric: "glass",
@@ -340,7 +364,7 @@ const state = {
   homeChartSort: "value-desc",
   homeChartSelectedLabel: "",
   statisticsIncludeExternalRemakes: false,
-  // v0.060: breakage charts use one combined dataset and switch the charted
+  // v0.262: breakage charts use one combined dataset and switch the charted
   // unit without forcing users through duplicate piece/SQFT/cost datasets.
   statisticsBreakageMeasure: "sqft",
   statisticsGlassSizeType: "",
@@ -439,7 +463,7 @@ const actionHistoryUi = {
   scopes: new Map(),
 };
 
-// DLS_AUTOMATION_LIST_REFRESH_BRIDGE_V101
+// DLS_AUTOMATION_LIST_REFRESH_BRIDGE_V121
 // Delivery List Management has two independent live inputs: the current list
 // catalog and the complete newest import result. Keep both in the app's normal
 // state, then call the original Admin renderer so the existing layout remains
@@ -573,7 +597,7 @@ function dlsAutomationMergeRecentImports(currentImports = [], incomingImports = 
       String(b.deliveryDate || "").localeCompare(String(a.deliveryDate || ""))
       || dlsAutomationImportResultTime(b) - dlsAutomationImportResultTime(a),
     )
-    .slice(0, 0000);
+    .slice(0, 2000);
 }
 
 function dlsAutomationDateLabel(value) {
@@ -606,7 +630,7 @@ function dlsAutomationApplyLastUpdatedTimestamp(value) {
   const parsed = new Date(text);
   const label = Number.isNaN(parsed.getTime())
     ? text
-    : parsed.toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "0-digit" });
+    : parsed.toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const target = document.getElementById("adminLastUpdated");
   if (target) target.textContent = `Last updated: ${label}`;
 }
@@ -775,7 +799,7 @@ function dlsAutomationApplyDeliveryCatalog(refreshedLists) {
   );
   if (!activeListStillExists && deliveryDates.length) {
     const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(0, "0")}-${String(today.getDate()).padStart(0, "0")}`;
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     const selectedDate = deliveryDates.includes(previousDate)
       ? previousDate
       : deliveryDates.find((value) => value >= todayKey) || deliveryDates[deliveryDates.length - 1];
@@ -874,24 +898,26 @@ document.addEventListener("dls:delivery-list-data-refreshed", (event) => {
   if (!detail.catalogOnly) {
     state.orderDetailCacheV474.clear();
     state.orderDetailProductionCacheV507.clear();
+    state.orderDetailSketchRetryV515.forEach((entry) => { if (entry?.timer) window.clearTimeout(entry.timer); });
+    state.orderDetailSketchRetryV515.clear();
   }
   dlsAutomationApplyImportSnapshot(detail);
-  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 050);
+  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 250);
 });
 
 document.addEventListener("dls:user-line-updates-reviewed", () => {
-  // v0.065: stage/date markers are authoritative per user. Do not hide an entire
+  // v0.265: stage/date markers are authoritative per user. Do not hide an entire
   // date optimistically because route-specific stages may still need review.
-  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 100);
+  window.setTimeout(() => refreshPendingUpdateDates({ force: true }).catch(() => {}), 120);
 });
 
 document.addEventListener("dls:open-internal-reject-notification", () => {
   showPage("rejects");
-  window.setTimeout(() => els.rejectHistory?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+  window.setTimeout(() => els.rejectHistory?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
 });
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
-const APP_SOUND_CACHE_VERSION = "00060700-v105";
+const APP_SOUND_CACHE_VERSION = "20260722-v105";
 const APP_SOUND_FILES = Object.freeze({
   // Normal accepted item scans use the restrained confirmation cue. The
   // fuller scan_success cue is reserved for a successful cross-date switch.
@@ -1002,7 +1028,7 @@ const appSoundRuntime = {
       const savedValue = localStorage.getItem(APP_SOUND_VOLUME_KEY);
       if (savedValue === null || String(savedValue).trim() === "") return 100;
       const saved = Number(savedValue);
-      return Number.isFinite(saved) ? Math.max(0, Math.min(saved, 000)) : 100;
+      return Number.isFinite(saved) ? Math.max(0, Math.min(saved, 200)) : 100;
     } catch {
       return 100;
     }
@@ -1061,7 +1087,13 @@ const els = {
   statisticsChartViewButtons: document.querySelectorAll("[data-statistics-view]"),
   statisticsMiniCharts: document.getElementById("statisticsMiniCharts"),
   statisticsProductionActivity: document.getElementById("statisticsProductionActivity"),
+  statisticsTodayProductionDateV514: document.getElementById("statisticsTodayProductionDateV514"),
   statisticsDailyProductionEmailBtn: document.getElementById("statisticsDailyProductionEmailBtn"),
+  statisticsProductionOptionsV514: document.getElementById("statisticsProductionOptionsV514"),
+  statisticsProductionIncludeRemakesV514: document.getElementById("statisticsProductionIncludeRemakesV514"),
+  statisticsProductionIncludeRejectsV514: document.getElementById("statisticsProductionIncludeRejectsV514"),
+  statisticsProductionIncludeRushesV514: document.getElementById("statisticsProductionIncludeRushesV514"),
+  statisticsProductionDetailedV514: document.getElementById("statisticsProductionDetailedV514"),
   homeGreeting: document.getElementById("homeGreeting"),
   homeHubUpdated: document.getElementById("homeHubUpdated"),
   homeDeliveryTimeline: document.getElementById("homeDeliveryTimeline"),
@@ -1887,7 +1919,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Indian Trail Bay Assignment", "Asignación de bahía de Indian Trail"],
   ["Indian Trail only", "Solo Indian Trail"],
   ["Item", "Artículo"],
-  ["Latest 0", "Últimos 0"],
+  ["Latest 2", "Últimos 2"],
   ["Latest 4", "Últimos 4"],
   ["Selected category", "Categoría seleccionada"],
   ["Value", "Valor"],
@@ -1946,7 +1978,7 @@ const SPANISH_UI_TEXT = new Map([
   ["Target Bay", "Bahía de destino"],
   ["Today", "Hoy"],
   ["Top 10", "10 principales"],
-  ["Top 00", "00 principales"],
+  ["Top 20", "20 principales"],
   ["Top 5", "5 principales"],
   ["Updated items only", "Solo artículos actualizados"],
   ["Users & Permissions", "Usuarios y permisos"],
@@ -1966,7 +1998,7 @@ const SPANISH_UI_ADDITIONS = new Map([
   ["Internal rejects", "Rechazos internos"],
   ["Yield Percentage rejects excluded", "Rechazos de porcentaje de rendimiento excluidos"],
   ["First imported during this range · remakes excluded", "Importado por primera vez en este rango · rehacer excluidos"],
-  ["First imported or first changed to REMAKE during this range", "Importado por primera vez o cambiado por primera vez a REHACER durante este rango"],
+  ["First imported or first changed to REMAKE today", "Importado por primera vez o cambiado por primera vez a REHACER durante este rango"],
   ["Email draft", "Borrador de correo"],
   ["Copy body", "Copiar cuerpo"],
   ["Open in Email App", "Abrir en la aplicación de correo"],
@@ -3451,9 +3483,9 @@ const SPANISH_UI_V195 = new Map([
 ]);
 SPANISH_UI_V195.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
-// v0.060 Statistics workspace terminology. Keep these exact labels synchronized
+// v0.260 Statistics workspace terminology. Keep these exact labels synchronized
 // with the compact analytics controls so the language toggle remains complete.
-const SPANISH_UI_V060 = new Map([
+const SPANISH_UI_V260 = new Map([
   ["External remakes", "Rehechos externos"],
   ["Include in breakage", "Incluir en roturas"],
   ["Show more data", "Mostrar más datos"],
@@ -3479,7 +3511,7 @@ const SPANISH_UI_V060 = new Map([
   ["Piece breakage rate", "Tasa de rotura por piezas"],
   ["Breakage pieces", "Piezas rotas"],
 ]);
-SPANISH_UI_V060.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+SPANISH_UI_V260.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
 // v0.359: exhaustive Spanish coverage for current static and dynamically rendered browser surfaces.
 // Keep proper names, user-entered values, stable route/stage codes, and identifiers untranslated.
@@ -3701,7 +3733,7 @@ const SPANISH_UI_V359 = new Map([
   ["Finds the piece's current bay", "Encuentra la bahía actual de la pieza"],
   ["Places the piece in a target bay", "Coloca la pieza en una bahía de destino"],
   ["Scan barcode", "Escanear código de barras"],
-  ["Accepted: 036505001, 036505 1, 036505.1, or 036505/1", "Aceptado: 036505001, 036505 1, 036505.1 o 036505/1"],
+  ["Accepted: 236505001, 236505 1, 236505.1, or 236505/1", "Aceptado: 236505001, 236505 1, 236505.1 o 236505/1"],
   ["Last Bay Scan", "Último escaneo de bahía"],
   ["All Scans", "Todos los escaneos"],
   ["Scan result", "Resultado del escaneo"],
@@ -3719,7 +3751,7 @@ const SPANISH_UI_V359 = new Map([
   ["Priority handling", "Manejo prioritario"],
   ["Create and manage intentional Rush work without counting imported remake markers.", "Cree y administre trabajo urgente intencional sin contar los marcadores de rehecho importados."],
   ["Step 1", "Paso 1"],
-  ["Step 0", "Paso 0"],
+  ["Step 2", "Paso 2"],
   ["Step 3", "Paso 3"],
   ["Search by Job Nr., SO, Order Nr., or barcode. Narrow by bay only when needed.", "Busque por Núm. de trabajo, SO, Núm. de orden o código de barras. Limite por bahía solo cuando sea necesario."],
   ["Optional. Use this to narrow the selected job to one bay.", "Opcional. Úselo para limitar el trabajo seleccionado a una bahía."],
@@ -3776,7 +3808,7 @@ const SPANISH_UI_V359 = new Map([
   ["Last scanned into bay", "Último escaneo en la bahía"],
   ["Old bay review needed", "Se requiere revisar bahías antiguas"],
   ["You have old orders that need review.", "Tiene órdenes antiguas que requieren revisión."],
-  ["Closes in 00s", "Se cierra en 00 s"],
+  ["Closes in 20s", "Se cierra en 20 s"],
   ["Select", "Seleccionar"],
   ["days old", "días de antigüedad"],
   ["Glass / Job", "Vidrio / Trabajo"],
@@ -3786,7 +3818,7 @@ const SPANISH_UI_V359 = new Map([
   ["1 day", "1 día"],
   ["3 days", "3 días"],
   ["1 week", "1 semana"],
-  ["0 weeks", "0 semanas"],
+  ["2 weeks", "2 semanas"],
   ["30 days", "30 días"],
   ["Snooze", "Posponer"],
   ["Current filters", "Filtros actuales"],
@@ -3807,7 +3839,7 @@ const SPANISH_UI_V359 = new Map([
   ["7 days", "7 días"],
   ["Total scans", "Escaneos totales"],
   ["of retained scans", "de escaneos conservados"],
-  ["Retrieving page with no more than 05 scans.", "Recuperando una página con no más de 05 escaneos."],
+  ["Retrieving page with no more than 25 scans.", "Recuperando una página con no más de 25 escaneos."],
   ["Loading retained scans", "Cargando escaneos conservados"],
   ["Only the requested page is being downloaded.", "Solo se está descargando la página solicitada."],
   ["Unable to load Bay Scan history", "No se pudo cargar el historial de escaneos de bahía"],
@@ -4005,7 +4037,7 @@ const SPANISH_UI_V359 = new Map([
   ["Newest", "Más reciente"],
   ["Copy Full Log", "Copiar registro completo"],
   ["No command output yet.", "Aún no hay salida del comando."],
-  ["Normal browsing shows three business weeks per page. Filters show every matching import for up to 05 activity dates per page.", "La navegación normal muestra tres semanas laborales por página. Los filtros muestran cada importación coincidente para hasta 05 fechas de actividad por página."],
+  ["Normal browsing shows three business weeks per page. Filters show every matching import for up to 25 activity dates per page.", "La navegación normal muestra tres semanas laborales por página. Los filtros muestran cada importación coincidente para hasta 25 fechas de actividad por página."],
   ["Search history", "Buscar historial"],
   ["New + Updated", "Nuevo + actualizado"],
   ["No Changes", "Sin cambios"],
@@ -4146,7 +4178,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Temporary sound tests", "Pruebas temporales de sonido"],
   ["Remove after approval", "Quitar después de la aprobación"],
   ["Sound volume", "Volumen del sonido"],
-  ["Up to 000% floor boost", "Hasta 000 % de refuerzo para planta"],
+  ["Up to 200% floor boost", "Hasta 200 % de refuerzo para planta"],
   ["Duplicate", "Duplicado"],
   ["Warning", "Advertencia"],
   ["Error", "Error"],
@@ -4384,7 +4416,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Rack codes and display names must both be unique so operators never have to guess which rack a scan belongs to.", "Los códigos y nombres visibles de los racks deben ser únicos para que los operadores nunca tengan que adivinar a qué rack pertenece un escaneo."],
   ["Name the group and choose the suffix used in generated rack codes.", "Nombre el grupo y seleccione el sufijo usado en los códigos de rack generados."],
   ["Shown as the rack-set heading throughout the app.", "Se muestra como encabezado del grupo de racks en toda la aplicación."],
-  ["Example: suffix S creates codes such as R1S and R0S.", "Ejemplo: el sufijo S crea códigos como R1S y R0S."],
+  ["Example: suffix S creates codes such as R1S and R2S.", "Ejemplo: el sufijo S crea códigos como R1S y R2S."],
   ["Choose how many racks to create and where numbering begins.", "Seleccione cuántos racks crear y dónde comienza la numeración."],
   ["Create between 1 and 100 racks in this set.", "Cree entre 1 y 100 racks en este grupo."],
   ["Useful when extending an existing numbering sequence.", "Útil al ampliar una secuencia de numeración existente."],
@@ -4427,7 +4459,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["DTC requires an address. Other routes can leave this blank unless an address is useful operationally.", "DTC requiere una dirección. Otras rutas pueden dejarla en blanco salvo que una dirección sea útil operativamente."],
   ["The new rule affects future route resolution. Existing delivery-list rows are not silently reassigned by creating a rule.", "La nueva regla afecta la resolución futura de rutas. Las filas existentes de listas de entrega no se reasignan silenciosamente al crear una regla."],
   ["Choose how long an approved destination mismatch remains valid for Bay Map scanning.", "Elija cuánto tiempo permanece válida una discrepancia de destino aprobada para el escaneo del Mapa de Bahías."],
-  ["Enter 1–100 minutes.", "Ingrese de 1 a 100 minutos."],
+  ["Enter 1–120 minutes.", "Ingrese de 1 a 120 minutos."],
   ["Only the temporary Bay Map mixed-destination approval window. It does not change route assignment, rack status, or normal scan validation.", "Solo cambia la ventana temporal de aprobación de destinos mixtos del Mapa de Bahías. No cambia la asignación de ruta, el estado del rack ni la validación normal de escaneo."],
   ["Only destination work enters this workflow.", "Solo el trabajo de destino entra en este flujo."],
   ["The first available bay of that type is preassigned to the entire order.", "La primera bahía disponible de ese tipo se preasigna a toda la orden."],
@@ -4507,7 +4539,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Lookup value is required", "Se requiere el valor del catálogo."],
   ["Glass cost per SQFT is required", "Se requiere el costo del vidrio por pie cuadrado."],
   ["Glass cost per SQFT cannot be negative", "El costo del vidrio por pie cuadrado no puede ser negativo."],
-  ["Glass color must be a six-digit hex color such as #0F80ED", "El color del vidrio debe ser un color hexadecimal de seis dígitos como #0F80ED."],
+  ["Glass color must be a six-digit hex color such as #2F80ED", "El color del vidrio debe ser un color hexadecimal de seis dígitos como #2F80ED."],
   ["Choose a maintained stage behavior preset", "Seleccione un preajuste de comportamiento de etapa mantenido."],
   ["Stage key is required", "Se requiere la clave de etapa."],
   ["Custom Route stages require a route code", "Las etapas de Ruta personalizada requieren un código de ruta."],
@@ -4520,7 +4552,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Cross-date scan search limits must be whole numbers", "Los límites de búsqueda entre fechas deben ser números enteros."],
   ["Cross-date scan search limits must be between 0 and 365 days", "Los límites de búsqueda entre fechas deben estar entre 0 y 365 días."],
   ["Destination override time must be a whole number of minutes", "El tiempo de omisión de destino debe ser un número entero de minutos."],
-  ["Destination override time must be between 1 and 100 minutes", "El tiempo de omisión de destino debe estar entre 1 y 100 minutos."],
+  ["Destination override time must be between 1 and 120 minutes", "El tiempo de omisión de destino debe estar entre 1 y 120 minutos."],
   ["Manual input rule type must be exact, contains, or regex", "El tipo de regla de entrada manual debe ser exact, contains o regex."],
   ["Manual input pattern is required", "Se requiere el patrón de entrada manual."],
   ["Barcode pattern is required", "Se requiere el patrón del código de barras."],
@@ -4618,7 +4650,7 @@ const SPANISH_UI_V359_EXTRAS = new Map([
   ["Choose a valid import-history status filter", "Seleccione un filtro de estado válido para el historial de importaciones."],
   ["History start date cannot be after the end date", "La fecha inicial del historial no puede ser posterior a la fecha final."],
   ["Choose a valid automation mode", "Seleccione un modo de automatización válido."],
-  ["Full refresh time must use 04-hour HH:MM format", "La hora de actualización completa debe usar el formato de 04 horas HH:MM."],
+  ["Full refresh time must use 24-hour HH:MM format", "La hora de actualización completa debe usar el formato de 24 horas HH:MM."],
   ["Temp Delivery Lists folder is required", "Se requiere la carpeta temporal de listas de entrega."],
   ["Choose folder import, SQL export only, or SQL export and import", "Seleccione importar carpeta, solo exportar SQL o exportar e importar SQL."],
   ["Choose a valid date range mode", "Seleccione un modo de rango de fechas válido."],
@@ -4641,7 +4673,7 @@ const SPANISH_UI_V359_FINAL = new Map([
   ["This print/export selection has expired. Reopen Print / Export and try again.", "Esta selección de impresión/exportación venció. Vuelva a abrir Imprimir / Exportar e inténtelo de nuevo."],
   ["The selected filters produced no printable rows.", "Los filtros seleccionados no produjeron filas imprimibles."],
   ["Not found", "No encontrado"],
-  ["PBKDF0 iterations must be greater than zero", "Las iteraciones de PBKDF0 deben ser mayores que cero."],
+  ["PBKDF2 iterations must be greater than zero", "Las iteraciones de PBKDF2 deben ser mayores que cero."],
   ["Workbook does not contain a worksheet XML file", "El libro no contiene un archivo XML de hoja de cálculo."],
   ["contact id is required", "Se requiere el ID del contacto."],
   ["cc id is required", "Se requiere el ID de CC."],
@@ -4717,7 +4749,7 @@ const SPANISH_UI_V359_SURFACE = new Map([
   ["Rack display name", "Nombre visible del rack"],
   ["Close confirmation", "Cerrar confirmación"],
   ["Delete this reject", "Eliminar este rechazo"],
-  ["Example: 70\" x 36\"", "Ejemplo: 70\" x 36\""],
+  ["Example: 72\" x 36\"", "Ejemplo: 72\" x 36\""],
   ["Example: Showers A", "Ejemplo: Regaderas A"],
   ["Import run history", "Historial de ejecuciones de importación"],
   ["Open notifications", "Abrir notificaciones"],
@@ -4775,7 +4807,7 @@ const SPANISH_UI_V359_SURFACE = new Map([
   ["Delivery-list route results", "Resultados de rutas de listas de entrega"],
   ["Search customer email rules", "Buscar reglas de correo de clientes"],
   ["Add investigation details...", "Agregar detalles de la investigación..."],
-  ["Example: receiving-scanner-0", "Ejemplo: escáner-recepción-0"],
+  ["Example: receiving-scanner-2", "Ejemplo: escáner-recepción-2"],
   ["Select all items in this job", "Seleccionar todos los artículos de este trabajo"],
   ["Temporary scanner sound tests", "Pruebas temporales de sonido del escáner"],
   ["CPU, DTC, GNV, or custom route", "CPU, DTC, GNV o ruta personalizada"],
@@ -4851,8 +4883,8 @@ const SPANISH_UI_V361 = new Map([
 ]);
 SPANISH_UI_V361.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
-// v0.360: language-safe multi-select uncombine workflow.
-const SPANISH_UI_V360 = new Map([
+// v0.362: language-safe multi-select uncombine workflow.
+const SPANISH_UI_V362 = new Map([
   ["Uncombine Glass Types", "Separar tipos de vidrio"],
   ["Uncombine selected", "Separar seleccionados"],
   ["Uncombine", "Separar"],
@@ -4868,7 +4900,7 @@ const SPANISH_UI_V360 = new Map([
   ["Select at least one combined glass type to uncombine.", "Seleccione al menos un tipo de vidrio combinado para separar."],
   ["Selected glass combinations were separated.", "Las combinaciones de vidrio seleccionadas se separaron."],
 ]);
-SPANISH_UI_V360.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+SPANISH_UI_V362.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
 [
   ["Draft mode", "Modo borrador"],
@@ -4910,7 +4942,7 @@ const SPANISH_PLACEHOLDERS = new Map([
   ["Scan order to remove from bay...", "Escanee una orden para quitarla de la bahía..."],
   ["Temp Delivery Lists folder path", "Ruta de la carpeta temporal de listas de entrega"],
   ["Showers, Mirror, Coral...", "Regaderas, espejo, coral..."],
-  ["R1S or T0", "R1S o T0"],
+  ["R1S or T2", "R1S o T2"],
 ].forEach(([english, spanish]) => SPANISH_PLACEHOLDERS.set(english, spanish));
 
 // v0.359: placeholders are translated explicitly so search/help wording remains natural
@@ -4921,7 +4953,7 @@ const SPANISH_PLACEHOLDERS = new Map([
   ["Search order, item, customer, reason, or machine...", "Buscar orden, artículo, cliente, motivo o máquina..."],
   ["Click a bay or enter its code", "Haga clic en una bahía o ingrese su código"],
   ["Scan or type the piece barcode...", "Escanee o escriba el código de barras de la pieza..."],
-  ["Order + item (036505.1)", "Orden + artículo (036505.1)"],
+  ["Order + item (236505.1)", "Orden + artículo (236505.1)"],
   ["Search order, item, customer, bay, job, or glass...", "Buscar orden, artículo, cliente, bahía, trabajo o vidrio..."],
   ["Search customer, order, item, or Job Nr.", "Buscar cliente, orden, artículo o Núm. de trabajo"],
   ["Example: Indian Trail Outbound Morning", "Ejemplo: Salida de Indian Trail por la mañana"],
@@ -5596,7 +5628,7 @@ function toggleMobileSidebar() {
  */
 function syncFullscreenStickyPanelOffset() {
   const headerHeight = Math.ceil(els.appHeader?.getBoundingClientRect().height || 108);
-  const panelTop = headerHeight + 10;
+  const panelTop = headerHeight + 12;
 
   document.documentElement.style.setProperty("--sticky-scanner-panel-top", `${panelTop}px`);
   document.documentElement.style.setProperty("--fullscreen-sticky-panel-top", `${panelTop}px`);
@@ -5758,7 +5790,7 @@ function customSelectAccessibleLabel(select) {
   }
 
   return select.id
-    ? select.id.replace(/([a-z])([A-Z])/g, "$1 $0").replace(/[-_]+/g, " ")
+    ? select.id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_]+/g, " ")
     : "Choose an option";
 }
 
@@ -5844,16 +5876,16 @@ function syncCustomSelect(select) {
   trigger.title = option?.textContent?.trim() || customSelectAccessibleLabel(select);
   const selectedText = customSelectSelectedText(select);
   const rackRouteLabel = String(option?.dataset.rackRouteLabel || "").trim();
-  // v0.350: operational rack selectors mirror the opened option row. Route is
+  // v0.352: operational rack selectors mirror the opened option row. Route is
   // a colored cue at the front, followed by the full rack summary. Inline
   // Location editors keep their compact display through data-selected-label.
   const bayStatusBadge = String(option?.dataset.bayStatusBadge || "").trim();
   const bayStatusKind = String(option?.dataset.bayStatusKind || "").trim();
   const baySelectedLabel = String(option?.dataset.baySelectedLabel || "").trim();
   if (bayStatusBadge) {
-    value.innerHTML = `<span class="bay-selected-option-v440"><span>${escapeHtml(baySelectedLabel || selectedText)}</span><b class="bay-target-status-badge-v440 is-${escapeHtml(bayStatusKind || "available")}">${escapeHtml(bayStatusBadge)}</b></span>`;
+    value.innerHTML = `<span class="bay-selected-option-v442"><span>${escapeHtml(baySelectedLabel || selectedText)}</span><b class="bay-target-status-badge-v442 is-${escapeHtml(bayStatusKind || "available")}">${escapeHtml(bayStatusBadge)}</b></span>`;
   } else if (rackStatusCue && rackRouteCue && rackRouteLabel) {
-    value.innerHTML = `<span class="rack-selected-option-v350"><b class="rack-select-option-route-v345 rack-select-route-${escapeHtml(rackRouteCue)}">${escapeHtml(rackRouteLabel)}</b><span class="rack-selected-option-summary-v350">${escapeHtml(selectedText)}</span></span>`;
+    value.innerHTML = `<span class="rack-selected-option-v352"><b class="rack-select-option-route-v345 rack-select-route-${escapeHtml(rackRouteCue)}">${escapeHtml(rackRouteLabel)}</b><span class="rack-selected-option-summary-v352">${escapeHtml(selectedText)}</span></span>`;
   } else {
     value.textContent = selectedText;
   }
@@ -5912,7 +5944,7 @@ function positionCustomSelectMenu() {
     (length, option) => Math.max(length, option.textContent?.trim().length || 0),
     0,
   );
-  const contentWidth = Math.min(400, Math.max(010, longestOptionLength * 7.0 + 58));
+  const contentWidth = Math.min(420, Math.max(210, longestOptionLength * 7.2 + 58));
   const isScanDateSelect = select.id === "deliveryDateSelect";
   const isScanStageSelect = select.id === "deliveryStageSelect";
   const isInlineRackSelect = select.matches?.("[data-line-rack-select]");
@@ -5928,31 +5960,31 @@ function positionCustomSelectMenu() {
   // v0.351: expand the v0.350 compact rack menu by 13% without returning to
   // the former oversized menu. 0.791 = 0.70 * 1.13.
   const rackMenuScale = 0.791;
-  const rackOpenMenuWidth = Math.max(094, Math.min(340, Math.round(rect.width * rackMenuScale)));
+  const rackOpenMenuWidth = Math.max(294, Math.min(340, Math.round(rect.width * rackMenuScale)));
   const preferredWidth = isScanDateSelect
-    ? Math.max(rect.width, 044)
+    ? Math.max(rect.width, 244)
     : isScanStageSelect
       ? rect.width
       : isCompactLocationSelect
         ? rackOpenMenuWidth
         : Math.max(rect.width, contentWidth);
   const minimumWidth = isScanDateSelect
-    ? Math.max(rect.width, 000)
+    ? Math.max(rect.width, 220)
     : isScanStageSelect
       ? rect.width
       : isCompactLocationSelect
-        ? Math.min(094, rackOpenMenuWidth)
-        : 010;
-  const availableWidth = Math.max(160, window.innerWidth - viewportPadding * 0);
+        ? Math.min(294, rackOpenMenuWidth)
+        : 210;
+  const availableWidth = Math.max(160, window.innerWidth - viewportPadding * 2);
   const menuWidth = Math.min(Math.max(preferredWidth, Math.min(minimumWidth, availableWidth)), availableWidth);
 
   menu.style.width = `${menuWidth}px`;
   menu.style.left = `${Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - menuWidth - viewportPadding)}px`;
 
-  const menuHeight = Math.min(menu.scrollHeight || 300, Math.max(180, window.innerHeight - viewportPadding * 0));
+  const menuHeight = Math.min(menu.scrollHeight || 320, Math.max(180, window.innerHeight - viewportPadding * 2));
   const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
   const spaceAbove = rect.top - viewportPadding;
-  const openAbove = spaceBelow < Math.min(menuHeight, 080) && spaceAbove > spaceBelow;
+  const openAbove = spaceBelow < Math.min(menuHeight, 280) && spaceAbove > spaceBelow;
 
   menu.classList.toggle("opens-above", openAbove);
   const availableVertical = Math.max(160, openAbove ? spaceAbove : spaceBelow);
@@ -6081,7 +6113,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     const bayStatusBadge = String(row.option.dataset.bayStatusBadge || "").trim();
     const bayStatusKind = String(row.option.dataset.bayStatusKind || "").trim();
     if (bayStatusBadge) {
-      button.classList.add("bay-target-option-v440", `is-${bayStatusKind || "available"}`);
+      button.classList.add("bay-target-option-v442", `is-${bayStatusKind || "available"}`);
     }
     if (rackStatusCue) button.classList.add(`rack-select-status-${rackStatusCue}`);
     if (rackRouteCue) button.classList.add(`rack-select-route-${rackRouteCue}`);
@@ -6096,7 +6128,7 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
 
     const bayStatusCue = bayStatusBadge ? document.createElement("b") : null;
     if (bayStatusCue) {
-      bayStatusCue.className = `bay-target-status-badge-v440 is-${bayStatusKind || "available"}`;
+      bayStatusCue.className = `bay-target-status-badge-v442 is-${bayStatusKind || "available"}`;
       bayStatusCue.textContent = bayStatusBadge;
       bayStatusCue.title = String(row.option.dataset.bayStatusLabel || "Bay status");
     }
@@ -6480,7 +6512,7 @@ function initCustomSelectSystem() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function canonicalBarcode(order, item) {
-  return `T000${pad(order, 6)}${pad(item, 3)}000`;
+  return `T200${pad(order, 6)}${pad(item, 3)}000`;
 }
 
 /**
@@ -6493,7 +6525,7 @@ function parseBayManualOrderItemReference(value) {
   if (!text) return null;
 
   const clean = cleanBarcode(text);
-  if (/^T000\d{10}$/.test(clean)) {
+  if (/^T200\d{12}$/.test(clean)) {
     return {
       order: clean.slice(4, 10),
       item: clean.slice(10, 13),
@@ -6504,7 +6536,7 @@ function parseBayManualOrderItemReference(value) {
   const separated = text.match(/^\s*(\d{6})\s*(?:[.\/\\-]+|\s+)\s*(\d{1,3})\s*$/);
   if (separated) {
     const order = separated[1];
-    const item = separated[0].padStart(3, "0");
+    const item = separated[2].padStart(3, "0");
     return { order, item, barcode: canonicalBarcode(order, item) };
   }
 
@@ -6525,6 +6557,10 @@ function appLocale() {
   return state.language === "es" ? "es-US" : "en-US";
 }
 
+// BFS production clocks are Monroe/Charlotte Eastern time. Keep the explicit
+// IANA zone instead of inheriting a scanner/tablet workstation's local zone.
+const PLANT_TIME_ZONE_V516 = "America/New_York";
+
 /** Translate locale-generated English date text that was already on screen when Spanish was selected. */
 function translateEnglishLocaleDateV359(value) {
   const text = String(value || "").trim();
@@ -6535,7 +6571,7 @@ function translateEnglishLocaleDateV359(value) {
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return text;
 
-  const hasTime = hasEnglishClock || /\d{1,0}:\d{0}/.test(text);
+  const hasTime = hasEnglishClock || /\d{1,2}:\d{2}/.test(text);
   const hasWeekday = /\b(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)\b/i.test(text);
   const hasYear = /\b\d{4}\b/.test(text);
   const usesLongMonth = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/i.test(text);
@@ -6544,7 +6580,7 @@ function translateEnglishLocaleDateV359(value) {
     year: hasYear ? "numeric" : undefined,
     month: usesLongMonth ? "long" : "short",
     day: "numeric",
-    ...(hasTime ? { hour: "numeric", minute: "0-digit" } : {}),
+    ...(hasTime ? { hour: "numeric", minute: "2-digit" } : {}),
   };
   Object.keys(dateOptions).forEach((key) => dateOptions[key] === undefined && delete dateOptions[key]);
   return new Intl.DateTimeFormat(appLocale(), dateOptions).format(parsed);
@@ -6558,9 +6594,9 @@ function translateEnglishLocaleDateV359(value) {
 function formatDisplayDate(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const match = text.match(/^(\d{4})-(\d{1,0})-(\d{1,0})/);
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   const parsed = match
-    ? new Date(Number(match[1]), Number(match[0]) - 1, Number(match[3]))
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
     : new Date(text);
   if (Number.isNaN(parsed.getTime())) return text;
   return parsed.toLocaleDateString(appLocale(), {
@@ -6575,9 +6611,9 @@ function formatDisplayDate(value) {
 function formatNumericDeliveryDate(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const match = text.match(/^(\d{4})-(\d{1,0})-(\d{1,0})/);
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   const parsed = match
-    ? new Date(Number(match[1]), Number(match[0]) - 1, Number(match[3]), 10, 0, 0, 0)
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0)
     : new Date(text);
   if (Number.isNaN(parsed.getTime())) return text;
   return `${parsed.getMonth() + 1}/${parsed.getDate()}/${parsed.getFullYear()}`;
@@ -6591,7 +6627,7 @@ function formatNumericDeliveryDate(value) {
 function formatDateTime(value) {
   if (!value) return "";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(appLocale());
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(appLocale(), { timeZone: PLANT_TIME_ZONE_V516 });
 }
 
 /**
@@ -6606,9 +6642,9 @@ function formatScanDateTimeParts(value) {
     return { date: String(value), time: "" };
   }
   return {
-    date: parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric", year: "0-digit" }),
+    date: parsed.toLocaleDateString(appLocale(), { timeZone: PLANT_TIME_ZONE_V516, month: "numeric", day: "numeric", year: "2-digit" }),
     time: parsed
-      .toLocaleTimeString(appLocale(), { hour: "numeric", minute: "0-digit" })
+      .toLocaleTimeString(appLocale(), { timeZone: PLANT_TIME_ZONE_V516, hour: "numeric", minute: "2-digit" })
       .replace(/\s+/g, "")
       .toLowerCase(),
   };
@@ -6633,15 +6669,15 @@ function scanTimingMetaV447(item = {}, deliveryDateOverride = "") {
 
   const scanDate = new Date(scanValue);
   if (Number.isNaN(scanDate.getTime())) return { known: false, late: false, label: "SCANNED:" };
-  const scanKey = `${scanDate.getFullYear()}-${pad(scanDate.getMonth() + 1, 0)}-${pad(scanDate.getDate(), 0)}`;
-  const deliveryMatch = deliveryValue.match(/^(\d{4})-(\d{1,0})-(\d{1,0})/);
+  const scanKey = `${scanDate.getFullYear()}-${pad(scanDate.getMonth() + 1, 2)}-${pad(scanDate.getDate(), 2)}`;
+  const deliveryMatch = deliveryValue.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   let deliveryKey = deliveryValue;
   if (deliveryMatch) {
-    deliveryKey = `${deliveryMatch[1]}-${pad(Number(deliveryMatch[0]), 0)}-${pad(Number(deliveryMatch[3]), 0)}`;
+    deliveryKey = `${deliveryMatch[1]}-${pad(Number(deliveryMatch[2]), 2)}-${pad(Number(deliveryMatch[3]), 2)}`;
   } else {
     const deliveryDate = new Date(deliveryValue);
     if (Number.isNaN(deliveryDate.getTime())) return { known: false, late: false, label: "SCANNED:" };
-    deliveryKey = `${deliveryDate.getFullYear()}-${pad(deliveryDate.getMonth() + 1, 0)}-${pad(deliveryDate.getDate(), 0)}`;
+    deliveryKey = `${deliveryDate.getFullYear()}-${pad(deliveryDate.getMonth() + 1, 2)}-${pad(deliveryDate.getDate(), 2)}`;
   }
   const late = scanKey > deliveryKey;
   return { known: true, late, label: late ? "LATE:" : "ON TIME:", scanKey, deliveryKey };
@@ -6657,7 +6693,7 @@ function scanTimePillMarkupV447(item = {}, deliveryDateOverride = "") {
   const indianTrailOverride = scanStation.toLowerCase() === "scan override it";
   if (indianTrailOverride) {
     const title = `Scan Override IT at ${formatDateTime(item.lastScannedAt)}`;
-    return `<span class="last-scan-pill-v157 is-it-override-v450" title="${escapeHtml(title)}">
+    return `<span class="last-scan-pill-v157 is-it-override-v452" title="${escapeHtml(title)}">
       <span class="last-scan-pill-icon-v157" aria-hidden="true">&#8635;</span>
       <span class="last-scan-pill-label-v157">SCAN OVERRIDE IT:</span>
       <b>${escapeHtml(scanTimestamp.date)}</b>
@@ -6682,7 +6718,7 @@ function scanTimePillMarkupV447(item = {}, deliveryDateOverride = "") {
  */
 function todayKey() {
   const now = new Date();
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1, 0)}-${pad(now.getDate(), 0)}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
 }
 
 /**
@@ -6691,7 +6727,7 @@ function todayKey() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function dateInputValue(date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1, 0)}-${pad(date.getDate(), 0)}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
 }
 
 const IMPORT_MAX_DATE = "";
@@ -6743,7 +6779,7 @@ function currentImportDateWindow() {
 function parseDateKey(value) {
   const parts = String(value || "").split("-").map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
-  return new Date(parts[0], parts[1] - 1, parts[0]);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 /**
@@ -6759,7 +6795,7 @@ function filterListsByOverviewRange(lists = state.lists) {
     const end = parseDateKey(state.statisticsCustomDateTo);
     if (!start || !end) return lists.slice();
     start.setHours(0, 0, 0, 0);
-    end.setHours(03, 59, 59, 999);
+    end.setHours(23, 59, 59, 999);
     return lists.filter((list) => {
       const date = parseDateKey(list.deliveryDate);
       return date && date >= start && date <= end;
@@ -6769,7 +6805,7 @@ function filterListsByOverviewRange(lists = state.lists) {
   const days = Number(state.overviewRange || 30);
   if (!days) return lists.slice();
   const end = new Date();
-  end.setHours(03, 59, 59, 999);
+  end.setHours(23, 59, 59, 999);
   const start = new Date(end);
   start.setDate(start.getDate() - days + 1);
   start.setHours(0, 0, 0, 0);
@@ -7151,7 +7187,7 @@ function stageCategory(list) {
 const DELIVERY_ROUTE_GROUP_DEFINITIONS = Object.freeze([
   Object.freeze({ key: "airport", label: "Airport Road", printRouteGroup: "airport", sort: 0 }),
   Object.freeze({ key: "indian_trail", label: "Indian Trail", printRouteGroup: "indian_trail", sort: 1 }),
-  Object.freeze({ key: "greenville", label: "Greenville", printRouteGroup: "greenville", sort: 0 }),
+  Object.freeze({ key: "greenville", label: "Greenville", printRouteGroup: "greenville", sort: 2 }),
   Object.freeze({ key: "cpu", label: "CPU", printRouteGroup: "cpu", sort: 3 }),
   Object.freeze({ key: "dtc", label: "DTC", printRouteGroup: "dtc", sort: 4 }),
 ]);
@@ -7309,16 +7345,16 @@ function listsByDeliveryDate(lists = state.lists) {
 
 /** Parse one YYYY-MM-DD delivery date without UTC shifting. */
 function deliveryDateFromKey(value) {
-  const match = /^(\d{4})-(\d{0})-(\d{0})$/.exec(String(value || ""));
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
   if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[0]) - 1, Number(match[3]), 10, 0, 0, 0);
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /** Return the Monday for the business week containing one delivery date. */
 function deliveryBusinessWeekStart(value) {
   const date = value instanceof Date
-    ? new Date(value.getFullYear(), value.getMonth(), value.getDate(), 10, 0, 0, 0)
+    ? new Date(value.getFullYear(), value.getMonth(), value.getDate(), 12, 0, 0, 0)
     : deliveryDateFromKey(value);
   if (!date) return null;
   date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
@@ -7327,17 +7363,17 @@ function deliveryBusinessWeekStart(value) {
 
 function deliveryDateKey(value) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(0, "0")}-${String(value.getDate()).padStart(0, "0")}`;
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
 /** Format the same Monday-Friday week separator used by Print / Export. */
 function deliveryBusinessWeekLabel(value) {
   const start = deliveryBusinessWeekStart(value);
   if (!start) return "Delivery Dates";
-  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 4, 10, 0, 0, 0);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 4, 12, 0, 0, 0);
   const current = deliveryBusinessWeekStart(new Date());
-  const previous = new Date(current.getFullYear(), current.getMonth(), current.getDate() - 7, 10, 0, 0, 0);
-  const next = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7, 10, 0, 0, 0);
+  const previous = new Date(current.getFullYear(), current.getMonth(), current.getDate() - 7, 12, 0, 0, 0);
+  const next = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 7, 12, 0, 0, 0);
   const key = deliveryDateKey(start);
   const prefix = key === deliveryDateKey(current)
     ? "This Week"
@@ -7385,7 +7421,7 @@ function groupedDeliveryDateOptions(groups, optionHtml) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function stageSort(list) {
-  return { staged: 1, outbound: 0, received: 3, greenville: 4, pickup: 5, dtc: 6 }[stageCategory(list)] || 9;
+  return { staged: 1, outbound: 2, received: 3, greenville: 4, pickup: 5, dtc: 6 }[stageCategory(list)] || 9;
 }
 
 /**
@@ -8228,7 +8264,7 @@ function applyBackendPayload(payload, { selectionFallbackId = "" } = {}) {
   state.recent = payload.recent || [];
   state.errors = payload.errors || [];
   state.lastScan = payload.lastScan || state.recent[0] || null;
-  // v0.380: background refreshes and polling must never create or move a Scan
+  // v0.382: background refreshes and polling must never create or move a Scan
   // selection. Preserve the operator's explicit selection only while that row
   // still exists. A real scan may opt into one explicit fallback row; normal
   // refreshes always leave an empty selection empty instead of jumping to the
@@ -8271,7 +8307,7 @@ async function loadDeliveryLists(preferredListId = "") {
         break;
       } catch (error) {
         lastError = error;
-        if (!state.authenticated || attempt >= 0) break;
+        if (!state.authenticated || attempt >= 2) break;
         await new Promise((resolve) => window.setTimeout(resolve, 150 * (attempt + 1)));
       }
     }
@@ -8375,7 +8411,7 @@ function scanWorkflowPresetSequenceV485(item = {}) {
 }
 
 function scanStageCopyRankV485(copy = {}) {
-  return { airport_staging: 10, airport_outbound: 00, indian_trail: 30, cpu: 30, greenville: 30, dtc: 30 }[scanStagePresetV485(copy)] ?? 40;
+  return { airport_staging: 10, airport_outbound: 20, indian_trail: 30, cpu: 30, greenville: 30, dtc: 30 }[scanStagePresetV485(copy)] ?? 40;
 }
 
 function mergeDateWideLineFlagsV485(item = {}, flagsPayload = null) {
@@ -8473,6 +8509,7 @@ function buildDateWideScanItemsV485(records = []) {
       priorityBanner: copies.map((copy) => copy.priorityBanner).find(Boolean) || base.priorityBanner || null,
       lastScannedAt: latestCopy.lastScannedAt || latestCopy.lastScanTime || "",
       lastScannedStation: latestCopy.lastScannedStation || latestCopy.scanner || "",
+      cutting: copies.map((copy) => copy.cutting).find((value) => value && typeof value === "object") || base.cutting || {},
       workflowLogicalKeyV485: logicalKey,
       workflowStageCopiesV485: copies,
       workflowStagesV485: workflowStages,
@@ -8495,19 +8532,37 @@ function scanDateWideCatalogSignatureV486(deliveryDate = "", lists = state.lists
     .sort().join("\n");
 }
 
+function cancelScanDateWideLoadV512() {
+  const controller = state.scanDateWideAbortControllerV512;
+  if (controller && !controller.signal.aborted) controller.abort();
+  state.scanDateWideAbortControllerV512 = null;
+  state.scanDateWideLoadStartedAtV512 = 0;
+  state.scanDateWideLoadingV485 = false;
+  ++state.scanDateWideLoadTokenV485;
+}
+
 async function activateScanDateV485(deliveryDate, navigate = true, { preferredListId = "", selectionFallbackId = "", selectionKey = "" } = {}) {
   const date = String(deliveryDate || "").trim();
   if (!date || !state.backend) return;
   const dateLists = state.lists.filter((list) => String(list.deliveryDate || "") === date);
   if (!dateLists.length) return;
+  const previousControllerV512 = state.scanDateWideAbortControllerV512;
+  if (previousControllerV512 && !previousControllerV512.signal.aborted) previousControllerV512.abort();
+  const controllerV512 = new AbortController();
+  state.scanDateWideAbortControllerV512 = controllerV512;
   const token = ++state.scanDateWideLoadTokenV485;
   state.scanDateWideLoadingV485 = true;
+  state.scanDateWideLoadStartedAtV512 = Date.now();
   const previousDate = String(state.meta?.deliveryDate || "").trim();
   const previousSelected = state.items.find((item) => String(item.id || "") === String(state.selectedId || ""));
   const wantedSelectionKey = selectionKey || previousSelected?.workflowLogicalKeyV485 || "";
   const startedAt = performance.now();
+  const requestedCatalogSignature = scanDateWideCatalogSignatureV486(date);
+  const timeoutV512 = window.setTimeout(() => {
+    if (state.scanDateWideAbortControllerV512 === controllerV512 && !controllerV512.signal.aborted) controllerV512.abort();
+  }, 15000);
   try {
-    const bundle = await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`);
+    const bundle = await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controllerV512.signal });
     if (token !== state.scanDateWideLoadTokenV485) return;
     const records = Array.isArray(bundle.records) ? bundle.records.filter(Boolean) : [];
     if (!records.length) throw new Error(`No accessible workflow lists were found for ${date}.`);
@@ -8526,7 +8581,7 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     state.lastScan = recent[0] || state.lastScan;
     state.scanDateWideDateV485 = date;
     state.scanDateWidePayloadsV485 = new Map(records.map((record) => [String(record.list?.id || record.payload?.meta?.id || ""), record.payload]));
-    state.scanDateWideCatalogSignatureV486 = scanDateWideCatalogSignatureV486(date);
+    state.scanDateWideCatalogSignatureV486 = requestedCatalogSignature;
     state.scanDateWideLastLoadMsV486 = Math.round((performance.now() - startedAt) * 10) / 10;
     let selected = wantedSelectionKey ? projectedItems.find((item) => item.workflowLogicalKeyV485 === wantedSelectionKey) : null;
     if (!selected && selectionFallbackId) selected = projectedItems.find((item) => (item.workflowStageCopiesV485 || []).some((copy) => String(copy.id || "") === String(selectionFallbackId)));
@@ -8537,14 +8592,29 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
       state.glassTypeFilters.clear();
       state.lastGlassFilterSignature = "";
     }
-    state.pageIndex = 1;
+    if (previousDate !== date) state.pageIndex = 1;
     renderStationOptions(meta.scanner);
-    if (navigate) showPage("scan"); else renderScanPage();
+    // Finish ownership before navigation: showPage otherwise cancels this
+    // successful load and starts the same date request for a second time.
+    state.scanDateWideLoadingV485 = false;
+    state.scanDateWideAbortControllerV512 = null;
+    if (navigate) showPage("scan"); else if (state.page === "scan") renderScanPage();
     renderDeliveryDateSelect();
     if (els.deliveryDateSelect?.dataset.customSelectEnhanced === "true") syncCustomSelect(els.deliveryDateSelect);
     return { meta, items: projectedItems };
+  } catch (error) {
+    if (controllerV512.signal.aborted) {
+      if (token !== state.scanDateWideLoadTokenV485) return null;
+      throw new Error("Scan data took too long to load. Re-enter Scan or choose the date again to retry.");
+    }
+    throw error;
   } finally {
-    if (token === state.scanDateWideLoadTokenV485) state.scanDateWideLoadingV485 = false;
+    window.clearTimeout(timeoutV512);
+    if (token === state.scanDateWideLoadTokenV485) {
+      state.scanDateWideLoadingV485 = false;
+      state.scanDateWideLoadStartedAtV512 = 0;
+      if (state.scanDateWideAbortControllerV512 === controllerV512) state.scanDateWideAbortControllerV512 = null;
+    }
   }
 }
 
@@ -8862,10 +8932,10 @@ async function unlockAppSounds() {
 /**
  * Purpose: Persist and synchronize the operator-selected scanner sound volume.
  * Effects: Updates the shared Web Audio master gain and every visible volume control.
- * Flow: Clamps the floor-volume range to 0-000%, persists it locally, and refreshes labels.
+ * Flow: Clamps the floor-volume range to 0-200%, persists it locally, and refreshes labels.
  */
 function setAppSoundVolume(value, { persist = true } = {}) {
-  const volumePercent = Math.max(0, Math.min(Number(value || 0), 000));
+  const volumePercent = Math.max(0, Math.min(Number(value || 0), 200));
   appSoundRuntime.volumePercent = volumePercent;
   if (appSoundRuntime.masterGain && appSoundRuntime.context) {
     appSoundRuntime.masterGain.gain.setTargetAtTime(volumePercent / 100, appSoundRuntime.context.currentTime, 0.015);
@@ -8902,22 +8972,22 @@ function updateAppSoundStatus(message, stateName = "ready") {
  * Effects: Creates a temporary oscillator and gain node that disconnect automatically after playback.
  * Flow: Applies a quick attack/release envelope so operational sounds remain clear without being harsh.
  */
-function scheduleAppTone(context, { frequency, start, duration, type = "sine", volume = 0.10 }) {
+function scheduleAppTone(context, { frequency, start, duration, type = "sine", volume = 0.12 }) {
   const oscillator = context.createOscillator();
   const gain = context.createGain();
   const safeStart = Math.max(Number(start || context.currentTime), context.currentTime);
   const safeDuration = Math.max(Number(duration || 0.1), 0.04);
-  const safeVolume = Math.max(0.005, Math.min(Number(volume || 0.10), 0.40));
+  const safeVolume = Math.max(0.005, Math.min(Number(volume || 0.12), 0.42));
 
   oscillator.type = type;
   oscillator.frequency.setValueAtTime(Math.max(Number(frequency || 440), 40), safeStart);
   gain.gain.setValueAtTime(0.0001, safeStart);
-  gain.gain.exponentialRampToValueAtTime(safeVolume, safeStart + 0.010);
+  gain.gain.exponentialRampToValueAtTime(safeVolume, safeStart + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, safeStart + safeDuration);
   oscillator.connect(gain);
   gain.connect(appSoundRuntime.masterGain || context.destination);
   oscillator.start(safeStart);
-  oscillator.stop(safeStart + safeDuration + 0.005);
+  oscillator.stop(safeStart + safeDuration + 0.025);
 }
 
 /**
@@ -9033,7 +9103,7 @@ function playAppSound(kind = "notice", options = {}) {
   if (!APP_SOUND_ENABLED_KINDS.has(normalizedKind) || appSoundRuntime.volumePercent <= 0) return Promise.resolve(false);
   const now = performance.now();
   const lastPlayedAt = Number(appSoundRuntime.lastPlayedAt.get(normalizedKind) || 0);
-  const throttleMs = ["task_complete", "rack_complete", "machine_fault"].includes(normalizedKind) ? 060 : 75;
+  const throttleMs = ["task_complete", "rack_complete", "machine_fault"].includes(normalizedKind) ? 260 : 75;
   if (!options.force && now - lastPlayedAt < throttleMs) return Promise.resolve(false);
   appSoundRuntime.lastPlayedAt.set(normalizedKind, now);
 
@@ -9057,11 +9127,11 @@ function playAppSound(kind = "notice", options = {}) {
     const start = context.currentTime + delay;
     const patterns = {
       success: [
-        { frequency: 061.63, offset: 0, duration: 0.16, type: "triangle", volume: 0.055 },
-        { frequency: 503.05, offset: 0.005, duration: 0.13, type: "sine", volume: 0.075 },
-        { frequency: 659.05, offset: 0.095, duration: 0.15, type: "sine", volume: 0.085 },
-        { frequency: 783.99, offset: 0.17, duration: 0.0, type: "sine", volume: 0.095 },
-        { frequency: 1046.5, offset: 0.035, duration: 0.16, type: "triangle", volume: 0.055 },
+        { frequency: 261.63, offset: 0, duration: 0.16, type: "triangle", volume: 0.055 },
+        { frequency: 523.25, offset: 0.025, duration: 0.13, type: "sine", volume: 0.075 },
+        { frequency: 659.25, offset: 0.095, duration: 0.15, type: "sine", volume: 0.085 },
+        { frequency: 783.99, offset: 0.17, duration: 0.2, type: "sine", volume: 0.095 },
+        { frequency: 1046.5, offset: 0.235, duration: 0.16, type: "triangle", volume: 0.055 },
       ],
       duplicate: [
         { frequency: 440, offset: 0, duration: 0.09, type: "triangle", volume: 0.075 },
@@ -9069,23 +9139,23 @@ function playAppSound(kind = "notice", options = {}) {
       ],
       warning: [
         { frequency: 554.37, offset: 0, duration: 0.1, type: "triangle", volume: 0.075 },
-        { frequency: 493.88, offset: 0.11, duration: 0.10, type: "triangle", volume: 0.07 },
+        { frequency: 493.88, offset: 0.11, duration: 0.12, type: "triangle", volume: 0.07 },
       ],
       error: [
         { frequency: 196, offset: 0, duration: 0.13, type: "square", volume: 0.06 },
         { frequency: 164.81, offset: 0.14, duration: 0.16, type: "square", volume: 0.055 },
       ],
       priority: [
-        { frequency: 659.05, offset: 0, duration: 0.08, type: "triangle", volume: 0.075 },
-        { frequency: 880, offset: 0.09, duration: 0.10, type: "sine", volume: 0.09 },
+        { frequency: 659.25, offset: 0, duration: 0.08, type: "triangle", volume: 0.075 },
+        { frequency: 880, offset: 0.09, duration: 0.12, type: "sine", volume: 0.09 },
       ],
       complete: [
-        { frequency: 503.05, offset: 0, duration: 0.1, type: "triangle", volume: 0.07 },
-        { frequency: 659.05, offset: 0.1, duration: 0.11, type: "triangle", volume: 0.075 },
-        { frequency: 783.99, offset: 0.01, duration: 0.17, type: "sine", volume: 0.085 },
+        { frequency: 523.25, offset: 0, duration: 0.1, type: "triangle", volume: 0.07 },
+        { frequency: 659.25, offset: 0.1, duration: 0.11, type: "triangle", volume: 0.075 },
+        { frequency: 783.99, offset: 0.21, duration: 0.17, type: "sine", volume: 0.085 },
       ],
       confirmed: [
-        { frequency: 659.05, offset: 0, duration: 0.09, type: "triangle", volume: 0.065 },
+        { frequency: 659.25, offset: 0, duration: 0.09, type: "triangle", volume: 0.065 },
         { frequency: 880, offset: 0.08, duration: 0.14, type: "sine", volume: 0.075 },
       ],
       down: [
@@ -9160,8 +9230,8 @@ function soundTestControlsHtml(context = "scan") {
       <span class="scan-sound-test-copy"><strong>Temporary sound tests</strong><small>Remove after approval</small></span>
       <label class="scan-sound-volume-control">
         <span>Sound volume <strong data-app-sound-volume-label>${Math.round(appSoundRuntime.volumePercent)}%</strong></span>
-        <input type="range" min="0" max="000" step="10" value="${Math.round(appSoundRuntime.volumePercent)}" data-app-sound-volume aria-label="Scanner sound volume">
-        <small>Up to 000% floor boost</small>
+        <input type="range" min="0" max="200" step="10" value="${Math.round(appSoundRuntime.volumePercent)}" data-app-sound-volume aria-label="Scanner sound volume">
+        <small>Up to 200% floor boost</small>
       </label>
       <div class="scan-sound-test-actions">
         <button type="button" data-scan-sound-test="scan_success">Scan</button>
@@ -9258,9 +9328,44 @@ function scanFilterGroup(filter) {
  * Effects: None; all filter predicates stay centralized so desktop and mobile views cannot drift.
  * Flow: Evaluates status, attention, or route rules and returns whether the item belongs to that filter.
  */
+function scanWorkflowCompletionStateV514(item = {}) {
+  const selectedMachineFilters = SCAN_FILTER_GROUPS.machine.filter((key) => state.activeFilters.has(key));
+  const fabricationStatus = cachedFabricationStatusV474(item);
+  const fabricationCompletion = fabricationCompletionStateV512(item, fabricationStatus);
+
+  // When a production machine is selected, Status describes that checkpoint.
+  // This makes WaterJet + Complete / Partial / Not Complete composable without
+  // a second, competing Production Progress filter group. No Fab has no
+  // fabrication checkpoint, so its status continues to describe the workflow.
+  if (selectedMachineFilters.length && fabricationCompletion.machine !== "No Fab") {
+    if (fabricationCompletion.complete) return "complete";
+    if (fabricationCompletion.state === "partial") return "partial";
+    return "remaining";
+  }
+
+  const dateWide = scanDateWideProgressStepsV485(item);
+  if (!dateWide?.steps?.length) return itemStatus(item);
+  const required = dateWide.steps.filter((step) => !step.nonBlockingUnknown);
+  if (!required.length) return itemStatus(item);
+  const allComplete = required.every((step) => Boolean(step.complete));
+  if (allComplete) return "complete";
+  const hasProgress = required.some((step) => {
+    if (step.complete) return true;
+    if (step.kind === "cutting") return Boolean(step.active);
+    return Number(step.scanned || 0) > 0 || Boolean(step.partial);
+  });
+  return hasProgress ? "partial" : "remaining";
+}
+
 function itemMatchesScanFilter(item, filter) {
-  const status = itemStatus(item);
-  if (filter === "remaining" || filter === "partial" || filter === "complete") return status === filter;
+  const status = scanWorkflowCompletionStateV514(item);
+  if (filter === "remaining") return status !== "complete";
+  if (filter === "partial" || filter === "complete") return status === filter;
+  const fabricationStatus = cachedFabricationStatusV474(item);
+  const fabricationCompletion = fabricationCompletionStateV512(item, fabricationStatus);
+  if (filter === "machine-no-fab") return fabricationCompletion.noFab === true;
+  if (filter === "machine-waterjet") return fabricationCompletion.machine === "WaterJet";
+  if (filter === "machine-denver") return fabricationCompletion.machine === "Denver";
   if (filter === "internal-rejects") return Number(item.internalRejectCount || 0) > 0;
   if (filter === "errors") return hasScanError(item);
   if (filter === "remakes") return isRemakeItem(item);
@@ -9388,7 +9493,7 @@ function renderActiveScanFilters() {
   const priorityOpen = unscannedPieceCount(state.items.filter((item) => isRemakeItem(item) || isRushItem(item)));
 
   if (els.scanFilterPriorityState) {
-    els.scanFilterPriorityState.textContent = priorityOpen ? "!" : "\u0713";
+    els.scanFilterPriorityState.textContent = priorityOpen ? "!" : "\u2713";
     els.scanFilterPriorityState.classList.toggle("has-alert", Boolean(priorityOpen));
     els.scanFilterPriorityState.classList.toggle("is-clear", !priorityOpen);
     els.scanFilterPriorityState.setAttribute(
@@ -9407,7 +9512,7 @@ function renderActiveScanFilters() {
       (label) => `<button class="scan-filter-chip is-glass glass-tone-chip" ${glassToneAttributes(label)} type="button" data-remove-glass-filter="${escapeHtml(label)}"><i aria-hidden="true"></i><span>${escapeHtml(label)}</span><b aria-hidden="true">&times;</b></button>`,
     ),
     ...(state.scanSortKey && SCAN_TABLE_COLUMNS[state.scanSortKey]
-      ? [`<button class="scan-filter-chip is-sort-v308" type="button" data-clear-scan-sort><i aria-hidden="true"></i><span>${escapeHtml(SCAN_TABLE_COLUMNS[state.scanSortKey].label)} ${state.scanSortDirection === "desc" ? "↓" : "↑"}</span><b aria-hidden="true">&times;</b></button>`]
+      ? [`<button class="scan-filter-chip is-sort-v328" type="button" data-clear-scan-sort><i aria-hidden="true"></i><span>${escapeHtml(SCAN_TABLE_COLUMNS[state.scanSortKey].label)} ${state.scanSortDirection === "desc" ? "↓" : "↑"}</span><b aria-hidden="true">&times;</b></button>`]
       : []),
   ].join("");
 }
@@ -9543,9 +9648,10 @@ function cachedFabricationStatusV474(item = {}) {
 
 function fabricationNoFabConfirmedV481(status = null, { loaded = true } = {}) {
   if (!loaded || !status || typeof status !== "object") return false;
-  if (status.required === false) return true;
   const machine = compactMachineLabelV475(status.actualMachine || status.machine || status.assignedMachine || "");
-  return !machine && /fabrication machine not assigned/i.test(String(status.label || ""));
+  if (machine) return false;
+  if (status.required === false) return true;
+  return /fabrication machine not assigned/i.test(String(status.label || ""));
 }
 
 function compactMachineLabelV475(value = "") {
@@ -9565,13 +9671,13 @@ function productionMachineColorV476(machine = "") {
   const label = compactMachineLabelV475(machine).toLowerCase();
   const colors = state.productionFileSettings?.machineColors || {};
   if (label.includes("waterjet")) return safeProgressColorV476(colors.waterjet, "#7c3aed");
-  if (label.includes("denver")) return safeProgressColorV476(colors.denver, "#0563eb");
+  if (label.includes("denver")) return safeProgressColorV476(colors.denver, "#2563eb");
   return "#64748b";
 }
 
 function progressStepColorV480(step = null) {
-  if (step?.kind === "fabrication" && step?.color) {
-    return safeProgressColorV476(step.color, productionMachineColorV476(step.label || ""));
+  if (["fabrication", "cutting"].includes(step?.kind) && step?.color) {
+    return safeProgressColorV476(step.color, step?.kind === "cutting" ? "#0f80c4" : productionMachineColorV476(step.label || ""));
   }
   return safeProgressColorV476(progressStageColorV476(step?.label || "Progress"), "#718096");
 }
@@ -9579,6 +9685,7 @@ function progressStepColorV480(step = null) {
 function progressStageColorV476(label = "") {
   const signal = String(label || "").trim().toLowerCase();
   if (signal.includes("not scanned") || signal.includes("not started")) return "#7b8796";
+  if (signal.includes("cutting") || signal === "cut") return "#0f80c4";
   if (signal.includes("waterjet") || signal === "wj") return productionMachineColorV476("WaterJet");
   if (signal.includes("denver")) return productionMachineColorV476("Denver");
   if (signal.includes("not fabricated") || signal.includes("fabrication")) return "#7b8796";
@@ -9593,6 +9700,7 @@ function progressStageColorV476(label = "") {
 
 function progressStageIconKindV476(label = "") {
   const signal = String(label || "").trim().toLowerCase();
+  if (signal.includes("cutting") || signal === "cut") return "cutting";
   if (signal.includes("waterjet") || signal === "wj") return "waterjet";
   if (signal.includes("denver")) return "denver";
   if (signal.includes("staged") || signal.includes("staging")) return "staging";
@@ -9604,21 +9712,50 @@ function progressStageIconKindV476(label = "") {
   return "clock";
 }
 
+function waterjetCompletedPieceCountV512(item = {}, status = null) {
+  if (!status || compactMachineLabelV475(status.actualMachine || status.machine || status.assignedMachine || "") !== "WaterJet") return 0;
+  const rows = Array.isArray(status.completedWaterjet) ? status.completedWaterjet : [];
+  const cutoff = Date.parse(String(item.lastRejectedAt || status.evidenceAfter || ""));
+  const cutoffSeconds = Number.isFinite(cutoff) ? cutoff / 1000 : 0;
+  return rows.filter((asset) => {
+    if (!/\.nce$/i.test(String(asset?.name || asset?.relative || ""))) return false;
+    const modified = Number(asset?.modifiedAt || 0);
+    return !cutoffSeconds || modified > cutoffSeconds;
+  }).length;
+}
+
+function fabricationCompletionStateV512(item = {}, status = cachedFabricationStatusV474(item)) {
+  if (!status || typeof status !== "object") return { machine: "", state: "unknown", scanned: 0, qty: 1, complete: false };
+  const machine = compactMachineLabelV475(status.actualMachine || status.machine || status.assignedMachine || "");
+  if (fabricationNoFabConfirmedV481(status)) return { machine: "No Fab", state: "not-applicable", scanned: 0, qty: 0, complete: true, noFab: true };
+  if (!machine) return { machine: "", state: "unknown", scanned: 0, qty: 1, complete: false };
+  if (machine === "WaterJet") {
+    const qty = Math.max(1, Number(item.qty || 1));
+    const evidenceCount = waterjetCompletedPieceCountV512(item, status);
+    if (evidenceCount > 0) {
+      const scanned = Math.min(qty, evidenceCount);
+      return { machine, state: scanned >= qty ? "complete" : "partial", scanned, qty, complete: scanned >= qty };
+    }
+  }
+  const complete = status.fabricated === true;
+  return { machine, state: complete ? "complete" : "incomplete", scanned: complete ? 1 : 0, qty: 1, complete };
+}
+
 function fabricationProgressPresentationV474(item = {}) {
   const status = cachedFabricationStatusV474(item);
   if (!status) return null;
-  const machine = compactMachineLabelV475(status.actualMachine || status.machine || status.assignedMachine || "");
+  const completion = fabricationCompletionStateV512(item, status);
+  const machine = completion.machine === "No Fab" ? "" : completion.machine;
   if (!machine && !status.sketchMatched) return null;
-  if (status.fabricated === true && machine) {
-    return { text: `${machine} 1/1`, label: machine, scanned: 1, qty: 1, complete: true, kind: "fabrication", color: productionMachineColorV476(machine), className: "fabricated-v474" };
-  }
-  if (status.sketchMatched && status.fabricated === false) {
-    return { text: machine ? `${machine} 0/1` : "Not Fabricated", label: machine || "Fabrication", scanned: 0, qty: 1, complete: false, kind: "fabrication", color: productionMachineColorV476(machine), className: "not-fabricated-v474" };
-  }
-  if (status.sketchMatched && machine && status.fabricated == null) {
-    return { text: `${machine} 0/1`, label: machine, scanned: 0, qty: 1, complete: false, kind: "fabrication", color: productionMachineColorV476(machine), className: "fabrication-unknown-v474" };
+  if (machine) {
+    const className = completion.complete ? "fabricated-v474" : completion.state === "partial" ? "partial-fabricated-v512" : status.fabricated === false ? "not-fabricated-v474" : "fabrication-unknown-v474";
+    return { text: `${machine} ${completion.scanned}/${completion.qty}`, label: machine, scanned: completion.scanned, qty: completion.qty, complete: completion.complete, kind: "fabrication", color: productionMachineColorV476(machine), className };
   }
   return null;
+}
+
+function noFabProgressStepV512() {
+  return { label: "No Fab", detail: "N/A", scanned: 0, qty: 0, complete: true, kind: "no-fab", tone: "no-fab-v478", color: "#8b96a0", timestamp: "" };
 }
 
 function scanNextDestinationLabelV475(item = {}) {
@@ -9631,11 +9768,32 @@ function scanNextDestinationLabelV475(item = {}) {
   return "";
 }
 
+function scanCuttingProgressPresentationV511(item = {}) {
+  const cutting = item.cutting && typeof item.cutting === "object" ? item.cutting : {};
+  const presentation = cuttingProgressPresentationV498(cutting);
+  return {
+    label: "Cutting",
+    detail: presentation.detail,
+    scanned: presentation.complete ? 1 : 0,
+    qty: 1,
+    complete: Boolean(presentation.complete),
+    kind: "cutting",
+    color: "#0f80c4",
+    className: presentation.className,
+    active: Boolean(presentation.active),
+    nonBlockingUnknown: cutting.dataAvailable === false,
+    timestamp: cuttingProgressTimestampV511(cutting),
+  };
+}
+
 function scanDateWideProgressStepsV485(item = {}) {
   if (!state.meta?.dateWideScanV485 || !Array.isArray(item.workflowStagesV485)) return null;
+  const cutting = scanCuttingProgressPresentationV511(item);
   const fabrication = fabricationProgressPresentationV474(item);
   const fabricationStatus = cachedFabricationStatusV474(item);
   const noFab = fabricationNoFabConfirmedV481(fabricationStatus);
+  if (fabrication) fabrication.timestamp = fabricationProgressTimestampV511(fabricationStatus || {});
+  const fabricationSlot = fabrication || (noFab ? noFabProgressStepV512() : null);
   const stages = item.workflowStagesV485.map((stage) => ({
     label: stage.label || scanStageLabelV485(stage.preset),
     scanned: Math.max(0, Number(stage.scanned || 0)),
@@ -9643,8 +9801,9 @@ function scanDateWideProgressStepsV485(item = {}) {
     complete: Boolean(stage.complete),
     kind: "stage",
     preset: stage.preset,
+    timestamp: stage.lastScannedAt || "",
   }));
-  return { steps: [...(fabrication ? [fabrication] : []), ...stages], noFab, fabricationStatus };
+  return { steps: [cutting, ...(fabricationSlot ? [fabricationSlot] : []), ...stages], noFab, fabricationStatus };
 }
 
 function scanDateWideProgressPairV486(item = {}) {
@@ -9655,6 +9814,10 @@ function scanDateWideProgressPairV486(item = {}) {
   for (const step of dateWide.steps) {
     if (!next && step.complete) {
       previous = step;
+      continue;
+    }
+    if (!step.complete && step.nonBlockingUnknown) {
+      if (!previous) previous = step;
       continue;
     }
     if (!step.complete) {
@@ -9715,9 +9878,10 @@ function progressStepHtmlV475(step, role = "") {
   const qty = Math.max(0, Number(step.qty || 0));
   const stateClass = step.complete ? "is-complete-v475" : role === "previous" ? "is-prior-pending-v475" : "is-next-v475";
   const toneClass = step.tone === "no-fab-v478" ? "is-no-fab-v478" : "";
-  const kindClass = step.kind === "fabrication" ? "is-fabrication-pending-v480" : "";
-  const iconKind = step.complete ? "checkcircle" : progressStageIconKindV476(step.label || "Progress");
-  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(scanned)}/${escapeHtml(qty)}</strong></span>`;
+  const kindClass = step.kind === "fabrication" ? "is-fabrication-pending-v480" : step.kind === "cutting" ? "is-cutting-step-v511" : step.kind === "no-fab" ? "is-no-fab-slot-v512" : "";
+  const iconKind = step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : step.complete ? "checkcircle" : progressStageIconKindV476(step.label || "Progress");
+  const value = step.kind === "no-fab" ? "N/A" : step.kind === "cutting" && step.detail ? step.detail : `${scanned}/${qty}`;
+  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span>`;
 }
 
 function scanProgressMarkupV475(item = {}) {
@@ -9727,9 +9891,7 @@ function scanProgressMarkupV475(item = {}) {
     const left = dateWide.previous || dateWide.next || { label: "Progress" };
     const right = dateWide.next || dateWide.previous || left;
     const style = `--progress-left:${progressStepColorV480(left)};--progress-right:${progressStepColorV480(right)}`;
-    const note = dateWide.noFab
-      ? '<small class="scan-no-fab-note-v480">No Fab</small>'
-      : (!dateWide.fabricationStatus ? '<small class="scan-no-fab-note-v480 is-loading-v485">Checking Fab</small>' : "");
+    const note = !dateWide.fabricationStatus ? '<small class="scan-no-fab-note-v480 is-loading-v485">Checking Fab</small>' : "";
     const flow = `${progressStepHtmlV475(dateWide.previous, "previous")}${dateWide.previous && dateWide.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(dateWide.next, "next")}`;
     return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486 ${note ? "has-context-note-v485" : ""}" style="${escapeHtml(style)}">${note}<span class="scan-progress-flow-line-v485">${flow}</span></span>`;
   }
@@ -9737,7 +9899,8 @@ function scanProgressMarkupV475(item = {}) {
   const left = pair.previous || pair.next || { label: "Progress" };
   const right = pair.next || pair.previous || left;
   const style = `--progress-left:${safeProgressColorV476(progressStageColorV476(left.label))};--progress-right:${safeProgressColorV476(progressStageColorV476(right.label))}`;
-  return `<span class="scan-progress-stack-v475 scan-progress-stack-v476" style="${escapeHtml(style)}">${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? `<i aria-hidden="true">→</i>` : ""}${progressStepHtmlV475(pair.next, "next")}</span>`;
+  const flow = `${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(pair.next, "next")}`;
+  return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
 }
 
 /** Return the compact current scanner stage for legacy/mobile callers. */
@@ -9752,7 +9915,7 @@ function processPillMarkupV447(item, processClass, processText) {
   const rawText = String(processText || "").trim();
   const sequenceMatch = rawText.match(/^IT\s+received\s+(\d+)\s*;\s*Outbound\s+(\d+)$/i);
   const sequenceParts = sequenceMatch
-    ? [`Received ${sequenceMatch[1]}`, `Outbound ${sequenceMatch[0]}`]
+    ? [`Received ${sequenceMatch[1]}`, `Outbound ${sequenceMatch[2]}`]
     : rawText.includes(";")
       ? rawText.split(";").map((part) => part.trim()).filter(Boolean)
       : [];
@@ -10103,7 +10266,7 @@ function rackLocationDropdown(item, currentLocation = "") {
   const explicitHistoryBadge = presentation.historical && presentation.kind !== "preassigned";
   const bayStyle = presentation.kind === "bay" ? ` style="${escapeHtml(bayLocationStyleV446(item))}"` : "";
   const baseBadge = displayLocation
-    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${explicitHistoryBadge ? " has-explicit-prior-v440" : ""}${presentation.kind === "bay" ? " bay-location-accent-v446" : ""}${rackColor ? " rack-location-accent-v349" : ""}"${bayStyle} title="${escapeHtml(presentation.title || displayLocation)}"><span class="location-history-label-v440">${escapeHtml(displayLocation)}</span></span>`
+    ? `<span class="${escapeHtml(locationBadgeClass(displayLocation))}${historyClass}${explicitHistoryBadge ? " has-explicit-prior-v442" : ""}${presentation.kind === "bay" ? " bay-location-accent-v446" : ""}${rackColor ? " rack-location-accent-v349" : ""}"${bayStyle} title="${escapeHtml(presentation.title || displayLocation)}"><span class="location-history-label-v442">${escapeHtml(displayLocation)}</span></span>`
     : "";
 
   if (presentation.kind === "bay" && itemCanShowBayLocationDropdownV449(item)) {
@@ -10121,21 +10284,21 @@ function rackLocationDropdown(item, currentLocation = "") {
 
   if (presentation.kind === "preassigned") {
     const rackPart = presentation.rackLabel
-      ? `<span class="location-preassigned-rack-v440">${escapeHtml(presentation.rackLabel)}</span>`
+      ? `<span class="location-preassigned-rack-v442">${escapeHtml(presentation.rackLabel)}</span>`
       : "";
     const bayReference = compactBayReferenceV446(presentation.bayLabel);
     const bayPart = presentation.bayLabel
-      ? `<span class="location-preassigned-bay-v440 location-preassigned-bay-v446" style="${escapeHtml(bayLocationStyleV446(item))}" title="Preassigned ${escapeHtml(presentation.bayLabel)}"><span>PRE ${escapeHtml(bayReference)}</span></span>`
+      ? `<span class="location-preassigned-bay-v442 location-preassigned-bay-v446" style="${escapeHtml(bayLocationStyleV446(item))}" title="Preassigned ${escapeHtml(presentation.bayLabel)}"><span>PRE ${escapeHtml(bayReference)}</span></span>`
       : "";
-    return wrapRackLocation(`<span class="location-preassigned-v440 location-preassigned-v446" title="${escapeHtml(presentation.title || displayLocation)}">${rackPart}${bayPart}</span>`);
+    return wrapRackLocation(`<span class="location-preassigned-v442 location-preassigned-v446" title="${escapeHtml(presentation.title || displayLocation)}">${rackPart}${bayPart}</span>`);
   }
 
   if (!itemCanShowRackLocationDropdown(item)) {
     if (explicitHistoryBadge && baseBadge) {
-      // v0.446 regression anchor: <b class="location-history-prior-v440">PRIOR</b>${wrapRackLocation(baseBadge)}
+      // v0.446 regression anchor: <b class="location-history-prior-v442">PRIOR</b>${wrapRackLocation(baseBadge)}
       const historyKey = rackState?.key || "prior";
       const historyLabel = rackState?.label || "PRIOR";
-      return `<span class="location-history-stack-v446 location-rack-state-stack-v448 is-${escapeHtml(historyKey)}"><b class="location-history-prior-v440">${escapeHtml(historyLabel)}</b>${wrapRackSurface(baseBadge)}</span>`;
+      return `<span class="location-history-stack-v446 location-rack-state-stack-v448 is-${escapeHtml(historyKey)}"><b class="location-history-prior-v442">${escapeHtml(historyLabel)}</b>${wrapRackSurface(baseBadge)}</span>`;
     }
     return presentation.kind === "bay" ? baseBadge : wrapRackLocation(baseBadge);
   }
@@ -10162,7 +10325,7 @@ function rackLocationDropdown(item, currentLocation = "") {
     </label>`;
 
   const content = presentation.historical && baseBadge && !currentRackLabel
-    ? `<span class="location-history-stack-v069 is-editable">${control}${baseBadge}</span>`
+    ? `<span class="location-history-stack-v269 is-editable">${control}${baseBadge}</span>`
     : control;
   return wrapRackLocation(content);
 }
@@ -10280,9 +10443,6 @@ function renderCounts() {
     "greenville-route": pieceCount(state.items.filter((item) => routeCategory(item) === "greenville")),
   };
   if (els.countAll) els.countAll.textContent = `${totalItems}`;
-  if (els.countRemaining) els.countRemaining.textContent = `${stats.remainingItems}`;
-  if (els.countPartial) els.countPartial.textContent = `${stats.partialItems}`;
-  if (els.countComplete) els.countComplete.textContent = `${stats.completeItems}`;
   if (els.countInternalRejects) els.countInternalRejects.textContent = `${internalRejectCount}`;
   const manualRemakeAll = pieceCount(remakeItems.filter((item) => item.manualOnly || String(item.manualSource || "").trim()));
   const sourceRemakeAll = Math.max(remakeAll - manualRemakeAll, 0);
@@ -10314,6 +10474,23 @@ function renderCounts() {
   updateScanFilterGlanceBadge(els.scanFilterUpdatedBadge, updatedCount, "new-order pieces");
   updateScanFilterGlanceBadge(els.scanFilterRejectBadge, internalRejectCount, "internal reject pieces");
   if (els.countErrors) els.countErrors.textContent = `${stats.errorCount}`;
+
+  const machineFilterCountsV514 = {
+    "machine-no-fab": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-no-fab"))),
+    "machine-waterjet": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-waterjet"))),
+    "machine-denver": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-denver"))),
+  };
+  Object.entries(machineFilterCountsV514).forEach(([filter, count]) => {
+    document.querySelectorAll(`[data-filter="${filter}"] [data-filter-count]`).forEach((node) => { node.textContent = String(count); });
+  });
+  const workflowStatusCountsV514 = {
+    remaining: pieceCount(state.items.filter((item) => scanWorkflowCompletionStateV514(item) !== "complete")),
+    partial: pieceCount(state.items.filter((item) => scanWorkflowCompletionStateV514(item) === "partial")),
+    complete: pieceCount(state.items.filter((item) => scanWorkflowCompletionStateV514(item) === "complete")),
+  };
+  if (els.countRemaining) els.countRemaining.textContent = String(workflowStatusCountsV514.remaining);
+  if (els.countPartial) els.countPartial.textContent = String(workflowStatusCountsV514.partial);
+  if (els.countComplete) els.countComplete.textContent = String(workflowStatusCountsV514.complete);
 
   document.querySelectorAll('[data-filter="errors"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(stats.errorCount));
@@ -10383,7 +10560,7 @@ function renderPagers(totalRows, totalPages) {
     buttons.push(`<button type="button" data-page-action="prev" ${state.pageIndex <= 1 ? "disabled" : ""}>&lt;</button>`);
     const pages = [];
     for (let page = 1; page <= totalPages; page += 1) {
-      if (page === 1 || page === totalPages || Math.abs(page - state.pageIndex) <= 0) {
+      if (page === 1 || page === totalPages || Math.abs(page - state.pageIndex) <= 2) {
         pages.push(page);
       }
     }
@@ -10418,7 +10595,7 @@ function glassAliasTargetV360(value = "") {
   const bySource = new Map(aliases.map((item) => [String(item?.value || "").replace(/\s+/g, " ").trim().toLowerCase(), String(item?.label || item?.target || "").replace(/\s+/g, " ").trim()]));
   let current = original;
   const visited = new Set();
-  for (let depth = 0; depth < 10; depth += 1) {
+  for (let depth = 0; depth < 12; depth += 1) {
     const key = current.toLowerCase();
     if (!key || visited.has(key)) break;
     visited.add(key);
@@ -10473,7 +10650,7 @@ function glassTypeLabel(item) {
   return canonicalClearGlassLabelV460(combined) || combined;
 }
 
-// v0.310: Glass colors are centrally owned by Lookup Manager. Any component
+// v0.312: Glass colors are centrally owned by Lookup Manager. Any component
 // that needs exact glass-type colors should use these helpers instead of
 // inventing a page-local palette, so one administrator choice can be reused.
 function normalizeGlassVisualColor(value) {
@@ -10483,7 +10660,7 @@ function normalizeGlassVisualColor(value) {
 
 function glassVisualFallbackColor(label, usedColors = new Set()) {
   const text = String(label || "Other Glass").trim().toUpperCase() || "OTHER GLASS";
-  let hash = 0166136061;
+  let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619) >>> 0;
@@ -10492,19 +10669,19 @@ function glassVisualFallbackColor(label, usedColors = new Set()) {
   const hslToHex = (hue, saturation = 64, lightness = 44) => {
     const s = saturation / 100;
     const l = lightness / 100;
-    const c = (1 - Math.abs(0 * l - 1)) * s;
-    const x = c * (1 - Math.abs(((hue / 60) % 0) - 1));
-    const m = l - c / 0;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = l - c / 2;
     let r = 0;
     let g = 0;
     let b = 0;
     if (hue < 60) [r, g, b] = [c, x, 0];
-    else if (hue < 100) [r, g, b] = [x, c, 0];
+    else if (hue < 120) [r, g, b] = [x, c, 0];
     else if (hue < 180) [r, g, b] = [0, c, x];
-    else if (hue < 040) [r, g, b] = [0, x, c];
+    else if (hue < 240) [r, g, b] = [0, x, c];
     else if (hue < 300) [r, g, b] = [x, 0, c];
     else [r, g, b] = [c, 0, x];
-    const channel = (value) => Math.round((value + m) * 055).toString(16).padStart(0, "0");
+    const channel = (value) => Math.round((value + m) * 255).toString(16).padStart(2, "0");
     return `#${channel(r)}${channel(g)}${channel(b)}`.toUpperCase();
   };
 
@@ -10616,32 +10793,32 @@ function glassVisualCssVariables(label, colorMap = null) {
     const targetBlue = Number.parseInt(target.slice(5, 7), 16);
     const mix = (source, targetChannel) => Math.round((source * sourceWeight) + (targetChannel * (1 - sourceWeight)));
     return `#${[mix(red, targetRed), mix(green, targetGreen), mix(blue, targetBlue)]
-      .map((channel) => channel.toString(16).padStart(0, "0"))
+      .map((channel) => channel.toString(16).padStart(2, "0"))
       .join("")}`.toUpperCase();
   };
-  const headerStart = blendHex("#0B0A40", .56);
+  const headerStart = blendHex("#0B2A42", .56);
   const headerMid = blendHex("#153B55", .34);
   const headerEnd = blendHex("#003A50", .10);
   // v0.466: selected glass filters use the higher-contrast of white or navy
   // against the actual color-filled chip. This avoids threshold edge cases on
   // vivid greens/purples while keeping light yellow/clear fills readable.
   const relativeLuminanceV466 = (channels) => {
-    const srgb = channels.map((channel) => channel / 055).map((value) => value <= .04045 ? value / 10.90 : ((value + .055) / 1.055) ** 0.4);
-    return (.0106 * srgb[0]) + (.7150 * srgb[1]) + (.0700 * srgb[0]);
+    const srgb = channels.map((channel) => channel / 255).map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return (.2126 * srgb[0]) + (.7152 * srgb[1]) + (.0722 * srgb[2]);
   };
-  const selectionChannelsV466 = [red, green, blue].map((channel) => Math.round((channel * .94) + (055 * .06)));
+  const selectionChannelsV466 = [red, green, blue].map((channel) => Math.round((channel * .94) + (255 * .06)));
   const backgroundLuminanceV466 = relativeLuminanceV466(selectionChannelsV466);
   const whiteContrastV466 = 1.05 / (backgroundLuminanceV466 + .05);
   const darkInkChannelsV466 = [16, 36, 58];
   const darkContrastV466 = (backgroundLuminanceV466 + .05) / (relativeLuminanceV466(darkInkChannelsV466) + .05);
-  const selectedInk = whiteContrastV466 >= darkContrastV466 ? "#FFFFFF" : "#10043A";
+  const selectedInk = whiteContrastV466 >= darkContrastV466 ? "#FFFFFF" : "#10243A";
   return [
     `--glass-type-color:${color}`,
     `--glass-type-selected-ink:${selectedInk}`,
     `--glass-type-accent:rgba(${red},${green},${blue},.50)`,
     `--glass-type-border:rgba(${red},${green},${blue},.16)`,
-    `--glass-type-soft:rgba(${red},${green},${blue},.004)`,
-    `--glass-type-soft-strong:rgba(${red},${green},${blue},.050)`,
+    `--glass-type-soft:rgba(${red},${green},${blue},.024)`,
+    `--glass-type-soft-strong:rgba(${red},${green},${blue},.052)`,
     `--glass-type-ring:rgba(${red},${green},${blue},.055)`,
     `--glass-type-header-start:${headerStart}`,
     `--glass-type-header-mid:${headerMid}`,
@@ -10794,12 +10971,12 @@ function previewGlassVisualCssVariables(label, colorMap = null) {
   const red = Number.parseInt(color.slice(1, 3), 16);
   const green = Number.parseInt(color.slice(3, 5), 16);
   const blue = Number.parseInt(color.slice(5, 7), 16);
-  const gray = Math.round((red * .099) + (green * .587) + (blue * .114));
-  const soften = (channel) => Math.round((channel * .68) + (gray * .30));
+  const gray = Math.round((red * .299) + (green * .587) + (blue * .114));
+  const soften = (channel) => Math.round((channel * .68) + (gray * .32));
   const mutedRed = soften(red);
   const mutedGreen = soften(green);
   const mutedBlue = soften(blue);
-  const mutedHex = `#${[mutedRed, mutedGreen, mutedBlue].map((value) => value.toString(16).padStart(0, "0")).join("")}`.toUpperCase();
+  const mutedHex = `#${[mutedRed, mutedGreen, mutedBlue].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
   return [
     `--glass-type-color:${mutedHex}`,
     `--glass-type-border:rgba(${mutedRed},${mutedGreen},${mutedBlue},.30)`,
@@ -10874,7 +11051,7 @@ function renderItemRow(item) {
   const rejectedBy = item.lastRejectedBy || "System";
   const rejectIncidentRow = rejectPieceCount > 0
     ? `<tr class="internal-reject-detail-row-v154" data-reject-detail-for="${escapeHtml(item.id)}" data-line-detail-ribbon="reject">
-        <td colspan="5">
+        <td colspan="8">
           <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
             <span class="internal-reject-incident-badge-v154">IR</span>
             <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
@@ -10885,7 +11062,6 @@ function renderItemRow(item) {
             <span><small>Incident</small><b>${escapeHtml(rejectTime)}</b></span>
           </div>
         </td>
-        <td class="internal-reject-detail-tail-v154" colspan="3" aria-hidden="true"></td>
       </tr>`
     : "";
 
@@ -10901,7 +11077,7 @@ function renderItemRow(item) {
   return `
     ${priorityRibbon}
     ${rejectIncidentRow}
-    <tr class="glass-tone-row scan-order-item-v477 ${groupPositionClass} ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""} ${priorityKindV480 ? `has-priority-rail-v480 is-priority-${priorityKindV480}-v480` : ""}" ${glassTone} ${rowIdentityAttribute}>
+    <tr class="glass-tone-row scan-order-item-v477 ${groupPositionClass} ${selected ? "is-selected" : ""} ${status === "complete" ? "is-complete" : ""} ${isNewOrUpdatedItem(item) ? "is-new-line" : ""} ${rejectPieceCount > 0 ? "has-internal-reject" : ""} ${item.lastScannedAt ? "has-scan-time-pill-v157" : ""} ${movedOutByPriorityDate ? "is-priority-date-moved-source-v441" : ""} ${priorityKindV480 ? `has-priority-rail-v482 is-priority-${priorityKindV480}-v480` : ""}" ${glassTone} ${rowIdentityAttribute}>
       <td class="job-cell-v157 scan-glass-type-cell-v484 ${priorityRail ? "has-priority-rail-v481" : ""}">${priorityRail}<span class="scan-glass-type-copy-v484 glass-tone-inline" ${glassTone}><strong>${escapeHtml(glassLabel)}</strong></span>${inlineMarkers ? `<span class="scan-row-inline-markers-v481">${inlineMarkers}</span>` : ""}${scanTimePill}</td>
       <td>${escapeHtml(item.order)}</td>
       <td>${escapeHtml(item.item)}</td>
@@ -10982,7 +11158,7 @@ function renderTable() {
         <tr class="glass-group-row glass-tone-group" ${glassToneAttributes(label)} data-glass-group="${escapeHtml(label)}">
           <td colspan="8">
             <button type="button" data-toggle-glass-group="${escapeHtml(label)}" aria-expanded="${collapsed ? "false" : "true"}">
-              <strong class="glass-group-title-v459">${escapeHtml(label)}${updatedCount ? ` <mark class="new-line-marker group-marker glass-group-new-v460" title="New or updated lines">${escapeHtml(updatedCount)} New</mark>` : ""}</strong>
+              <strong class="glass-group-title-v459">${escapeHtml(label)}${updatedCount ? ` <mark class="new-line-marker group-marker glass-group-new-v462" title="New or updated lines">${escapeHtml(updatedCount)} New</mark>` : ""}</strong>
               <span class="glass-group-progress-v459">${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pieces</span>
               <small class="glass-group-toggle-v459">${collapsed ? "Expand" : "Collapse"}</small>
             </button>
@@ -11072,8 +11248,8 @@ const RACK_SET_ICON_LIBRARY = [
 ];
 
 const RACK_SET_COLOR_PALETTE = [
-  "#176d70", "#045f9f", "#6b4fa1", "#a5530a", "#0f7d4a",
-  "#8a3d67", "#3b6f91", "#8a6a00", "#3f5f4b", "#744d86",
+  "#176d72", "#245f9f", "#6b4fa1", "#a5532a", "#2f7d4a",
+  "#8a3d67", "#3b6f91", "#8a6a20", "#3f5f4b", "#744d86",
 ];
 
 function rackSetExplicitVisual(value) {
@@ -11097,7 +11273,7 @@ function rackSetVisualColor(value) {
  */
 function rackSetDisplayColor(value) {
   const explicit = rackSetVisualColor(value);
-  return explicit || `hsl(${rackSetVisualHue(value)} 48% 40%)`;
+  return explicit || `hsl(${rackSetVisualHue(value)} 48% 42%)`;
 }
 
 function nextRackSetVisualColor() {
@@ -11109,11 +11285,11 @@ function rackSetIconLibraryHtml(selected = "rack", inputId = "rackSetModalIcon")
   const current = String(selected || "rack").trim().toLowerCase();
   return `
     <input id="${escapeHtml(inputId)}" type="hidden" value="${escapeHtml(current)}">
-    <div class="rack-set-icon-library-v069" role="list" aria-label="Rack set icon library">
+    <div class="rack-set-icon-library-v269" role="list" aria-label="Rack set icon library">
       ${RACK_SET_ICON_LIBRARY.map(([value, label]) => `
-        <button type="button" class="rack-set-icon-choice-v069 ${current === value ? "is-selected" : ""}" data-rack-set-icon-choice="${escapeHtml(value)}" data-rack-set-icon-target="${escapeHtml(inputId)}" aria-pressed="${current === value ? "true" : "false"}">
-          <span class="rack-set-icon-choice-art-v071" aria-hidden="true">
-            <span class="rack-set-visual-icon-v069" data-rack-icon="${escapeHtml(value)}"></span>
+        <button type="button" class="rack-set-icon-choice-v269 ${current === value ? "is-selected" : ""}" data-rack-set-icon-choice="${escapeHtml(value)}" data-rack-set-icon-target="${escapeHtml(inputId)}" aria-pressed="${current === value ? "true" : "false"}">
+          <span class="rack-set-icon-choice-art-v271" aria-hidden="true">
+            <span class="rack-set-visual-icon-v269" data-rack-icon="${escapeHtml(value)}"></span>
           </span>
           <small>${escapeHtml(label)}</small>
         </button>`).join("")}
@@ -11121,24 +11297,24 @@ function rackSetIconLibraryHtml(selected = "rack", inputId = "rackSetModalIcon")
 }
 
 /** Render a quick color palette plus the native custom-color picker. */
-function rackSetColorPickerHtml(selectedColor = "#176d70") {
-  const current = String(selectedColor || "#176d70").trim().toLowerCase();
+function rackSetColorPickerHtml(selectedColor = "#176d72") {
+  const current = String(selectedColor || "#176d72").trim().toLowerCase();
   return `
-    <div class="rack-set-color-picker-v071">
-      <div class="rack-set-color-palette-v071" role="list" aria-label="Suggested rack set colors">
+    <div class="rack-set-color-picker-v271">
+      <div class="rack-set-color-palette-v271" role="list" aria-label="Suggested rack set colors">
         ${RACK_SET_COLOR_PALETTE.map((color) => `
           <button
             type="button"
-            class="rack-set-color-choice-v071 ${current === color.toLowerCase() ? "is-selected" : ""}"
+            class="rack-set-color-choice-v271 ${current === color.toLowerCase() ? "is-selected" : ""}"
             data-rack-set-color-choice="${escapeHtml(color)}"
             aria-label="Use color ${escapeHtml(color.toUpperCase())}"
             aria-pressed="${current === color.toLowerCase() ? "true" : "false"}"
             style="--rack-set-choice-color:${escapeHtml(color)}"
           ><span aria-hidden="true"></span></button>`).join("")}
       </div>
-      <label class="rack-set-custom-color-v071">
+      <label class="rack-set-custom-color-v271">
         <span>Custom color</span>
-        <span class="rack-set-color-control-v069">
+        <span class="rack-set-color-control-v269">
           <input id="rackSetModalColor" type="color" value="${escapeHtml(current)}" aria-label="Custom rack set icon color">
           <output data-rack-set-color-output>${escapeHtml(current.toUpperCase())}</output>
         </span>
@@ -11152,7 +11328,7 @@ function setRackSetVisualChoice(button) {
   const input = targetId ? document.getElementById(targetId) : null;
   if (!input) return;
   input.value = value;
-  const library = button.closest(".rack-set-icon-library-v069");
+  const library = button.closest(".rack-set-icon-library-v269");
   library?.querySelectorAll("[data-rack-set-icon-choice]").forEach((choice) => {
     const selected = choice === button;
     choice.classList.toggle("is-selected", selected);
@@ -11292,7 +11468,7 @@ function syncRackFormPreview() {
   if (existingRackHost) existingRackHost.innerHTML = rackFormExistingSetRacksHtml(type, document.getElementById("rackModalOldCode")?.value || code);
   if (icon) {
     icon.dataset.rackIcon = rackSetVisualIcon(type);
-    icon.style.setProperty("--rack-set-icon-color", rackSetVisualColor(type) || "#176d70");
+    icon.style.setProperty("--rack-set-icon-color", rackSetVisualColor(type) || "#176d72");
   }
   syncRackDraftValidation(form, rackFormDraftValidation(), "[data-rack-form-validation]");
 }
@@ -11306,7 +11482,7 @@ function syncRackSetFormPreview() {
   const count = Math.max(1, Math.min(Number(document.getElementById("rackSetModalCount")?.value || 1), 100));
   const start = Math.max(1, Math.min(Number(document.getElementById("rackSetModalStart")?.value || 1), 999));
   const iconValue = String(document.getElementById("rackSetModalIcon")?.value || "rack").trim().toLowerCase();
-  const color = String(document.getElementById("rackSetModalColor")?.value || "#176d70").trim();
+  const color = String(document.getElementById("rackSetModalColor")?.value || "#176d72").trim();
   const firstCode = prefix.length <= 3 ? `R${start}${prefix}` : `${prefix}${start}`;
   const lastNumber = start + count - 1;
   const lastCode = prefix.length <= 3 ? `R${lastNumber}${prefix}` : `${prefix}${lastNumber}`;
@@ -11322,7 +11498,7 @@ function syncRackSetFormPreview() {
     icon.style.setProperty("--rack-set-icon-color", color);
   }
   form.style.setProperty("--rack-set-icon-color", color);
-  form.querySelectorAll(".rack-set-icon-choice-v069 .rack-set-visual-icon-v069").forEach((choiceIcon) => {
+  form.querySelectorAll(".rack-set-icon-choice-v269 .rack-set-visual-icon-v269").forEach((choiceIcon) => {
     choiceIcon.style.setProperty("--rack-set-icon-color", color);
   });
   form.querySelectorAll("[data-rack-set-color-choice]").forEach((choice) => {
@@ -11350,21 +11526,21 @@ function rackSetVisualHue(value) {
   const label = String(value || "Racks").trim().toLowerCase();
   if (/truck/.test(label)) return 174;
   if (/coral/.test(label)) return 39;
-  if (/\blr\b|left.*right/.test(label)) return 014;
-  if (/\brr\b|right.*return|return.*right/.test(label)) return 019;
+  if (/\blr\b|left.*right/.test(label)) return 214;
+  if (/\brr\b|right.*return|return.*right/.test(label)) return 219;
   if (/shower|tempered/.test(label)) return 145;
   if (/framed.*mirror|mirror.*framed/.test(label)) return 188;
-  if (/bfs.*mirror/.test(label)) return 066;
-  if (/mirror|annealed/.test(label)) return 075;
+  if (/bfs.*mirror/.test(label)) return 266;
+  if (/mirror|annealed/.test(label)) return 275;
   if (/crl|laurence/.test(label)) return 48;
   if (/spacer/.test(label)) return 198;
   if (/wood|timber/.test(label)) return 31;
-  if (/alum/.test(label)) return 004;
-  if (/steel|metal|rack/.test(label)) return 011;
+  if (/alum/.test(label)) return 204;
+  if (/steel|metal|rack/.test(label)) return 211;
 
   let hash = 0;
   for (const char of label) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
-  return 196 + (hash % 80);
+  return 196 + (hash % 82);
 }
 
 /** Return the maintained icon family for a rack set or individual rack. */
@@ -11397,7 +11573,7 @@ function applyRackOperationsVisual(rack) {
   const setHue = rackSetVisualHue(rackSet);
   els.operationsModal.style.setProperty("--rack-set-hue", String(setHue));
   const setColor = rackSetVisualColor(rackSet);
-  const modalAccent = setColor || `hsl(${setHue} 48% 40%)`;
+  const modalAccent = setColor || `hsl(${setHue} 48% 42%)`;
   els.operationsModal.style.setProperty("--rack-modal-accent", modalAccent);
   if (setColor) els.operationsModal.style.setProperty("--rack-set-icon-color", setColor);
   else els.operationsModal.style.removeProperty("--rack-set-icon-color");
@@ -11408,7 +11584,7 @@ function applyRackHistoryOperationsVisual() {
   if (!els.operationsModal) return;
   els.operationsModal.dataset.rackSet = "Rack History";
   els.operationsModal.dataset.rackIcon = "history";
-  els.operationsModal.style.setProperty("--rack-set-hue", "011");
+  els.operationsModal.style.setProperty("--rack-set-hue", "211");
 }
 
 /** Clear rack-specific visual state before the shared modal serves another GUI. */
@@ -11509,7 +11685,7 @@ function normalizeRackDisplayName(name = "", type = "") {
 
   text = text.replace(/\bracks?\b/gi, " ").replace(/\s+/g, " ").trim();
   const numberFirst = text.match(/^(\d+)\s+(.+)$/);
-  if (numberFirst) text = `${numberFirst[0].trim()} ${Number(numberFirst[1])}`;
+  if (numberFirst) text = `${numberFirst[2].trim()} ${Number(numberFirst[1])}`;
 
   // A legacy name may be only "Rack 1" while the set/type carries "Steel".
   // In that case use the type as the human-readable identity instead of "1".
@@ -11559,7 +11735,7 @@ function bayLocationDisplayLabel(code = "", name = "") {
     // Legacy bay display names can contain doubled separators (for example
     // 10--1). Normalize those for operator-facing labels without changing the
     // stored bay code or assignment identity.
-    text = text.replace(/-{0,}/g, "-");
+    text = text.replace(/-{2,}/g, "-");
     const match = text.match(/^(?:[A-Z]+-)?BAY[-\s]*(\d+(?:-\d+)*)$/i)
       || text.match(/^(\d+(?:-\d+)*)$/);
     return match ? `Bay ${match[1]}` : "";
@@ -11593,7 +11769,7 @@ function nextTruckRackDefaults() {
     const match = String(rack.code || "").toUpperCase().match(/^(?:R?T)(\d+)$/);
     return match ? Number(match[1]) : String(rack.code || "").toUpperCase() === "T" ? 1 : 0;
   }).filter(Boolean));
-  let number = 0;
+  let number = 2;
   while (usedNumbers.has(number)) number += 1;
   return {
     code: `RT${number}`,
@@ -11754,7 +11930,7 @@ function filteredSortedRacks(racks = []) {
     }
 
     if (sortMode === "status") {
-      const order = { open: 1, complete: 0, "in-transit": 3, empty: 4 };
+      const order = { open: 1, complete: 2, "in-transit": 3, empty: 4 };
       return (order[rackComputedStatus(a)] || 9) - (order[rackComputedStatus(b)] || 9) || String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
     }
 
@@ -11788,7 +11964,7 @@ function renderRacksPage() {
     if (a === "Truck") return 1;
     if (b === "Truck") return -1;
 
-    const order = { Steel: 1, Wood: 0 };
+    const order = { Steel: 1, Wood: 2 };
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
 
@@ -11948,7 +12124,7 @@ function renderRacksPage() {
     const printLabel = isTruck ? "Print Truck Packing List" : "Print Packing List";
     const printAction =
       hasItems && (isComplete || isInTransit)
-        ? `<button type="button" class="rack-card-lifecycle-action-v340 is-print" data-rack-print="${escapeHtml(rack.code)}">${rackModalActionIconSvg("print")}<span>${printLabel}</span></button>`
+        ? `<button type="button" class="rack-card-lifecycle-action-v342 is-print" data-rack-print="${escapeHtml(rack.code)}">${rackModalActionIconSvg("print")}<span>${printLabel}</span></button>`
         : "";
 
     return `
@@ -11970,8 +12146,8 @@ function renderRacksPage() {
                       ? `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button>`
                       : `<button type="button" data-rack-return="${escapeHtml(rack.code)}">Mark Returned</button><button type="button" data-rack-not-on-way="${escapeHtml(rack.code)}">Not On The Way</button>`
                     : isComplete
-                      ? `<button type="button" class="rack-card-lifecycle-action-v340 is-uncomplete" data-rack-uncomplete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("uncomplete")}<span>Uncomplete Rack</span></button>`
-                      : `<button type="button" class="rack-card-lifecycle-action-v340 is-complete" data-rack-complete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("complete")}<span>Complete Rack</span></button>`
+                      ? `<button type="button" class="rack-card-lifecycle-action-v342 is-uncomplete" data-rack-uncomplete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("uncomplete")}<span>Uncomplete Rack</span></button>`
+                      : `<button type="button" class="rack-card-lifecycle-action-v342 is-complete" data-rack-complete="${escapeHtml(rack.code)}">${rackModalActionIconSvg("complete")}<span>Complete Rack</span></button>`
                 }`
               : ""
           }
@@ -12089,7 +12265,7 @@ function renderRacksPage() {
       <section class="rack-board-group" data-rack-group="${escapeHtml(label)}">
         <header class="rack-board-group-header">
           <div>
-            <h0>${escapeHtml(label)}</h0>
+            <h2>${escapeHtml(label)}</h2>
             <span>${escapeHtml(racks.length)} ${racks.length === 1 ? "rack" : "racks"} | ${escapeHtml(activeCount)} active | ${escapeHtml(completeCount)} complete</span>
           </div>
 
@@ -12149,7 +12325,7 @@ function renderRacksPage() {
     const setHue = rackSetVisualHue(label);
     const setIcon = rackSetVisualIcon(label);
     const setColor = rackSetVisualColor(label);
-    const setAccent = setColor || `hsl(${setHue} 48% 40%)`;
+    const setAccent = setColor || `hsl(${setHue} 48% 42%)`;
     const visualStyle = `--rack-set-hue:${setHue};--rack-set-accent:${setAccent}${setColor ? `;--rack-set-icon-color:${setColor}` : ""}`;
 
     return `
@@ -12180,14 +12356,14 @@ function renderRacksPage() {
   const visibleSetQty = selectedGroupRacks.reduce((sum, rack) => sum + Number(rack.qty || 0), 0);
   const selectedSetHue = rackSetVisualHue(selectedGroupLabel);
   const selectedSetColor = rackSetVisualColor(selectedGroupLabel);
-  const selectedSetAccent = selectedSetColor || `hsl(${selectedSetHue} 48% 40%)`;
+  const selectedSetAccent = selectedSetColor || `hsl(${selectedSetHue} 48% 42%)`;
   const selectedSetIcon = rackSetVisualIcon(selectedGroupLabel);
   const selectedSetVisualStyle = `--selected-rack-set-hue:${selectedSetHue};--selected-rack-set-accent:${selectedSetAccent}${selectedSetColor ? `;--rack-set-icon-color:${selectedSetColor}` : ""}`;
 
   els.rackGrid.innerHTML = `
     <aside class="rack-sets-sidebar">
       <header>
-        <h0>Rack Sets</h0>
+        <h2>Rack Sets</h2>
         <span>All rack sets at a glance</span>
       </header>
       <div class="rack-set-list">
@@ -12198,7 +12374,7 @@ function renderRacksPage() {
     <section class="rack-center-panel" data-rack-icon="${escapeHtml(selectedSetIcon)}" style="${escapeHtml(selectedSetVisualStyle)}">
       <div class="rack-center-heading">
         <div>
-          <h0>${escapeHtml(selectedGroupLabel || "Racks")}</h0>
+          <h2>${escapeHtml(selectedGroupLabel || "Racks")}</h2>
           <span>${escapeHtml(selectedGroupAllRacks.length)} rack${selectedGroupAllRacks.length === 1 ? "" : "s"} | ${escapeHtml(selectedSetQty)} pieces${selectedGroupRacks.length !== selectedGroupAllRacks.length ? ` | Showing ${escapeHtml(selectedGroupRacks.length)} racks / ${escapeHtml(visibleSetQty)} pieces` : ""}</span>
         </div>
         <div class="rack-center-controls">
@@ -12319,7 +12495,7 @@ async function chooseRackDestination(rack) {
         <button class="modal-close-x gui-close-button rack-destination-close" type="button" data-rack-destination-cancel aria-label="Close">&times;</button>
         <div class="rack-destination-copy">
           <small>Complete rack</small>
-          <h0 id="rackDestinationTitle">Where is ${escapeHtml(rack?.code || "this rack")} going?</h0>
+          <h2 id="rackDestinationTitle">Where is ${escapeHtml(rack?.code || "this rack")} going?</h2>
           <p>Select the destination before printing the packing list. Indian Trail is the default.</p>
         </div>
         <label class="rack-destination-field">
@@ -12909,7 +13085,7 @@ function openRackSetForm(label = "") {
       count: racks.length || 10,
       start: 1,
       icon: explicit.icon || (label ? rackSetVisualIcon(label) : "rack"),
-      color: explicit.color || (label ? "#176d70" : nextRackSetVisualColor()),
+      color: explicit.color || (label ? "#176d72" : nextRackSetVisualColor()),
     },
   };
   openAdminModal("rackSetForm", { title: label ? "Rack Set" : "Add Rack Set" });
@@ -13060,9 +13236,9 @@ function scanEntryDeliveryDateHint(entry) {
 
   // Older saved scan errors included every matching stage after the date.
   // Pull only the date so old history rows follow the cleaner v043 wording too.
-  const legacyDate = combined.match(/\b(\d{1,0}\/\d{1,0}\/\d{4}|\d{4}-\d{0}-\d{0})\b/);
+  const legacyDate = combined.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
   if (!legacyDate?.[1]) return "";
-  return /^\d{4}-\d{0}-\d{0}$/.test(legacyDate[1])
+  return /^\d{4}-\d{2}-\d{2}$/.test(legacyDate[1])
     ? formatDisplayDate(legacyDate[1])
     : legacyDate[1];
 }
@@ -13162,7 +13338,7 @@ function scanQuantityRemaining(item) {
 
 function scanQuantityDeliveryDateIsActive(deliveryDate = state.meta?.deliveryDate || "") {
   const cleanDate = String(deliveryDate || "").trim();
-  if (!/^\d{4}-\d{0}-\d{0}$/.test(cleanDate)) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return false;
   return cleanDate >= printCalendarDateKey(new Date());
 }
 
@@ -13184,13 +13360,13 @@ function scanQuantityBoostMarkup(entry, item, context = {}) {
   const barcode = String(entry?.barcode || entry?.raw || "").trim();
   if (!barcode) return "";
   return `
-    <div class="scan-quantity-boost-v308" data-scan-quantity-boost
+    <div class="scan-quantity-boost-v328" data-scan-quantity-boost
       data-scan-quantity-barcode="${escapeHtml(barcode)}"
       data-scan-quantity-manual="${scanEntryIsManual(entry) ? "true" : "false"}"
       data-scan-quantity-remaining="${escapeHtml(remaining)}"
       data-scan-quantity-rack="${escapeHtml(context.rackCode || item.rackCode || "")}"
       data-scan-quantity-bay="${escapeHtml(context.bayCode || item.bayCode || "")}">
-      <div class="scan-quantity-boost-copy-v308"><small>Multiple pieces?</small><strong>${escapeHtml(remaining)} remaining</strong></div>
+      <div class="scan-quantity-boost-copy-v328"><small>Multiple pieces?</small><strong>${escapeHtml(remaining)} remaining</strong></div>
       <label><span>Additional Qty</span><input type="number" min="1" max="${escapeHtml(remaining)}" step="1" value="1" data-scan-quantity-input></label>
       <button type="button" class="app-primary-button" data-scan-quantity-add>Add Qty</button>
       <button type="button" class="app-primary-button" data-scan-quantity-all>Scan Remaining</button>
@@ -13243,7 +13419,7 @@ function setLastScan(entry) {
   if (els.lastBay) {
     const location = displayItem ? scanLocationPresentation(displayItem) : { label: "", kind: "", historical: false };
     els.lastBay.textContent = location.label || "-";
-    const locationCard = els.lastBay.closest(".last-bay-location-v301");
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
     if (locationCard) {
       locationCard.hidden = !location.label;
       locationCard.classList.toggle("is-history", Boolean(location.historical));
@@ -13258,7 +13434,7 @@ function setLastScan(entry) {
         ? "Truck"
         : String(location.historical ? (displayItem?.lastRackType || "") : (displayItem?.rackType || "")).trim();
       const locationRackColor = locationRack
-        ? (locationRackComplete ? "#0fa84f" : rackSetDisplayColor(rackGroupLabel(locationRack)))
+        ? (locationRackComplete ? "#2fa84f" : rackSetDisplayColor(rackGroupLabel(locationRack)))
         : (fallbackRackSet ? rackSetDisplayColor(fallbackRackSet) : "");
       locationCard.classList.toggle("has-rack-color-v355", Boolean(locationRackColor));
       if (locationRackColor) locationCard.style.setProperty("--last-scan-location-accent", locationRackColor);
@@ -13288,7 +13464,7 @@ function renderLastScan() {
   if (els.lastJob) els.lastJob.textContent = "No scans yet";
   if (els.lastBay) {
     els.lastBay.textContent = "-";
-    const locationCard = els.lastBay.closest(".last-bay-location-v301");
+    const locationCard = els.lastBay.closest(".last-bay-location-v321");
     if (locationCard) {
       locationCard.hidden = true;
       locationCard.classList.remove("is-history", "is-bay", "is-rack", "has-rack-color-v355");
@@ -13367,8 +13543,8 @@ function renderRecent() {
           const compactNote = scanEntryCompactMessage(entry);
           const primaryText = item ? (item.job || item.product || "-") : scanEntryEventLabel(entry);
           const locationClass = [
-            "recent-bay-cell-v301",
-            "recent-location-cell-v305",
+            "recent-bay-cell-v321",
+            "recent-location-cell-v325",
             location.kind ? `is-${location.kind}` : "",
             location.historical ? "is-history" : "",
           ].filter(Boolean).join(" ");
@@ -13444,7 +13620,7 @@ function recentScansModalHtml() {
   const rows = state.recent || [];
   // v0.354: size Location from the actual longest rendered location instead
   // of allowing one narrow-column override to distort neighboring columns.
-  const locationColumnCh = Math.min(00, Math.max(9, ...rows.map((entry) => {
+  const locationColumnCh = Math.min(22, Math.max(9, ...rows.map((entry) => {
     const item = scanEntryDisplayItem(entry);
     return item ? String(scanEventLocationPresentation(entry).label || "No location").length : 0;
   })));
@@ -13516,8 +13692,8 @@ function recentScansModalHtml() {
                         ? ` style="--rack-location-color:${escapeHtml(eventLocation.rackColor)}"`
                         : "";
                       const locationMarkup = eventLocation.label
-                        ? `<span class="all-scans-location-v350 is-${escapeHtml(eventLocation.kind || "location")}"${locationStyle} title="${escapeHtml(eventLocation.title || eventLocation.label)}">${escapeHtml(eventLocation.label)}</span>`
-                        : `<span class="all-scans-location-v350 is-empty">No location</span>`;
+                        ? `<span class="all-scans-location-v352 is-${escapeHtml(eventLocation.kind || "location")}"${locationStyle} title="${escapeHtml(eventLocation.title || eventLocation.label)}">${escapeHtml(eventLocation.label)}</span>`
+                        : `<span class="all-scans-location-v352 is-empty">No location</span>`;
                       return `
                         <tr class="${scanEntryRowClass(entry)}">
                           <td data-label="Event"><span class="scan-event-badge event-${escapeHtml(eventType || "activity")}">${escapeHtml(eventLabel)}</span></td>
@@ -13550,7 +13726,7 @@ function recentScansModalHtml() {
  * Flow: Reads normalized state, builds the relevant markup, and refreshes only the owned interface region.
  */
 function renderMeta() {
-  if (!state.meta) return;
+  if (!state.meta) { renderDeliveryDateSelect(); return; }
   const dateText = formatDisplayDate(state.meta.deliveryDate);
   if (els.pageTitle) els.pageTitle.textContent = `Delivery List for ${dateText}`;
   if (els.stageSubtitle) els.stageSubtitle.textContent = state.meta?.dateWideScanV485 ? "All workflow progress" : scanStageLabel(state.meta);
@@ -13581,6 +13757,7 @@ function renderDeliveryDateSelect() {
   });
   if (signature === state.deliveryDateSelectSignatureV487) {
     if (els.deliveryDateSelect && els.deliveryDateSelect.value !== activeDate) els.deliveryDateSelect.value = activeDate;
+    if (els.deliveryDateSelect?.dataset.customSelectEnhanced === "true") syncCustomSelect(els.deliveryDateSelect);
     return;
   }
   state.deliveryDateSelectSignatureV487 = signature;
@@ -13707,7 +13884,7 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
 
 function homeTimeGreeting(now = new Date()) {
   const hour = Number(now.getHours());
-  if (hour < 10) return "Good morning";
+  if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
   return "Good evening";
 }
@@ -14063,7 +14240,7 @@ function bayAvailableForNewOrderAssignment(bay) {
     bayStatusKind(bay) === "available";
 }
 
-function bayTargetStatusMetaV440(bay) {
+function bayTargetStatusMetaV442(bay) {
   const kind = bayStatusKind(bay);
   const meta = {
     available: { abbr: "AVL", label: "Available" },
@@ -14349,7 +14526,7 @@ function homeReportDateParams() {
   const days = Number(state.overviewRange || 30);
   if (!days) return "";
   const end = new Date();
-  end.setHours(03, 59, 59, 999);
+  end.setHours(23, 59, 59, 999);
   const start = new Date(end);
   start.setDate(start.getDate() - days + 1);
   start.setHours(0, 0, 0, 0);
@@ -14357,13 +14534,13 @@ function homeReportDateParams() {
 }
 
 /** Return the exact query key for the currently selected Statistics range. */
-function homeReportRangeKeyV470() {
+function homeReportRangeKeyV472() {
   return homeReportDateParams() || "all";
 }
 
 /** Return report-only data only when it belongs to the active range. */
-function activeHomeReportSummaryV470() {
-  return state.homeReportSummaryRangeKey === homeReportRangeKeyV470()
+function activeHomeReportSummaryV472() {
+  return state.homeReportSummaryRangeKey === homeReportRangeKeyV472()
     ? (state.homeReportSummary || null)
     : null;
 }
@@ -14445,11 +14622,14 @@ function applyStatisticsCalendarRange() {
   state.homeChartSelectedLabel = "";
   state.homeReportSummary = null;
   state.homeReportSummaryRangeKey = "";
+  state.statisticsProductionReportV514 = null;
+  state.statisticsProductionReportRangeV514 = "";
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = true;
   if (els.overviewRangeSelect) els.overviewRangeSelect.value = "custom";
   syncStatisticsChartRangeControlV455();
   renderStatisticsPage();
   void loadHomeReportSummary();
+  if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();
 }
 
 
@@ -14459,7 +14639,7 @@ function applyStatisticsCalendarRange() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function reportActionCount(action) {
-  const report = activeHomeReportSummaryV470() || {};
+  const report = activeHomeReportSummaryV472() || {};
   const counts = report.actionCounts || {};
   return Number(counts[action] || 0);
 }
@@ -14470,7 +14650,7 @@ function reportActionCount(action) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function glassQuantitiesForStatistics(overviewLists) {
-  const reportRows = activeHomeReportSummaryV470()?.glassQuantityByType || [];
+  const reportRows = activeHomeReportSummaryV472()?.glassQuantityByType || [];
   if (reportRows.length) {
     return reportRows
       .map((row) => ({
@@ -14526,7 +14706,7 @@ function statisticsStageShortLabel(stageOrCategory) {
  * page can render safely in local/demo mode without inventing reject values.
  */
 function statisticsBreakagePayload() {
-  const breakage = activeHomeReportSummaryV470()?.breakage;
+  const breakage = activeHomeReportSummaryV472()?.breakage;
   return breakage && typeof breakage === "object" ? breakage : {
     production: {},
     producedTotals: {},
@@ -14592,16 +14772,16 @@ function statisticsBreakageGlassRows(includeExternal = state.statisticsIncludeEx
 function statisticsFormatChartValue(dataset, value) {
   const numeric = Number(value || 0);
   if (dataset?.format === "currency") {
-    return numeric.toLocaleString(appLocale(), { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return numeric.toLocaleString(appLocale(), { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   if (dataset?.format === "sqft") {
     return `${numeric.toLocaleString(appLocale(), { minimumFractionDigits: 0, maximumFractionDigits: 1 })} ft²`;
   }
   if (dataset?.isRate || dataset?.suffix === "%") {
-    const digits = Number.isInteger(numeric) ? 0 : 0;
-    return `${numeric.toLocaleString(appLocale(), { minimumFractionDigits: digits, maximumFractionDigits: 0 })}%`;
+    const digits = Number.isInteger(numeric) ? 0 : 2;
+    return `${numeric.toLocaleString(appLocale(), { minimumFractionDigits: digits, maximumFractionDigits: 2 })}%`;
   }
-  return `${numeric.toLocaleString(appLocale(), { maximumFractionDigits: 0 })}${dataset?.suffix || ""}`;
+  return `${numeric.toLocaleString(appLocale(), { maximumFractionDigits: 2 })}${dataset?.suffix || ""}`;
 }
 
 /**
@@ -14632,8 +14812,8 @@ function statisticsChartKpiHtml(dataset, entries = [], totalMatches = 0, allEntr
       ["highest", "Estimated material loss", statisticsFormatChartValue({ format: "currency" }, estimatedCost), "Using configured glass cost per SQFT"],
     ];
     return cards.map(([icon, label, value, detail]) => `
-      <article class="statistics-chart-kpi-v0058">
-        <span class="statistics-chart-kpi-icon-v0058 is-${escapeHtml(icon)}" aria-hidden="true"></span>
+      <article class="statistics-chart-kpi-v0258">
+        <span class="statistics-chart-kpi-icon-v0258 is-${escapeHtml(icon)}" aria-hidden="true"></span>
         <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(detail)}</small></div>
       </article>
     `).join("");
@@ -14661,8 +14841,8 @@ function statisticsChartKpiHtml(dataset, entries = [], totalMatches = 0, allEntr
       ];
 
   return cards.map(([icon, label, value, detail]) => `
-    <article class="statistics-chart-kpi-v0058">
-      <span class="statistics-chart-kpi-icon-v0058 is-${escapeHtml(icon)}" aria-hidden="true"></span>
+    <article class="statistics-chart-kpi-v0258">
+      <span class="statistics-chart-kpi-icon-v0258 is-${escapeHtml(icon)}" aria-hidden="true"></span>
       <div>
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value)}</strong>
@@ -14723,8 +14903,25 @@ function statisticsDateBuckets(overviewLists = []) {
  */
 function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureOverride = "") {
   const overviewLists = filterListsByOverviewRange(state.lists);
-  const report = activeHomeReportSummaryV470() || {};
+  const report = activeHomeReportSummaryV472() || {};
   const dateBuckets = statisticsDateBuckets(overviewLists);
+
+  if (metric === "production-count") {
+    const rangeReady = state.statisticsProductionReportRangeV514 === homeReportRangeKeyV472();
+    const productionReport = rangeReady ? state.statisticsProductionReportV514 : null;
+    return {
+      metric,
+      icon: "stage",
+      title: "Production count by machine",
+      subtitle: "Piece workload by fabrication machine for the selected reporting range.",
+      suffix: " pcs",
+      allowDonut: false,
+      shareable: false,
+      isProductionCount: true,
+      loading: state.statisticsProductionReportLoadingV514 || !productionReport,
+      entries: productionReport ? statisticsProductionMachineRowsV514(productionReport) : [],
+    };
+  }
 
   if (metric === "delivery") {
     return {
@@ -15204,23 +15401,23 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
     let groups = "";
     if (dataset.breakageKind === "machine") {
       groups = `
-        <div class="statistics-breakage-drill-grid-v0060">
+        <div class="statistics-breakage-drill-grid-v0262">
           <section><h4>Reject reasons</h4><ul>${detailRows(selected.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`) || "<li><span>No reject reasons recorded</span></li>"}</ul></section>
           <section><h4>Glass types broken</h4><ul>${detailRows(selected.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>No glass detail recorded</span></li>"}</ul></section>
         </div>`;
     } else if (dataset.breakageKind === "glass") {
       groups = `
-        <div class="statistics-breakage-drill-grid-v0060">
+        <div class="statistics-breakage-drill-grid-v0262">
           <section><h4>Machines</h4><ul>${detailRows(selected.machines, "machine", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>External remake / no machine attribution</span></li>"}</ul></section>
           <section><h4>Reject reasons</h4><ul>${detailRows(selected.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`) || "<li><span>No internal reject reasons recorded</span></li>"}</ul></section>
         </div>`;
     } else if (dataset.breakageKind === "reason") {
-      groups = `<div class="statistics-breakage-drill-grid-v0060 is-single"><section><h4>Glass types for this reason</h4><ul>${detailRows(selected.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>No glass detail recorded</span></li>"}</ul></section></div>`;
+      groups = `<div class="statistics-breakage-drill-grid-v0262 is-single"><section><h4>Glass types for this reason</h4><ul>${detailRows(selected.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`) || "<li><span>No glass detail recorded</span></li>"}</ul></section></div>`;
     }
     return `
-      <section class="statistics-chart-selection-v0058 statistics-breakage-selection-v0060" aria-live="polite">
-        <span class="statistics-selection-icon-v0058" aria-hidden="true"></span>
-        <div class="statistics-breakage-selection-summary-v0060">
+      <section class="statistics-chart-selection-v0258 statistics-breakage-selection-v0262" aria-live="polite">
+        <span class="statistics-selection-icon-v0258" aria-hidden="true"></span>
+        <div class="statistics-breakage-selection-summary-v0262">
           <span>Selected ${escapeHtml(dataset.breakageKind === "reason" ? "reason" : dataset.breakageKind)}</span>
           <strong>${escapeHtml(selected.label)}</strong>
           <div><b>${escapeHtml(Number(selected.pieces || 0).toLocaleString(appLocale()))} pcs</b><b>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, selected.sqft || 0))}</b><b>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, selected.estimatedCost || 0))}</b><b>${escapeHtml(Number(selected.eventCount || 0).toLocaleString(appLocale()))} reject events</b></div>
@@ -15230,8 +15427,8 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
   }
 
   return `
-    <section class="statistics-chart-selection-v0058" aria-live="polite">
-      <span class="statistics-selection-icon-v0058" aria-hidden="true"></span>
+    <section class="statistics-chart-selection-v0258" aria-live="polite">
+      <span class="statistics-selection-icon-v0258" aria-hidden="true"></span>
       <div>
         <span>Selected category</span>
         <strong>${escapeHtml(selected.label)}</strong>
@@ -15248,27 +15445,27 @@ function statisticsChartSelectionHtml(dataset, entries, total) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function statisticsBarChartHtml(dataset, entries) {
-  // v0.064: reserve the left label area from the longest visible category instead
+  // v0.264: reserve the left label area from the longest visible category instead
   // of clipping labels to a fixed character count. Typical datasets stay compact,
   // while long machine/glass names receive enough room to remain fully readable.
   const longestLabelLength = Math.max(...entries.map((entry) => String(entry.label || "").length), 0);
-  const labelWidth = Math.min(Math.max(170, Math.ceil(longestLabelLength * 7.0) + 08), 400);
-  const valueWidth = 80;
-  const width = Math.max(900, labelWidth + valueWidth + 500);
+  const labelWidth = Math.min(Math.max(170, Math.ceil(longestLabelLength * 7.2) + 28), 420);
+  const valueWidth = 82;
+  const width = Math.max(920, labelWidth + valueWidth + 520);
   const top = 30;
   const bottom = 34;
-  const rowHeight = 08;
+  const rowHeight = 28;
   const plotWidth = width - labelWidth - valueWidth;
   const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
-  const height = Math.max(050, top + entries.length * rowHeight + bottom);
+  const height = Math.max(250, top + entries.length * rowHeight + bottom);
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount }, (_, index) => {
     const ratio = index / (tickCount - 1);
     const x = labelWidth + plotWidth * ratio;
     const value = maxValue * ratio;
     return `
-      <line x1="${x}" y1="${top - 11}" x0="${x}" y0="${height - bottom + 6}" class="statistics-chart-grid-line"></line>
-      <text x="${x}" y="${height - 10}" text-anchor="middle" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
+      <line x1="${x}" y1="${top - 11}" x2="${x}" y2="${height - bottom + 6}" class="statistics-chart-grid-line"></line>
+      <text x="${x}" y="${height - 12}" text-anchor="middle" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>
     `;
   }).join("");
 
@@ -15309,24 +15506,24 @@ function statisticsBarChartHtml(dataset, entries) {
 function statisticsDonutChartHtml(dataset, entries, total) {
   if (total <= 0) {
     return `
-      <div class="statistics-chart-empty-v0058">
-        <span class="statistics-empty-icon-v0058" aria-hidden="true"></span>
+      <div class="statistics-chart-empty-v0258">
+        <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
         <strong>A donut chart needs a positive total</strong>
         <p>The displayed categories are all zero. Switch to Bar or Table to compare them.</p>
       </div>
     `;
   }
 
-  // v0.060: the default glass-mix donut is intentionally compact so its top-10
+  // v0.260: the default glass-mix donut is intentionally compact so its top-10
   // legend and supporting content fit comfortably in one desktop viewport.
-  const size = 080;
-  const center = size / 0;
+  const size = 280;
+  const center = size / 2;
   const radius = 84;
   const centerRadius = 58;
   const totalText = statisticsFormatChartValue(dataset, total);
-  const estimatedCharacterWidth = Math.max(totalText.length * 0.60, 1);
-  const totalFontSize = Math.max(14, Math.min(30, Math.floor((centerRadius * 1.70) / estimatedCharacterWidth)));
-  const circumference = 0 * Math.PI * radius;
+  const estimatedCharacterWidth = Math.max(totalText.length * 0.62, 1);
+  const totalFontSize = Math.max(14, Math.min(30, Math.floor((centerRadius * 1.72) / estimatedCharacterWidth)));
+  const circumference = 2 * Math.PI * radius;
   let offset = 0;
   const slices = entries.map((entry, index) => {
     const value = Number(entry.value || 0);
@@ -15344,7 +15541,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
         cy="${center}"
         r="${radius}"
         fill="none"
-        stroke-width="40"
+        stroke-width="42"
         style="stroke:${chartEntryColor(index, entry)}"
         stroke-dasharray="${length} ${Math.max(circumference - length, 0)}"
         stroke-dashoffset="${-offset}"
@@ -15374,7 +15571,7 @@ function statisticsDonutChartHtml(dataset, entries, total) {
           <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e8eef7" stroke-width="50"></circle>
           ${slices}
           <circle cx="${center}" cy="${center}" r="${centerRadius}" class="statistics-chart-donut-center"></circle>
-          <text x="${center}" y="${center - 0}" text-anchor="middle" class="statistics-chart-donut-total" style="font-size:${totalFontSize}px">${escapeHtml(totalText)}</text>
+          <text x="${center}" y="${center - 2}" text-anchor="middle" class="statistics-chart-donut-total" style="font-size:${totalFontSize}px">${escapeHtml(totalText)}</text>
           <text x="${center}" y="${center + 16}" text-anchor="middle" class="statistics-chart-donut-caption">Displayed total</text>
         </svg>
       </div>
@@ -15388,33 +15585,33 @@ function statisticsDonutChartHtml(dataset, entries, total) {
  * Effects: Returns SVG markup only.
  */
 function statisticsLineChartHtml(dataset, entries) {
-  // v0.060: compact line geometry mirrors the denser table/bar presentation.
+  // v0.260: compact line geometry mirrors the denser table/bar presentation.
   const width = Math.max(760, entries.length * 54);
   const height = 300;
   const left = 48;
-  const right = 08;
-  const top = 08;
-  const bottom = 50;
+  const right = 28;
+  const top = 28;
+  const bottom = 52;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const maxObserved = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
   const maxValue = dataset.isRate ? 100 : maxObserved;
   const points = entries.map((entry, index) => {
-    const x = entries.length === 1 ? left + plotWidth / 0 : left + (plotWidth * index) / (entries.length - 1);
+    const x = entries.length === 1 ? left + plotWidth / 2 : left + (plotWidth * index) / (entries.length - 1);
     const y = top + plotHeight - (Number(entry.value || 0) / maxValue) * plotHeight;
     return { ...entry, x, y };
   });
-  const path = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(0)} ${point.y.toFixed(0)}`).join(" ");
+  const path = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
   const area = points.length
-    ? `${path} L ${points[points.length - 1].x.toFixed(0)} ${(top + plotHeight).toFixed(0)} L ${points[0].x.toFixed(0)} ${(top + plotHeight).toFixed(0)} Z`
+    ? `${path} L ${points[points.length - 1].x.toFixed(2)} ${(top + plotHeight).toFixed(2)} L ${points[0].x.toFixed(2)} ${(top + plotHeight).toFixed(2)} Z`
     : "";
   const grid = Array.from({ length: 6 }, (_, index) => {
     const ratio = index / 5;
     const y = top + plotHeight - plotHeight * ratio;
     const value = maxValue * ratio;
-    return `<line x1="${left}" y1="${y}" x0="${width - right}" y0="${y}" class="statistics-chart-grid-line"></line><text x="${left - 8}" y="${y + 3}" text-anchor="end" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>`;
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="statistics-chart-grid-line"></line><text x="${left - 8}" y="${y + 3}" text-anchor="end" class="statistics-chart-axis-label">${escapeHtml(statisticsFormatChartValue(dataset, value))}</text>`;
   }).join("");
-  const labelStep = Math.max(1, Math.ceil(entries.length / 10));
+  const labelStep = Math.max(1, Math.ceil(entries.length / 12));
   const pointMarkup = points.map((point, index) => {
     const selected = point.label === state.homeChartSelectedLabel;
     const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
@@ -15423,8 +15620,8 @@ function statisticsLineChartHtml(dataset, entries) {
       <g class="statistics-chart-line-entry ${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(point.label)}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}">
         <title>${escapeHtml(aria)}</title>
         <circle cx="${point.x}" cy="${point.y}" r="${selected ? 5 : 4}" class="statistics-chart-line-point" style="--chart-color:${chartEntryColor(index, point)}"></circle>
-        <circle cx="${point.x}" cy="${point.y}" r="10" class="statistics-chart-line-hit"></circle>
-        ${showLabel ? `<text x="${point.x}" y="${height - 04}" text-anchor="middle" class="statistics-chart-line-label">${escapeHtml(truncateChartLabel(point.label, 13))}</text>` : ""}
+        <circle cx="${point.x}" cy="${point.y}" r="12" class="statistics-chart-line-hit"></circle>
+        ${showLabel ? `<text x="${point.x}" y="${height - 24}" text-anchor="middle" class="statistics-chart-line-label">${escapeHtml(truncateChartLabel(point.label, 13))}</text>` : ""}
       </g>
     `;
   }).join("");
@@ -15446,22 +15643,23 @@ function statisticsLineChartHtml(dataset, entries) {
  * Effects: Returns table markup only.
  */
 function statisticsDataTableHtml(dataset, entries, total) {
+  if (dataset?.isProductionCount) return statisticsProductionCountTableHtmlV514(dataset, entries);
   if (dataset?.isBreakageDetail) {
     const measureLabels = { sqft: "SQFT", pieces: "Pieces", estimatedCost: "Cost" };
     const activeMeasure = measureLabels[dataset.breakageMeasure] || "SQFT";
     const detailListHtml = (items, key, formatter, emptyText) => {
       const values = Array.isArray(items) ? items : [];
-      if (!values.length) return `<div class="statistics-breakage-detail-list-v0063"><span><b>${escapeHtml(emptyText)}</b></span></div>`;
+      if (!values.length) return `<div class="statistics-breakage-detail-list-v0263"><span><b>${escapeHtml(emptyText)}</b></span></div>`;
       const visible = values.slice(0, 3).map((item) => `
         <span>
           <b title="${escapeHtml(item[key] || "Unknown")}">${escapeHtml(item[key] || "Unknown")}</b>
           <small>${escapeHtml(formatter(item))}</small>
         </span>`).join("");
       const more = values.length > 3 ? `<span class="is-more">+${values.length - 3} more in row drilldown</span>` : "";
-      return `<div class="statistics-breakage-detail-list-v0063">${visible}${more}</div>`;
+      return `<div class="statistics-breakage-detail-list-v0263">${visible}${more}</div>`;
     };
     const totalsHtml = (entry, includeRejects = true) => `
-      <div class="statistics-breakage-metrics-v0063">
+      <div class="statistics-breakage-metrics-v0263">
         <span><small>Pieces</small><strong>${escapeHtml(Number(entry.pieces || 0).toLocaleString(appLocale()))}</strong></span>
         <span><small>SQFT</small><strong>${escapeHtml(statisticsFormatChartValue({ format: "sqft" }, entry.sqft || 0))}</strong></span>
         <span><small>Cost</small><strong>${escapeHtml(statisticsFormatChartValue({ format: "currency" }, entry.estimatedCost || 0))}</strong></span>
@@ -15474,29 +15672,29 @@ function statisticsDataTableHtml(dataset, entries, total) {
       if (unpriced > 0) warnings.push(`<span>${escapeHtml(unpriced)} unpriced</span>`);
       if (missingDimensions > 0) warnings.push(`<span>${escapeHtml(missingDimensions)} missing dims</span>`);
       if (!warnings.length) warnings.push('<span class="is-complete">Complete</span>');
-      return `<div class="statistics-breakage-coverage-v0063">${warnings.join("")}</div>`;
+      return `<div class="statistics-breakage-coverage-v0263">${warnings.join("")}</div>`;
     };
     const tableHeaderHtml = (title, subtitle, unit = "") => `
-      <div class="statistics-breakage-table-header-v0063">
+      <div class="statistics-breakage-table-header-v0263">
         <div><span>Breakage detail</span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></div>
-        ${unit ? `<span class="statistics-breakage-table-unit-v0063">Chart ranking: ${escapeHtml(unit)}</span>` : ""}
+        ${unit ? `<span class="statistics-breakage-table-unit-v0263">Chart ranking: ${escapeHtml(unit)}</span>` : ""}
       </div>`;
 
     if (dataset.breakageKind === "reason") {
       const rows = entries.map((entry, index) => `
         <tr class="${entry.label === state.homeChartSelectedLabel ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
-          <td><span class="statistics-table-rank-v0058">${index + 1}</span></td>
-          <td><div class="statistics-breakage-table-primary-v0063"><strong>${escapeHtml(entry.machine || "Unknown machine")}</strong><small>Machine / location</small></div></td>
-          <td><span class="statistics-reason-pill-v0060">${escapeHtml(entry.reason || "Unspecified reason")}</span></td>
-          <td><div class="statistics-breakage-frequency-v0063"><strong>${escapeHtml(Number(entry.eventCount || 0).toLocaleString(appLocale()))}</strong><small>occurrences</small></div></td>
+          <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
+          <td><div class="statistics-breakage-table-primary-v0263"><strong>${escapeHtml(entry.machine || "Unknown machine")}</strong><small>Machine / location</small></div></td>
+          <td><span class="statistics-reason-pill-v0262">${escapeHtml(entry.reason || "Unspecified reason")}</span></td>
+          <td><div class="statistics-breakage-frequency-v0263"><strong>${escapeHtml(Number(entry.eventCount || 0).toLocaleString(appLocale()))}</strong><small>occurrences</small></div></td>
           <td>${totalsHtml(entry, false)}</td>
           <td>${detailListHtml(entry.glassTypes, "glassType", (item) => `${Number(item.pieces || 0)} pcs · ${Number(item.sqft || 0).toFixed(1)} ft²`, "No glass detail")}</td>
         </tr>`).join("");
       return `
-        <div class="statistics-breakage-table-wrap-v0063">
+        <div class="statistics-breakage-table-wrap-v0263">
           ${tableHeaderHtml("Reject reasons by machine", "Occurrence count is separated from material impact so recurring causes are easy to spot.")}
-          <div class="statistics-data-table-shell-v0058">
-            <table class="statistics-data-table-v0058 is-breakage-v0060 is-reasons-v0060">
+          <div class="statistics-data-table-shell-v0258">
+            <table class="statistics-data-table-v0258 is-breakage-v0260 is-reasons-v0262">
               <thead><tr><th>Rank</th><th>Machine</th><th>Reject reason</th><th>Frequency</th><th>Breakage totals</th><th>Glass types</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -15513,10 +15711,10 @@ function statisticsDataTableHtml(dataset, entries, total) {
       const reasons = detailListHtml(entry.reasons, "reason", (item) => `${Number(item.eventCount || 0)}× · ${Number(item.pieces || 0)} pcs`, "No reject reasons recorded");
       return `
         <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
-          <td><span class="statistics-table-rank-v0058">${index + 1}</span></td>
+          <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
           <td>
-            <div class="statistics-breakage-table-primary-v0063">
-              <span class="statistics-table-category-v0058"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span>
+            <div class="statistics-breakage-table-primary-v0263">
+              <span class="statistics-table-category-v0258"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span>
               <small>${machineMode ? "Machine / location" : "Glass type"}</small>
             </div>
           </td>
@@ -15531,10 +15729,10 @@ function statisticsDataTableHtml(dataset, entries, total) {
       ? "Compare pieces, SQFT, cost, glass types, and recurring reject reasons for every machine."
       : "Compare total material impact for each glass type, then see the machines and reasons behind it.";
     return `
-      <div class="statistics-breakage-table-wrap-v0063">
+      <div class="statistics-breakage-table-wrap-v0263">
         ${tableHeaderHtml(tableTitle, tableSubtitle, activeMeasure)}
-        <div class="statistics-data-table-shell-v0058">
-          <table class="statistics-data-table-v0058 is-breakage-v0060 is-combined-v0060">
+        <div class="statistics-data-table-shell-v0258">
+          <table class="statistics-data-table-v0258 is-breakage-v0260 is-combined-v0262">
             <thead><tr><th>Rank</th><th>${machineMode ? "Machine / location" : "Glass type"}</th><th>Breakage totals</th><th>${machineMode ? "Glass broken" : "Machines"}</th><th>Reject reasons</th><th>Coverage</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -15547,14 +15745,14 @@ function statisticsDataTableHtml(dataset, entries, total) {
     const selected = entry.label === state.homeChartSelectedLabel;
     return `
       <tr class="${selected ? "is-selected" : ""}" data-chart-entry-label="${escapeHtml(entry.label)}" tabindex="0">
-        <td><span class="statistics-table-rank-v0058">${index + 1}</span></td>
-        <td><span class="statistics-table-category-v0058" style="--chart-color:${chartEntryColor(index, entry)}"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
+        <td><span class="statistics-table-rank-v0258">${index + 1}</span></td>
+        <td><span class="statistics-table-category-v0258" style="--chart-color:${chartEntryColor(index, entry)}"><i aria-hidden="true"></i><strong>${escapeHtml(entry.label)}</strong></span></td>
         <td><b>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))}</b></td>
         <td>${escapeHtml(share)}</td>
         <td>${escapeHtml(entry.detail || "")}</td>
       </tr>`;
   }).join("");
-  return `<div class="statistics-data-table-shell-v0058"><table class="statistics-data-table-v0058"><thead><tr><th>Rank</th><th>Category</th><th>Value</th><th>Share</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258"><thead><tr><th>Rank</th><th>Category</th><th>Value</th><th>Share</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /**
@@ -15564,7 +15762,7 @@ function statisticsDataTableHtml(dataset, entries, total) {
  * remaining categories, avoiding an unexpectedly tall chart on first load.
  */
 function statisticsNextDisplayLimit(currentValue = state.homeChartLimit) {
-  const steps = [10, 00, 30, 40, 50, 100];
+  const steps = [10, 20, 30, 40, 50, 100];
   if (String(currentValue) === "all") return "all";
   const current = Number(currentValue || 10);
   return String(steps.find((value) => value > current) || "all");
@@ -15578,7 +15776,8 @@ function renderStatisticsAnalytics() {
   if (!els.statisticsChartCanvas) return;
 
   const dataset = statisticsChartDataset(state.homeChartMetric);
-  if (dataset.allowDonut === false && state.homeChartView === "donut") state.homeChartView = "bar";
+  if (dataset.isProductionCount) state.homeChartView = "table";
+  else if (dataset.allowDonut === false && state.homeChartView === "donut") state.homeChartView = "bar";
   const allEntryCount = (dataset.entries || []).length;
   const filtered = filteredStatisticsChartEntries(dataset);
   const entries = filtered.entries;
@@ -15588,7 +15787,7 @@ function renderStatisticsAnalytics() {
   // v0.457: the analytics header no longer repeats the dataset description and
   // reporting range. The calendar selector already owns that context.
   if (els.statisticsChartDatasetIcon) {
-    els.statisticsChartDatasetIcon.className = `statistics-section-icon-v0058 is-analytics is-${dataset.icon || "analytics"}`;
+    els.statisticsChartDatasetIcon.className = `statistics-section-icon-v0258 is-analytics is-${dataset.icon || "analytics"}`;
   }
   if (els.statsChartMetricSelect) els.statsChartMetricSelect.value = state.homeChartMetric;
   if (els.statsChartSortSelect) els.statsChartSortSelect.value = state.homeChartSort;
@@ -15597,7 +15796,7 @@ function renderStatisticsAnalytics() {
   const glassSizeVisible = state.homeChartMetric === "glass-sizes";
   if (els.statisticsGlassSizeControl) els.statisticsGlassSizeControl.hidden = !glassSizeVisible;
   if (els.statsGlassSizeTypeSelect) {
-    const sizeTypes = (activeHomeReportSummaryV470()?.glassSizeFrequencyByType || []).filter((row) => Array.isArray(row.sizes) && row.sizes.length);
+    const sizeTypes = (activeHomeReportSummaryV472()?.glassSizeFrequencyByType || []).filter((row) => Array.isArray(row.sizes) && row.sizes.length);
     if (!state.statisticsGlassSizeType || !sizeTypes.some((row) => row.glassType === state.statisticsGlassSizeType)) {
       state.statisticsGlassSizeType = sizeTypes[0]?.glassType || "";
     }
@@ -15621,6 +15820,12 @@ function renderStatisticsAnalytics() {
     els.statsGlassSizeTypeSelect.disabled = !sizeTypes.length;
     els.statsGlassSizeTypeSelect.value = sizeTypes.length ? state.statisticsGlassSizeType : "";
   }
+  const productionCountVisibleV514 = state.homeChartMetric === "production-count";
+  if (els.statisticsProductionOptionsV514) els.statisticsProductionOptionsV514.hidden = !productionCountVisibleV514;
+  if (els.statisticsProductionIncludeRemakesV514) els.statisticsProductionIncludeRemakesV514.checked = Boolean(state.statisticsProductionIncludeRemakesV514);
+  if (els.statisticsProductionIncludeRejectsV514) els.statisticsProductionIncludeRejectsV514.checked = Boolean(state.statisticsProductionIncludeRejectsV514);
+  if (els.statisticsProductionIncludeRushesV514) els.statisticsProductionIncludeRushesV514.checked = Boolean(state.statisticsProductionIncludeRushesV514);
+  if (els.statisticsProductionDetailedV514) els.statisticsProductionDetailedV514.checked = Boolean(state.statisticsProductionDetailedV514);
   const breakageMeasureVisible = ["breakage-machines", "breakage-glass"].includes(state.homeChartMetric);
   const externalRemakesVisible = ["breakage-machines", "breakage-glass", "breakage-rate"].includes(state.homeChartMetric);
   if (els.statisticsBreakageMeasureControl) els.statisticsBreakageMeasureControl.hidden = !breakageMeasureVisible;
@@ -15634,7 +15839,7 @@ function renderStatisticsAnalytics() {
 
   els.statisticsChartViewButtons?.forEach((button) => {
     const view = button.dataset.statisticsView || "bar";
-    const disabled = view === "donut" && dataset.allowDonut === false;
+    const disabled = dataset.isProductionCount ? view !== "table" : (view === "donut" && dataset.allowDonut === false);
     const active = view === state.homeChartView;
     button.disabled = disabled;
     button.classList.toggle("app-primary-button", active);
@@ -15657,7 +15862,7 @@ function renderStatisticsAnalytics() {
 
   if (!entries.length) {
     state.homeChartSelectedLabel = "";
-    if (state.homeReportSummaryLoading && !activeHomeReportSummaryV470()) {
+    if ((dataset.isProductionCount && dataset.loading) || (state.homeReportSummaryLoading && !activeHomeReportSummaryV472())) {
       els.statisticsChartCanvas.innerHTML = `
         <div class="statistics-chart-loading-v507" role="status" aria-live="polite">
           <span class="statistics-chart-loading-spinner-v507" aria-hidden="true"></span>
@@ -15666,8 +15871,8 @@ function renderStatisticsAnalytics() {
       `;
     } else {
       els.statisticsChartCanvas.innerHTML = `
-        <div class="statistics-chart-empty-v0058">
-          <span class="statistics-empty-icon-v0058" aria-hidden="true"></span>
+        <div class="statistics-chart-empty-v0258">
+          <span class="statistics-empty-icon-v0258" aria-hidden="true"></span>
           <strong>No data is available</strong>
           <p>Change the range, data type, or category filter to display results.</p>
         </div>
@@ -15684,7 +15889,8 @@ function renderStatisticsAnalytics() {
   else if (state.homeChartView === "table") visualization = statisticsDataTableHtml(dataset, entries, total);
   else visualization = statisticsBarChartHtml(dataset, entries);
 
-  els.statisticsChartCanvas.innerHTML = `${visualization}${statisticsChartSelectionHtml(dataset, entries, total)}`;
+  const selection = dataset.isProductionCount ? "" : statisticsChartSelectionHtml(dataset, entries, total);
+  els.statisticsChartCanvas.innerHTML = `${visualization}${selection}`;
 }
 
 /**
@@ -15705,23 +15911,23 @@ function renderStatisticsMiniCharts() {
     const maxValue = Math.max(...entries.map((entry) => Number(entry.value || 0)), 1);
     const rows = entries.length
       ? entries.map((entry) => `
-          <div class="statistics-mini-row-v0058">
+          <div class="statistics-mini-row-v0258">
             <span title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
             <div><i style="width:${Math.max((Number(entry.value || 0) / maxValue) * 100, Number(entry.value || 0) > 0 ? 3 : 0)}%"></i></div>
             <strong>${escapeHtml(statisticsFormatChartValue(dataset, entry.value))}</strong>
           </div>
         `).join("")
-      : `<div class="statistics-mini-empty-v0058">No data is available for this range.</div>`;
+      : `<div class="statistics-mini-empty-v0258">No data is available for this range.</div>`;
     return `
-      <article class="statistics-card-v0058 statistics-mini-card-v0058">
+      <article class="statistics-card-v0258 statistics-mini-card-v0258">
         <header>
-          <span class="statistics-mini-icon-v0058 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
+          <span class="statistics-mini-icon-v0258 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
           <div><h3>${escapeHtml(card.title)}</h3><p>${escapeHtml(card.subtitle)}</p></div>
-          <button class="statistics-mini-open-button-v0058 app-primary-button" type="button" data-statistics-metric="${escapeHtml(card.metric)}" data-statistics-measure="${escapeHtml(card.measure || "")}">
-            <span class="statistics-button-icon-v0058 is-chart" aria-hidden="true"></span><span>Analyze</span>
+          <button class="statistics-mini-open-button-v0258 app-primary-button" type="button" data-statistics-metric="${escapeHtml(card.metric)}" data-statistics-measure="${escapeHtml(card.measure || "")}">
+            <span class="statistics-button-icon-v0258 is-chart" aria-hidden="true"></span><span>Analyze</span>
           </button>
         </header>
-        <div class="statistics-mini-chart-v0058">${rows}</div>
+        <div class="statistics-mini-chart-v0258">${rows}</div>
       </article>
     `;
   }).join("");
@@ -15733,7 +15939,7 @@ function renderStatisticsMiniCharts() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function selectedRangeRemakeStats(overviewLists = []) {
-  const report = activeHomeReportSummaryV470() || {};
+  const report = activeHomeReportSummaryV472() || {};
   const backendQty = Number(report.rangeRemakeQty ?? report.remakeRangeQty ?? 0);
   const backendCount = Number(report.rangeRemakeCount ?? report.remakeRangeCount ?? 0);
 
@@ -15787,7 +15993,7 @@ function selectedRangeBreakageStats() {
 }
 
 /** Return the range-scoped first-seen production activity payload used by v0.506. */
-function statisticsProductionActivityV506(report = activeHomeReportSummaryV470()) {
+function statisticsProductionActivityV506(report = activeHomeReportSummaryV472()) {
   return report?.productionActivity || {
     newProduction: { pieces: 0, itemCount: 0, orderCount: 0, byGlass: [], rows: [] },
     internalRejects: { pieces: 0, eventCount: 0, orderCount: 0, rows: [] },
@@ -15800,15 +16006,169 @@ function statisticsProductionActivityV506(report = activeHomeReportSummaryV470()
 function productionDeliveryDatesV506(values = []) {
   const dates = [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
   if (!dates.length) return "—";
-  return dates.map((value) => formatDisplayDate(value) || value).join(" · ");
+  return dates.map((value) => formatNumericDeliveryDate(value) || value).join(" · ");
+}
+
+/** Resolve the fabrication machine for one production activity row without synchronous file work. */
+function productionActivityMachineV514(row = {}, kind = "new") {
+  if (kind === "reject") return String(row.location || "Unknown machine").trim() || "Unknown machine";
+  const status = state.fabricationStatusCacheV474.get(
+    fabricationStatusKeyV474(row.order, row.item, row.job, row.lastRejectedAt)
+  );
+  if (!status) return "Unknown";
+  const completion = fabricationCompletionStateV512(row, status);
+  if (completion.noFab === true) return "No Fab";
+  return compactMachineLabelV475(completion.machine || status.actualMachine || status.machine || status.assignedMachine || "") || "Unknown";
+}
+
+/** Hydrate report-machine evidence in bounded batches only when production reporting is visible. */
+async function hydrateProductionActivityMachinesV514(report) {
+  const activity = statisticsProductionActivityV506(report);
+  const rows = [
+    ...(activity.newProduction?.rows || []),
+    ...(activity.externalRemakes?.rows || []),
+  ];
+  for (let offset = 0; offset < rows.length; offset += 80) {
+    await hydrateFabricationStatusesV474(rows.slice(offset, offset + 80), { context: "statistics" });
+  }
+  return report;
+}
+
+/** Load the independent today-only activity ledger used by the prominent Statistics card and email. */
+async function ensureTodayProductionReportV514({ force = false } = {}) {
+  const today = todayKey() || dateInputValue(new Date());
+  if (!state.backend || !hasPermission("view_reports")) return state.statisticsTodayProductionReportV514;
+  if (!force && state.statisticsTodayProductionReportV514?.dateKeyV514 === today) return state.statisticsTodayProductionReportV514;
+  if (state.statisticsTodayProductionLoadingV514) return state.statisticsTodayProductionReportV514;
+  state.statisticsTodayProductionLoadingV514 = true;
+  if (state.page === "statistics") renderStatisticsProductionActivityV506();
+  try {
+    const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
+    report.dateKeyV514 = today;
+    state.statisticsTodayProductionReportV514 = report;
+    await hydrateProductionActivityMachinesV514(report);
+    return report;
+  } catch (_error) {
+    if (force) state.statisticsTodayProductionReportV514 = null;
+    return state.statisticsTodayProductionReportV514;
+  } finally {
+    state.statisticsTodayProductionLoadingV514 = false;
+    if (state.page === "statistics") renderStatisticsProductionActivityV506();
+  }
+}
+
+/** Load detailed production activity for the active chart range, independent of aggregate chart data. */
+async function ensureStatisticsProductionReportV514({ force = false } = {}) {
+  const rangeKey = homeReportRangeKeyV472();
+  if (!state.backend || !hasPermission("view_reports")) return state.statisticsProductionReportV514;
+  if (!force && state.statisticsProductionReportV514 && state.statisticsProductionReportRangeV514 === rangeKey) return state.statisticsProductionReportV514;
+  if (state.statisticsProductionReportLoadingV514) return state.statisticsProductionReportV514;
+  state.statisticsProductionReportLoadingV514 = true;
+  if (state.page === "statistics") renderStatisticsAnalytics();
+  try {
+    const params = homeReportDateParams();
+    const query = params ? `${params}&detailRows=1` : "?detailRows=1";
+    const report = await fetchJson(`/api/reports/summary${query}`);
+    state.statisticsProductionReportV514 = report;
+    state.statisticsProductionReportRangeV514 = rangeKey;
+    await hydrateProductionActivityMachinesV514(report);
+    return report;
+  } catch (_error) {
+    if (force) {
+      state.statisticsProductionReportV514 = null;
+      state.statisticsProductionReportRangeV514 = "";
+    }
+    return state.statisticsProductionReportV514;
+  } finally {
+    state.statisticsProductionReportLoadingV514 = false;
+    if (state.page === "statistics" && state.homeChartMetric === "production-count") renderStatisticsAnalytics();
+  }
+}
+
+/** Normalize included activity rows for machine summary and detailed production reporting. */
+function statisticsProductionRowsV514(report = state.statisticsProductionReportV514) {
+  const activity = statisticsProductionActivityV506(report);
+  const rows = [];
+  for (const row of activity.newProduction?.rows || []) {
+    if (row.rush && !state.statisticsProductionIncludeRushesV514) continue;
+    rows.push({ ...row, activityKindV514: row.rush ? "Rush" : "New", machineV514: productionActivityMachineV514(row, "new"), activityAtV514: row.firstSeenAt || "" });
+  }
+  if (state.statisticsProductionIncludeRemakesV514) {
+    for (const row of activity.externalRemakes?.rows || []) {
+      if (row.rush && !state.statisticsProductionIncludeRushesV514) continue;
+      rows.push({ ...row, activityKindV514: "Remake", machineV514: productionActivityMachineV514(row, "remake"), activityAtV514: row.firstSeenAt || "" });
+    }
+  }
+  if (state.statisticsProductionIncludeRejectsV514) {
+    for (const row of activity.internalRejects?.rows || []) {
+      rows.push({ ...row, activityKindV514: "Internal Reject", machineV514: productionActivityMachineV514(row, "reject"), activityAtV514: row.rejectedAt || "" });
+    }
+  }
+  return rows;
+}
+
+function statisticsProductionMachineRowsV514(report = state.statisticsProductionReportV514) {
+  const buckets = new Map();
+  for (const row of statisticsProductionRowsV514(report)) {
+    const machine = String(row.machineV514 || "Unknown").trim() || "Unknown";
+    const bucket = buckets.get(machine) || { label: machine, value: 0, newPieces: 0, rushPieces: 0, remakePieces: 0, rejectPieces: 0, orders: new Set(), items: 0, detailRows: [] };
+    const qty = Math.max(0, Number(row.qty || 0));
+    bucket.value += qty;
+    if (row.activityKindV514 === "Rush") bucket.rushPieces += qty;
+    else if (row.activityKindV514 === "Remake") bucket.remakePieces += qty;
+    else if (row.activityKindV514 === "Internal Reject") bucket.rejectPieces += qty;
+    else bucket.newPieces += qty;
+    if (row.order) bucket.orders.add(String(row.order));
+    bucket.items += 1;
+    bucket.detailRows.push(row);
+    buckets.set(machine, bucket);
+  }
+  return [...buckets.values()].map((bucket) => ({
+    ...bucket,
+    orderCount: bucket.orders.size,
+    detail: `${bucket.value} included pcs · ${bucket.items} items · ${bucket.orders.size} orders`,
+  })).sort((a, b) => Number(b.value || 0) - Number(a.value || 0) || a.label.localeCompare(b.label));
+}
+
+function statisticsProductionCountTableHtmlV514(dataset, entries) {
+  const visibleMachines = new Set(entries.map((entry) => entry.label));
+  const summaryRows = entries.map((entry) => `<tr>
+    <td><strong>${escapeHtml(entry.label)}</strong></td>
+    <td>${escapeHtml(Number(entry.newPieces || 0))}</td>
+    <td>${escapeHtml(Number(entry.rushPieces || 0))}</td>
+    <td>${escapeHtml(Number(entry.remakePieces || 0))}</td>
+    <td>${escapeHtml(Number(entry.rejectPieces || 0))}</td>
+    <td><b>${escapeHtml(Number(entry.value || 0))}</b></td>
+    <td>${escapeHtml(Number(entry.items || 0))}</td>
+    <td>${escapeHtml(Number(entry.orderCount || 0))}</td>
+  </tr>`).join("");
+  const detailRows = state.statisticsProductionDetailedV514
+    ? statisticsProductionRowsV514(state.statisticsProductionReportV514)
+        .filter((row) => visibleMachines.has(row.machineV514))
+        .sort((a, b) => String(a.machineV514).localeCompare(String(b.machineV514)) || String(a.activityAtV514).localeCompare(String(b.activityAtV514)))
+        .map((row) => `<tr>
+          <td><strong>${escapeHtml(row.machineV514 || "Unknown")}</strong></td><td><span class="statistics-production-kind-v514 is-${escapeHtml(String(row.activityKindV514 || "new").toLowerCase().replace(/\s+/g, "-"))}">${escapeHtml(row.activityKindV514)}</span></td>
+          <td>${escapeHtml(formatDateTime(row.activityAtV514) || row.activityAtV514 || "—")}</td><td><b>${escapeHtml(row.order || "—")}</b></td><td>${escapeHtml(String(row.item || "").replace(/^0+/, "") || "—")}</td>
+          <td>${escapeHtml(Number(row.qty || 0))}</td><td>${escapeHtml(row.customer || "—")}</td><td>${escapeHtml(row.job || "—")}</td><td>${escapeHtml(row.glassType || row.product || "Other Glass")}</td>
+          <td>${escapeHtml(row.dimensions || "—")}</td><td>${escapeHtml(row.route || "—")}</td><td>${escapeHtml(formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—")}</td>
+          <td>${escapeHtml(row.barcode || "—")}</td><td>${escapeHtml(row.processState || "—")}</td><td>${escapeHtml(row.queueState || "—")}</td><td>${escapeHtml(row.reason || "—")}</td>
+        </tr>`).join("")
+    : "";
+  return `<div class="statistics-production-report-v514">
+    <div class="statistics-production-report-heading-v514"><div><span>Production count</span><strong>Machine workload</strong><small>New production is separated from Rush, External Remake, and Internal Reject work so totals stay auditable.</small></div><b>${escapeHtml(entries.reduce((sum, row) => sum + Number(row.value || 0), 0))} pcs</b></div>
+    <div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258 statistics-production-machine-table-v514"><thead><tr><th>Machine</th><th>New</th><th>Rush</th><th>Remake</th><th>Internal Reject</th><th>Total</th><th>Items</th><th>Orders</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
+    ${state.statisticsProductionDetailedV514 ? `<div class="statistics-production-detail-heading-v514"><strong>Detailed piece report</strong><span>${escapeHtml(statisticsProductionRowsV514(state.statisticsProductionReportV514).filter((row) => visibleMachines.has(row.machineV514)).length)} activity rows</span></div><div class="statistics-data-table-shell-v0258"><table class="statistics-data-table-v0258 statistics-production-detail-table-v514"><thead><tr><th>Machine</th><th>Type</th><th>Date / Time</th><th>Order</th><th>Item</th><th>Qty</th><th>Customer</th><th>Job</th><th>Glass</th><th>Size</th><th>Route</th><th>DD</th><th>Barcode</th><th>Process</th><th>Queue</th><th>Reason</th></tr></thead><tbody>${detailRows}</tbody></table></div>` : ""}
+  </div>`;
 }
 
 /** Render true piece counts by glass type plus separate reject/remake totals. */
 function renderStatisticsProductionActivityV506() {
   if (!els.statisticsProductionActivity) return;
-  const report = activeHomeReportSummaryV470();
+  const report = state.statisticsTodayProductionReportV514;
+  const today = todayKey() || dateInputValue(new Date());
+  if (els.statisticsTodayProductionDateV514) els.statisticsTodayProductionDateV514.textContent = formatNumericDeliveryDate(today) || today;
   if (!report) {
-    const message = state.homeReportSummaryLoading ? "Loading production activity…" : "Production activity is not available for this range yet.";
+    const message = state.statisticsTodayProductionLoadingV514 ? "Loading today’s production activity…" : "Today’s production activity is not available yet.";
     els.statisticsProductionActivity.innerHTML = `<div class="statistics-production-count-empty-v505">${escapeHtml(message)}</div>`;
     return;
   }
@@ -15826,8 +16186,20 @@ function renderStatisticsProductionActivityV506() {
           <span>${escapeHtml(Number(row.itemCount || 0))} item${Number(row.itemCount || 0) === 1 ? "" : "s"}</span>
           <em>DD ${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
         </div>`).join("")
-    : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported in this range.</div>`;
+    : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported today.</div>`;
 
+  const todayMachineBucketsV514 = new Map();
+  for (const row of newWork.rows || []) {
+    const machine = productionActivityMachineV514(row, "new");
+    const bucket = todayMachineBucketsV514.get(machine) || { pieces: 0, items: 0 };
+    bucket.pieces += Math.max(0, Number(row.qty || 0));
+    bucket.items += 1;
+    todayMachineBucketsV514.set(machine, bucket);
+  }
+  const machineMarkupV514 = [...todayMachineBucketsV514.entries()]
+    .sort((a, b) => Number(b[1].pieces || 0) - Number(a[1].pieces || 0) || a[0].localeCompare(b[0]))
+    .map(([machine, values]) => `<div class="statistics-production-machine-row-v514"><span>${escapeHtml(machine)}</span><strong>${escapeHtml(values.pieces)}<small> pcs</small></strong><em>${escapeHtml(values.items)} item${values.items === 1 ? "" : "s"}</em></div>`).join("")
+    || `<div class="statistics-production-glass-empty-v506">No machine production has been recorded today.</div>`;
   const excludedPieces = Number(activity.yieldPercentageExcluded?.pieces || 0);
   els.statisticsProductionActivity.innerHTML = `
     <article class="statistics-production-count-card-v505 statistics-production-new-v506 is-new">
@@ -15840,6 +16212,7 @@ function renderStatisticsProductionActivityV506() {
         </div>
       </header>
       <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">${glassMarkup}</div>
+      <div class="statistics-production-machine-ledger-v514" aria-label="Today’s new production by machine"><header><span>By machine</span><small>New orders only</small></header>${machineMarkupV514}</div>
     </article>
     <div class="statistics-production-side-stack-v506">
       <article class="statistics-production-count-card-v505 is-reject statistics-production-side-card-v506">
@@ -15857,7 +16230,7 @@ function renderStatisticsProductionActivityV506() {
           <small>External remakes</small>
           <strong>${escapeHtml(Number(remakes.pieces || 0))}</strong>
           <p>${escapeHtml(Number(remakes.itemCount || 0))} item${Number(remakes.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(remakes.orderCount || 0))} order${Number(remakes.orderCount || 0) === 1 ? "" : "s"}</p>
-          <em>First imported or first changed to REMAKE during this range</em>
+          <em>First imported or first changed to REMAKE today</em>
         </div>
       </article>
     </div>`;
@@ -15875,11 +16248,11 @@ function sortedDailyProductionRowsV506(rows = []) {
 function dailyProductionCellV506(value, options = {}) {
   const align = options.align || "left";
   const weight = options.bold ? "700" : "500";
-  return `<td style="padding:8px 9px;border-bottom:1px solid #dce7f0;color:#00384c;font-size:10px;line-height:1.3;text-align:${align};font-weight:${weight};vertical-align:top;">${escapeHtml(value == null || value === "" ? "—" : String(value))}</td>`;
+  return `<td style="padding:8px 9px;border-bottom:1px solid #dce7f0;color:#00384c;font-size:11px;line-height:1.35;text-align:${align};font-weight:${weight};vertical-align:top;">${escapeHtml(value == null || value === "" ? "—" : String(value))}</td>`;
 }
 
 function dailyProductionHeaderCellV506(value, color = "#0b3158", align = "left") {
-  return `<th style="padding:8px 9px;background:${color};color:#ffffff;font-size:10px;letter-spacing:.03em;text-transform:uppercase;text-align:${align};font-weight:800;border-right:1px solid rgba(055,055,055,.15);">${escapeHtml(value)}</th>`;
+  return `<th style="padding:8px 9px;background:${color};color:#ffffff;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;text-align:${align};font-weight:800;border-right:1px solid rgba(255,255,255,.15);">${escapeHtml(value)}</th>`;
 }
 
 /** Build an Outlook-friendly formatted email and a complete plain-text fallback. */
@@ -15889,12 +16262,27 @@ function dailyProductionEmailDraftV506(report, dateKey) {
   const rejects = activity.internalRejects || {};
   const remakes = activity.externalRemakes || {};
   const excluded = activity.yieldPercentageExcluded || {};
-  const displayDate = formatDisplayDate(dateKey) || dateKey;
+  const displayDate = formatNumericDeliveryDate(dateKey) || dateKey;
   const newGlassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
   const rejectRows = sortedDailyProductionRowsV506(rejects.rows);
   const remakeRows = sortedDailyProductionRowsV506(remakes.rows);
+  const emailMachineBucketsV514 = new Map();
+  for (const row of newWork.rows || []) {
+    const machine = productionActivityMachineV514(row, "new");
+    const bucket = emailMachineBucketsV514.get(machine) || { pieces: 0, items: 0, orders: new Set() };
+    bucket.pieces += Math.max(0, Number(row.qty || 0));
+    bucket.items += 1;
+    if (row.order) bucket.orders.add(String(row.order));
+    emailMachineBucketsV514.set(machine, bucket);
+  }
+  const emailMachineRowsV514 = [...emailMachineBucketsV514.entries()]
+    .map(([machine, values]) => ({ machine, pieces: values.pieces, items: values.items, orders: values.orders.size }))
+    .sort((a, b) => Number(b.pieces || 0) - Number(a.pieces || 0) || a.machine.localeCompare(b.machine));
 
-  const plain = [`DAILY PRODUCTION COUNT - ${displayDate}`, "", "NEW ORDERS:"];
+  const plain = [`DAILY PRODUCTION COUNT - ${displayDate}`, "", "TODAY AT A GLANCE:", `  New production: ${Number(newWork.pieces || 0)} pieces`, `  Internal rejects: ${Number(rejects.pieces || 0)} pieces`, `  External remakes: ${Number(remakes.pieces || 0)} pieces`, "", "NEW PRODUCTION BY MACHINE:"];
+  if (!emailMachineRowsV514.length) plain.push("  No machine production recorded.");
+  emailMachineRowsV514.forEach((row) => plain.push(`  ${row.machine}: ${row.pieces} pieces | ${row.items} items | ${row.orders} orders`));
+  plain.push("", "NEW ORDERS BY GLASS:");
   if (!newGlassRows.length) plain.push("  No new production pieces.");
   newGlassRows.forEach((row) => {
     plain.push(`  ${row.glassType || "Other Glass"} - ${Number(row.pieces || 0)} Piece${Number(row.pieces || 0) === 1 ? "" : "s"} | DD: ${productionDeliveryDatesV506(row.deliveryDates)}`);
@@ -15910,7 +16298,7 @@ function dailyProductionEmailDraftV506(report, dateKey) {
   if (!remakeRows.length) plain.push("  No external remakes.");
   remakeRows.forEach((row) => {
     const orderItem = `${String(row.order || "—").trim()}-${String(row.item || "—").trim().padStart(3, "0")}`;
-    plain.push(`  ${orderItem} | Qty ${Number(row.qty || 0)} | ${row.customer || "—"} | ${row.glassType || row.product || "Other Glass"} | ${row.dimensions || "—"} | DD ${formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—"}`);
+    plain.push(`  ${orderItem} | Qty ${Number(row.qty || 0)} | ${row.customer || "—"} | ${row.glassType || row.product || "Other Glass"} | ${row.dimensions || "—"} | DD ${formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—"}`);
   });
   plain.push("", "Generated by Delivery List Scanner");
 
@@ -15922,6 +16310,13 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     ${dailyProductionCellV506(productionDeliveryDatesV506(row.deliveryDates))}
   </tr>`).join("") : `<tr><td colspan="5" style="padding:16px;color:#687d90;text-align:center;font-size:10px;">No new production pieces.</td></tr>`;
 
+  const machineRowsHtmlV514 = emailMachineRowsV514.length ? emailMachineRowsV514.map((row) => `<tr>
+    ${dailyProductionCellV506(row.machine, { bold: true })}
+    ${dailyProductionCellV506(row.pieces, { bold: true, align: "center" })}
+    ${dailyProductionCellV506(row.items, { align: "center" })}
+    ${dailyProductionCellV506(row.orders, { align: "center" })}
+  </tr>`).join("") : `<tr><td colspan="4" style="padding:16px;color:#687d90;text-align:center;font-size:11px;">No machine production recorded.</td></tr>`;
+
   const rejectRowsHtml = rejectRows.length ? rejectRows.map((row) => `<tr>
     ${dailyProductionCellV506(formatDateTime(row.rejectedAt) || row.rejectedAt || "—")}
     ${dailyProductionCellV506(row.order || "—", { bold: true })}
@@ -15929,8 +16324,8 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     ${dailyProductionCellV506(Number(row.qty || 0), { align: "center" })}
     ${dailyProductionCellV506(row.glassType || row.product || "Other Glass")}
     ${dailyProductionCellV506(row.dimensions || "—")}
-    ${dailyProductionCellV506(Number(row.sqft || 0).toFixed(0), { align: "right" })}
-    ${dailyProductionCellV506(formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—")}
+    ${dailyProductionCellV506(Number(row.sqft || 0).toFixed(2), { align: "right" })}
+    ${dailyProductionCellV506(formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—")}
     ${dailyProductionCellV506(row.reason || "—")}
     ${dailyProductionCellV506(row.location || "—")}
     ${dailyProductionCellV506(row.rejectedBy || "—")}
@@ -15945,35 +16340,39 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     ${dailyProductionCellV506(row.job || "—")}
     ${dailyProductionCellV506(row.glassType || row.product || "Other Glass")}
     ${dailyProductionCellV506(row.dimensions || "—")}
-    ${dailyProductionCellV506(formatDisplayDate(row.deliveryDate) || row.deliveryDate || "—")}
+    ${dailyProductionCellV506(formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—")}
   </tr>`).join("") : `<tr><td colspan="9" style="padding:16px;color:#687d90;text-align:center;font-size:10px;">No external remakes.</td></tr>`;
 
-  const summaryCard = (label, value, note, accent) => `<td width="33.33%" style="padding:0 5px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dbe6ef;border-top:4px solid ${accent};border-radius:6px;"><tr><td style="padding:10px 14px;"><div style="font-size:10px;color:#6a8094;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">${escapeHtml(label)}</div><div style="font-size:08px;line-height:1.05;color:#103a61;font-weight:800;margin-top:3px;">${escapeHtml(value)}</div><div style="font-size:10px;color:#7d8d9c;margin-top:4px;">${escapeHtml(note)}</div></td></tr></table></td>`;
+  const summaryCard = (label, value, note, accent) => `<td width="33.33%" style="padding:0 5px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dbe6ef;border-top:4px solid ${accent};border-radius:6px;"><tr><td style="padding:10px 14px;"><div style="font-size:10px;color:#6a8094;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">${escapeHtml(label)}</div><div style="font-size:28px;line-height:1.05;color:#103a61;font-weight:800;margin-top:3px;">${escapeHtml(value)}</div><div style="font-size:10px;color:#7d8d9c;margin-top:4px;">${escapeHtml(note)}</div></td></tr></table></td>`;
 
   const html = `<div style="margin:0;padding:0;background:#f4f7fa;font-family:'Segoe UI',Arial,sans-serif;color:#00384c;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f4f7fa;"><tr><td align="center" style="padding:04px 10px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f4f7fa;"><tr><td align="center" style="padding:24px 10px;">
       <table role="presentation" width="900" cellpadding="0" cellspacing="0" style="width:100%;max-width:900px;border-collapse:collapse;background:#ffffff;border:1px solid #d5e1eb;box-shadow:0 5px 18px rgba(15,47,76,.08);">
-        <tr><td style="padding:00px 04px;background:#0b3158;border-bottom:4px solid #0f77ad;color:#ffffff;">
-          <table width="100%" cellpadding="0" cellspacing="0"><tr><td><div style="font-size:11px;letter-spacing:.10em;text-transform:uppercase;color:#a9c9e4;font-weight:800;">Delivery List Scanner</div><div style="font-size:06px;line-height:1.15;font-weight:800;margin-top:3px;">Daily Production Count</div></td><td align="right" style="font-size:15px;font-weight:700;color:#ffffff;">${escapeHtml(displayDate)}</td></tr></table>
+        <tr><td style="padding:22px 26px;background:#082f55;border-bottom:5px solid #1688c9;color:#ffffff;">
+          <table width="100%" cellpadding="0" cellspacing="0"><tr><td><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#acd4ee;font-weight:800;">Barefoot Facility Services · Delivery List Scanner</div><div style="font-size:28px;line-height:1.1;font-weight:850;margin-top:4px;">Daily Production Count</div><div style="font-size:11px;color:#c9e1f1;margin-top:5px;">New production, machine workload, rejects, and replacement work</div></td><td align="right" style="font-size:17px;font-weight:800;color:#ffffff;white-space:nowrap;">${escapeHtml(displayDate)}</td></tr></table>
         </td></tr>
         <tr><td style="padding:16px 18px 4px;"><table width="100%" cellpadding="0" cellspacing="0"><tr>
           ${summaryCard("New production", `${Number(newWork.pieces || 0)} pcs`, `${Number(newWork.itemCount || 0)} items · ${Number(newWork.orderCount || 0)} orders`, "#0f77ad")}
           ${summaryCard("Internal rejects", `${Number(rejects.pieces || 0)} pcs`, `${Number(rejects.eventCount || 0)} events`, "#c34030")}
           ${summaryCard("External remakes", `${Number(remakes.pieces || 0)} pcs`, `${Number(remakes.itemCount || 0)} items`, "#7055a5")}
         </tr></table></td></tr>
-        <tr><td style="padding:18px 03px 6px;"><div style="font-size:17px;font-weight:800;color:#103a61;">New Orders</div><div style="font-size:11px;color:#718599;margin-top:0px;">Actual new-piece count grouped by glass type. Remakes are excluded.</div></td></tr>
-        <tr><td style="padding:0 03px 18px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
+        <tr><td style="padding:18px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#103a61;">New Orders</div><div style="font-size:11px;color:#718599;margin-top:2px;">Actual new-piece count grouped by glass type. Remakes are excluded.</div></td></tr>
+        <tr><td style="padding:0 23px 18px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
           <thead><tr>${dailyProductionHeaderCellV506("Glass Type")}${dailyProductionHeaderCellV506("Pieces", "#0b3158", "center")}${dailyProductionHeaderCellV506("Items", "#0b3158", "center")}${dailyProductionHeaderCellV506("Orders", "#0b3158", "center")}${dailyProductionHeaderCellV506("Delivery Date(s)")}</tr></thead><tbody>${newRowsHtml}</tbody>
         </table></td></tr>
-        <tr><td style="padding:4px 03px 6px;"><div style="font-size:17px;font-weight:800;color:#9f0f05;">Internal Rejects</div><div style="font-size:11px;color:#718599;margin-top:0px;">Yield Percentage rejects are excluded from these production-accounting totals.</div></td></tr>
-        <tr><td style="padding:0 03px 18px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #ead8d5;">
+        <tr><td style="padding:2px 23px 7px;"><div style="font-size:17px;font-weight:850;color:#103a61;">New Production by Machine</div><div style="font-size:11px;color:#718599;margin-top:2px;">Shows where today’s newly imported glass is expected to run. Remakes and Internal Rejects remain separate below.</div></td></tr>
+        <tr><td style="padding:0 23px 20px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
+          <thead><tr>${dailyProductionHeaderCellV506("Machine", "#135d8b")}${dailyProductionHeaderCellV506("Pieces", "#135d8b", "center")}${dailyProductionHeaderCellV506("Items", "#135d8b", "center")}${dailyProductionHeaderCellV506("Orders", "#135d8b", "center")}</tr></thead><tbody>${machineRowsHtmlV514}</tbody>
+        </table></td></tr>
+        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#9f0f05;">Internal Rejects</div><div style="font-size:11px;color:#718599;margin-top:2px;">Yield Percentage rejects are excluded from these production-accounting totals.</div></td></tr>
+        <tr><td style="padding:0 23px 18px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #ead8d5;">
           <thead><tr>${["Date / Time","Order #","Line","Qty","Glass Type","Size","Sq Ft.","Delivery Date","Reason","Machine","Reported By"].map((value) => dailyProductionHeaderCellV506(value, "#b63c30", ["Line","Qty","Sq Ft."].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${rejectRowsHtml}</tbody>
         </table></div>${Number(excluded.pieces || 0) > 0 ? `<div style="padding:8px 10px;margin-top:8px;background:#fff8e8;border:1px solid #f0d79c;color:#765516;font-size:11px;"><b>${Number(excluded.pieces || 0)} Yield Percentage piece${Number(excluded.pieces || 0) === 1 ? "" : "s"}</b> excluded from production statistics.</div>` : ""}</td></tr>
-        <tr><td style="padding:4px 03px 6px;"><div style="font-size:17px;font-weight:800;color:#5d468a;">External Remakes</div><div style="font-size:11px;color:#718599;margin-top:0px;">Replacement work first imported or first changed to REMAKE today.</div></td></tr>
-        <tr><td style="padding:0 03px 00px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dfd8eb;">
+        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#5d468a;">External Remakes</div><div style="font-size:11px;color:#718599;margin-top:2px;">Replacement work first imported or first changed to REMAKE today.</div></td></tr>
+        <tr><td style="padding:0 23px 20px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dfd8eb;">
           <thead><tr>${["Reported","Order #","Line","Qty","Customer","Job ID","Glass Type","Size","Delivery Date"].map((value) => dailyProductionHeaderCellV506(value, "#654c90", ["Line","Qty"].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${remakeRowsHtml}</tbody>
         </table></div></td></tr>
-        <tr><td style="padding:13px 03px;background:#f3f7fa;border-top:1px solid #dbe5ed;color:#748698;font-size:10px;">Generated by Delivery List Scanner · Production counts use first-seen import activity; Internal Rejects use reject incident time.</td></tr>
+        <tr><td style="padding:13px 23px;background:#f3f7fa;border-top:1px solid #dbe5ed;color:#748698;font-size:10px;">Generated by Delivery List Scanner · Production counts use first-seen import activity; Internal Rejects use reject incident time.</td></tr>
       </table>
     </td></tr></table>
   </div>`;
@@ -16027,7 +16426,9 @@ async function draftDailyProductionEmailV506() {
   const today = todayKey() || dateInputValue(new Date());
   if (button) button.disabled = true;
   try {
-    const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}`);
+    const report = await ensureTodayProductionReportV514({ force: false })
+      || await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
+    await hydrateProductionActivityMachinesV514(report);
     const draft = dailyProductionEmailDraftV506(report, today);
     state.dailyProductionEmailDraftV506 = draft;
     const modal = ensureDailyProductionEmailPreviewV506();
@@ -16139,11 +16540,11 @@ function renderHomeStatistics(overviewLists, overview) {
     els.overviewStats.innerHTML = priorityCards.map((card) => {
       const progress = card.progress === null ? null : Number(card.progress);
       const progressMarkup = progress !== null && Number.isFinite(progress)
-        ? `<div class="statistics-priority-progress-v0058"><span style="width:${Math.min(Math.max(progress, 0), 100)}%"></span></div>`
+        ? `<div class="statistics-priority-progress-v0258"><span style="width:${Math.min(Math.max(progress, 0), 100)}%"></span></div>`
         : "";
       return `
-        <article class="statistics-priority-card-v0058 is-${escapeHtml(card.tone)}">
-          <span class="statistics-priority-icon-v0058 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
+        <article class="statistics-priority-card-v0258 is-${escapeHtml(card.tone)}">
+          <span class="statistics-priority-icon-v0258 is-${escapeHtml(card.icon)}" aria-hidden="true"></span>
           <div>
             <small>${escapeHtml(card.label)}</small>
             <strong>${escapeHtml(card.value)}</strong>
@@ -16166,7 +16567,7 @@ function renderHomeStatistics(overviewLists, overview) {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 async function loadHomeReportSummary() {
-  if (!state.backend || !hasPermission("view_reports")) return activeHomeReportSummaryV470();
+  if (!state.backend || !hasPermission("view_reports")) return activeHomeReportSummaryV472();
 
   const requestParams = homeReportDateParams();
   const requestKey = requestParams || "all";
@@ -16197,7 +16598,7 @@ async function loadHomeReportSummary() {
     const report = await requestPromise;
     const stillCurrent = state.homeReportSummaryRequestToken === requestToken
       && state.homeReportSummaryRequestKey === requestKey
-      && homeReportRangeKeyV470() === requestKey;
+      && homeReportRangeKeyV472() === requestKey;
     if (stillCurrent) {
       state.homeReportSummary = report;
       state.homeReportSummaryRangeKey = requestKey;
@@ -16230,7 +16631,7 @@ function openHomeStatisticsReport() {
   const overviewLists = filterListsByOverviewRange(state.lists);
   const overview = aggregateListStats(overviewLists);
   const stages = homeStageBreakdown(overviewLists);
-  const report = activeHomeReportSummaryV470() || {};
+  const report = activeHomeReportSummaryV472() || {};
   const breakage = statisticsBreakagePayload();
   const breakageStats = selectedRangeBreakageStats();
   const generatedAt = new Date().toLocaleString(appLocale());
@@ -16281,25 +16682,25 @@ function openHomeStatisticsReport() {
   <title>Delivery Scanner Statistics Report</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 00px; color: #07100f; font-family: "Segoe UI", Arial, sans-serif; background: #fff; }
-    button { margin-bottom: 10px; border: 1px solid #060f59; border-radius: 8px; background: #060f59; color: #fff; padding: 8px 10px; font-weight: 850; }
-    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; border-bottom: 3px solid #060f59; padding-bottom: 10px; }
-    h1 { margin: 0; color: #041a3d; font-size: 07px; }
-    h0 { margin: 18px 0 8px; color: #041a3d; font-size: 17px; }
-    p { margin: 4px 0 0; color: #506078; font-weight: 700; }
-    .report-meta { text-align: right; font-size: 11px; color: #506078; font-weight: 800; }
+    body { margin: 22px; color: #07122f; font-family: "Segoe UI", Arial, sans-serif; background: #fff; }
+    button { margin-bottom: 12px; border: 1px solid #062f59; border-radius: 8px; background: #062f59; color: #fff; padding: 8px 12px; font-weight: 850; }
+    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; border-bottom: 3px solid #062f59; padding-bottom: 12px; }
+    h1 { margin: 0; color: #041a3d; font-size: 27px; }
+    h2 { margin: 18px 0 8px; color: #041a3d; font-size: 17px; }
+    p { margin: 4px 0 0; color: #526078; font-weight: 700; }
+    .report-meta { text-align: right; font-size: 11px; color: #526078; font-weight: 800; }
     .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0 0; }
     .kpi { border: 1px solid #d7e1ee; border-radius: 8px; background: #f7faff; padding: 9px 10px; }
-    .kpi small { display: block; color: #60708a; font-size: 10px; font-weight: 900; text-transform: uppercase; }
-    .kpi strong { display: block; margin-top: 3px; color: #060f59; font-size: 00px; }
-    .kpi span { display: block; margin-top: 0px; color: #60708a; font-size: 10px; font-weight: 700; }
+    .kpi small { display: block; color: #60728a; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+    .kpi strong { display: block; margin-top: 3px; color: #062f59; font-size: 20px; }
+    .kpi span { display: block; margin-top: 2px; color: #60728a; font-size: 10px; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; }
     th, td { border: 1px solid #d9e1ee; padding: 5px 6px; text-align: left; vertical-align: middle; }
     th { background: #edf4fb; color: #173d67; font-size: 9.5px; text-transform: uppercase; }
     .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .notes { margin-top: 14px; border: 1px solid #d9e1ee; border-radius: 8px; background: #f8fafc; padding: 9px 11px; }
     .notes strong { color: #041a3d; }
-    .notes ul { margin: 6px 0 0 18px; padding: 0; color: #506078; font-size: 10px; font-weight: 700; }
+    .notes ul { margin: 6px 0 0 18px; padding: 0; color: #526078; font-size: 10px; font-weight: 700; }
     @page { size: letter landscape; margin: .3in; }
     @media print { body { margin: 0; } button { display: none; } .two-column { break-inside: avoid; } }
   </style>
@@ -16327,16 +16728,16 @@ function openHomeStatisticsReport() {
     <div class="kpi"><small>External remake pieces</small><strong>${escapeHtml(Number(breakageStats.external.pieces || 0))}</strong><span>${escapeHtml(externalLabel)} in active breakage rate</span></div>
   </section>
 
-  <h0>Workflow progress</h0>
+  <h2>Workflow progress</h2>
   <table><thead><tr><th>Stage</th><th>Total pieces</th><th>Completed</th><th>Open</th><th>Completion</th></tr></thead><tbody>${stageRows}</tbody></table>
 
   <div class="two-column">
     <section>
-      <h0>Internal breakage by machine</h0>
+      <h2>Internal breakage by machine</h2>
       <table><thead><tr><th>Machine / location</th><th>Reject events</th><th>Pieces</th><th>SQFT</th><th>Estimated cost</th><th>Glass broken</th><th>Top reasons</th></tr></thead><tbody>${machineRows}</tbody></table>
     </section>
     <section>
-      <h0>Breakage by glass type</h0>
+      <h2>Breakage by glass type</h2>
       <table><thead><tr><th>Glass type</th><th>Pieces</th><th>SQFT</th><th>Estimated cost</th><th>Top machines</th><th>Top reasons</th></tr></thead><tbody>${glassRows}</tbody></table>
     </section>
   </div>
@@ -16366,7 +16767,7 @@ function openHomeStatisticsReport() {
 </html>`;
 
   state.restoreFullscreenAfterPrint = Boolean(document.fullscreenElement);
-  const win = window.open("", "deliveryStatisticsPrintWindow", "popup=yes,width=1180,height=800,resizable=yes,scrollbars=yes");
+  const win = window.open("", "deliveryStatisticsPrintWindow", "popup=yes,width=1180,height=820,resizable=yes,scrollbars=yes");
   if (!win) {
     showInlineError("Allow popups to generate the statistics PDF report.");
     return;
@@ -16409,7 +16810,7 @@ function stageProgressSegments(lists) {
  */
 function progressWidth(percent) {
   const value = Math.min(Math.max(Number(percent || 0), 0), 100);
-  return value > 0 ? Math.max(value, 1.05) : 0;
+  return value > 0 ? Math.max(value, 1.25) : 0;
 }
 
 /**
@@ -16507,7 +16908,7 @@ function renderTodayProgress() {
   els.todayStageGrid.style.setProperty("--home-stage-count", String(todayStageCount));
   els.todayStageGrid.dataset.stageCount = String(todayStageCount);
 
-  // v0.360: Keep Home intentionally simple: greeting/date followed immediately
+  // v0.362: Keep Home intentionally simple: greeting/date followed immediately
   // by the live stage cards. Summary KPIs were useful data but made the top of
   // Home feel heavier than the operational overview it is meant to be.
   els.todayStageGrid.innerHTML = lists.length
@@ -16567,7 +16968,7 @@ function renderStatisticsPage() {
     els.overviewRangeSelect.value = state.overviewRange;
   }
   if (els.statisticsLastUpdated) {
-    const updated = new Date().toLocaleTimeString(appLocale(), { hour: "numeric", minute: "0-digit" });
+    const updated = new Date().toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
     els.statisticsLastUpdated.textContent = `Updated ${updated}`;
   }
   renderHomeStatistics(overviewLists, overview);
@@ -16584,7 +16985,7 @@ function homeHubTimelineGroups() {
   const today = todayKey();
   const groups = listsByDeliveryDate(state.lists || []);
   const upcoming = groups
-    .filter((group) => /^\d{4}-\d{0}-\d{0}$/.test(group.date) && group.date >= today)
+    .filter((group) => /^\d{4}-\d{2}-\d{2}$/.test(group.date) && group.date >= today)
     .sort((left, right) => left.date.localeCompare(right.date));
   if (upcoming.length) return upcoming.slice(0, 5);
   return groups.slice(0, 5).reverse();
@@ -16649,7 +17050,7 @@ function renderHomeHub() {
   const now = new Date();
 
   if (els.homeHubUpdated) {
-    els.homeHubUpdated.textContent = `Updated ${now.toLocaleTimeString([], { hour: "numeric", minute: "0-digit" })}`;
+    els.homeHubUpdated.textContent = `Updated ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
   }
 
   if (els.homeDeliveryTimeline) {
@@ -16666,7 +17067,7 @@ function renderHomeHub() {
           <span class="home-timeline-progress-v358 home-timeline-progress-v378" role="progressbar" aria-label="${escapeHtml(formatDisplayDate(group.date))} Airport Road staging completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(Math.max(Number(airport.percent || 0), 0), 100)}">
             <i>${Number(airport.percent || 0) > 0 ? `<b style="width:${progressWidth(airport.percent)}%"></b>` : ""}<strong>${formatPercent(airport.percent)}</strong></i>
           </span>
-          <span class="home-timeline-summary-v378 home-timeline-summary-v380 home-timeline-summary-v383 home-forward-stage-counters-v431" data-forward-legacy="home-timeline-pieces-v378 home-timeline-pieces-v383" aria-label="Stage piece progress">
+          <span class="home-timeline-summary-v378 home-timeline-summary-v382 home-timeline-summary-v383 home-forward-stage-counters-v431" data-forward-legacy="home-timeline-pieces-v378 home-timeline-pieces-v383" aria-label="Stage piece progress">
             ${stageCounters.map((counter) => `
               <span class="home-forward-stage-counter-v431 ${escapeHtml(counter.category)}" title="${escapeHtml(counter.shortLabel)} ${escapeHtml(counter.scannedQty)} / ${escapeHtml(counter.totalQty)} pieces">
                 <i aria-hidden="true"></i>
@@ -16689,7 +17090,7 @@ function focusHomeDeliveryDate(dateKey) {
   if (els.homeListSearch) els.homeListSearch.value = "";
   const groups = listsByDeliveryDate(filteredDeliveryLists());
   const groupIndex = groups.findIndex((group) => group.date === requested);
-  if (groupIndex >= 0) state.homePageIndex = Math.floor(groupIndex / Math.max(Number(state.homePageSize || 05), 1)) + 1;
+  if (groupIndex >= 0) state.homePageIndex = Math.floor(groupIndex / Math.max(Number(state.homePageSize || 25), 1)) + 1;
   state.expandedDeliveryDate = requested;
   renderHome();
   requestAnimationFrame(() => {
@@ -16844,9 +17245,9 @@ function rackHeadingActionNeedsRepair() {
     const geometryOverlap = rect.top < headerBottom && rect.bottom > headerBottom;
     if (geometryOverlap) return true;
 
-    const x = rect.left + (rect.width / 0);
-    const topY = rect.top + Math.min(6, rect.height * 0.0);
-    const bottomY = rect.bottom - Math.min(6, rect.height * 0.0);
+    const x = rect.left + (rect.width / 2);
+    const topY = rect.top + Math.min(6, rect.height * 0.2);
+    const bottomY = rect.bottom - Math.min(6, rect.height * 0.2);
     const topHit = document.elementFromPoint(x, topY);
     const bottomHit = document.elementFromPoint(x, bottomY);
     const ownsHit = (node) => Boolean(node && (node === button || button.contains(node)));
@@ -16880,6 +17281,9 @@ function clearPageEnterTransitionV0376(view) {
 function preparePageEnterTransitionV0376(view) {
   if (!view) return;
   clearPageEnterTransitionV0376(view);
+  // Scan must stay visible even while background-tab animation frames are
+  // suspended or its renderer is interrupted. Its controls are ready now.
+  if (view.id === "scanPage") return;
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
   // v0.376: establish the invisible state before the page is unhidden. This
   // prevents the one-frame flash/jump that happened when v0.375 applied an
@@ -16888,6 +17292,7 @@ function preparePageEnterTransitionV0376(view) {
 }
 
 function startPageEnterTransitionV0376(view) {
+  if (view?.id === "scanPage") { clearPageEnterTransitionV0376(view); return; }
   if (!view || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
   window.requestAnimationFrame(() => {
     if (view.hidden) return;
@@ -16918,7 +17323,7 @@ function revealBayFlowEntryV0376() {
   }
   window.requestAnimationFrame(() => {
     panel.classList.add("is-route-visible-v0376");
-    window.setTimeout(() => panel.classList.remove("is-route-fading-v0376", "is-route-visible-v0376"), 000);
+    window.setTimeout(() => panel.classList.remove("is-route-fading-v0376", "is-route-visible-v0376"), 220);
   });
 }
 
@@ -17003,7 +17408,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
       { selector: ".admin-import-panel", title: "Delivery List Management", body: "Review imports, open automation controls, resolve superseded Orders, or edit delivery lists." },
       { selector: ".admin-users-panel", title: "Users and permissions", body: "Create or edit users and station access. Manage role permissions separately for consistency." },
       { selector: ".customer-route-overview-panel-v351", title: "Customer routing", body: "Set default routes. Explicit A+W route data still takes priority when present." },
-      { selector: ".production-files-overview-card-v470", title: "Machine and production files", body: "Configure Denver, Waterjet, sketch folders, and production evidence indexing." },
+      { selector: ".production-files-overview-card-v472", title: "Machine and production files", body: "Configure Denver, Waterjet, sketch folders, and production evidence indexing." },
       { selector: "#adminPage .admin-layout", title: "Additional controls", body: "The remaining cards manage lookups, scan rules, rejects, bays, stations, email, and racks." },
     ]),
   }),
@@ -17122,8 +17527,8 @@ function positionTutorialCoach() {
   const target = helpTutorialState.target;
   if (!target || !target.isConnected) {
     if (spotlight) spotlight.hidden = true;
-    coach.style.left = `${Math.max((window.innerWidth - coach.offsetWidth) / 0, 10)}px`;
-    coach.style.top = `${Math.max((window.innerHeight - coach.offsetHeight) / 0, 10)}px`;
+    coach.style.left = `${Math.max((window.innerWidth - coach.offsetWidth) / 2, 10)}px`;
+    coach.style.top = `${Math.max((window.innerHeight - coach.offsetHeight) / 2, 10)}px`;
     return;
   }
   const rect = target.getBoundingClientRect();
@@ -17132,8 +17537,8 @@ function positionTutorialCoach() {
     spotlight.hidden = false;
     spotlight.style.left = `${Math.max(rect.left - pad, 4)}px`;
     spotlight.style.top = `${Math.max(rect.top - pad, 4)}px`;
-    spotlight.style.width = `${Math.min(rect.width + pad * 0, window.innerWidth - 8)}px`;
-    spotlight.style.height = `${Math.min(rect.height + pad * 0, window.innerHeight - 8)}px`;
+    spotlight.style.width = `${Math.min(rect.width + pad * 2, window.innerWidth - 8)}px`;
+    spotlight.style.height = `${Math.min(rect.height + pad * 2, window.innerHeight - 8)}px`;
   }
   if (window.innerWidth <= 600) {
     coach.style.left = "10px";
@@ -17207,6 +17612,7 @@ function showPage(page) {
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
   if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_delivery_lists"])) page = "home";
   const pageChanged = state.page !== page;
+  if (state.page === "scan" && page !== "scan" && state.scanDateWideLoadingV485) cancelScanDateWideLoadV512();
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
   document.body.dataset.page = page;
@@ -17244,13 +17650,21 @@ function showPage(page) {
     // user reaches Statistics before it completes (or after a transient report
     // failure), page entry now guarantees a retry instead of leaving report-only
     // controls such as Common glass sizes empty.
-    if (!activeHomeReportSummaryV470()) void loadHomeReportSummary();
+    if (!activeHomeReportSummaryV472()) void loadHomeReportSummary();
+    void ensureTodayProductionReportV514();
+    if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();
   }
   if (page === "scan") {
+    // v0.512: a previous route transition can never strand Scan behind an old
+    // in-flight request. If a load somehow survived page cleanup, cancel it and
+    // let this foreground entry own a fresh request.
+    const restartPendingLoadV512 = pageChanged && state.scanDateWideLoadingV485;
+    if (restartPendingLoadV512) cancelScanDateWideLoadV512();
     renderScanPage();
     const scanDateV485 = String(state.meta?.deliveryDate || selectedDeliveryDate() || "").trim();
-    const needsDateWidePayloadV485 = !state.meta?.dateWideScanV485
-      || state.scanDateWideDateV485 !== scanDateV485;
+    const needsDateWidePayloadV485 = restartPendingLoadV512 || !state.meta?.dateWideScanV485
+      || state.scanDateWideDateV485 !== scanDateV485
+      || state.scanDateWideCatalogSignatureV486 !== scanDateWideCatalogSignatureV486(scanDateV485);
     if (state.backend && scanDateV485 && needsDateWidePayloadV485 && !state.scanDateWideLoadingV485) {
       void activateScanDateV485(scanDateV485, false, { preferredListId: state.activeListId })
         .catch((error) => showInlineError(error.message));
@@ -17324,7 +17738,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
         <div class="outbound-override-icon" aria-hidden="true"></div>
         <div class="outbound-override-copy">
           <span class="outbound-override-eyebrow">Outbound safety check</span>
-          <h0 id="outboundOverrideTitle">${escapeHtml(payload.outboundOverrideMessage || "Outbound scan needs review")}</h0>
+          <h2 id="outboundOverrideTitle">${escapeHtml(payload.outboundOverrideMessage || "Outbound scan needs review")}</h2>
           <p>${escapeHtml(payload.outboundOverrideReason || "Review this scan before allowing it to continue.")}</p>
         </div>
         <div class="outbound-override-item">
@@ -17453,7 +17867,7 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
         <span class="action-confirm-icon" aria-hidden="true"></span>
         <div class="action-confirm-copy">
           <small class="dialog-eyebrow">${spanish ? "Asignación de bahía de Indian Trail" : "Indian Trail bay assignment"}</small>
-          <h0 id="indianTrailBayOverrideTitle">${spanish ? "¿En qué bahía se debe recibir este artículo?" : "What bay should receive this item?"}</h0>
+          <h2 id="indianTrailBayOverrideTitle">${spanish ? "¿En qué bahía se debe recibir este artículo?" : "What bay should receive this item?"}</h2>
           <p>${spanish ? "Elija la bahía física para" : "Choose the physical bay for"} <strong>${escapeHtml(itemLabel)}</strong> ${spanish ? "antes de completar la omisión." : "before completing the override."}</p>
         </div>
         <div class="indian-trail-override-item">
@@ -17538,7 +17952,7 @@ function mountTimedScanConfirmation({
   id,
   className = "",
   markup,
-  durationSeconds = 10,
+  durationSeconds = 12,
   openAllScans = null,
 }) {
   document.querySelectorAll("[data-timed-scan-confirmation]").forEach((existingShell) => {
@@ -17681,7 +18095,7 @@ function showOutboundRackTransitPrompt(result) {
         <div class="indian-trail-placement-icon" aria-hidden="true"></div>
         <div class="indian-trail-placement-copy">
           <small>${spanish ? "RACK ENVIADO DESDE SALIDA" : "OUTBOUND RACK RELEASED"}</small>
-          <h0>${escapeHtml(title)}</h0>
+          <h2>${escapeHtml(title)}</h2>
           <p>${escapeHtml(detail)}</p>
         </div>
         <div class="outbound-rack-transit-summary">
@@ -17691,7 +18105,7 @@ function showOutboundRackTransitPrompt(result) {
         </div>
         <div class="indian-trail-placement-actions">
           <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
-          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>10</span></button>
+          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
         </div>
         <i class="indian-trail-placement-timer" aria-hidden="true"></i>
       </section>
@@ -17762,7 +18176,7 @@ function showStageScanConfirmation(result, options = {}) {
           <div class="indian-trail-placement-icon" aria-hidden="true"></div>
           <div class="indian-trail-placement-copy">
             <small>${escapeHtml(eyebrow)}</small>
-            <h0>${escapeHtml(title)}</h0>
+            <h2>${escapeHtml(title)}</h2>
             <p>${escapeHtml(message || (entry.ok ? `${stage} quantity was updated.` : "Review the scan and try again."))}</p>
           </div>
           <div class="scan-result-status-stack">
@@ -17926,7 +18340,7 @@ async function showIndianTrailPlacementPrompt(result) {
             <strong>${escapeHtml(directTruckLabel)}</strong>
           </div>
         ` : `
-          <div class="indian-trail-placement-destination-v301">
+          <div class="indian-trail-placement-destination-v321">
             <small>${escapeHtml(orderHeroLabel)}</small>
             <strong>${escapeHtml(bayHeroPrefix)} ${escapeHtml(placementBayShort)}</strong>
           </div>
@@ -17943,7 +18357,7 @@ async function showIndianTrailPlacementPrompt(result) {
         ${scanQuantityBoostMarkup(result.lastScan || {}, scanEntryDisplayItem(result.lastScan || {}) || item, { bayCode: result.bayCode || "" })}
         <div class="indian-trail-placement-footer-v453">
           <span class="timed-scan-open-hint">${spanish ? "Haga clic en el aviso para abrir Todos los escaneos" : "Click the notice to open All Scans"}</span>
-          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>10</span></button>
+          <button type="button" data-placement-close>${spanish ? "Listo" : "Done"} <span data-placement-countdown>12</span></button>
         </div>
         <i class="indian-trail-placement-timer" aria-hidden="true"></i>
       </section>
@@ -17994,7 +18408,7 @@ function showCrossDateScanSelection(payload) {
           <span class="cross-date-scan-icon" aria-hidden="true"></span>
           <div>
             <small>Selected date: ${escapeHtml(formatDisplayDate(payload.originalDeliveryDate || ""))}</small>
-            <h0 id="crossDateScanTitle">${escapeHtml(candidates.length === 1 ? "Item found on another delivery date" : "Choose the correct delivery date")}</h0>
+            <h2 id="crossDateScanTitle">${escapeHtml(candidates.length === 1 ? "Item found on another delivery date" : "Choose the correct delivery date")}</h2>
             <p>${escapeHtml(payload.message || "Confirm the delivery list before the scan is applied.")}</p>
           </div>
         </header>
@@ -18446,7 +18860,7 @@ function buildIndexes() {
 function recoverScan(rawScan, { strictOrderItem = false } = {}) {
   const cleanText = cleanBarcode(rawScan);
   const { byOrderItem, bySuffixItem } = buildIndexes();
-  if (/^T000\d{10}$/.test(cleanText)) {
+  if (/^T200\d{12}$/.test(cleanText)) {
     const order = Number(cleanText.slice(4, 10));
     const item = Number(cleanText.slice(10, 13));
     const matches = byOrderItem.get(`${order}-${item}`) || [];
@@ -18456,8 +18870,8 @@ function recoverScan(rawScan, { strictOrderItem = false } = {}) {
   }
   if (strictOrderItem) return { ok: false, barcode: cleanText, reason: "Manual scans require an exact six-digit order and one-to-three-digit item" };
   const numbers = digitsOnly(cleanText);
-  for (let start = 0; start <= numbers.length - 10; start += 1) {
-    const windowText = numbers.slice(start, start + 10);
+  for (let start = 0; start <= numbers.length - 12; start += 1) {
+    const windowText = numbers.slice(start, start + 12);
     const order = Number(windowText.slice(0, 6));
     const item = Number(windowText.slice(6, 9));
     const matches = byOrderItem.get(`${order}-${item}`) || [];
@@ -18553,7 +18967,7 @@ function showFloatingNotice(message, kind = "notice") {
   window.clearTimeout(notice._hideTimer);
   notice._hideTimer = window.setTimeout(() => {
     notice.classList.add("is-hiding");
-  }, 5000);
+  }, 5200);
 }
 
 /**
@@ -18564,7 +18978,7 @@ function showFloatingNotice(message, kind = "notice") {
 function closeActionFeedback() {
   document.getElementById("actionFeedbackShell")?.remove();
   updateModalScrollLock();
-  window.setTimeout(() => presentNextUserNotification(), 100);
+  window.setTimeout(() => presentNextUserNotification(), 120);
 }
 
 /**
@@ -18604,7 +19018,7 @@ function showActionFeedback({
       <div class="action-feedback-icon" aria-hidden="true"><i></i></div>
       <div class="action-feedback-copy">
         <small>${escapeHtml(eyebrow)}</small>
-        <h0 id="actionFeedbackTitle">${escapeHtml(title)}</h0>
+        <h2 id="actionFeedbackTitle">${escapeHtml(title)}</h2>
         ${message ? `<p>${escapeHtml(message)}</p>` : ""}
       </div>
       ${detailRows ? `<div class="action-feedback-details">${detailRows}</div>` : ""}
@@ -18676,7 +19090,7 @@ function showUnexpectedAppError(error, context = "Application error") {
   const message = rawMessage.trim() || "The action stopped before it could finish.";
   const key = `${context}::${message}`;
   const now = Date.now();
-  if (key === unexpectedErrorUi.lastKey && now - unexpectedErrorUi.lastShownAt < 0500) return;
+  if (key === unexpectedErrorUi.lastKey && now - unexpectedErrorUi.lastShownAt < 2500) return;
 
   unexpectedErrorUi.handling = true;
   unexpectedErrorUi.lastKey = key;
@@ -18939,7 +19353,7 @@ function showRushAlert(notification) {
       <div class="rush-alert-icon" aria-hidden="true"><i>!</i></div>
       <div class="rush-alert-copy">
         <small>${spanish ? "ALERTA DE PRODUCCION" : "PRODUCTION PRIORITY ALERT"}</small>
-        <h0 id="rushAlertTitle">${escapeHtml(title)}</h0>
+        <h2 id="rushAlertTitle">${escapeHtml(title)}</h2>
         <p>${escapeHtml(message)}</p>
       </div>
       <div class="rush-alert-details">
@@ -19125,7 +19539,7 @@ function checkManagedPrintWindowClosed() {
 function watchManagedPrintWindow(printWindow) {
   stopManagedPrintWindowWatch();
   state.managedPrintWindow = printWindow;
-  state.managedPrintWatchTimer = window.setInterval(checkManagedPrintWindowClosed, 050);
+  state.managedPrintWatchTimer = window.setInterval(checkManagedPrintWindowClosed, 250);
 }
 
 /**
@@ -19173,7 +19587,9 @@ function printCurrentPageManaged() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = {}) {
-  if (!state.backend || !hasPermission("global_search")) return;
+  // v0.512: Scan machine/progress filters use the same bounded status endpoint
+  // as Smart Search. The backend independently enforces accessible Order/Items.
+  if (!state.backend || !hasAnyPermission(["global_search", "view_delivery_lists", "view_reports"])) return;
   const candidates = [];
   for (const row of rows || []) {
     const order = String(row?.order || "").trim();
@@ -19232,11 +19648,23 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
   }
 }
 
+async function hydrateFabricationFilterCatalogV512() {
+  // Machine filters are an explicit operator request to classify the whole
+  // selected delivery date. Process it in bounded 80-row windows so the UI can
+  // repaint between batches and production shares never receive one unbounded
+  // request. Ordinary Scan rendering continues to hydrate only visible rows.
+  const rows = Array.isArray(state.items) ? state.items.slice() : [];
+  for (let offset = 0; offset < rows.length; offset += 80) {
+    if (state.page !== "scan") return;
+    await hydrateFabricationStatusesV474(rows.slice(offset, offset + 80), { context: "scan" });
+  }
+}
+
 async function runGlobalSearch() {
   if (!hasPermission("global_search")) return [];
   const query = els.headerGlobalSearchInput?.value.trim() || "";
   const requestId = ++state.globalSearchRequestId;
-  if (query.length < 0) {
+  if (query.length < 2) {
     state.globalSearchLastQuery = "";
     state.globalSearchLastResults = [];
     renderGlobalSearchResults([]);
@@ -19375,9 +19803,9 @@ function globalSearchScanDateTimeV439(value) {
   return parsed.toLocaleString(appLocale(), {
     month: "numeric",
     day: "numeric",
-    year: "0-digit",
+    year: "2-digit",
     hour: "numeric",
-    minute: "0-digit",
+    minute: "2-digit",
   });
 }
 
@@ -19385,12 +19813,12 @@ function globalSearchScanDateTimeV439(value) {
 function globalSearchCompactDateV405(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const match = text.match(/^(\d{4})-(\d{1,0})-(\d{1,0})/);
+  const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   const parsed = match
-    ? new Date(Number(match[1]), Number(match[0]) - 1, Number(match[3]), 10, 0, 0, 0)
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 10, 0, 0, 0)
     : new Date(text);
   if (Number.isNaN(parsed.getTime())) return text;
-  return parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric", year: "0-digit" });
+  return parsed.toLocaleDateString(appLocale(), { month: "numeric", day: "numeric", year: "2-digit" });
 }
 
 /** Resolve the operational stage used by the v0.435 Smart Search card wash/icon. */
@@ -19417,27 +19845,28 @@ function globalSearchStageKeyV435(result = {}) {
 /** Compact line icons used by the v0.433 Smart Search reference-card layout. */
 function globalSearchIconV433(kind) {
   const icons = {
-    cube: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="m10 0.8 7.0 4.1v8.0L10 19.0l-7.0-4.1V6.9L10 0.8Z"/><path d="m4.8 6.9 7.0 4.0 7.0-4.0M10 11.1v8.1"/></svg>`,
-    unscanned: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 00H4v-3M17 00h3v-3"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>`,
-    staging: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M5.5 7.0 10 3.8l6.5 3.4v9.6L10 00.0 5.5 16.8V7.0Z" fill="none"/><path d="M5.5 7.0 10 10.6l6.5-3.4M10 10.6v9.6" fill="none"/></svg>`,
-    outbound: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M6.5 17.5 17.5 6.5M11 6.5h6.5V13" fill="none"/></svg>`,
-    received: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5M17.5 11v6.5H11" fill="none"/></svg>`,
-    cpu: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M10 10a3.6 3.6 0 1 0 0-7.0 3.6 3.6 0 0 0 0 7.0Zm0 0.4c-4.1 0-7.4 0.1-7.4 4.8V00h14.8v-.8c0-0.7-3.3-4.8-7.4-4.8Z"/></svg>`,
-    greenville: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M4.5 00V9.5L10 5l7.5 4.5V00M8 00v-5h8v5M7.5 10h.01M10 10h.01M16.5 10h.01" fill="none"/></svg>`,
-    dtc: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M4.5 10.3 10 4l7.5 6.3V00h-5.4v-5.8H9.9V00H4.5v-9.7Z" fill="none"/></svg>`,
-    denver: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M5 18.5V6.0h6.0c4.8 0 7.8 0.3 7.8 6.1 0 3.9-3 6.0-7.8 6.0H5Z" fill="none"/><path d="M9 9.0h0.0c0.4 0 3.7 1.1 3.7 3.1 0 0-1.3 3.1-3.7 3.1H9V9.0Z"/></svg>`,
-    waterjet: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M10 3.0c0.6 3.4 5.1 6.0 5.1 9.8a5.1 5.1 0 1 1-10.0 0c0-3.6 0.5-6.4 5.1-9.8Z"/><path d="M9.0 15.0c.7 1.0 1.6 1.8 0.8 1.8" fill="none"/></svg>`,
-    calendar: `<svg viewBox="0 0 04 04" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="0"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16"/></svg>`,
-    flag: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M6 01V4.0M6 5c4.3-0.3 7 0.1 10-1v9c-5 3.1-7.7-1.3-10 1"/></svg>`,
-    route: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="m4.0 11.1 15.1-6.4-6.4 15.1-0.0-6.5-6.5-0.0Z"/><path d="m10.8 13.0 3.8-3.8"/></svg>`,
-    clock: `<svg viewBox="0 0 04 04" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M10 7.5V10l3 0"/></svg>`,
-    scan: `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 00H4v-3M17 00h3v-3"/><path d="M7 10h10"/></svg>`,
+    cube: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 7.2 4.1v8.2L12 19.2l-7.2-4.1V6.9L12 2.8Z"/><path d="m4.8 6.9 7.2 4.2 7.2-4.2M12 11.1v8.1"/></svg>`,
+    unscanned: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 20H4v-3M17 20h3v-3"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>`,
+    staging: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 7.2 12 3.8l6.5 3.4v9.6L12 20.2 5.5 16.8V7.2Z" fill="none"/><path d="M5.5 7.2 12 10.6l6.5-3.4M12 10.6v9.6" fill="none"/></svg>`,
+    outbound: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 17.5 17.5 6.5M11 6.5h6.5V13" fill="none"/></svg>`,
+    received: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5M17.5 11v6.5H11" fill="none"/></svg>`,
+    cpu: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Zm0 2.4c-4.1 0-7.4 2.1-7.4 4.8V20h14.8v-.8c0-2.7-3.3-4.8-7.4-4.8Z"/></svg>`,
+    greenville: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 20V9.5L12 5l7.5 4.5V20M8 20v-5h8v5M7.5 12h.01M12 12h.01M16.5 12h.01" fill="none"/></svg>`,
+    dtc: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 10.3 12 4l7.5 6.3V20h-5.4v-5.8H9.9V20H4.5v-9.7Z" fill="none"/></svg>`,
+    denver: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5V6.2h6.2c4.8 0 7.8 2.3 7.8 6.1 0 3.9-3 6.2-7.8 6.2H5Z" fill="none"/><path d="M9 9.2h2.2c2.4 0 3.7 1.1 3.7 3.1 0 2-1.3 3.1-3.7 3.1H9V9.2Z"/></svg>`,
+    waterjet: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2c2.6 3.4 5.1 6.2 5.1 9.8a5.1 5.1 0 1 1-10.2 0c0-3.6 2.5-6.4 5.1-9.8Z"/><path d="M9.2 15.2c.7 1.2 1.6 1.8 2.8 1.8" fill="none"/></svg>`,
+    cutting: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5.1" fill="none"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" fill="none"/></svg>`,
+    calendar: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16"/></svg>`,
+    flag: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V4.2M6 5c4.3-2.3 7 2.1 12-1v9c-5 3.1-7.7-1.3-12 1"/></svg>`,
+    route: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.2 11.1 15.1-6.4-6.4 15.1-2.2-6.5-6.5-2.2Z"/><path d="m10.8 13.2 3.8-3.8"/></svg>`,
+    clock: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>`,
+    scan: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4H4v3M17 4h3v3M7 20H4v-3M17 20h3v-3"/><path d="M7 12h10"/></svg>`,
   };
   return `<span class="global-result-chip-icon-v433" aria-hidden="true">${icons[kind] || icons.cube}</span>`;
 }
 
 /** Build the always-present compact Flags cell shown between delivery date and route. */
-function globalSearchPriorityFlagsV405(result) {
+function globalSearchPriorityFlagsV425(result) {
   const remake = Boolean(result?.remake) || isRemakeItem(result || {});
   const bannerKind = String(result?.priorityBanner?.kind || "").trim().toLowerCase();
   // v0.469: Missing Glass is now a reason inside the unified workflow rather
@@ -19447,7 +19876,7 @@ function globalSearchPriorityFlagsV405(result) {
   const remakeFlag = combined || remake;
   const stateClass = remakeFlag && rush ? "is-both" : remakeFlag ? "is-remake" : rush ? "is-rush" : "is-none";
   const label = remakeFlag && rush ? "REMAKE · RUSH" : remakeFlag ? "REMAKE" : rush ? "RUSH" : "None";
-  return `<span class="global-result-cell-v430 global-result-flag-v405 global-result-flag-cell-v430 ${stateClass}">${globalSearchIconV433("flag")}<b class="global-result-inline-label-v407">Flags:</b> ${label}</span>`;
+  return `<span class="global-result-cell-v430 global-result-flag-v425 global-result-flag-cell-v430 ${stateClass}">${globalSearchIconV433("flag")}<b class="global-result-inline-label-v427">Flags:</b> ${label}</span>`;
 }
 
 /**
@@ -19472,7 +19901,7 @@ function workflowProgressStageRankV477(stage = {}) {
   const preset = stagePresetFromValuesV445(stage.stage || "", stage.scanner || "", stage.stagePreset || "");
   return {
     airport_staging: 10,
-    airport_outbound: 00,
+    airport_outbound: 20,
     indian_trail: 30,
     greenville: 30,
     cpu: 30,
@@ -19482,47 +19911,86 @@ function workflowProgressStageRankV477(stage = {}) {
 }
 
 function globalSearchProgressPairV476(result = {}, fabrication = null) {
-  const rows = Array.isArray(result.progressStages) ? result.progressStages : [];
-  const stages = rows.map((stage, index) => {
-    const qty = Math.max(0, Number(stage.qty || result.qty || 0));
-    const scanned = Math.min(Math.max(0, Number(stage.scanned || 0)), qty || Number(stage.scanned || 0));
-    return { label: globalSearchProgressStageLabelV475(stage), scanned, qty, complete: qty > 0 && scanned >= qty, rank: workflowProgressStageRankV477(stage), index, kind: "stage" };
-  }).sort((left, right) => left.rank - right.rank || left.index - right.index);
-  const machine = compactMachineLabelV475(fabrication?.actualMachine || fabrication?.machine || fabrication?.assignedMachine || "");
-  if ((fabrication?.sketchMatched || machine) && machine) {
-    stages.unshift({ label: machine, scanned: fabrication?.fabricated === true ? 1 : 0, qty: 1, complete: fabrication?.fabricated === true, kind: "fabrication" });
-  }
-  if (!machine && !stages.some((stage) => stage.scanned > 0)) {
-    const next = stages[0] || null;
-    return { previous: { label: "Not Scanned", scanned: 0, qty: Math.max(1, Number(result.qty || 1)), complete: false, kind: "not-scanned" }, next };
-  }
-  if (!stages.length) return { previous: null, next: { label: "Not Scanned", scanned: 0, qty: Math.max(1, Number(result.qty || 1)), complete: false, kind: "not-scanned" } };
-  const firstIncomplete = stages.findIndex((stage) => !stage.complete);
+  // Kept as a compatibility helper for callers/tests that still need the compact
+  // completed -> next pair. The visible Smart Search surface now renders the full
+  // production/workflow sequence through globalSearchProgressStepsV513().
+  const stages = globalSearchProgressStepsV513(result, fabrication);
+  if (!stages.length) return { previous: null, next: null };
+  const firstIncomplete = stages.findIndex((stage) => !stage.complete && stage.kind !== "no-fab");
   if (firstIncomplete < 0) {
-    const tail = stages.slice(-0);
+    const tail = stages.slice(-2);
     return { previous: tail.length > 1 ? tail[0] : null, next: tail[tail.length - 1] || null };
   }
   return { previous: firstIncomplete > 0 ? stages[firstIncomplete - 1] : null, next: stages[firstIncomplete] };
 }
 
+function globalSearchProgressStepsV513(result = {}, fabrication = null) {
+  const steps = [];
+  const cutting = scanCuttingProgressPresentationV511(result);
+  steps.push({ ...cutting, rank: -10 });
+
+  const machine = compactMachineLabelV475(fabrication?.actualMachine || fabrication?.machine || fabrication?.assignedMachine || "");
+  const fabricationCompletion = fabricationCompletionStateV512(result, fabrication);
+  if ((fabrication?.sketchMatched || machine) && machine) {
+    steps.push({
+      label: machine,
+      scanned: fabricationCompletion.scanned,
+      qty: fabricationCompletion.qty,
+      complete: fabricationCompletion.complete,
+      kind: "fabrication",
+      color: productionMachineColorV476(machine),
+      timestamp: fabricationProgressTimestampV511(fabrication || {}),
+      rank: 0,
+      partial: fabricationCompletion.state === "partial",
+    });
+  } else if (fabricationNoFabConfirmedV481(fabrication || {}, { loaded: Boolean(fabrication) })) {
+    steps.push({ ...noFabProgressStepV512(), rank: 0 });
+  }
+
+  const stageRows = Array.isArray(result.progressStages) ? result.progressStages : [];
+  stageRows.forEach((stage, index) => {
+    const qty = Math.max(0, Number(stage.qty || result.qty || 0));
+    const scanned = Math.min(Math.max(0, Number(stage.scanned || 0)), qty || Number(stage.scanned || 0));
+    steps.push({
+      label: globalSearchProgressStageLabelV475(stage),
+      scanned,
+      qty,
+      complete: qty > 0 && scanned >= qty,
+      kind: "stage",
+      timestamp: stage.lastScanTime || stage.lastScannedAt || "",
+      rank: workflowProgressStageRankV477(stage),
+      index,
+    });
+  });
+
+  return steps.sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0) || Number(left.index || 0) - Number(right.index || 0));
+}
+
 function globalSearchProgressTextV475(result = {}, fabrication = null) {
-  const pair = globalSearchProgressPairV476(result, fabrication);
-  return [pair.previous, pair.next].filter(Boolean).map((stage) => `${stage.label} ${stage.scanned}/${stage.qty}`).join(" → ") || "Not started";
+  const steps = globalSearchProgressStepsV513(result, fabrication);
+  return steps.map((stage) => {
+    const value = stage.kind === "no-fab" ? "N/A" : stage.kind === "cutting" ? stage.detail : `${stage.scanned}/${stage.qty}`;
+    const timestamp = formatOperationalTimestampV511(stage.timestamp);
+    return `${stage.label} ${value}${timestamp ? ` @ ${timestamp}` : ""}`;
+  }).join(" → ") || "Not started";
 }
 
 function globalSearchProgressMarkupV476(result = {}, fabrication = null) {
-  const pair = globalSearchProgressPairV476(result, fabrication);
-  const left = pair.previous || pair.next || { label: "Not started", scanned: 0, qty: 1 };
-  const right = pair.next || pair.previous || left;
-  const leftColor = progressStageColorV476(left.label);
-  const rightColor = progressStageColorV476(right.label);
-  const step = (stage, role) => {
-    if (!stage) return "";
-    const icon = globalSearchIconV433(progressStageIconKindV476(stage.label));
-    const stateClass = stage.complete ? "is-complete-v477" : stage.kind === "fabrication" ? "is-fabrication-pending-v477" : "is-stage-pending-v477";
-    return `<span class="global-result-progress-step-v476 is-${role} ${stateClass}" style="--step-color:${escapeHtml(progressStageColorV476(stage.label))}">${icon}<strong>${escapeHtml(stage.label)} ${escapeHtml(stage.scanned)}/${escapeHtml(stage.qty)}</strong></span>`;
-  };
-  return `<span class="global-result-progress-flow-v476" style="--progress-left:${escapeHtml(leftColor)};--progress-right:${escapeHtml(rightColor)}">${step(pair.previous, "previous")}${pair.previous && pair.next ? `<i aria-hidden="true">→</i>` : ""}${step(pair.next, "next")}</span>`;
+  const steps = globalSearchProgressStepsV513(result, fabrication);
+  if (!steps.length) return '<span class="global-result-progress-empty-v513">Not started</span>';
+  const stepMarkup = steps.map((stage) => {
+    const iconKind = stage.kind === "cutting" ? "cutting" : stage.kind === "no-fab" ? "cube" : progressStageIconKindV476(stage.label);
+    const icon = globalSearchIconV433(iconKind);
+    const value = stage.kind === "no-fab" ? "N/A" : stage.kind === "cutting" ? stage.detail : `${stage.scanned}/${stage.qty}`;
+    const timestamp = formatOperationalTimestampV511(stage.timestamp);
+    const timestampLabel = stage.kind === "no-fab" ? "N/A" : timestamp || (stage.complete ? "Time unavailable" : "Pending");
+    const stateClass = stage.kind === "no-fab"
+      ? "is-no-fab-v513"
+      : stage.complete ? "is-complete-v513" : stage.partial ? "is-partial-v513" : "is-pending-v513";
+    const color = stage.kind === "cutting" ? "#0f80c4" : stage.kind === "fabrication" ? productionMachineColorV476(stage.label) : progressStageColorV476(stage.label);
+    return `<span class="global-result-progress-step-v476 global-result-progress-step-v513 ${stateClass}" style="--step-color:${escapeHtml(color)}">${icon}<b>${escapeHtml(stage.label)}</b><strong>${escapeHtml(value)}</strong><time>${escapeHtml(timestampLabel)}</time></span>`;
+  });
+  return `<span class="global-result-progress-flow-v476 global-result-progress-flow-v513">${stepMarkup.join('<i aria-hidden="true">→</i>')}</span>`;
 }
 
 function renderGlobalSearchResults(results) {
@@ -19534,7 +20002,7 @@ function renderGlobalSearchResults(results) {
   }
   els.headerGlobalSearchResults.hidden = false;
   els.headerGlobalSearchResults.innerHTML = results
-    .slice(0, 00)
+    .slice(0, 20)
     .map(
       (result) => {
         const navigationListId = result.navigationDeliveryListId || result.deliveryListId || "";
@@ -19557,43 +20025,47 @@ function renderGlobalSearchResults(results) {
         const routeColor = globalSearchRouteColorV430(result.route);
         const resultStyle = `--global-stage-color:${stageColor};--global-route-color:${routeColor}`;
         const deliveryDateMarkup = hasChangedDeliveryDate
-          ? `<span class="global-result-cell-v430 global-result-dd-v405 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v407">DD:</b> ${escapeHtml(originalDeliveryDate || "—")} <em>Changed to</em> ${escapeHtml(priorityDeliveryDate || "—")}</span>`
-          : `<span class="global-result-cell-v430 global-result-dd-v405 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v407">DD:</b> ${escapeHtml(originalDeliveryDate || "—")}</span>`;
-        const flagsMarkup = globalSearchPriorityFlagsV405(result);
-        const routeMarkup = `<span class="global-result-cell-v430 global-result-route-v405 global-result-route-cell-v430 global-result-chip-v433">${globalSearchIconV433("route")}<b class="global-result-inline-label-v407">Route:</b> ${escapeHtml(result.route || "—")}</span>`;
-        const searchScanTimingV447 = scanTimingMetaV447(result, result.priorityDeliveryDate || result.deliveryDate || "");
-        const scanMarkup = result.lastScanTime
-          ? `<span class="global-result-stage-scan-divider-v440" aria-hidden="true">•</span><span class="global-result-scan-timing-v447 ${searchScanTimingV447.late ? "is-late-v447" : "is-on-time-v447"}">${globalSearchIconV433("scan")}<b class="global-result-inline-label-v407 global-result-scanned-label-v440">${escapeHtml(searchScanTimingV447.label)}</b> <time class="global-result-stage-scan-time-v440" datetime="${escapeHtml(result.lastScanTime)}">${escapeHtml(globalSearchScanDateTimeV439(result.lastScanTime))}</time></span>`
-          : "";
+          ? `<span class="global-result-cell-v430 global-result-dd-v425 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v427">DD:</b> ${escapeHtml(originalDeliveryDate || "—")} <em>Changed to</em> ${escapeHtml(priorityDeliveryDate || "—")}</span>`
+          : `<span class="global-result-cell-v430 global-result-dd-v425 global-result-chip-v433 global-result-dd-chip-v433">${globalSearchIconV433("calendar")}<b class="global-result-inline-label-v427">DD:</b> ${escapeHtml(originalDeliveryDate || "—")}</span>`;
+        const flagsMarkup = globalSearchPriorityFlagsV425(result);
+        const routeMarkup = `<span class="global-result-cell-v430 global-result-route-v425 global-result-route-cell-v430 global-result-chip-v433">${globalSearchIconV433("route")}<b class="global-result-inline-label-v427">Route:</b> ${escapeHtml(result.route || "—")}</span>`;
         const fabricationV474 = result.fabrication || state.fabricationStatusCacheV474.get(
           fabricationStatusKeyV474(result.order, result.item, result.job, result.lastRejectedAt)
         );
         const progressTextV475 = globalSearchProgressTextV475(result, fabricationV474);
         const progressFlowV476 = globalSearchProgressMarkupV476(result, fabricationV474);
-        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v406 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440 global-result-progress-v475 global-result-progress-v476" title="Progress: ${escapeHtml(progressTextV475)}">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v407">Progress:</b>${progressFlowV476}${scanMarkup}</span>`;
+        const stageScanMarkup = `<span class="global-result-cell-v430 global-result-stage-text-v426 global-result-stage-cell-v430 global-result-chip-v433 global-result-stage-scan-cell-v440 global-result-progress-v475 global-result-progress-v476 global-result-progress-v513" title="Progress: ${escapeHtml(progressTextV475)}">${globalSearchIconV433("clock")}<b class="global-result-inline-label-v427">Progress:</b>${progressFlowV476}</span>`;
+        const priorityBannerV514 = priorityBannerMetaV441(result);
+        const remakeReasonV514 = isRemakeItem(result)
+          ? String(priorityBannerV514?.reason || result.remakeReason || result.priorityReason || "External remake").trim()
+          : "";
+        const remakeMetaV514 = remakeReasonV514
+          ? `<span class="global-result-remake-meta-v514"><b>REMAKE</b><span>${escapeHtml(remakeReasonV514)}</span></span>`
+          : "";
 
         return `
-        <article class="global-result-card-v405 global-result-line-v406 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"} global-result-card-v474" style="${escapeHtml(resultStyle)}">
+        <article class="global-result-card-v405 global-result-line-v426 global-result-record-v430 global-result-reference-card-v433 global-result-stage-${escapeHtml(stageKeyV435)}-v435${hasScan ? " is-scanned-v430" : " is-unscanned-v430"} global-result-card-v474" style="${escapeHtml(resultStyle)}">
           <span class="global-result-leading-icon-v433 global-result-leading-stage-icon-v435" aria-hidden="true">${globalSearchIconV433(stageIconV435)}</span>
           <span class="global-result-content-v433">
-            <span class="global-result-primary-v406 global-result-primary-v433">
-              <strong class="global-result-order-v406 global-result-order-v433">${escapeHtml(orderItem)}</strong>
-              <span class="global-result-job-v406 global-result-meta-v433"><b class="global-result-inline-label-v407">Job:</b> ${escapeHtml(result.job || "—")}</span>
-              <span class="global-result-customer-v406 global-result-meta-v433"><b class="global-result-inline-label-v407">Customer:</b> ${escapeHtml(result.customer || "No customer")}</span>
+            <span class="global-result-primary-v426 global-result-primary-v433">
+              <strong class="global-result-order-v426 global-result-order-v433">${escapeHtml(orderItem)}</strong>
+              <span class="global-result-job-v426 global-result-meta-v433"><b class="global-result-inline-label-v427">Job:</b> ${escapeHtml(result.job || "—")}</span>
+              <span class="global-result-customer-v426 global-result-meta-v433"><b class="global-result-inline-label-v427">Customer:</b> ${escapeHtml(result.customer || "No customer")}</span>
+              ${remakeMetaV514}
             </span>
-            <span class="global-result-glass-v406 global-result-glass-v433">
-              <span class="global-result-size-v406 global-result-plain-field-v433"><b class="global-result-inline-label-v407">Size:</b> ${escapeHtml(result.dimensions || "—")}</span>
+            <span class="global-result-glass-v426 global-result-glass-v433">
+              <span class="global-result-size-v426 global-result-plain-field-v433"><b class="global-result-inline-label-v427">Size:</b> ${escapeHtml(result.dimensions || "—")}</span>
               <span class="global-result-dot-v433" aria-hidden="true">•</span>
-              <span class="global-result-qty-v406 global-result-plain-field-v433"><b class="global-result-inline-label-v407">Qty:</b> ${escapeHtml(result.qty ?? 0)}</span>
+              <span class="global-result-qty-v426 global-result-plain-field-v433"><b class="global-result-inline-label-v427">Qty:</b> ${escapeHtml(result.qty ?? 0)}</span>
               <span class="global-result-dot-v433" aria-hidden="true">•</span>
-              <span class="global-result-cell-v430 global-result-type-v407 global-result-type-cell-v430 global-result-type-chip-v433" ${glassToneAttributes(glassLabel)}><b class="global-result-inline-label-v407">Type:</b> <span class="global-result-glass-text-v406">${escapeHtml(glassLabel)}</span></span>
+              <span class="global-result-cell-v430 global-result-type-v427 global-result-type-cell-v430 global-result-type-chip-v433" ${glassToneAttributes(glassLabel)}><b class="global-result-inline-label-v427">Type:</b> <span class="global-result-glass-text-v426">${escapeHtml(glassLabel)}</span></span>
             </span>
-            <span class="global-result-delivery-v406 global-result-chips-v433">
+            <span class="global-result-delivery-v426 global-result-chips-v433">
               ${deliveryDateMarkup}
               ${flagsMarkup}
               ${routeMarkup}
-              ${stageScanMarkup}
             </span>
+            <span class="global-result-progress-row-v514">${stageScanMarkup}</span>
             <span class="global-result-actions-v474 global-result-actions-v475">
               <button type="button" ${openAttrs} class="app-primary-button global-result-action-v475 is-scan">Scan Page</button>
               <button type="button" data-open-order-detail-v474="${escapeHtml(result.order || "")}" class="app-primary-button global-result-action-v475 is-details" ${result.order ? "" : "disabled"}>Order Details</button>
@@ -19681,20 +20153,20 @@ function bayTransitAnimationProfileV459(pieceCount = 0) {
       travelSeconds: 0, flipSeconds: 0,
     };
   }
-  const visiblePanes = Math.min(pieces, 100);
-  const paneMotionSeconds = 0.78;
+  const visiblePanes = Math.min(pieces, 120);
+  // v0.512 deliberately slows each phase so the loading direction is obvious
+  // on the Bay Map instead of reading as a quick decorative loop.
+  const paneMotionSeconds = 1.35;
   const paneStagger = visiblePanes <= 1
     ? 0
-    : Math.max(0.045, Math.min(0.04, 5.5 / Math.max(visiblePanes - 1, 1)));
+    : Math.max(0.075, Math.min(0.42, 8.5 / Math.max(visiblePanes - 1, 1)));
   const loadSeconds = paneMotionSeconds + (Math.max(visiblePanes - 1, 0) * paneStagger);
-  const postLoadDwellSeconds = 0;
-  const travelSeconds = Math.max(0.8, Math.min(4.4, 0.8 + (pieces * 0.014)));
-  const flipSeconds = 0.04;
-  const cycleSeconds = (loadSeconds * 0) + (postLoadDwellSeconds * 0) + (travelSeconds * 0) + (flipSeconds * 0);
-  // Keep the waiting stack compact enough to sit beside the truck while still
-  // separating individual panes. Large loads overlap tightly instead of clumping.
-  const paneStep = visiblePanes <= 1 ? 0 : Math.max(0.18, Math.min(4.0, 00 / Math.max(visiblePanes - 1, 1)));
-  const stackWidth = Math.max(9, Math.min(09, ((visiblePanes - 1) * paneStep) + 7));
+  const postLoadDwellSeconds = 2.8;
+  const travelSeconds = Math.max(5.5, Math.min(10.5, 5.5 + (pieces * 0.025)));
+  const flipSeconds = 0.42;
+  const cycleSeconds = (loadSeconds * 2) + (postLoadDwellSeconds * 2) + (travelSeconds * 2) + (flipSeconds * 2);
+  const paneStep = visiblePanes <= 1 ? 0 : Math.max(0.18, Math.min(4.2, 20 / Math.max(visiblePanes - 1, 1)));
+  const stackWidth = Math.max(9, Math.min(29, ((visiblePanes - 1) * paneStep) + 7));
   return {
     pieces, visiblePanes, cycleSeconds, paneStep, paneStagger, stackWidth, loadSeconds,
     paneMotionSeconds, postLoadDwellSeconds, travelSeconds, flipSeconds,
@@ -19713,9 +20185,6 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   const root = els.bayFlowPanel?.querySelector(".transit-animation-truck.has-transit-glass-v467");
   const truck = root?.querySelector(".transit-moving-truck");
   if (!root || !truck || !profile?.visiblePanes || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
-
-  // v0.467 owns these animations through Web Animations so the truck departure
-  // can be tied to the *last* pane instead of a fixed percentage of the cycle.
   root.getAnimations({ subtree: true }).forEach((animation) => animation.cancel());
 
   const outboundTransfer = root.querySelector(".transit-rack-transfer-outbound");
@@ -19724,76 +20193,83 @@ function startBayTransitAnimationV467(profile = state.bayTransitAnimationProfile
   const inboundPanes = [...root.querySelectorAll(".transit-rack-transfer-inbound > i")];
   const laneWidth = Math.max(root.clientWidth, 1);
   const truckWidth = Math.max(truck.getBoundingClientRect().width, 70);
-  const sideGap = window.innerWidth <= 800 ? 08 : 30;
+  const sideGap = window.innerWidth <= 800 ? 28 : 30;
   const leftTruckLeft = sideGap;
   const rightTruckLeft = Math.max(sideGap, laneWidth - truckWidth - sideGap);
-  const stackWidth = Number(profile.stackWidth || 00);
-  // v0.470: Outbound glass waits on the *front/right* side of the parked
-  // truck, then enters the cargo body right-to-left. The glass layer itself
-  // remains above the dotted route but below the truck via bays.css.
-  const outboundLeft = Math.min(Math.max(0, laneWidth - stackWidth), leftTruckLeft + truckWidth + 7);
-  // v0.474 mirrors the endpoint geometry: Outbound glass waits to the
-  // right of the left truck; after arrival at Indian Trail the unloading
-  // stack sits to the left of the flipped right-side truck.
-  const inboundLeft = Math.max(1, rightTruckLeft - stackWidth - 7);
+  const stackWidth = Number(profile.stackWidth || 20);
+
+  // Outbound truck faces right, so its rear door is on the left. Glass waits
+  // left of that rear door and the right-most/nearest pane loads first.
+  const outboundLeft = Math.max(1, leftTruckLeft - stackWidth - 7);
+  // At Inbound the truck is flipped. Mirror the operation: panes emerge from
+  // the rear and are placed into a receiving stack to the truck's right.
+  const inboundLeft = Math.min(Math.max(1, laneWidth - stackWidth - 1), rightTruckLeft + truckWidth + 7);
   if (outboundTransfer) outboundTransfer.style.setProperty("left", `${outboundLeft}px`, "important");
   if (inboundTransfer) inboundTransfer.style.setProperty("left", `${inboundLeft}px`, "important");
 
   const cycleMs = Math.max(Number(profile.cycleSeconds || 1) * 1000, 1000);
   const loadMs = Number(profile.loadSeconds || 0) * 1000;
-  const paneMotionMs = Number(profile.paneMotionSeconds || .78) * 1000;
+  const paneMotionMs = Number(profile.paneMotionSeconds || 1.35) * 1000;
   const paneStaggerMs = Number(profile.paneStagger || 0) * 1000;
   const postLoadDwellMs = Number(profile.postLoadDwellSeconds || 0) * 1000;
-  const travelMs = Number(profile.travelSeconds || 3) * 1000;
-  const flipMs = Number(profile.flipSeconds || .04) * 1000;
+  const travelMs = Number(profile.travelSeconds || 6) * 1000;
+  const flipMs = Number(profile.flipSeconds || .42) * 1000;
   const outboundDepartMs = loadMs + postLoadDwellMs;
   const inboundArriveMs = outboundDepartMs + travelMs;
   const inboundReadyMs = inboundArriveMs + flipMs;
   const inboundUnloadEndMs = inboundReadyMs + loadMs;
   const returnDepartMs = inboundUnloadEndMs + postLoadDwellMs;
   const outboundArriveMs = returnDepartMs + travelMs;
-
   const offset = (ms) => Math.max(0, Math.min(1, ms / cycleMs));
+  const lerpLeft = (from, to, ratio) => `${from + ((to - from) * ratio)}px`;
+  const bumpFrames = (startMs, endMs, fromLeft, toLeft, scale) => [
+    { ratio: .26, y: -55 }, { ratio: .275, y: -59 }, { ratio: .295, y: -53.5 }, { ratio: .315, y: -55 },
+    { ratio: .67, y: -55 }, { ratio: .685, y: -58.5 }, { ratio: .705, y: -54 }, { ratio: .725, y: -55 },
+  ].map(({ ratio, y }) => ({
+    offset: offset(startMs + ((endMs - startMs) * ratio)),
+    left: lerpLeft(fromLeft, toLeft, ratio),
+    transform: `translateY(${y}%) scaleX(${scale})`,
+  }));
+
   truck.animate([
     { offset: 0, left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
     { offset: offset(outboundDepartMs), left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
+    ...bumpFrames(outboundDepartMs, inboundArriveMs, leftTruckLeft, rightTruckLeft, 1),
     { offset: offset(inboundArriveMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
     { offset: offset(inboundReadyMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
     { offset: offset(returnDepartMs), left: `${rightTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
+    ...bumpFrames(returnDepartMs, outboundArriveMs, rightTruckLeft, leftTruckLeft, -1),
     { offset: offset(outboundArriveMs), left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(-1)" },
     { offset: 1, left: `${leftTruckLeft}px`, transform: "translateY(-55%) scaleX(1)" },
   ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
 
   const paneStep = Number(profile.paneStep || 0);
   outboundPanes.forEach((pane, index) => {
-    const startMs = index * paneStaggerMs;
+    const sequenceIndex = Math.max(outboundPanes.length - 1 - index, 0);
+    const startMs = sequenceIndex * paneStaggerMs;
     const endMs = startMs + paneMotionMs;
     const paneLeft = outboundLeft + (index * paneStep);
-    // Target the rear half of the cargo body. Because the waiting stack begins
-    // to the truck's right, this is always negative/right-to-left motion.
-    const cargoTargetX = leftTruckLeft + Math.min(31, Math.max(01, truckWidth * .30));
-    const targetDx = Math.min(-18, cargoTargetX - paneLeft);
+    const cargoTargetX = leftTruckLeft + Math.min(24, Math.max(15, truckWidth * .22));
+    const targetDx = Math.max(18, cargoTargetX - paneLeft);
     pane.animate([
       { offset: 0, opacity: 1, transform: "translateX(0)" },
       { offset: offset(startMs), opacity: 1, transform: "translateX(0)" },
-      { offset: offset(Math.max(startMs, endMs - 70)), opacity: 1, transform: `translateX(${targetDx}px)` },
-      { offset: offset(endMs), opacity: 0, transform: `translateX(${targetDx - 5}px)` },
-      { offset: 1, opacity: 0, transform: `translateX(${targetDx - 5}px)` },
+      { offset: offset(Math.max(startMs, endMs - 90)), opacity: 1, transform: `translateX(${targetDx}px)` },
+      { offset: offset(endMs), opacity: 0, transform: `translateX(${targetDx + 5}px)` },
+      { offset: 1, opacity: 0, transform: `translateX(${targetDx + 5}px)` },
     ], { duration: cycleMs, iterations: Infinity, easing: "linear" });
   });
 
   inboundPanes.forEach((pane, index) => {
-    const startMs = inboundReadyMs + (index * paneStaggerMs);
+    const sequenceIndex = Math.max(inboundPanes.length - 1 - index, 0);
+    const startMs = inboundReadyMs + (sequenceIndex * paneStaggerMs);
     const endMs = startMs + paneMotionMs;
     const finalPaneLeft = inboundLeft + (index * paneStep);
-    const insideRearX = rightTruckLeft + truckWidth - 04;
+    const insideRearX = rightTruckLeft + truckWidth - Math.min(24, Math.max(15, truckWidth * .22));
     const startDx = insideRearX - finalPaneLeft;
     pane.animate([
       { offset: 0, opacity: 0, transform: `translateX(${startDx}px)` },
-      // Hold fully invisible until the truck has actually arrived and flipped.
-      // Without this duplicate keyframe, Web Animations interpolates opacity
-      // from cycle start and makes Inbound glass faintly appear too early.
-      { offset: offset(Math.max(0, startMs - 0)), opacity: 0, transform: `translateX(${startDx}px)` },
+      { offset: offset(Math.max(0, startMs - 2)), opacity: 0, transform: `translateX(${startDx}px)` },
       { offset: offset(startMs), opacity: 1, transform: `translateX(${startDx}px)` },
       { offset: offset(endMs), opacity: 1, transform: "translateX(0)" },
       { offset: offset(returnDepartMs), opacity: 1, transform: "translateX(0)" },
@@ -19887,7 +20363,7 @@ function renderBayRouteFlow(summary) {
 
   els.bayFlowPanel.innerHTML = `
     <button
-      class="flow-card outbound flow-card-v0 bay-flow-side-card ${outbound ? "is-actionable" : "is-unavailable"}"
+      class="flow-card outbound flow-card-v2 bay-flow-side-card ${outbound ? "is-actionable" : "is-unavailable"}"
       type="button"
       ${outbound ? `data-open-list="${escapeHtml(outbound.id)}"` : "disabled"}
       title="${outbound ? "Open the current Outbound stage" : "No Outbound delivery list is available"}"
@@ -19902,9 +20378,9 @@ function renderBayRouteFlow(summary) {
       <span class="flow-card-open" aria-hidden="true"><b>${outbound ? "Open Stage" : "Unavailable"}</b><i></i></span>
     </button>
 
-    <button class="flow-lane flow-lane-v0 transit-lane-button transit-lane-polished" type="button" data-open-transit-manifest title="Open ${escapeHtml(portable.receivingSite)} in-transit manifest">
+    <button class="flow-lane flow-lane-v2 transit-lane-button transit-lane-polished" type="button" data-open-transit-manifest title="Open ${escapeHtml(portable.receivingSite)} in-transit manifest">
       <span class="flow-truck"><b>${escapeHtml(inTransitPieceLabel)}</b></span>
-      ${rackLine ? `<span class="flow-rack-line flow-rack-line-v0"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
+      ${rackLine ? `<span class="flow-rack-line flow-rack-line-v2"><b>Racks:</b><span>${escapeHtml(rackLine)}</span></span>` : ""}
       <span
         class="transit-animation transit-animation-v59 transit-animation-truck ${inTransitQty > 0 ? "has-transit-glass-v459 has-transit-glass-v467" : "is-waiting-for-glass-v459"}"
         style="--transit-cycle-duration-v459:${transitAnimation.cycleSeconds || 16.7}s;--transit-load-seconds-v459:${transitAnimation.loadSeconds || 0.15}s;--glass-pane-step-v459:${transitAnimation.paneStep}px;--glass-pane-stagger-v459:${transitAnimation.paneStagger}s;--glass-stack-width-v459:${transitAnimation.stackWidth}px"
@@ -19917,15 +20393,15 @@ function renderBayRouteFlow(summary) {
         <span class="transit-route-line"></span>
         <span class="transit-moving-truck">
           <span class="transit-wait-cloud-v459"><i></i><i></i><i></i></span>
-          <svg viewBox="0 0 90 44" focusable="false" aria-hidden="true">
-            <rect class="transit-truck-cargo" x="7" y="7" width="49" height="07" rx="4"></rect>
+          <svg viewBox="0 0 92 44" focusable="false" aria-hidden="true">
+            <rect class="transit-truck-cargo" x="7" y="7" width="49" height="27" rx="4"></rect>
             <path class="transit-truck-cab" d="M56 15h17l11 11v8H56V15Z"></path>
-            <path class="transit-truck-window" d="M60 18h9l7 7H60v-7Z"></path>
-            <rect class="transit-truck-bumper" x="80" y="30" width="7" height="4" rx="1.5"></rect>
-            <circle class="transit-truck-wheel" cx="03" cy="36" r="6"></circle>
+            <path class="transit-truck-window" d="M62 18h9l7 7H62v-7Z"></path>
+            <rect class="transit-truck-bumper" x="82" y="30" width="7" height="4" rx="1.5"></rect>
+            <circle class="transit-truck-wheel" cx="23" cy="36" r="6"></circle>
             <circle class="transit-truck-wheel" cx="70" cy="36" r="6"></circle>
-            <circle class="transit-truck-hub" cx="03" cy="36" r="0.5"></circle>
-            <circle class="transit-truck-hub" cx="70" cy="36" r="0.5"></circle>
+            <circle class="transit-truck-hub" cx="23" cy="36" r="2.5"></circle>
+            <circle class="transit-truck-hub" cx="70" cy="36" r="2.5"></circle>
           </svg>
         </span>
         <span class="transit-route-node transit-route-node-end"></span>
@@ -19936,7 +20412,7 @@ function renderBayRouteFlow(summary) {
     </button>
 
     <button
-      class="flow-card inbound flow-card-v0 bay-flow-side-card ${inbound ? "is-actionable" : "is-unavailable"}"
+      class="flow-card inbound flow-card-v2 bay-flow-side-card ${inbound ? "is-actionable" : "is-unavailable"}"
       type="button"
       ${inbound ? `data-open-list="${escapeHtml(inbound.id)}"` : "disabled"}
       title="${escapeHtml(inbound ? `Open the current ${portable.receivingSite} delivery list` : `No ${portable.receivingSite} delivery list is available`)}"
@@ -20167,7 +20643,7 @@ function transitRackIconClass(rack) {
 
 /** Keep the in-transit rack marker on the same saved rack-set color as Rack Overview. */
 function transitRackIconStyle(rack) {
-  const color = rackSetVisualColor(rack?.type || rack?.name || rack?.code || "Rack") || "#176d70";
+  const color = rackSetVisualColor(rack?.type || rack?.name || rack?.code || "Rack") || "#176d72";
   return `--rack-set-icon-color:${color}`;
 }
 
@@ -20195,7 +20671,7 @@ function transitManifestHtml(payload) {
         .map((rack) => `
           <details class="transit-rack-card transit-rack-group-card ${rack.code === "UNASSIGNED" ? "needs-method" : ""}">
             <summary class="transit-rack-head transit-rack-group-head">
-              <span class="rack-set-visual-icon-v069 transit-rack-icon" data-rack-icon="${escapeHtml(transitRackIconClass(rack))}" style="${escapeHtml(transitRackIconStyle(rack))}" aria-hidden="true"></span>
+              <span class="rack-set-visual-icon-v269 transit-rack-icon" data-rack-icon="${escapeHtml(transitRackIconClass(rack))}" style="${escapeHtml(transitRackIconStyle(rack))}" aria-hidden="true"></span>
               <div>
                 <strong>${escapeHtml(transitRackDisplayName(rack))}</strong>
                 <small>${escapeHtml(rackDisplayCode(rack))}</small>
@@ -20237,7 +20713,7 @@ function transitManifestHtml(payload) {
       <header class="transit-manifest-header">
         <div>
           <small>${escapeHtml(portable.receivingSite)} Receiving</small>
-          <h0>In-Transit Manifest</h0>
+          <h2>In-Transit Manifest</h2>
           <span>${escapeHtml(dateLabel)} | grouped by rack, then glass type</span>
         </div>
         <div class="transit-manifest-header-actions">
@@ -20272,7 +20748,7 @@ async function openInTransitManifest() {
     <div class="modal-backdrop transit-manifest-backdrop" data-close-transit-manifest></div>
     <section class="modal-panel transit-manifest-panel is-loading" role="dialog" aria-modal="true" aria-label="${escapeHtml(portable.receivingSite)} in-transit manifest">
       <header class="transit-manifest-header">
-        <div><small>${escapeHtml(portable.receivingSite)} Receiving</small><h0>Loading in-transit manifest...</h0><span>Checking outbound scans against received scans.</span></div>
+        <div><small>${escapeHtml(portable.receivingSite)} Receiving</small><h2>Loading in-transit manifest...</h2><span>Checking outbound scans against received scans.</span></div>
         <button class="modal-close-x gui-close-button transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
       </header>
       <div class="transit-empty"><strong>Loading</strong><span>Please wait while the current in-transit jobs are pulled together.</span></div>
@@ -20512,7 +20988,7 @@ function bayGlassLabel(bay) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function isWorkbookLegendCell(cell) {
-  return Number(cell.row || 0) >= 11 && Number(cell.row || 0) <= 18 && Number(cell.col || 0) >= 17 && Number(cell.col || 0) <= 00;
+  return Number(cell.row || 0) >= 11 && Number(cell.row || 0) <= 18 && Number(cell.col || 0) >= 17 && Number(cell.col || 0) <= 20;
 }
 
 /**
@@ -20579,7 +21055,7 @@ function bayCategoryLabel(kind) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function bayCategoryOrder(kind) {
-  return { coral: 1, lr: 0, rr: 3, showers: 4, mirror: 5, "bfs-mirror": 6, "framed-mirror": 7, crl: 8, standard: 9, spacer: 10 }[kind] || 9;
+  return { coral: 1, lr: 2, rr: 3, showers: 4, mirror: 5, "bfs-mirror": 6, "framed-mirror": 7, crl: 8, standard: 9, spacer: 10 }[kind] || 9;
 }
 
 /**
@@ -20927,7 +21403,7 @@ function renderBaySlotButton(bay, mode = "physical") {
   const modeClass = mode === "physical" ? "physical-bay-slot" : "bay-slot";
 
   return `
-    <button class="${modeClass} bay-slot-v0 bay-slot-v17 type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
+    <button class="${modeClass} bay-slot-v2 bay-slot-v17 type-${escapeHtml(kind)} status-${escapeHtml(statusKind)} ${escapeHtml(String(status).toLowerCase())} ${dimmed ? "is-dimmed" : ""} ${searchMatch ? "is-search-match" : ""} ${state.selectedBayCode === bay.bayCode ? "is-selected" : ""}"
       type="button"
       data-bay-code="${escapeHtml(bay.bayCode)}"
       data-assignment-id="${escapeHtml(assignment?.id || "")}"
@@ -21083,7 +21559,7 @@ function renderBaySection(section) {
   const blocked = operationalBays.filter((bay) => bayPolicyKind(bay) === "blocked").length;
   const totalBays = operationalBays.length;
   const utilizationRatio = totalBays ? Math.min(Math.max(occupied / totalBays, 0), 1) : 0;
-  const utilizationHue = Math.round(100 * (1 - utilizationRatio));
+  const utilizationHue = Math.round(120 * (1 - utilizationRatio));
   const groupPolicy = bayGroupPolicySummary(section);
   const groupPolicyLabel = {
     auto: "AUTO",
@@ -21093,18 +21569,18 @@ function renderBaySection(section) {
     empty: "--",
   }[groupPolicy.kind] || String(groupPolicy.label || "").toUpperCase();
   const open = Boolean(filtersActive) || !state.collapsedBaySections.has(section.label);
-  const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 0));
+  const cols = Math.max(1, Math.min(Number(state.bayGroupColumns[section.label] || 1), 2));
   return `
     <details ${open ? "open" : ""} class="physical-bay-section physical-bay-section-v17 type-${escapeHtml(section.kind)} cols-${cols} policy-${escapeHtml(groupPolicy.kind)} ${state.bayEditMode ? "is-editing" : ""} ${dimmed ? "is-dimmed" : ""}" data-bay-drop-section="${escapeHtml(section.label)}" data-bay-drop-category="${escapeHtml(section.kind)}">
       <summary ${state.bayEditMode && hasPermission("manage_bay_layout") ? 'draggable="true"' : ""} data-bay-group-drag="${escapeHtml(section.label)}">
         <span class="bay-section-policy-v310 policy-${escapeHtml(groupPolicy.kind)}" title="${escapeHtml(groupPolicy.detail)}" aria-label="${escapeHtml(groupPolicy.label)}: ${escapeHtml(groupPolicy.detail)}">${escapeHtml(groupPolicyLabel)}</span>
         <span class="bay-section-title"><strong>${escapeHtml(section.label)}</strong><small>${escapeHtml(bayCategoryLabel(section.kind))}</small></span>
         <span class="bay-section-counts" aria-label="${escapeHtml(occupied)} occupied of ${escapeHtml(totalBays)} bays" style="--bay-group-utilization-hue:${escapeHtml(utilizationHue)};--bay-group-utilization-percent:${escapeHtml(Math.round(utilizationRatio * 100))}%">
-          <b class="bay-section-occupancy-v310" title="${escapeHtml(occupied)} occupied · ${escapeHtml(Math.max(totalBays - occupied, 0))} available · ${escapeHtml(totalBays)} total"><strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span></b>
+          <b class="bay-section-occupancy-v312" title="${escapeHtml(occupied)} occupied · ${escapeHtml(Math.max(totalBays - occupied, 0))} available · ${escapeHtml(totalBays)} total"><strong>${escapeHtml(occupied)}</strong><span>/${escapeHtml(totalBays)}</span></b>
           ${blocked ? `<em class="blocked">${escapeHtml(blocked)} blocked</em>` : ""}
           ${attention ? `<em class="bay-section-attention-v309" title="${escapeHtml(attention)} bay${attention === 1 ? "" : "s"} need attention" aria-label="${escapeHtml(attention)} bay${attention === 1 ? "" : "s"} need attention"><span class="bay-section-attention-mark-v309" aria-hidden="true">!</span><span>${escapeHtml(attention)}</span></em>` : ""}
         </span>
-        ${hasPermission("manage_bay_layout") ? `<button type="button" class="bay-section-edit-btn bay-section-edit-btn-v073" data-bay-editor-open="${escapeHtml(section.label)}" title="Edit ${escapeHtml(section.label)}" aria-label="Edit ${escapeHtml(section.label)} bay group"></button>` : ""}
+        ${hasPermission("manage_bay_layout") ? `<button type="button" class="bay-section-edit-btn bay-section-edit-btn-v273" data-bay-editor-open="${escapeHtml(section.label)}" title="Edit ${escapeHtml(section.label)}" aria-label="Edit ${escapeHtml(section.label)} bay group"></button>` : ""}
         ${state.bayEditMode ? `<span class="bay-column-controls"><button type="button" data-bay-col-action="dec" data-bay-section="${escapeHtml(section.label)}">-</button><b>${cols} col</b><button type="button" data-bay-col-action="inc" data-bay-section="${escapeHtml(section.label)}">+</button></span>` : ""}
       </summary>
       <div class="physical-slot-grid physical-slot-grid-v17" style="--bay-section-cols:${cols}">
@@ -21261,13 +21737,13 @@ function shiftBaySectionDraft(sectionLabel, direction) {
   }
   if (direction === "down") {
     if (sourceIndex === columns[sourceColumn].length - 1) return;
-    insertBaySectionDraft(sectionLabel, sourceColumn + 1, sourceIndex + 0);
+    insertBaySectionDraft(sectionLabel, sourceColumn + 1, sourceIndex + 2);
     return;
   }
 
   if (direction === "left" && sourceColumn === 0) return;
   if (direction === "right" && sourceColumn === 6) return;
-  const targetColumn = direction === "left" ? sourceColumn : sourceColumn + 0;
+  const targetColumn = direction === "left" ? sourceColumn : sourceColumn + 2;
   insertBaySectionDraft(sectionLabel, targetColumn, Math.min(sourceIndex, columns[targetColumn - 1].length));
 }
 
@@ -21339,12 +21815,12 @@ function renderBayGrid(physicalSections) {
     .filter(Boolean);
 
   return `
-    <section class="bay-edit-map-shell-v03">
-      <div class="bay-edit-map-help-v03">
+    <section class="bay-edit-map-shell-v23">
+      <div class="bay-edit-map-help-v23">
         <strong>Edit Map Layout</strong>
         <span>Drag a compact group card onto any blue insertion line to place it above, between, or below other groups. Use the arrow buttons for precise one-step movement, then Save Layout.</span>
       </div>
-      <section class="bay-holding-area bay-holding-area-v03" data-bay-holding-area="true">
+      <section class="bay-holding-area bay-holding-area-v23" data-bay-holding-area="true">
         <header><strong>Temporary Holding Area</strong><span>${escapeHtml(holding.length)} group${holding.length === 1 ? "" : "s"}</span></header>
         <div class="bay-holding-list bay-layout-holding-list" data-bay-drop-section="__holding" data-bay-holding-drop="true">
           ${holding.length
@@ -21352,7 +21828,7 @@ function renderBayGrid(physicalSections) {
             : `<div class="empty-grid-slot">Drop grouped bay sets here while reorganizing.</div>`}
         </div>
       </section>
-      <section class="bay-edit-column-grid-v03">${columnMarkup}</section>
+      <section class="bay-edit-column-grid-v23">${columnMarkup}</section>
     </section>
   `;
 }
@@ -21514,8 +21990,8 @@ function renderBaySidePanels() {
         ? ""
         : `<span class="status-chip status-${escapeHtml(statusKind)}">${escapeHtml(bayStatusLabel(bay))}</span>`;
       els.baySelectedPanel.innerHTML = `
-        <div class="selected-bay-command-card selected-bay-command-card-v08 status-${escapeHtml(bayStatusKind(bay))} policy-${escapeHtml(policyKind)}">
-          <div class="selected-bay-title-row selected-bay-title-row-v08">
+        <div class="selected-bay-command-card selected-bay-command-card-v28 status-${escapeHtml(bayStatusKind(bay))} policy-${escapeHtml(policyKind)}">
+          <div class="selected-bay-title-row selected-bay-title-row-v28">
             <div class="selected-bay-id-block">
               <span class="bay-status-dot status-${escapeHtml(bayStatusKind(bay))}"></span>
               <div class="selected-bay-title-copy">
@@ -21529,7 +22005,7 @@ function renderBaySidePanels() {
             </div>
           </div>
 
-          <div class="selected-bay-metric-row selected-bay-metric-row-v08">
+          <div class="selected-bay-metric-row selected-bay-metric-row-v28">
             <span><small>Category</small><strong>${escapeHtml(bayCategoryLabel(bayCategoryKind(bay)))}</strong></span>
             <span><small>${jobGroups.length === 1 ? "Job" : "Jobs"}</small><strong>${escapeHtml(completedJobCount)}/${escapeHtml(jobGroups.length)}</strong></span>
             <span><small>In this bay</small><strong>${escapeHtml(selectedBayQty)}/${escapeHtml(requiredQty)}</strong></span>
@@ -21538,7 +22014,7 @@ function renderBaySidePanels() {
 
           <div class="capacity-meter selected-capacity-meter fulfillment-meter" title="${escapeHtml(selectedBayQty)} of ${escapeHtml(requiredQty)} required pieces are in this bay; ${escapeHtml(locatedQty)} are located across all bays"><span style="width:${fulfillmentPercent}%"></span></div>
 
-          <div class="selected-bay-primary-actions selected-bay-primary-actions-v08">
+          <div class="selected-bay-primary-actions selected-bay-primary-actions-v28">
             <button type="button" data-bay-action="scan-here">Use For Scanner</button>
             <button type="button" data-bay-action="hold" data-permission-any="clear_bay,move_bay">Manual Assign</button>
             <button type="button" data-bay-action="unblock" data-permission-any="clear_bay,move_bay">Auto Assign</button>
@@ -21551,7 +22027,7 @@ function renderBaySidePanels() {
           <span>${escapeHtml(jobGroups.length)} job group${jobGroups.length === 1 ? "" : "s"}</span>
         </div>
 
-        <div class="selected-assignment-list selected-assignment-list-v0 selected-bay-job-list">
+        <div class="selected-assignment-list selected-assignment-list-v2 selected-bay-job-list">
           ${
             jobGroups.length
               ? jobGroups
@@ -21588,7 +22064,7 @@ function renderBaySidePanels() {
                             : bay.jobDetailsError
                               ? `<div class="selected-bay-job-empty-detail">Unable to load job details: ${escapeHtml(bay.jobDetailsError)}</div>`
                               : selectedBayJobItemsHtml(detail)}
-                          <div class="assignment-actions assignment-actions-v0 selected-bay-job-actions">
+                          <div class="assignment-actions assignment-actions-v2 selected-bay-job-actions">
                             <button type="button" title="Open manage workflow" data-assignment-action="manage" data-assignment-id="${escapeHtml(first.id)}">Manage</button>
                             <button type="button" title="Move this job" data-assignment-action="move" data-assignment-id="${escapeHtml(first.id)}">Move</button>
                             <button type="button" title="Clear this job from bay" data-assignment-action="clear" data-assignment-id="${escapeHtml(first.id)}">Clear</button>
@@ -21658,7 +22134,7 @@ function compactBaySnoozeDuration(milliseconds) {
   // noise on hour/day-scale windows. Show them only while under one hour.
   if (days) return `${days}d ${hours}h ${minutes}m`;
   if (hours) return `${hours}h ${minutes}m`;
-  if (minutes) return `${minutes}m ${String(seconds).padStart(0, "0")}s`;
+  if (minutes) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
   return `${seconds}s`;
 }
 
@@ -21707,7 +22183,7 @@ function closeOldBayReviewNotice() {
   window.clearTimeout(notice._hideTimer);
   window.clearInterval(notice._countdownTimer);
   notice.classList.add("is-hiding");
-  window.setTimeout(() => notice.remove(), 000);
+  window.setTimeout(() => notice.remove(), 220);
 }
 
 function showOldBayReviewNotice(count) {
@@ -21722,7 +22198,7 @@ function showOldBayReviewNotice(count) {
     <div>
       <strong>Old bay review needed</strong>
       <span>You have ${escapeHtml(count)} old order${count === 1 ? "" : "s"} that need review.</span>
-      <small class="old-bay-review-time-v069" data-old-bay-review-time>Closes in 00s</small>
+      <small class="old-bay-review-time-v269" data-old-bay-review-time>Closes in 20s</small>
     </div>
     <button type="button" data-old-bay-review>Review</button>
     <button type="button" class="old-bay-review-dismiss gui-close-button" data-old-bay-dismiss aria-label="Dismiss old bay notice">&times;</button>
@@ -21739,7 +22215,7 @@ function showOldBayReviewNotice(count) {
   });
   notice.querySelector("[data-old-bay-dismiss]")?.addEventListener("click", closeOldBayReviewNotice);
   const openedAt = Date.now();
-  const timeoutMs = 00000;
+  const timeoutMs = 20000;
   notice._countdownTimer = window.setInterval(() => {
     const remaining = Math.max(0, Math.ceil((timeoutMs - (Date.now() - openedAt)) / 1000));
     const timer = notice.querySelector("[data-old-bay-review-time]");
@@ -21971,7 +22447,7 @@ function renderStaleBayPanel(orders) {
 
   if (!list.length) {
     els.staleBayList.innerHTML = `
-      <div class="stale-bay-empty stale-bay-empty-v105 stale-bay-empty-v350">
+      <div class="stale-bay-empty stale-bay-empty-v105 stale-bay-empty-v352">
         <span class="stale-bay-empty-icon-v105" aria-hidden="true"></span>
         <strong>No old bay orders right now.</strong>
         <span>Indian Trail bay assignments older than 10 days will appear here.</span>
@@ -22046,7 +22522,7 @@ function renderStaleBayPanel(orders) {
       return `<article class="stale-bay-order-v353 stale-bay-order-v355 ${selected ? "is-selected" : ""} ${snooze.active ? "is-snoozed" : ""}" style="--stale-age-accent:${escapeHtml(ageAccent)}" data-stale-assignment-group="${escapeHtml(assignmentIds.join("|"))}">
         ${stateRibbon}
         <header class="stale-bay-order-command-v353 stale-bay-order-command-v355">
-          <label class="stale-bay-select-v350" title="Select order"><input type="checkbox" data-stale-select-group="${escapeHtml(assignmentIds.join("|"))}" ${selected ? "checked" : ""}><span aria-hidden="true"></span></label>
+          <label class="stale-bay-select-v352" title="Select order"><input type="checkbox" data-stale-select-group="${escapeHtml(assignmentIds.join("|"))}" ${selected ? "checked" : ""}><span aria-hidden="true"></span></label>
           <div class="stale-bay-order-identifiers-v353">
             <span><small>JOB NR.</small><strong>${escapeHtml(jobNumber)}</strong></span>
             <span><small>ORDER</small><strong>${escapeHtml(orderKey)}</strong></span>
@@ -22066,14 +22542,14 @@ function renderStaleBayPanel(orders) {
         </div>
         <footer class="stale-bay-order-footer-v353">
           <span class="stale-bay-order-footer-note-v353">Postpone this order only after the physical bay is verified.</span>
-          <label><small>${snooze.active ? "EXTEND" : "SNOOZE FOR"}</small><select data-stale-days-group="${escapeHtml(assignmentIds.join("|"))}"><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="14">0 weeks</option><option value="30">30 days</option></select></label>
+          <label><small>${snooze.active ? "EXTEND" : "SNOOZE FOR"}</small><select data-stale-days-group="${escapeHtml(assignmentIds.join("|"))}"><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">30 days</option></select></label>
           <button type="button" class="stale-bay-row-snooze-v339 stale-bay-bulk-snooze-v340 stale-bay-bulk-snooze-v341 stale-bay-bulk-snooze-v343 stale-bay-bulk-snooze-v344 stale-bay-bulk-snooze-v345 stale-bay-order-snooze-v353" data-stale-snooze-group="${escapeHtml(assignmentIds.join("|"))}"><span class="stale-bay-row-snooze-icon-v339" aria-hidden="true">Zz</span><span>${snooze.active ? "Extend Snooze" : "Snooze Order"}</span></button>
         </footer>
       </article>`;
     }).join("");
 
     const neighborMarkup = neighboringOrders.length
-      ? `<details class="stale-bay-neighbors-v350"><summary><span>Other active orders in ${escapeHtml(bayDisplay)}</span><b>${neighboringOrders.length}</b></summary><div>${neighboringOrders.map((order) => `<span><strong>Order ${escapeHtml(order.order || "-")}</strong><b>${escapeHtml(order.customer || "No customer")}</b><small>${escapeHtml((order.items || []).reduce((sum, item) => sum + Number(item.inBayQty || 0), 0))} pcs · ${escapeHtml(formatDateTime(order.lastScannedAt) || "No scan time")}</small></span>`).join("")}</div></details>`
+      ? `<details class="stale-bay-neighbors-v352"><summary><span>Other active orders in ${escapeHtml(bayDisplay)}</span><b>${neighboringOrders.length}</b></summary><div>${neighboringOrders.map((order) => `<span><strong>Order ${escapeHtml(order.order || "-")}</strong><b>${escapeHtml(order.customer || "No customer")}</b><small>${escapeHtml((order.items || []).reduce((sum, item) => sum + Number(item.inBayQty || 0), 0))} pcs · ${escapeHtml(formatDateTime(order.lastScannedAt) || "No scan time")}</small></span>`).join("")}</div></details>`
       : "";
 
     return `<section class="stale-bay-group-v353">
@@ -22087,7 +22563,7 @@ function renderStaleBayPanel(orders) {
 
   els.staleBayList.innerHTML = visible.length
     ? `<div class="stale-bay-normalized-v353"><header class="stale-bay-normalized-heading-v353"><div><small>OLD BAY REVIEW</small><strong>${escapeHtml(visible.length)} old order${visible.length === 1 ? "" : "s"}</strong><span>Bay → order → glass. Orange is newly old, red deepens with age, and purple means temporarily snoozed.</span></div></header>${groupsMarkup}</div>`
-    : `<div class="stale-bay-empty stale-bay-empty-v350"><strong>No matching old bay orders.</strong><span>Adjust Search, Status, Age, or Sort to broaden the review.</span></div>`;
+    : `<div class="stale-bay-empty stale-bay-empty-v352"><strong>No matching old bay orders.</strong><span>Adjust Search, Status, Age, or Sort to broaden the review.</span></div>`;
   updateStaleBaySelectionControls(visible);
 }
 
@@ -22143,7 +22619,7 @@ function renderBayLegend() {
  */
 function formatEventType(value) {
   return String(value || "")
-    .replace(/([a-z])([A-Z])/g, "$1 $0")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ");
 }
 
@@ -22201,7 +22677,7 @@ function renderBayLastScanCard(event) {
   const bayLastCheck = document.getElementById("bayLastCheck");
   const when = new Date(event?.time || event?.createdAt || "");
   const time = hasEvent && !Number.isNaN(when.getTime())
-    ? when.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "0-digit" })
+    ? when.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" })
     : "-";
   const bay = event?.currentBayDisplay || event?.currentBayCode || event?.newBayDisplay
     || event?.newBayCode || event?.bayDisplay || event?.bayCode || event?.oldBayDisplay
@@ -22247,7 +22723,7 @@ function bayScanRecentLimit() {
   const adding = Boolean(els.bayScanModeToggle?.checked);
   const fullscreen = Boolean(document.fullscreenElement);
   if (fullscreen) return adding ? 5 : 6;
-  return adding ? 1 : 0;
+  return adding ? 1 : 2;
 }
 
 /**
@@ -22652,7 +23128,7 @@ async function submitBayScanOut() {
 async function submitManualBayScan() {
   const reference = parseBayManualOrderItemReference(els.bayManualReferenceInput?.value || "");
   if (!reference) {
-    throw new Error("Enter the order and item together, for example 036505001, 036505 1, 036505.1, or 036505/1.");
+    throw new Error("Enter the order and item together, for example 236505001, 236505 1, 236505.1, or 236505/1.");
   }
   const adding = Boolean(els.bayScanModeToggle?.checked);
   const scanQty = adding ? Math.trunc(Number(els.bayManualQtyInput?.value || 1)) : 1;
@@ -23698,7 +24174,7 @@ async function deleteBayEditorBay(bayCode) {
 
 /** Build a compact page-number window for the All Bay Scans modal. */
 function bayAllScansPageNumbers(currentPage, totalPages) {
-  const start = Math.max(1, Math.min(currentPage - 0, Math.max(totalPages - 4, 1)));
+  const start = Math.max(1, Math.min(currentPage - 2, Math.max(totalPages - 4, 1)));
   const end = Math.min(totalPages, start + 4);
   const pages = [];
   for (let page = start; page <= end; page += 1) pages.push(page);
@@ -23711,7 +24187,7 @@ function renderBayAllScansPage(payload) {
   const page = Math.max(Number(payload?.page || 1), 1);
   const totalPages = Math.max(Number(payload?.totalPages || 1), 1);
   const total = Math.max(Number(payload?.total || 0), 0);
-  const pageSize = Math.max(Number(payload?.pageSize || 05), 1);
+  const pageSize = Math.max(Number(payload?.pageSize || 25), 1);
   state.bayAllScansPage = page;
   state.bayAllScansTotalPages = totalPages;
   state.bayAllScansTotal = total;
@@ -23789,7 +24265,7 @@ function renderBayAllScansPage(payload) {
 }
 
 /**
- * Purpose: Open All Bay Scans immediately, then load only one 05-row server page.
+ * Purpose: Open All Bay Scans immediately, then load only one 25-row server page.
  * Effects: Shows a fast loading state, requests one page, and leaves location editing in this GUI only.
  * Flow: Uses a request token to ignore stale responses and renders total/page metadata returned by the backend.
  */
@@ -23803,7 +24279,7 @@ async function openBayAllScansModal(page = 1) {
     description: "Review recent movements and correct a current bay without changing the read-only scanner activity cards.",
     body: `
       <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159 is-loading">
-        <div class="bay-all-scans-loading-note-v316">Retrieving page ${requestedPage} with no more than 05 scans.</div>
+        <div class="bay-all-scans-loading-note-v316">Retrieving page ${requestedPage} with no more than 25 scans.</div>
         <div class="bay-all-scans-loading-v159" role="status" aria-live="polite">
           <span class="bay-all-scans-spinner-v159" aria-hidden="true"></span>
           <div><strong>Loading retained scans</strong><small>Only the requested page is being downloaded.</small></div>
@@ -23814,8 +24290,8 @@ async function openBayAllScansModal(page = 1) {
   if (els.adminModal) els.adminModal.dataset.customView = "bay-all-scans";
   try {
     const payload = state.backend
-      ? await fetchJson(`/api/indian-trail/events?page=${requestedPage}&pageSize=05`)
-      : { events: state.bayEvents || [], page: 1, pageSize: 05, total: (state.bayEvents || []).length, totalPages: 1 };
+      ? await fetchJson(`/api/indian-trail/events?page=${requestedPage}&pageSize=25`)
+      : { events: state.bayEvents || [], page: 1, pageSize: 25, total: (state.bayEvents || []).length, totalPages: 1 };
     if (requestId !== state.bayAllScansRequestId || els.adminModal?.hidden) return;
     renderBayAllScansPage(payload);
   } catch (error) {
@@ -24053,7 +24529,7 @@ async function loadPriorityWorkLookup() {
   }
 }
 
-function schedulePriorityWorkLookup(delay = 080) {
+function schedulePriorityWorkLookup(delay = 280) {
   if (state.priorityWorkLookupTimer) window.clearTimeout(state.priorityWorkLookupTimer);
   state.priorityWorkLookupTimer = window.setTimeout(() => {
     state.priorityWorkLookupTimer = null;
@@ -24090,7 +24566,7 @@ function printPriorityWorkSheet(kind = "rush", request = null) {
   try { win.opener = null; } catch (_error) {}
   win.document.open();
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(typeLabel)} Priority Work</title><style>
-    @page{size:letter portrait;margin:.45in}*{box-sizing:border-box}body{margin:0;color:#100d4f;font-family:Arial,sans-serif;background:#fff}.sheet{border:0px solid #173e75;padding:18px}.head{display:flex;justify-content:space-between;gap:00px;border-bottom:4px solid ${printKind === "remake" ? "#161b04" : printKind === "missing" ? "#dc5b00" : "#d80330"};padding-bottom:10px}.head small{font-size:10px;font-weight:900;letter-spacing:.14em}.head h1{margin:3px 0 0;font-size:07px}.head b{align-self:center;border:1px solid #b8c8d9;border-radius:8px;padding:8px 10px;font-size:10px}.facts{display:grid;grid-template-columns:repeat(0,1fr);gap:8px;margin:14px 0}.fact{border:1px solid #cbd8e5;border-radius:8px;padding:9px}.fact small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.fact strong{display:block;margin-top:3px;font-size:13px}.reason{border:1px solid #cbd8e5;border-radius:8px;padding:10px;margin-bottom:10px}.reason small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase}.reason strong{display:block;margin-top:4px;min-height:30px;font-size:14px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aebdcb;padding:6px;text-align:left}th{background:#edf3f9;font-size:8px;text-transform:uppercase}.blank-row{height:80px;color:#7b8997;text-align:center}.notes{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.line{height:38px;border-bottom:1px solid #50677e;padding-top:00px;font-size:9px}.footer{display:flex;justify-content:space-between;margin-top:15px;color:#6c7f91;font-size:8px}.toolbar{margin:0 0 10px}.toolbar button{border:0;border-radius:7px;background:#0b447e;color:#fff;padding:9px 15px;font-weight:800}@media print{.toolbar{display:none}.sheet{border:0;padding:0}}</style></head><body><div class="toolbar"><button onclick="window.print()">Print ${escapeHtml(typeLabel)} Sheet</button></div><main class="sheet"><header class="head"><div><small>DELIVERY LIST SCANNER · PRIORITY WORK</small><h1>${escapeHtml(title)}</h1></div><b>${escapeHtml(lookup.found || request?.status === "matched" ? "IMPORTED" : "WAITING FOR IMPORT")}</b></header><section class="facts"><div class="fact"><small>Job Nr. / SO / Order</small><strong>${escapeHtml(job || "-")}</strong></div><div class="fact"><small>Priority Handling</small><strong>${escapeHtml(handling)}</strong></div><div class="fact"><small>Customer</small><strong>${escapeHtml(customer || "-")}</strong></div><div class="fact"><small>Order Nr.</small><strong>${escapeHtml(orders.join(", ") || "-")}</strong></div><div class="fact"><small>Priority Delivery Date</small><strong>${escapeHtml(deliveryDate ? formatDisplayDate(deliveryDate) : "Keep imported date")}</strong></div><div class="fact"><small>Person Responsible</small><strong>${escapeHtml(responsible || "-")}</strong></div></section><section class="reason"><small>Reason</small><strong>${escapeHtml(reason || (printKind === "missing" ? "Missing Glass" : "-"))}</strong></section><table><thead><tr><th>Order</th><th>Item</th><th>Glass</th><th>Dimensions</th><th>Qty</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table><section class="notes"><div class="line">Shop notes</div><div class="line">Completed / verified by</div></section><footer class="footer"><span>Printed ${escapeHtml(new Date().toLocaleString())}</span><span>${escapeHtml(typeLabel)} Priority Work</span></footer></main><script>setTimeout(()=>window.print(),150);<\/script></body></html>`);
+    @page{size:letter portrait;margin:.45in}*{box-sizing:border-box}body{margin:0;color:#122d4f;font-family:Arial,sans-serif;background:#fff}.sheet{border:2px solid #173e75;padding:18px}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:4px solid ${printKind === "remake" ? "#161b24" : printKind === "missing" ? "#dc5b20" : "#d82330"};padding-bottom:10px}.head small{font-size:10px;font-weight:900;letter-spacing:.14em}.head h1{margin:3px 0 0;font-size:27px}.head b{align-self:center;border:1px solid #b8c8d9;border-radius:8px;padding:8px 10px;font-size:10px}.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:14px 0}.fact{border:1px solid #cbd8e5;border-radius:8px;padding:9px}.fact small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.fact strong{display:block;margin-top:3px;font-size:13px}.reason{border:1px solid #cbd8e5;border-radius:8px;padding:10px;margin-bottom:10px}.reason small{display:block;color:#60748b;font-size:8px;font-weight:900;text-transform:uppercase}.reason strong{display:block;margin-top:4px;min-height:30px;font-size:14px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aebdcb;padding:6px;text-align:left}th{background:#edf3f9;font-size:8px;text-transform:uppercase}.blank-row{height:80px;color:#7b8997;text-align:center}.notes{margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.line{height:38px;border-bottom:1px solid #50677e;padding-top:20px;font-size:9px}.footer{display:flex;justify-content:space-between;margin-top:15px;color:#6c7f91;font-size:8px}.toolbar{margin:0 0 10px}.toolbar button{border:0;border-radius:7px;background:#0b447e;color:#fff;padding:9px 15px;font-weight:800}@media print{.toolbar{display:none}.sheet{border:0;padding:0}}</style></head><body><div class="toolbar"><button onclick="window.print()">Print ${escapeHtml(typeLabel)} Sheet</button></div><main class="sheet"><header class="head"><div><small>DELIVERY LIST SCANNER · PRIORITY WORK</small><h1>${escapeHtml(title)}</h1></div><b>${escapeHtml(lookup.found || request?.status === "matched" ? "IMPORTED" : "WAITING FOR IMPORT")}</b></header><section class="facts"><div class="fact"><small>Job Nr. / SO / Order</small><strong>${escapeHtml(job || "-")}</strong></div><div class="fact"><small>Priority Handling</small><strong>${escapeHtml(handling)}</strong></div><div class="fact"><small>Customer</small><strong>${escapeHtml(customer || "-")}</strong></div><div class="fact"><small>Order Nr.</small><strong>${escapeHtml(orders.join(", ") || "-")}</strong></div><div class="fact"><small>Priority Delivery Date</small><strong>${escapeHtml(deliveryDate ? formatDisplayDate(deliveryDate) : "Keep imported date")}</strong></div><div class="fact"><small>Person Responsible</small><strong>${escapeHtml(responsible || "-")}</strong></div></section><section class="reason"><small>Reason</small><strong>${escapeHtml(reason || (printKind === "missing" ? "Missing Glass" : "-"))}</strong></section><table><thead><tr><th>Order</th><th>Item</th><th>Glass</th><th>Dimensions</th><th>Qty</th><th>Check</th></tr></thead><tbody>${rows}</tbody></table><section class="notes"><div class="line">Shop notes</div><div class="line">Completed / verified by</div></section><footer class="footer"><span>Printed ${escapeHtml(new Date().toLocaleString())}</span><span>${escapeHtml(typeLabel)} Priority Work</span></footer></main><script>setTimeout(()=>window.print(),150);<\/script></body></html>`);
   win.document.close();
 }
 
@@ -24368,7 +24844,7 @@ function updateSdiSelectionSummary() {
   // changing the existing backend contract or submission behavior.
   const railSteps = [...document.querySelectorAll(".missing-glass-step-rail-v351 > span")];
   const hasLoadedItems = Boolean((state.sdiWorkspace?.items || []).length);
-  const activeStep = selected.length ? 0 : hasLoadedItems ? 1 : 0;
+  const activeStep = selected.length ? 2 : hasLoadedItems ? 1 : 0;
   railSteps.forEach((step, index) => {
     step.classList.toggle("is-active", index === activeStep);
     step.classList.toggle("is-complete", index < activeStep);
@@ -24863,6 +25339,7 @@ function ensureProductionExplorerModalV470() {
 }
 
 function closeProductionExplorerV470() {
+  cancelOrderDetailSketchRetryV515(state.orderDetailOpenOrderV474);
   state.orderDetailOpenOrderV474 = "";
   state.orderDetailFocusItemV477 = "";
   if (state.orderDetailFocusTimerV477) window.clearTimeout(state.orderDetailFocusTimerV477);
@@ -24907,7 +25384,7 @@ function fabricationStatusHtmlV470(status = {}, item = {}) {
   const title = override
     ? `Assigned ${status.assignedMachine}; completed evidence shows ${status.actualMachine}`
     : (needsRefabrication ? `${label}. Existing fabrication evidence predates the latest Internal Reject.` : label);
-  return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v470" : ""}" title="${escapeHtml(title)}">${escapeHtml(label)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
+  return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(label)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
 }
 
 function productionSketchFrameUrlV479(assetId, pageNumber = 0, { toolbar = false } = {}) {
@@ -24915,9 +25392,109 @@ function productionSketchFrameUrlV479(assetId, pageNumber = 0, { toolbar = false
   return `${productionAssetUrlV470(assetId, pageNumber)}#page=1&zoom=page-fit&view=Fit&navpanes=0&scrollbar=0&${controls}`;
 }
 
+function parseGeneratedSketchDimensionV516(value = "") {
+  const clean = String(value || "").replace(/[\"']/g, "").trim().replace(/^(\d+)-(\d+\s*\/)/, "$1 $2");
+  if (!clean) return 0;
+  const mixed = clean.match(/^(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) return Number(mixed[3]) > 0 ? Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3]) : 0;
+  const fraction = clean.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fraction) return Number(fraction[2]) > 0 ? Number(fraction[1]) / Number(fraction[2]) : 0;
+  const numeric = /^\d+(?:\.\d+)?$/.test(clean) ? Number(clean) : 0;
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function generatedSketchDimensionsV516(dimensions = "") {
+  const raw = String(dimensions || "").trim();
+  const parts = raw.split(/\s*[x×]\s*/i);
+  const width = parseGeneratedSketchDimensionV516(parts[0] || "");
+  const height = parseGeneratedSketchDimensionV516(parts[1] || "");
+  return { raw: raw || "Size not listed", width, height };
+}
+
+function generatedProductionSketchV516(item = {}, payload = {}, fabrication = {}, referenceGeometry = null) {
+  const order = String(item.order || payload.order || "-").trim() || "-";
+  const itemNumber = String(item.item || "-").trim() || "-";
+  const product = String(item.product || "Glass").trim() || "Glass";
+  const dimensions = generatedSketchDimensionsV516(item.dimensions);
+  const customer = String(item.customer || payload.customer || "").trim();
+  const job = String(item.job || payload.job || "").trim();
+  const route = String(item.route || payload.route || "").trim();
+  const qty = Math.max(1, Number(item.qty || 1));
+  const cutting = item.cutting && typeof item.cutting === "object" ? item.cutting : {};
+  const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "")
+    || (fabrication.required === false ? "NO FAB" : "MACHINE UNCONFIRMED");
+  const shapeNumber = Math.max(0, Number(cutting.shapeNumber || 0));
+  const edgeNotes = cuttingLabelEdgeCalloutsV507(cutting);
+  // Shower Programmer accepts source dimensions in either orientation with
+  // a 0.35-inch tolerance. Preserve native DXF orientation and all cut paths;
+  // do not manufacture a hinge-side rotation from an A+W shape number.
+  const validSize = dimensions.width > 0 && dimensions.height > 0;
+  const close = (a, b) => Math.abs(Number(a) - Number(b)) <= 0.35;
+  const direct = validSize && close(referenceGeometry?.width, dimensions.width) && close(referenceGeometry?.height, dimensions.height);
+  const swapped = validSize && close(referenceGeometry?.width, dimensions.height) && close(referenceGeometry?.height, dimensions.width);
+  const geometry = referenceGeometry?.units === "inches" && (direct || swapped)
+    && Array.isArray(referenceGeometry.paths) && referenceGeometry.paths.length ? referenceGeometry : null;
+  const width = geometry ? geometry.width : validSize ? dimensions.width : 1;
+  const height = geometry ? geometry.height : validSize ? dimensions.height : 1;
+  const scale = Math.min(340 / width, 340 / height);
+  const glassWidth = width * scale;
+  const glassHeight = height * scale;
+  const x = (612 - glassWidth) / 2;
+  const y = 238 + Math.max(0, (330 - glassHeight) / 2);
+  const right = x + glassWidth;
+  const bottom = y + glassHeight;
+  const sizeLabels = dimensions.raw.split(/\s*[x×]\s*/i);
+  if (geometry && swapped && !direct) sizeLabels.reverse();
+  const outlineUnconfirmed = !geometry && (shapeNumber > 0 || !validSize || fabrication.required !== false);
+  const sourceNote = geometry ? `DXF: ${geometry.source} · source orientation`
+    : outlineUnconfirmed ? "SIZE ENVELOPE ONLY · shape / cutouts unconfirmed" : "RECTANGULAR SIZE REFERENCE";
+  const outline = geometry ? geometry.paths.map((points) => `<polyline points="${points.map(([px, py]) => `${x + px * scale},${y + py * scale}`).join(" ")}" fill="none" stroke="#1f2937" stroke-width="1.8"/>`).join("")
+    : `<rect x="${x}" y="${y}" width="${glassWidth}" height="${glassHeight}" fill="#fbfdff" stroke="#1f2937" stroke-width="2.2"${outlineUnconfirmed ? ' stroke-dasharray="7 5"' : ""}/>`;
+  const edgeText = edgeNotes.length ? edgeNotes.join(" · ") : "";
+  const generatedAt = new Date().toLocaleString(appLocale(), {
+    timeZone: PLANT_TIME_ZONE_V516,
+    month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  return `<div class="production-sketch-visual-v476 production-generated-sketch-v516" role="img" aria-label="Generated reference sketch for Order ${escapeHtml(order)} Item ${escapeHtml(itemNumber)}">
+    <div class="production-sketch-canvas-v480 production-generated-sketch-canvas-v516">
+      <svg viewBox="0 0 612 792" aria-hidden="true" focusable="false">
+        <rect x="1" y="1" width="610" height="790" fill="#fff" stroke="#c6d0d8" stroke-width="2"/>
+        <text x="26" y="34" class="gsk-small">${escapeHtml(qty)} ea</text>
+        <text x="78" y="34" class="gsk-product">${escapeHtml(product.slice(0, 66))}</text>
+        <text x="26" y="56" class="gsk-small">${escapeHtml(dimensions.raw)}</text>
+        <text x="26" y="80" class="gsk-small">${escapeHtml((job ? `Project / Job: ${job}` : "Generated shop reference").slice(0, 105))}</text>
+        <text x="26" y="100" class="gsk-small">${escapeHtml((customer || route || "BFS Operations").slice(0, 105))}</text>
+        <text x="586" y="56" text-anchor="end" class="gsk-small">${shapeNumber ? `SHAPE ${shapeNumber}` : "SIZE REFERENCE"}</text>
+        <text x="306" y="145" text-anchor="middle" class="gsk-order">${escapeHtml(`${order}.${String(itemNumber).replace(/^0+/, "") || itemNumber}`)}</text>
+        <text x="306" y="168" text-anchor="middle" class="gsk-machine">${escapeHtml(machine)}</text>
+
+        <line x1="${x}" y1="${y - 36}" x2="${right}" y2="${y - 36}" class="gsk-dim"/>
+        <path d="M${x} ${y - 36} l8 -4 v8 z M${right} ${y - 36} l-8 -4 v8 z" class="gsk-fill"/>
+        <text x="306" y="${y - 43}" text-anchor="middle" class="gsk-dim-text">${escapeHtml(sizeLabels[0] || "WIDTH UNCONFIRMED")}</text>
+        <line x1="${x - 42}" y1="${y}" x2="${x - 42}" y2="${bottom}" class="gsk-dim"/>
+        <path d="M${x - 42} ${y} l-4 8 h8 z M${x - 42} ${bottom} l-4 -8 h8 z" class="gsk-fill"/>
+        <text x="${x - 50}" y="${(y + bottom) / 2}" text-anchor="middle" transform="rotate(-90 ${x - 50} ${(y + bottom) / 2})" class="gsk-dim-text">${escapeHtml(sizeLabels[1] || "HEIGHT UNCONFIRMED")}</text>
+
+        ${outline}
+        <text x="306" y="670" text-anchor="middle" class="gsk-small">${escapeHtml(sourceNote)}</text>
+        ${edgeText ? `<text x="306" y="${Math.min(650, bottom + 34)}" text-anchor="middle" class="gsk-edge">${escapeHtml(edgeText)}</text>` : ""}
+
+        <line x1="24" y1="704" x2="588" y2="704" stroke="#d7dee5" stroke-width="1"/>
+        <text x="26" y="729" class="gsk-warning">GENERATED REFERENCE · VERIFY AGAINST A+W / SHOP DATA</text>
+        <text x="26" y="754" class="gsk-small">BFS Operations LLC</text>
+        <text x="586" y="754" text-anchor="end" class="gsk-small">${escapeHtml(generatedAt)} · Generated 1 of 1</text>
+      </svg>
+    </div>
+    <span class="production-sketch-caption-v476 production-sketch-caption-v480 production-generated-sketch-caption-v516"><span><small>Order / Item</small><b>${escapeHtml(`${order} · Item ${itemNumber}`)}</b></span><span><small>Source</small><b>Generated reference</b></span></span>
+  </div>`;
+}
+
 function productionSketchVisualV476(sketches = [], itemLabel = "", meta = {}) {
   const sketch = (Array.isArray(sketches) ? sketches : []).find((asset) => asset?.id);
   if (!sketch) {
+    if (meta.itemData && typeof meta.itemData === "object") {
+      return generatedProductionSketchV516(meta.itemData, meta.payload || {}, meta.fabrication || {}, meta.referenceGeometry);
+    }
     return `<div class="production-sketch-visual-v476 is-empty"><span>${globalSearchIconV433("staging")}</span><strong>No sketch page</strong><small>${escapeHtml(itemLabel || "This item")} was not found in a recent order sketch.</small></div>`;
   }
   const page = Math.max(0, Number(sketch.pageNumber || 0));
@@ -24928,9 +25505,9 @@ function productionSketchVisualV476(sketches = [], itemLabel = "", meta = {}) {
   return `<div class="production-sketch-visual-v476 production-sketch-visual-v478 production-sketch-visual-v479 production-sketch-visual-v480">
     <div class="production-sketch-canvas-v480">
       <button type="button" class="production-sketch-maximize-v478 production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open large sketch viewer" title="Open large sketch viewer">
-        <svg viewBox="0 0 04 04" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 00H4v-5M15 00h5v-5"></path><path d="M4 9 9 4M00 9l-5-5M4 15l5 5M00 15l-5 5"></path></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg>
       </button>
-      <iframe loading="lazy" scrolling="no" src="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page))}" title="Sketch ${escapeHtml(label)}" tabindex="-1"></iframe>
+      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page))}" title="Sketch ${escapeHtml(label)}" tabindex="-1"></iframe>
     </div>
     <span class="production-sketch-caption-v476 production-sketch-caption-v480"><span><small>Order / Item</small><b>${escapeHtml(identity)}</b></span><span><small>Page</small><b>${escapeHtml(page || "-")}</b></span></span>
   </div>`;
@@ -24943,8 +25520,8 @@ function productionOrderOverviewSketchV480(orderFiles = {}, payload = {}, produc
   const identity = `Order ${payload.order || "-"} · Page 1`;
   return `<div class="production-overview-sketch-v480">
     <div class="production-overview-sketch-canvas-v480">
-      <button type="button" class="production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="1" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open order sketch large viewer" title="Open order sketch large viewer"><svg viewBox="0 0 04 04" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 00H4v-5M15 00h5v-5"></path><path d="M4 9 9 4M00 9l-5-5M4 15l5 5M00 15l-5 5"></path></svg></button>
-      <iframe loading="lazy" scrolling="no" src="${escapeHtml(productionSketchFrameUrlV479(sketch.id, 1))}" title="Order ${escapeHtml(payload.order || "")} sketch overview" tabindex="-1"></iframe>
+      <button type="button" class="production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="1" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open order sketch large viewer" title="Open order sketch large viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg></button>
+      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, 1))}" title="Order ${escapeHtml(payload.order || "")} sketch overview" tabindex="-1"></iframe>
     </div>
     <footer><span><small>Order</small><b>${escapeHtml(payload.order || "-")}</b></span><span><small>Page</small><b>1</b></span></footer>
   </div>`;
@@ -24966,7 +25543,7 @@ function openProductionSketchLightboxV479(assetId, pageNumber = 0, label = "Sket
   shell.innerHTML = `
     <button type="button" class="production-sketch-lightbox-backdrop-v479" data-production-close-sketch-v479 aria-label="Close large sketch viewer"></button>
     <section class="production-sketch-lightbox-panel-v479" role="dialog" aria-modal="true" aria-label="Large sketch viewer - ${escapeHtml(cleanLabel)}">
-      <header class="production-sketch-lightbox-header-v479"><div><small>Sketch Review</small><strong>${escapeHtml(cleanLabel)}</strong></div><button type="button" class="production-sketch-lightbox-close-v479 gui-close-button" data-production-close-sketch-v479 aria-label="Close sketch viewer" title="Close sketch viewer"><svg viewBox="0 0 04 04" aria-hidden="true"><path d="M6 6l10 10M18 6 6 18"></path></svg></button></header>
+      <header class="production-sketch-lightbox-header-v479"><div><small>Sketch Review</small><strong>${escapeHtml(cleanLabel)}</strong></div><button type="button" class="production-sketch-lightbox-close-v479 gui-close-button" data-production-close-sketch-v479 aria-label="Close sketch viewer" title="Close sketch viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></header>
       <div class="production-sketch-lightbox-canvas-v479"><iframe src="${escapeHtml(productionSketchFrameUrlV479(cleanAssetId, pageNumber, { toolbar: true }))}" title="Large sketch ${escapeHtml(cleanLabel)}"></iframe></div>
     </section>`;
   document.body.appendChild(shell);
@@ -24980,14 +25557,14 @@ function hydrateOrderDetailSketchesV507() {
   state.orderDetailSketchObserverV507 = null;
   if (!frames.length) return;
   const loadFrame = (frame) => {
-    if (!frame || frame.src || !frame.dataset.orderSketchSrcV507) return;
-    frame.src = frame.dataset.orderSketchSrcV507;
+    if (!frame || frame.hasAttribute("src") || !frame.dataset.orderSketchSrcV507) return;
+    frame.setAttribute("src", frame.dataset.orderSketchSrcV507);
     delete frame.dataset.orderSketchSrcV507;
   };
-  if (!("IntersectionObserver" in window)) {
-    frames.slice(0, 1).forEach(loadFrame);
-    return;
-  }
+  // Start the overview/first exact sketch immediately. Remaining PDFs stay
+  // virtualized until they approach the scroll viewport.
+  loadFrame(frames[0]);
+  if (!("IntersectionObserver" in window)) return;
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
@@ -24995,7 +25572,7 @@ function hydrateOrderDetailSketchesV507() {
       observer.unobserve(entry.target);
     });
   }, { root: document.getElementById("productionExplorerBodyV470"), rootMargin: "400px 0px" });
-  frames.forEach((frame) => observer.observe(frame));
+  frames.slice(1).forEach((frame) => observer.observe(frame));
   state.orderDetailSketchObserverV507 = observer;
 }
 
@@ -25014,17 +25591,17 @@ function cuttingProgressPresentationV498(cutting = {}) {
 function code39BarcodeSvgV500(value = "") {
   const clean = String(value || "").trim().toUpperCase();
   // v0.500: the supplied physical Cutting Label resolves as Code 39 and its
-  // payload matches the scanner's established T000 + Order + Item + 000
-  // canonical barcode (verified sample: T000031506001000). Keep the encoder
+  // payload matches the scanner's established T200 + Order + Item + 000
+  // canonical barcode (verified sample: T200231506001000). Keep the encoder
   // deliberately limited to that proven
   // character set rather than silently accepting arbitrary label text.
-  if (!/^T000\d{10}$/.test(clean)) return "";
+  if (!/^T200\d{12}$/.test(clean)) return "";
   const patterns = {
     "*": "nwnnwnwnn",
     T: "nnnnwnwwn",
     "0": "nnnwwnwnn",
     "1": "wnnwnnnnw",
-    "0": "nnwwnnnnw",
+    "2": "nnwwnnnnw",
     "3": "wnwwnnnnn",
     "4": "nnnwwnnnw",
     "5": "wnnwwnnnn",
@@ -25045,7 +25622,7 @@ function code39BarcodeSvgV500(value = "") {
     if (!pattern) return "";
     for (let elementIndex = 0; elementIndex < pattern.length; elementIndex += 1) {
       const width = pattern[elementIndex] === "w" ? wide : narrow;
-      if (elementIndex % 0 === 0) bars.push(`<rect x="${x}" y="0" width="${width}" height="40"></rect>`);
+      if (elementIndex % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${width}" height="40"></rect>`);
       x += width;
     }
     if (charIndex < encoded.length - 1) x += gap;
@@ -25102,7 +25679,7 @@ function cuttingGenerationPresentationV500(generation = {}) {
     || singleLegacyPlateCut
     || (quantity > 0 && cutQuantity >= quantity);
   if (cutComplete) return cuttingProgressPresentationV498({ ...generation, state: "cut" });
-  if (statusCode === 000) return cuttingProgressPresentationV498({ ...generation, state: "released" });
+  if (statusCode === 200) return cuttingProgressPresentationV498({ ...generation, state: "released" });
   if (statusCode === 100 || Number(generation.optimization || 0) > 0) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
   if (Number(generation.batchStatusCode || 0) === 400) return cuttingProgressPresentationV498({ ...generation, state: "batch_active" });
   return cuttingProgressPresentationV498({ ...generation, state: "unknown" });
@@ -25127,7 +25704,7 @@ function cuttingLabelProcessRowsV504(cutting = {}) {
       // The supplied Crystal labels consistently use this literal display text
       // even though FS_BOOK_HISTORY may name the cutting employee/machine Intermac.
       label = "Automatic Cutting - Cutting";
-    } else if (workTypeId === 00 || /polish/i.test(work) || /polish/i.test(product)) {
+    } else if (workTypeId === 20 || /polish/i.test(work) || /polish/i.test(product)) {
       const edgeData = String(row.edgeData || "").trim();
       const sides = Array.from(edgeData.slice(0, 8)).map((value, index) => (value !== "0" && value !== " " ? index + 1 : 0)).filter(Boolean);
       const sideText = sides.length ? ` side(s) ${sides.join("/")}` : "";
@@ -25147,7 +25724,7 @@ function cuttingLabelProcessRowsV504(cutting = {}) {
   return output;
 }
 
-function cuttingLabelGenerationPlanV500(item = {}) {
+function cuttingLabelGenerationPlanV502(item = {}) {
   const cutting = item.cutting || {};
   const total = Math.max(1, Math.round(Number(item.qty || cutting.positionQuantity || 1)));
   const candidates = [];
@@ -25192,13 +25769,13 @@ function cuttingLabelGenerationPlanV500(item = {}) {
 }
 
 function cuttingLabelEdgeCalloutsV507(cutting = {}) {
-  // Probe 61-65 + the physical 038375/3 label resolved Crystal's
+  // Probe 61-65 + the physical 238375/3 label resolved Crystal's
   // Dim_LengthInfo behavior for MOD 13 exactly: MOD_PARAM1..4 are raw
-  // 1/30-inch edge lengths (1880,1878,1444,1438 -> 58 3/4, 58 11/16,
+  // 1/32-inch edge lengths (1880,1878,1444,1438 -> 58 3/4, 58 11/16,
   // 45 1/8, 44 15/16). Do not extrapolate this formula to other shape
   // modules until A+W evidence proves their parameter semantics.
   if (Number(cutting.shapeNumber || 0) !== 13) return [];
-  const units = Math.max(Number(cutting.shapeParameterUnitsPerInch || 30), 1);
+  const units = Math.max(Number(cutting.shapeParameterUnitsPerInch || 32), 1);
   const params = Array.isArray(cutting.shapeParameters) ? cutting.shapeParameters : [];
   return params
     .map((value) => Number(value || 0))
@@ -25212,7 +25789,9 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
   const batch = String(cutting.batch || "").trim();
   const optimization = Number(cutting.optimization || 0);
   const awBarcodeSource = String(cutting.cuttingBarcodeStart || cutting.itemBarcodeStart || "").trim();
-  const remake = Number(cutting.keyIndex || 0) > 0;
+  // v0.513: A+W remake generations also occur after Internal Rejects, but the
+  // physical label prints REMAKE only for customer/external remake work.
+  const remake = isExternalRemakeItem(item);
   const weight = Number(cutting.weight || 0);
   const surface = Number(cutting.surfaceArea || 0);
   const awRoute = cuttingLabelRouteTextV504(cutting.routeText);
@@ -25246,10 +25825,10 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
     const markerClass = marker === "@" ? " is-at" : marker === "#" ? " is-hash" : "";
     return `<span>${escapeHtml(line)}${marker ? `<b class="production-cutting-label-process-marker-v505${markerClass}" aria-label="A+W process marker ${escapeHtml(marker)}">${escapeHtml(marker)}</b>` : ""}</span>`;
   }).join("");
-  const labelMarkup = `<section class="production-cutting-label-v498 production-cutting-label-reconstruction-v500 production-cutting-label-v500 production-cutting-label-v504" aria-label="Reconstructed A+W Cutting Label piece ${escapeHtml(sequence)} of ${escapeHtml(total)}">
+  const labelMarkup = `<section class="production-cutting-label-v498 production-cutting-label-reconstruction-v500 production-cutting-label-v502 production-cutting-label-v504" aria-label="Reconstructed A+W Cutting Label piece ${escapeHtml(sequence)} of ${escapeHtml(total)}">
     <div class="production-cutting-label-title-v500">
       <strong>${escapeHtml(customer)}</strong>
-      ${deliveryDate ? `<time>${escapeHtml(formatDisplayDate(deliveryDate) || deliveryDate)}</time>` : ""}
+      ${deliveryDate ? `<time>${escapeHtml(formatNumericDeliveryDate(deliveryDate) || deliveryDate)}</time>` : ""}
     </div>
     <div class="production-cutting-label-route-v500">${route ? `<b>${escapeHtml(route)}</b>` : ""}</div>
     ${remake ? `<em class="production-cutting-label-remake-v504">REMAKE</em>` : ""}
@@ -25270,36 +25849,28 @@ function orderDetailCuttingLabelV498(item = {}, payload = {}, pieceNumber = 1, p
     ${edgeCallouts.length ? `<div class="production-cutting-label-edge-dims-v507" aria-label="A+W edge dimensions">${edgeCallouts.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}</div>` : ""}
     <div class="production-cutting-label-process-v500">${processHtml}</div>
     <div class="production-cutting-label-metrics-v500">
-      ${weight > 0 ? `<span><b>${escapeHtml(weight.toFixed(0))}</b><strong>lbs</strong></span>` : ""}
-      ${surface > 0 ? `<span><b>${escapeHtml(surface.toFixed(0))}</b><strong>sqft</strong></span>` : ""}
+      ${weight > 0 ? `<span><b>${escapeHtml(weight.toFixed(2))}</b><strong>lbs</strong></span>` : ""}
+      ${surface > 0 ? `<span><b>${escapeHtml(surface.toFixed(2))}</b><strong>sqft</strong></span>` : ""}
       ${(plateNumber > 0 || optimizationSequence > 0) ? `<span class="production-cutting-label-piece-counter-v501" title="A+W optimization plate / sequence"><b>${escapeHtml(plateNumber || "—")}</b><strong>/ ${escapeHtml(optimizationSequence || "—")}</strong></span>` : ""}
     </div>
   </section>`;
-  return `<div class="production-cutting-label-frame-v500">
-    <button type="button" class="production-cutting-label-maximize-v500" data-cutting-label-maximize-v500 aria-label="Maximize Cutting Label" title="Maximize Cutting Label">
-      <svg viewBox="0 0 04 04" aria-hidden="true"><path d="M8 3H3v5h0V5h3V3Zm13 5V3h-5v0h3v3h0ZM5 16H3v5h5v-0H5v-3Zm16 0h-0v3h-3v0h5v-5Z" fill="currentColor"/></svg>
-    </button>
-    <div class="production-cutting-label-scale-v500">${labelMarkup}</div>
-  </div>`;
+  return `<div class="production-cutting-label-frame-v502"><div class="production-cutting-label-scale-v502">${labelMarkup}</div></div>`;
 }
 
 function cuttingLabelPieceHtmlV507(item = {}, payload = {}, piece = 1) {
-  const generationPlan = cuttingLabelGenerationPlanV500(item);
+  const generationPlan = cuttingLabelGenerationPlanV502(item);
   const total = Math.max(1, Number(generationPlan.total || 1));
   const index = Math.min(Math.max(Number(piece || 1), 1), total) - 1;
   const entry = generationPlan.plan[index] || generationPlan.plan[0] || { generation: item.cutting || {}, sequenceAssignment: null };
   const generation = entry.generation || item.cutting || {};
-  const status = cuttingGenerationPresentationV500(generation);
-  const generationMeta = Number(generation.keyIndex || 0) > 0 ? ` · Remake ${escapeHtml(generation.keyIndex)}` : "";
   return `<div class="production-cutting-piece-v501 is-virtual-v507">
-    <div class="production-cutting-piece-summary-v507"><span>Piece ${escapeHtml(index + 1)} of ${escapeHtml(total)}${generationMeta}</span><b>${escapeHtml(status.detail)}</b></div>
     ${orderDetailCuttingLabelV498(item, payload, index + 1, total, generation, entry.sequenceAssignment)}
   </div>`;
 }
 
 function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
   const cutting = item.cutting || {};
-  const generationPlan = cuttingLabelGenerationPlanV500(item);
+  const generationPlan = cuttingLabelGenerationPlanV502(item);
   const requestedTotal = Math.max(1, Number(generationPlan.total || 1));
   const history = Array.isArray(cutting.history) ? cutting.history.slice(1, 4) : [];
   const sourceNote = cutting.inferredFromFabrication
@@ -25310,68 +25881,106 @@ function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
     ? `<label class="production-cutting-piece-selector-v507"><span>Piece</span><select data-cutting-label-piece-select-v507="${escapeHtml(itemKey)}">${Array.from({ length: requestedTotal }, (_, index) => `<option value="${index + 1}">${index + 1} / ${requestedTotal}</option>`).join("")}</select></label>`
     : "";
   // v0.507: render one physical label, not hundreds of hidden SVG/barcodes.
-  return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v500" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
+  return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v502" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
     <header><div><small>CUTTING LABEL</small><strong>${escapeHtml(requestedTotal)} physical piece${requestedTotal === 1 ? "" : "s"}</strong></div><span>${escapeHtml(sourceNote)}</span>${selector}</header>
     <div class="production-cutting-piece-list-v501" data-cutting-label-piece-body-v507="${escapeHtml(itemKey)}">${cuttingLabelPieceHtmlV507(item, payload, 1)}</div>
     ${history.length ? `<div class="production-cutting-history-v498"><small>Prior generations</small>${history.map((row) => `<span>Batch <b>${escapeHtml(row.batch || "—")}</b>${row.optimization ? ` · Opt <b>${escapeHtml(row.optimization)}</b>` : ""}</span>`).join("")}</div>` : ""}
   </section>`;
 }
 
-function ensureCuttingLabelPreviewV500() {
+function ensureCuttingLabelPreviewV502() {
   let modal = document.getElementById("cuttingLabelPreviewV500");
   if (modal) return modal;
   const backdrop = document.createElement("div");
   backdrop.id = "cuttingLabelPreviewBackdropV500";
-  backdrop.className = "cutting-label-preview-backdrop-v500";
+  backdrop.className = "cutting-label-preview-backdrop-v502";
   backdrop.hidden = true;
   modal = document.createElement("section");
   modal.id = "cuttingLabelPreviewV500";
-  modal.className = "cutting-label-preview-v500";
+  modal.className = "cutting-label-preview-v502";
   modal.hidden = true;
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
   modal.setAttribute("aria-label", "Cutting Label preview");
-  modal.innerHTML = `<header><strong>Cutting Label</strong><button type="button" class="gui-close-button" data-cutting-label-close-v500 aria-label="Close Cutting Label preview">×</button></header><div class="cutting-label-preview-body-v500"></div>`;
+  modal.innerHTML = `<header><strong>Cutting Label</strong><button type="button" class="gui-close-button" data-cutting-label-close-v502 aria-label="Close Cutting Label preview">×</button></header><div class="cutting-label-preview-body-v502"></div>`;
   document.body.append(backdrop, modal);
-  backdrop.addEventListener("click", closeCuttingLabelPreviewV500);
+  backdrop.addEventListener("click", closeCuttingLabelPreviewV502);
   return modal;
 }
 
-function openCuttingLabelPreviewV500(button) {
-  const frame = button?.closest(".production-cutting-label-frame-v500");
-  const sourceLabel = frame?.querySelector(".production-cutting-label-v500");
+function openCuttingLabelPreviewV502(button) {
+  const frame = button?.closest(".production-cutting-label-frame-v502");
+  const sourceLabel = frame?.querySelector(".production-cutting-label-v502");
   if (!sourceLabel) return;
-  const modal = ensureCuttingLabelPreviewV500();
-  const body = modal.querySelector(".cutting-label-preview-body-v500");
+  const modal = ensureCuttingLabelPreviewV502();
+  const body = modal.querySelector(".cutting-label-preview-body-v502");
   const backdrop = document.getElementById("cuttingLabelPreviewBackdropV500");
   if (body) {
     body.replaceChildren();
     const clone = sourceLabel.cloneNode(true);
-    clone.classList.add("is-maximized-v500");
+    clone.classList.add("is-maximized-v502");
     body.append(clone);
   }
   modal.hidden = false;
   if (backdrop) backdrop.hidden = false;
 }
 
-function closeCuttingLabelPreviewV500() {
+function closeCuttingLabelPreviewV502() {
   const modal = document.getElementById("cuttingLabelPreviewV500");
   const backdrop = document.getElementById("cuttingLabelPreviewBackdropV500");
   if (modal) modal.hidden = true;
   if (backdrop) backdrop.hidden = true;
 }
+function formatOperationalTimestampV511(value) {
+  if (value === null || value === undefined || value === "") return "";
+  let parsed = null;
+  if (typeof value === "number" || /^\d+(?:\.\d+)?$/.test(String(value).trim())) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) parsed = new Date(numeric < 100000000000 ? numeric * 1000 : numeric);
+  }
+  if (!parsed) parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString(appLocale(), { timeZone: PLANT_TIME_ZONE_V516, month: "numeric", day: "numeric", year: "2-digit", hour: "numeric", minute: "2-digit" });
+}
+
+function cuttingProgressTimestampV511(cutting = {}) {
+  const stateName = String(cutting.state || "").trim();
+  if (stateName === "cut") return cutting.cutCompletedAt || cutting.optimizationPlateLastChangedAt || cutting.optimizationLastChangedAt || cutting.batchLastChangedAt || "";
+  if (stateName === "released" || stateName === "optimized") return cutting.optimizationPlateLastChangedAt || cutting.optimizationLastChangedAt || cutting.optimizationDate || "";
+  if (stateName === "batch_active") return cutting.batchLastChangedAt || cutting.batchCreatedAt || "";
+  return "";
+}
+
+function fabricationProgressTimestampV511(fabrication = {}) {
+  return fabrication?.evidence?.modifiedAt || fabrication?.evidence?.lastSeenAt || "";
+}
+
 function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   const steps = [];
   const cuttingSource = { ...(item.cutting || {}) };
-  // Until production-file hydration finishes, downstream fabrication can still
-  // prove Cutting complete. Avoid flashing NOT OPTIMIZED beside a sketch/fab
-  // section that has not finished loading its stronger downstream evidence yet.
   if (["unknown", "not_optimized"].includes(String(cuttingSource.state || "")) && options.productionLoaded === false) cuttingSource.state = "loading";
   const cutting = cuttingProgressPresentationV498(cuttingSource);
-  steps.push({ label: cutting.label, detail: cutting.detail, complete: cutting.complete, kind: "cutting", className: cutting.className, active: cutting.active, rank: -10 });
+  const cuttingQty = Math.max(1, Math.round(Number(cuttingSource.quantity || item.qty || 1)));
+  const rawCutQty = Math.max(0, Number(cuttingSource.cutQuantity || 0));
+  const cuttingScanned = cutting.complete ? cuttingQty : Math.min(cuttingQty, Math.round(rawCutQty));
+  steps.push({
+    label: cutting.label,
+    scanned: cuttingScanned,
+    qty: cuttingQty,
+    complete: cutting.complete,
+    kind: "cutting",
+    className: cutting.className,
+    active: cutting.active,
+    timestamp: cuttingProgressTimestampV511(cuttingSource),
+    stateDetail: cutting.detail,
+    rank: -10,
+  });
   const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "");
+  const fabricationCompletion = fabricationCompletionStateV512(item, fabrication);
   if ((fabrication.sketchMatched || machine) && machine) {
-    steps.push({ label: machine, scanned: fabrication.fabricated === true ? 1 : 0, qty: 1, complete: fabrication.fabricated === true, kind: "fabrication", rank: 0 });
+    steps.push({ label: machine, scanned: fabricationCompletion.scanned, qty: fabricationCompletion.qty, complete: fabricationCompletion.complete, kind: "fabrication", timestamp: fabricationProgressTimestampV511(fabrication), rank: 0 });
+  } else if (fabricationNoFabConfirmedV481(fabrication, { loaded: options.productionLoaded !== false })) {
+    steps.push({ ...noFabProgressStepV512(), rank: 0 });
   }
   const orderedStages = (item.stages || []).map((stage, index) => ({ stage, index, rank: workflowProgressStageRankV477(stage) }))
     .sort((left, right) => left.rank - right.rank || left.index - right.index);
@@ -25379,19 +25988,22 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
     const label = globalSearchProgressStageLabelV475(stage);
     const qty = Math.max(0, Number(stage.qty || item.qty || 0));
     const scanned = Math.min(Math.max(0, Number(stage.scanned || 0)), qty || Number(stage.scanned || 0));
-    steps.push({ label, scanned, qty, complete: qty > 0 && scanned >= qty, kind: "stage", rank });
+    steps.push({ label, scanned, qty, complete: qty > 0 && scanned >= qty, kind: "stage", timestamp: stage.lastScannedAt || "", rank });
   }
   if (!steps.length) return `<span class="production-progress-empty-v476">Not Scanned</span>`;
   return `<div class="production-item-progress-v476">${steps.map((step) => {
     const stateClass = step.kind === "cutting"
       ? `is-pending ${step.className || "is-cutting-pending-v498"}${step.complete ? " is-complete is-complete-v477" : ""}`
-      : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
+      : step.kind === "no-fab" ? "is-no-fab-v512" : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
     const icon = step.kind === "cutting" && step.active
       ? `<i class="cutting-progress-spinner-v498" aria-hidden="true"></i>`
-      : globalSearchIconV433(step.kind === "cutting" ? "staging" : progressStageIconKindV476(step.label));
-    const value = step.kind === "cutting" ? step.detail : `${step.scanned}/${step.qty}`;
+      : globalSearchIconV433(step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label));
+    const value = step.kind === "no-fab" ? "N/A" : `${Math.max(0, Number(step.scanned || 0))}/${Math.max(0, Number(step.qty || 0))}`;
     const color = step.kind === "cutting" ? "#0f80c4" : progressStageColorV476(step.label);
-    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(color)}">${icon}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(value)}</strong></span>`;
+    const timestamp = formatOperationalTimestampV511(step.timestamp);
+    const timestampLabel = step.kind === "no-fab" ? "N/A" : timestamp || (step.complete ? "Time unavailable" : "Pending");
+    const title = step.kind === "cutting" && step.stateDetail ? ` title="${escapeHtml(step.stateDetail)}"` : "";
+    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(color)}"${title}>${icon}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(value)}</strong><time class="production-progress-time-v511">${escapeHtml(timestampLabel)}</time></span>`;
   }).join('<i aria-hidden="true">→</i>')}</div>`;
 }
 
@@ -25410,7 +26022,7 @@ function focusOrderDetailItemV477(itemNumber = "") {
     if (!target) return;
     const modalBody = target.closest(".production-explorer-body-v470");
     if (modalBody) {
-      const targetTop = target.offsetTop - Math.max(00, (modalBody.clientHeight - target.offsetHeight) / 0);
+      const targetTop = target.offsetTop - Math.max(20, (modalBody.clientHeight - target.offsetHeight) / 2);
       modalBody.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
     }
     target.classList.remove("is-focused-v477");
@@ -25421,7 +26033,7 @@ function focusOrderDetailItemV477(itemNumber = "") {
       target.classList.remove("is-focused-v477");
       state.orderDetailFocusItemV477 = "";
       state.orderDetailFocusTimerV477 = 0;
-    }, 0800);
+    }, 2800);
   });
 }
 
@@ -25462,12 +26074,37 @@ function orderDetailInternalAwRejectsV485(rejects = []) {
       const reportedBy = String(reject.reportedBy || reject.timelineEmployee || "").trim();
       const replacement = String(reject.replacementJobNumber || "").trim();
       const sourceRows = Math.max(1, Number(reject.sourceRowCount || 1));
+      const generation = reject.cuttingGenerationAtReject && typeof reject.cuttingGenerationAtReject === "object" ? reject.cuttingGenerationAtReject : {};
+      const generationBatch = String(generation.batch || "").trim();
+      const generationOptimization = Number(generation.optimization || 0);
+      const generationStatus = String(generation.optimizationStatusLabel || "").trim();
       return `<article class="production-aw-reject-v484">
         <span class="production-aw-reject-mark-v484" aria-hidden="true">!</span>
         <div class="production-aw-reject-copy-v484"><strong>${escapeHtml(reason)}</strong><span>${escapeHtml(formatDateTime(reject.breakageAt) || "Time unavailable")}${location ? ` · ${escapeHtml(location)}` : ""}</span><small>${process ? escapeHtml(process) : "A+W production"}${machine ? ` · ${escapeHtml(machine)}` : ""}${reportedBy ? ` · ${escapeHtml(reportedBy)}` : ""}</small></div>
         <div class="production-aw-reject-meta-v484">${replacement ? `<b>Remake Job ${escapeHtml(replacement)}</b>` : `<b>Remake pending</b>`}<span>${escapeHtml(sourceRows)} source row${sourceRows === 1 ? "" : "s"}</span></div>
+        ${(generationBatch || generationOptimization || generationStatus) ? `<div class="production-aw-reject-generation-v516"><small>A+W generation at reject</small><span><b>Batch</b> ${escapeHtml(generationBatch || "—")}</span><span><b>Optimization</b> ${escapeHtml(generationOptimization || "—")}</span><span><b>Status</b> ${escapeHtml(generationStatus || "Unknown")}</span></div>` : ""}
       </article>`;
     }).join("")}</div>
+  </section>`;
+}
+
+function orderDetailAwInformationV516(item = {}) {
+  const cutting = item.cutting && typeof item.cutting === "object" ? item.cutting : {};
+  const batch = String(cutting.batch || "").trim();
+  const optimization = Number(cutting.optimization || 0);
+  const status = String(cutting.optimizationStatusLabel || "").trim()
+    || (cutting.complete ? "Booked" : cutting.released ? "Released" : optimization ? "Optimized" : "Not Optimized");
+  const generationAt = String(cutting.batchCreatedAt || cutting.optimizationDate || "").trim();
+  const rejects = Array.isArray(item.awRejects) ? item.awRejects : [];
+  if (!batch && !optimization && !rejects.length && String(cutting.state || "") === "unknown") return "";
+  return `<section class="production-aw-info-v516" aria-label="A+W production information">
+    <header class="production-aw-info-heading-v516"><div><small>A+W INFORMATION</small><strong>Current production generation</strong></div>${generationAt ? `<time>${escapeHtml(formatOperationalTimestampV511(generationAt))}</time>` : ""}</header>
+    <div class="production-aw-info-current-v516">
+      <span><small>Current Batch</small><b>${escapeHtml(batch || "—")}</b></span>
+      <span><small>Current Optimization</small><b>${escapeHtml(optimization || "—")}</b></span>
+      <span><small>Optimization Status</small><b>${escapeHtml(status)}</b></span>
+    </div>
+    ${orderDetailInternalAwRejectsV485(rejects)}
   </section>`;
 }
 
@@ -25515,31 +26152,37 @@ function renderOrderDetailV470(payload = {}) {
           const fabrication = files.fabrication || {};
           const itemLabel = `${payload.order || item.order || ""}.${String(item.item || "").replace(/^0+/, "") || item.item || "-"}`;
           const priorityDetail = productionPriorityDetailV481(item);
-          return `<article class="production-order-item-v470 production-order-item-v474 production-order-item-v475 production-order-item-v476 production-order-item-v480 production-order-item-v481" data-order-detail-item-v477="${escapeHtml(item.item || "")}">
-            <div class="production-item-sketch-v476">${productionLoaded ? productionSketchVisualV476(files.sketches, itemLabel, { order: payload.order || item.order, item: item.item }) : `<div class="production-sketch-visual-v476 is-loading"><i></i><span>Loading sketch…</span></div>`}</div>
+          return `<article class="production-order-item-v470 production-order-item-v474 production-order-item-v475 production-order-item-v476 production-order-item-v480 production-order-item-v481 production-order-item-v512" data-order-detail-item-v477="${escapeHtml(item.item || "")}">
+            <div class="production-item-sketch-v476">${productionLoaded ? productionSketchVisualV476(files.sketches, itemLabel, { order: payload.order || item.order, item: item.item, itemData: item, payload, fabrication, referenceGeometry: files.referenceGeometry }) : `<div class="production-sketch-visual-v476 is-loading"><i></i><span>Loading sketch…</span></div>`}</div>
+            <div class="production-item-cutting-label-v512">${orderDetailCuttingLabelsV501(item, payload)}</div>
             <div class="production-item-main-v476 production-item-main-v480 production-item-main-v481">
-              <header class="production-item-heading-v481">
-                <div><small>ITEM ${escapeHtml(item.item || "-")}</small><strong>${escapeHtml(item.product || "Glass")}</strong><span>${escapeHtml(item.dimensions || "Size not listed")}</span></div>
+              <header class="production-item-heading-v481 production-item-heading-v516">
+                <div><small>ORDER / ITEM</small><strong>${escapeHtml(payload.order || item.order || "-")} / ${escapeHtml(item.item || "-")}</strong><span>${escapeHtml(item.product || "Glass")}</span></div>
                 ${productionLoaded ? fabricationStatusHtmlV470(fabrication, item) : `<span class="production-fab-status-v470 is-neutral">Checking fabrication…</span>`}
               </header>
               ${priorityDetail}
-              <div class="production-item-facts-v476 production-item-facts-v480 production-item-facts-v481">
+              <div class="production-item-facts-v476 production-item-facts-v480 production-item-facts-v481 production-item-facts-v516">
+                <span><small>Order</small><b>${escapeHtml(payload.order || item.order || "-")}</b></span>
                 <span><small>Item Nr.</small><b>${escapeHtml(item.item || "-")}</b></span>
+                <span><small>Glass</small><b>${escapeHtml(item.product || "-")}</b></span>
                 <span><small>Size</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
                 <span><small>Qty</small><b>${escapeHtml(item.qty || 0)}</b></span>
+                <span><small>Customer</small><b>${escapeHtml(item.customer || payload.customer || "-")}</b></span>
                 <span><small>Route</small><b>${escapeHtml(item.route || payload.route || "-")}</b></span>
                 <span><small>Job Nr.</small><b>${escapeHtml(item.job || payload.job || "-")}</b></span>
-                <span><small>Order</small><b>${escapeHtml(payload.order || item.order || "-")}</b></span>
+                <span><small>Process</small><b>${escapeHtml(item.processState || "-")}</b></span>
+                <span><small>Queue</small><b>${escapeHtml(item.queueState || "-")}</b></span>
+                <span><small>Delivery Date</small><b>${escapeHtml(formatNumericDeliveryDate((item.stages || []).find((stage) => stage.deliveryDate)?.deliveryDate || payload.deliveryDate || "") || "-")}</b></span>
               </div>
               <section class="production-progress-section-v476"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication, { productionLoaded })}</section>
-              ${orderDetailCuttingLabelsV501(item, payload)}
-              ${orderDetailInternalAwRejectsV485(item.awRejects)}
-              <footer class="production-item-actions-v476 production-item-actions-v480 production-item-actions-v481">${productionLoaded ? productionItemActionsV476(files, orderFiles) : `<span>Loading files…</span>`}</footer>
+              ${orderDetailAwInformationV516(item)}
+              <footer class="production-item-actions-v476 production-item-actions-v480 production-item-actions-v481 production-item-actions-v516">${productionLoaded ? productionItemActionsV476(files, orderFiles) : `<span>Loading files…</span>`}</footer>
             </div>
           </article>`;
         }).join("") || `<div class="production-file-empty-v470">No active items found for this order.</div>`}
       </div>
     </div>`;
+  hydrateOrderDetailSketchesV507();
   if (state.orderDetailFocusItemV477) focusOrderDetailItemV477(state.orderDetailFocusItemV477);
 }
 
@@ -25593,10 +26236,66 @@ function fetchOrderDetailCoreV507(order, force = false) {
   return request;
 }
 
+function orderDetailProductionNeedsSketchRetryV515(payload = {}) {
+  if (!payload || payload.productionLoaded === false) return false;
+  const availability = payload.productionFileAvailability || {};
+  const orderSketches = Array.isArray(payload.orderProductionFiles?.sketches) ? payload.orderProductionFiles.sketches : [];
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const hasAnyItemSketch = items.some((item) => Array.isArray(item.productionFiles?.sketches) && item.productionFiles.sketches.length > 0);
+  const sketchRefreshPending = items.some((item) => item.productionFiles?.sketchRefreshPending === true);
+  // Retry only when the whole order is missing sketch evidence. A false share
+  // availability value may simply mean the first background index has not
+  // finished yet, so the backend's explicit sketchRefreshPending signal keeps
+  // that startup race recoverable without retrying every disconnected share.
+  if (availability.sketch !== true && !sketchRefreshPending) return false;
+  return orderSketches.length === 0 && (items.length === 0 || !hasAnyItemSketch);
+}
+
+function cancelOrderDetailSketchRetryV515(order = "") {
+  const cleanOrder = String(order || "").trim();
+  if (!cleanOrder) return;
+  const entry = state.orderDetailSketchRetryV515.get(cleanOrder);
+  if (entry?.timer) window.clearTimeout(entry.timer);
+  state.orderDetailSketchRetryV515.delete(cleanOrder);
+}
+
+function scheduleOrderDetailSketchRetryV515(order, payload = {}) {
+  const cleanOrder = String(order || "").trim();
+  if (!cleanOrder) return;
+  if (!orderDetailProductionNeedsSketchRetryV515(payload)) {
+    cancelOrderDetailSketchRetryV515(cleanOrder);
+    return;
+  }
+  const previous = state.orderDetailSketchRetryV515.get(cleanOrder) || { attempts: 0, timer: 0 };
+  if (previous.timer || previous.attempts >= 2) return;
+  const delay = previous.attempts === 0 ? 1400 : 3600;
+  const entry = { ...previous, timer: 0 };
+  entry.timer = window.setTimeout(async () => {
+    entry.timer = 0;
+    if (state.orderDetailOpenOrderV474 !== cleanOrder || document.getElementById("productionExplorerPanelV470")?.hidden) {
+      state.orderDetailSketchRetryV515.set(cleanOrder, entry);
+      return;
+    }
+    entry.attempts += 1;
+    state.orderDetailSketchRetryV515.set(cleanOrder, entry);
+    try {
+      const production = await fetchOrderDetailProductionV507(cleanOrder, true);
+      const core = state.orderDetailCacheV474.get(cleanOrder)?.payload;
+      if (core && state.orderDetailOpenOrderV474 === cleanOrder && !document.getElementById("productionExplorerPanelV470")?.hidden) {
+        renderOrderDetailV470(mergeOrderProductionDetailV507(core, production));
+      }
+    } catch (error) {
+      console.warn("Order Details sketch retry did not complete.", error);
+    }
+  }, delay);
+  state.orderDetailSketchRetryV515.set(cleanOrder, entry);
+}
+
 function fetchOrderDetailProductionV507(order, force = false) {
   const cached = state.orderDetailProductionCacheV507.get(order);
   const age = cached ? Date.now() - Number(cached.at || 0) : Infinity;
-  if (!force && cached?.payload && age < 100000) return Promise.resolve(cached.payload);
+  const cachedNeedsSketchRetry = Boolean(cached?.payload && orderDetailProductionNeedsSketchRetryV515(cached.payload));
+  if (!force && cached?.payload && age < 100000 && !cachedNeedsSketchRetry) return Promise.resolve(cached.payload);
   if (state.orderDetailProductionPendingV507.has(order)) return state.orderDetailProductionPendingV507.get(order);
   const request = fetchJson(`/api/orders/production-detail?order=${encodeURIComponent(order)}`)
     .then((payload) => {
@@ -25607,6 +26306,7 @@ function fetchOrderDetailProductionV507(order, force = false) {
           fabricationStatusKeyV474(item.order || order, item.item, item.job, item.lastRejectedAt), status
         );
       }
+      scheduleOrderDetailSketchRetryV515(order, payload);
       return payload;
     })
     .finally(() => state.orderDetailProductionPendingV507.delete(order));
@@ -25751,15 +26451,15 @@ document.addEventListener("click", (event) => {
     );
     return;
   }
-  const cuttingLabelMaximize = event.target.closest("[data-cutting-label-maximize-v500]");
+  const cuttingLabelMaximize = event.target.closest("[data-cutting-label-maximize-v502]");
   if (cuttingLabelMaximize) {
     event.preventDefault();
     event.stopPropagation();
-    openCuttingLabelPreviewV500(cuttingLabelMaximize);
+    openCuttingLabelPreviewV502(cuttingLabelMaximize);
     return;
   }
-  if (event.target.closest("[data-cutting-label-close-v500]")) {
-    closeCuttingLabelPreviewV500();
+  if (event.target.closest("[data-cutting-label-close-v502]")) {
+    closeCuttingLabelPreviewV502();
     return;
   }
   if (event.target.closest("[data-production-explorer-close-v470]")) {
@@ -25798,7 +26498,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && !document.getElementById("cuttingLabelPreviewV500")?.hidden) {
-    closeCuttingLabelPreviewV500();
+    closeCuttingLabelPreviewV502();
     return;
   }
   if (event.key !== "Enter" || event.target?.id !== "productionExplorerSearchInputV470") return;
@@ -26359,10 +27059,10 @@ async function runAssignmentAction(action, assignmentId) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 const PRINT_PREVIEW_PAGE_SIZE = 18;
-const PRINT_PRESET_STORAGE_KEY = "deliveryScannerPrintPresetsV005";
+const PRINT_PRESET_STORAGE_KEY = "deliveryScannerPrintPresetsV205";
 const PRINT_PRESET_LEGACY_STORAGE_KEY = "deliveryScannerPrintPresetsV197";
-const PRINT_ACTIVE_PRESET_STORAGE_KEY = "deliveryScannerActivePrintPresetV005";
-const PRINT_DEFAULT_PRESET_STORAGE_KEY = "deliveryScannerDefaultPrintPresetV007";
+const PRINT_ACTIVE_PRESET_STORAGE_KEY = "deliveryScannerActivePrintPresetV205";
+const PRINT_DEFAULT_PRESET_STORAGE_KEY = "deliveryScannerDefaultPrintPresetV227";
 const PRINT_SYSTEM_DEFAULT_PRESET_NAME = "Default";
 const PRINT_LEGACY_SYSTEM_DEFAULT_PRESET_NAME = "System Default";
 const PRINT_SYSTEM_DEFAULT_PRESET = Object.freeze({
@@ -26772,9 +27472,9 @@ function printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent) 
       type: `glass-${value}`,
       data: `data-print-glass-type="1" data-print-glass-value="${escapeHtml(glassLabel)}" data-print-glass-search="${escapeHtml(glassLabel.toLowerCase())}"`,
     })).join("");
-    return `<section class="print-glass-category-v000 is-${escapeHtml(value)}" data-print-glass-category>
-      <header class="print-glass-category-heading-v000"><span>${escapeHtml(label)}</span><b>${escapeHtml(pieceCount)} pcs</b></header>
-      <div class="print-glass-category-options-v000">${choices}</div>
+    return `<section class="print-glass-category-v220 is-${escapeHtml(value)}" data-print-glass-category>
+      <header class="print-glass-category-heading-v220"><span>${escapeHtml(label)}</span><b>${escapeHtml(pieceCount)} pcs</b></header>
+      <div class="print-glass-category-options-v220">${choices}</div>
     </section>`;
   }).join("");
 }
@@ -26783,15 +27483,15 @@ function printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent) 
 function printCalendarDateKey(date) {
   const value = date instanceof Date ? date : new Date();
   const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(0, "0");
-  const day = String(value.getDate()).padStart(0, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
 /** Parse a scanner date key without UTC date shifting. */
 function printCalendarDateFromKey(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{0})-(\d{0})$/);
-  return match ? new Date(Number(match[1]), Number(match[0]) - 1, Number(match[3])) : null;
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
 }
 
 /** Return the first day of the month represented by a date or date key. */
@@ -26803,15 +27503,15 @@ function printCalendarMonthDate(value) {
 
 /** Size the header date selector to its current date or date-range label. */
 function syncPrintDateControlWidth() {
-  const control = els.printDateQuickSelect?.closest(".print-header-date-control-v003");
+  const control = els.printDateQuickSelect?.closest(".print-header-date-control-v203");
   if (!control || !els.printDateQuickSelect) return;
   const text = customSelectSelectedText(els.printDateQuickSelect) || "Custom Range…";
   const isRange = String(els.printDateFrom?.value || "") !== String(els.printDateTo?.value || "");
   // Compact numeric dates keep the header balanced while custom ranges still
   // grow enough to show both endpoints without truncation.
-  const minimum = isRange ? 070 : 160;
-  const maximum = isRange ? 390 : 030;
-  const measured = Math.ceil(text.length * 7.0 + 50);
+  const minimum = isRange ? 270 : 160;
+  const maximum = isRange ? 390 : 230;
+  const measured = Math.ceil(text.length * 7.2 + 52);
   control.style.setProperty("--print-date-control-width", `${Math.min(Math.max(measured, minimum), maximum)}px`);
 }
 
@@ -26894,8 +27594,8 @@ function appendPrintQuickDateHistoryControl(select, optionsHost, query = "") {
   if (select.id !== "printDateQuickSelect" || select.dataset.hasMoreHistory !== "true" || String(query || "").trim()) return;
   const control = document.createElement("button");
   control.type = "button";
-  control.className = "custom-select-load-more print-date-load-more-v005";
-  control.innerHTML = '<strong>Load 0 older weeks</strong><span>Scroll to the bottom or select this row</span>';
+  control.className = "custom-select-load-more print-date-load-more-v225";
+  control.innerHTML = '<strong>Load 2 older weeks</strong><span>Scroll to the bottom or select this row</span>';
   control.addEventListener("click", () => extendPrintQuickDateMenu(select, optionsHost, query));
   optionsHost.append(control);
 }
@@ -26988,10 +27688,10 @@ function closePrintDateCalendar() {
 /** Return one calendar month's six-week button grid. */
 function dateRangeCalendarMonthButtons(month, today, availableDates, start, end, dataAttribute = "data-print-calendar-date") {
   const firstCell = new Date(month.getFullYear(), month.getMonth(), 1 - month.getDay());
-  return Array.from({ length: 40 }, (_, offset) => {
+  return Array.from({ length: 42 }, (_, offset) => {
     const date = new Date(firstCell.getFullYear(), firstCell.getMonth(), firstCell.getDate() + offset);
     const key = printCalendarDateKey(date);
-    const classes = ["print-calendar-day-v001"];
+    const classes = ["print-calendar-day-v201"];
     if (date.getMonth() !== month.getMonth()) classes.push("is-other-month");
     if (key === today) classes.push("is-today");
     if (key === start) classes.push("is-range-start", "is-selected");
@@ -27420,7 +28120,7 @@ function renderPrintSelectedOrders() {
     </article>
   `);
   const itemCards = state.printSelectedItems.map((entry) => `
-    <article class="print-selected-order-v199 print-selected-item-v000 ${entry.available ? "" : "is-unavailable"}">
+    <article class="print-selected-order-v199 print-selected-item-v202 ${entry.available ? "" : "is-unavailable"}">
       <div>
         <strong>Order ${escapeHtml(entry.order || "—")} · Item ${escapeHtml(entry.item || "—")}</strong>
         <span>${escapeHtml(entry.customer || "Unassigned customer")}</span>
@@ -27520,13 +28220,13 @@ function renderPrintSearchSuggestions() {
       const orderSelected = selectedOrders.has(entry.order);
       const itemSelected = selectedItems.has(entry.selectionKey) || orderSelected;
       return `
-        <article class="print-search-result-v000">
-          <div class="print-search-result-info-v036">
-            <div class="print-search-result-title-v036">
+        <article class="print-search-result-v202">
+          <div class="print-search-result-info-v236">
+            <div class="print-search-result-title-v236">
               <strong>Order ${escapeHtml(entry.order)}</strong>
               <span>Item ${escapeHtml(entry.item || "—")}</span>
             </div>
-            <div class="print-search-result-meta-v036">
+            <div class="print-search-result-meta-v236">
               <span><small>Customer</small><b>${escapeHtml(entry.customer)}</b></span>
               <span><small>Job</small><b>${escapeHtml(entry.job)}</b></span>
               <span><small>Glass</small><b>${escapeHtml(entry.glassType || "Glass")}</b></span>
@@ -27534,7 +28234,7 @@ function renderPrintSearchSuggestions() {
               <span><small>Date</small><b>${escapeHtml(formatDisplayDate(entry.deliveryDate || ""))}</b></span>
             </div>
           </div>
-          <div class="print-search-result-actions-v000">
+          <div class="print-search-result-actions-v202">
             <button type="button" data-print-add-item="${escapeHtml(entry.selectionKey)}" ${itemSelected ? "disabled" : ""}>${itemSelected ? "Item Added" : "Add Item"}</button>
             <button type="button" data-print-add-order="${escapeHtml(entry.order)}" ${orderSelected ? "disabled" : ""}>${orderSelected ? "Order Added" : "Add Order"}</button>
           </div>
@@ -27746,7 +28446,7 @@ function buildLocalPrintSelectionPreview() {
 function printPreviewTimestamp(value) {
   const parsed = new Date(value || Date.now());
   if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleString(appLocale(), { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "0-digit" });
+  return parsed.toLocaleString(appLocale(), { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 /** Compress one filter group into a readable print-header value. */
@@ -27754,7 +28454,7 @@ function printCompactFilterValue(values, allLabel, labels = {}, countedLabel = "
   const selected = [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))];
   if (!selected.length) return allLabel;
   const display = selected.map((value) => labels[value] || value);
-  if (display.length <= 0) return display.join(", ");
+  if (display.length <= 2) return display.join(", ");
   return `${display.length} ${countedLabel}`;
 }
 
@@ -27794,13 +28494,13 @@ function paginatePrintSheetRows(rows, orientation = "portrait") {
   let current = [];
   let count = 0;
   let currentGlass = "";
-  // v0.005 keeps the verified portrait limits and the 07-row landscape first
+  // v0.225 keeps the verified portrait limits and the 27-row landscape first
   // page, while reducing landscape continuation pages by one logical line.
   // Glass headings still consume one logical line so the final order row stays
   // above the fixed footer and printer-safe margin.
   const limit = () => landscape
-    ? (pages.length ? 08 : 07)
-    : (pages.length ? 08 : 06);
+    ? (pages.length ? 28 : 27)
+    : (pages.length ? 28 : 26);
   const flush = () => { if (current.length) pages.push(current); current = []; count = 0; currentGlass = ""; };
   for (const row of rows || []) {
     const glass = String(row.glassType || "Unspecified Glass");
@@ -27820,7 +28520,7 @@ function printSheetBodyMarkup(pageRows) {
   return (pageRows || []).map((entry) => {
     if (entry.type === "group") return `<tr class="glass-group"><td colspan="8">${escapeHtml(entry.glassType)}</td></tr>`;
     const row = entry.row || {};
-    const stripeClass = visibleRowIndex % 0 ? "is-even" : "is-odd";
+    const stripeClass = visibleRowIndex % 2 ? "is-even" : "is-odd";
     visibleRowIndex += 1;
     return `<tr class="print-data-row ${stripeClass}"><td class="print-truncate">${escapeHtml(row.job || row.glassType || "")}</td><td>${escapeHtml(row.order || "")}</td><td>${escapeHtml(row.item || "")}</td><td>${escapeHtml(row.pieces || 0)}</td><td class="print-truncate">${escapeHtml(row.dimensions || "")}</td><td class="print-truncate">${escapeHtml(row.customer || "")}</td><td>${escapeHtml(row.route || "Indian Trail")}</td><td class="check-cell">☐</td></tr>`;
   }).join("");
@@ -27838,18 +28538,18 @@ function printSheetPageMarkup(sheet, pageRows, pageNumber, pageTotal, orientatio
   const dateLabel = String(sheet.dateLabel || printSheetDateLabel(sheet.deliveryDate || ""));
   const routeLabel = String(sheet.routeLabel || printSheetRouteLabel());
   const titleLabel = String(sheet.titleLabel || `${routeLabel.toLocaleUpperCase()} DELIVERY LIST`);
-  const titleLengthClass = titleLabel.length > 40 ? "is-long" : titleLabel.length > 08 ? "is-medium" : "";
-  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=00060906-mobile-v509", window.location.href).href;
+  const titleLengthClass = titleLabel.length > 42 ? "is-long" : titleLabel.length > 28 ? "is-medium" : "";
+  const logoUrl = new URL("static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260908-v0.510", window.location.href).href;
   const pageFilterDetails = `<p class="sheet-filter-summary" title="${escapeHtml(filterSummary)}">${escapeHtml(filterSummary)}</p>`;
   const firstPageSignoff = continuation
     ? ""
     : `<div class="sheet-header-signoff"><div class="copy-box"><span>Checked By: <i class="write-line checked-line"></i></span></div></div>`;
-  return `<section class="delivery-print-sheet-v003 ${escapeHtml(sheet.mode || "normal")} is-${escapeHtml(orientation)} ${previewClass}">
+  return `<section class="delivery-print-sheet-v203 ${escapeHtml(sheet.mode || "normal")} is-${escapeHtml(orientation)} ${previewClass}">
     <div class="sheet-page-top">List page ${pageNumber} of ${pageTotal}</div>
     <header class="sheet-header ${continuation ? "sheet-header-compact" : ""}">
       <div class="sheet-brand-title">
         <div class="sheet-brand-mark"><img src="${escapeHtml(logoUrl)}" alt="Barefoot Company and Builders FirstSource logo"></div>
-        <div class="sheet-title-block"><div class="sheet-location-row ${titleLengthClass}"><${continuation ? "h0" : "h1"} class="sheet-location-title">${escapeHtml(titleLabel)}</${continuation ? "h0" : "h1"}>${badge}</div><p class="sheet-date-title">${escapeHtml(dateLabel)}</p><p class="sheet-totals">Rows: ${printableRows} | Orders: ${totalOrders} | QTY: ${totalQty}</p>${pageFilterDetails}</div>
+        <div class="sheet-title-block"><div class="sheet-location-row ${titleLengthClass}"><${continuation ? "h2" : "h1"} class="sheet-location-title">${escapeHtml(titleLabel)}</${continuation ? "h2" : "h1"}>${badge}</div><p class="sheet-date-title">${escapeHtml(dateLabel)}</p><p class="sheet-totals">Rows: ${printableRows} | Orders: ${totalOrders} | QTY: ${totalQty}</p>${pageFilterDetails}</div>
       </div>
       ${firstPageSignoff}
     </header>
@@ -27877,13 +28577,13 @@ function renderPrintDocumentPreview(preview = {}) {
   if (els.printPreviewPageCount) els.printPreviewPageCount.textContent = `${Math.max(pages.length, 1)} page${pages.length === 1 ? "" : "s"} · ${copies} cop${copies === 1 ? "y" : "ies"}`;
   els.printDocumentPaper.classList.toggle("is-landscape", orientation === "landscape");
   els.printDocumentPaper.classList.toggle("is-portrait", orientation !== "landscape");
-  els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<div class="print-preview-page-shell-v443 is-${orientation}"><section class="delivery-print-sheet-v003 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section></div>`;
+  els.printDocumentPaper.innerHTML = pages.length ? pages.join("") : `<div class="print-preview-page-shell-v443 is-${orientation}"><section class="delivery-print-sheet-v203 is-${orientation} is-preview"><div class="print-paper-empty-v197"><strong>0</strong><h3>No printable rows</h3><p>Selected filters yield 0 results.</p></div></section></div>`;
 }
 
 /** Return the zoom needed to fit one Letter sheet inside the preview width. */
 function printPreviewFitZoom(orientation = els.printOrientation?.value || "portrait") {
   const landscape = String(orientation || "portrait") === "landscape";
-  const availableWidth = Math.max(Number(els.printDocumentViewport?.clientWidth || 880) - 48, 300);
+  const availableWidth = Math.max(Number(els.printDocumentViewport?.clientWidth || 880) - 48, 320);
   const paperWidth = (landscape ? 11 : 8.5) * 96;
   return Math.min(1, Math.max(0.5, availableWidth / paperWidth));
 }
@@ -28032,7 +28732,7 @@ function readPrintPresets() {
     // Preserve an older user-created preset that happened to use the newly
     // reserved display name instead of silently discarding its settings.
     if (parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME]) {
-      const migratedName = parsed["Default (Saved)"] ? "Default (Saved 0)" : "Default (Saved)";
+      const migratedName = parsed["Default (Saved)"] ? "Default (Saved 2)" : "Default (Saved)";
       parsed[migratedName] = parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
     }
     delete parsed[PRINT_SYSTEM_DEFAULT_PRESET_NAME];
@@ -28133,7 +28833,7 @@ function currentPrintPreset() {
   };
 }
 
-/** Retain semantic choice hooks for the restrained v0.034 route and glass accents. */
+/** Retain semantic choice hooks for the restrained v0.234 route and glass accents. */
 function printPresetChoiceVisualClass(name, value, label = value) {
   const cleanName = String(name || "").trim().toLowerCase();
   const cleanValue = String(value || "").trim().toLowerCase().replaceAll("_", "-");
@@ -28165,21 +28865,21 @@ function printPresetGlassChoiceMarkup(options, selectedValues, selectedFamilies 
     const familySelected = families.has(value);
     const choices = entries.length
       ? entries.map(({ value: optionValue, label: optionLabel }) => `
-        <label class="print-preset-choice-v007 ${escapeHtml(printPresetChoiceVisualClass("glass", optionValue, optionLabel))}" data-preset-search="${escapeHtml(`${optionValue} ${optionLabel}`.toLowerCase())}">
+        <label class="print-preset-choice-v227 ${escapeHtml(printPresetChoiceVisualClass("glass", optionValue, optionLabel))}" data-preset-search="${escapeHtml(`${optionValue} ${optionLabel}`.toLowerCase())}">
           <input type="checkbox" data-preset-value="glass" value="${escapeHtml(optionValue)}" ${selected.has(optionValue) && !familySelected ? "checked" : ""} ${familySelected ? "disabled" : ""}>
           <span>${escapeHtml(optionLabel)}</span>
-          <i class="print-preset-glass-check-v041" aria-hidden="true">✓</i>
+          <i class="print-preset-glass-check-v241" aria-hidden="true">✓</i>
         </label>`).join("")
-      : `<div class="print-preset-glass-family-empty-v037">No known ${escapeHtml(label.toLowerCase())} products yet.</div>`;
-    return `<section class="print-preset-glass-category-v030 is-${escapeHtml(value)}" data-preset-glass-category="${escapeHtml(value)}">
+      : `<div class="print-preset-glass-family-empty-v237">No known ${escapeHtml(label.toLowerCase())} products yet.</div>`;
+    return `<section class="print-preset-glass-category-v232 is-${escapeHtml(value)}" data-preset-glass-category="${escapeHtml(value)}">
       <header>
-        <label class="print-preset-glass-family-v037">
+        <label class="print-preset-glass-family-v237">
           <input type="checkbox" data-preset-glass-family="${escapeHtml(value)}" ${familySelected ? "checked" : ""}>
           <span>${escapeHtml(label)} set</span>
         </label>
         <span>${entries.length} ${entries.length === 1 ? "type" : "types"}</span>
       </header>
-      <div class="print-preset-glass-category-options-v030">${choices}</div>
+      <div class="print-preset-glass-category-options-v232">${choices}</div>
     </section>`;
   }).join("");
 }
@@ -28195,23 +28895,23 @@ function printPresetBuilderGroup(title, name, options, selectedValues, allLabel 
       .join(" + ") || "None selected";
   const allChoiceClass = name === "statuses" ? "is-status-all" : name === "attention" ? "is-attention-all" : name === "glass" ? "is-glass-all" : "";
   const allChoice = allLabel
-    ? `<label class="print-preset-choice-v007 is-all ${allChoiceClass}"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
+    ? `<label class="print-preset-choice-v227 is-all ${allChoiceClass}"><input type="checkbox" data-preset-all="${escapeHtml(name)}" ${allSelected ? "checked" : ""}><span>${escapeHtml(allLabel)}</span></label>`
     : "";
   const glassSearch = name === "glass"
-    ? `<label class="print-preset-glass-search-v007"><span class="visually-hidden">Search preset glass types</span><input type="search" data-preset-glass-search autocomplete="off" placeholder="Search glass types"></label>`
+    ? `<label class="print-preset-glass-search-v227"><span class="visually-hidden">Search preset glass types</span><input type="search" data-preset-glass-search autocomplete="off" placeholder="Search glass types"></label>`
     : "";
   const choices = name === "glass"
     ? printPresetGlassChoiceMarkup(options, selectedValues, selectedFamilies)
-    : options.map(({ value, label }) => `<label class="print-preset-choice-v007 ${escapeHtml(printPresetChoiceVisualClass(name, value, label))}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
+    : options.map(({ value, label }) => `<label class="print-preset-choice-v227 ${escapeHtml(printPresetChoiceVisualClass(name, value, label))}"><input type="checkbox" data-preset-value="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
   return `
-    <section class="print-preset-filter-row-v007 is-${escapeHtml(name)}" data-preset-group="${escapeHtml(name)}">
+    <section class="print-preset-filter-row-v227 is-${escapeHtml(name)}" data-preset-group="${escapeHtml(name)}">
       <header><strong>${escapeHtml(title)}</strong></header>
-      <div class="print-preset-filter-control-v007">
+      <div class="print-preset-filter-control-v227">
         ${glassSearch}
-        <div class="print-preset-choice-grid-v007 ${name === "glass" ? "is-grouped-glass-v030" : ""}">
+        <div class="print-preset-choice-grid-v227 ${name === "glass" ? "is-grouped-glass-v232" : ""}">
           ${allChoice}
           ${choices}
-          ${name === "glass" ? '<div class="print-preset-glass-empty-v006" data-preset-glass-empty hidden>No glass types match this search.</div>' : ""}
+          ${name === "glass" ? '<div class="print-preset-glass-empty-v206" data-preset-glass-empty hidden>No glass types match this search.</div>' : ""}
         </div>
       </div>
       <b data-preset-group-summary>${escapeHtml(selectionSummary)}</b>
@@ -28317,9 +29017,9 @@ function renderPrintPresetSaveSummary(knownGlassOptions = state.printKnownGlassT
     ${printPresetBuilderGroup("Routes", "routes", routeOptions, preset.routeGroups)}
     ${printPresetBuilderGroup("Glass Types", "glass", glassOptions, preset.glassTypes, "All Glass", preset.glassFamilies)}`;
   els.printPresetOutputSettings.innerHTML = `
-    <label class="print-preset-option-field-v007"><span>Copies</span><div class="print-preset-copy-stepper-v007"><button type="button" data-preset-copy-change="-1" aria-label="Decrease copies">−</button><input data-preset-copies type="text" inputmode="numeric" pattern="[0-9]*" maxlength="0" aria-label="Number of copies" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"><button type="button" data-preset-copy-change="1" aria-label="Increase copies">+</button></div></label>
-    <div class="print-preset-option-field-v007 print-preset-orientation-v007"><span>Orientation</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
-    <label class="print-preset-option-field-v007"><span>File Format</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>`;
+    <label class="print-preset-option-field-v227"><span>Copies</span><div class="print-preset-copy-stepper-v227"><button type="button" data-preset-copy-change="-1" aria-label="Decrease copies">−</button><input data-preset-copies type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" aria-label="Number of copies" value="${Math.max(1, Math.min(Number(preset.copies || 1), 10))}"><button type="button" data-preset-copy-change="1" aria-label="Increase copies">+</button></div></label>
+    <div class="print-preset-option-field-v227 print-preset-orientation-v227"><span>Orientation</span><input data-preset-orientation type="hidden" value="${preset.orientation === "landscape" ? "landscape" : "portrait"}"><div><button type="button" class="${preset.orientation === "landscape" ? "" : "is-active"}" data-preset-orientation-choice="portrait">Portrait</button><button type="button" class="${preset.orientation === "landscape" ? "is-active" : ""}" data-preset-orientation-choice="landscape">Landscape</button></div></div>
+    <label class="print-preset-option-field-v227"><span>File Format</span><select data-preset-output-type><option value="pdf" ${preset.outputType === "pdf" ? "selected" : ""}>PDF</option><option value="xlsx" ${preset.outputType === "xlsx" ? "selected" : ""}>Excel Workbook (.xlsx)</option><option value="csv" ${preset.outputType === "csv" ? "selected" : ""}>Comma-Separated Values (.csv)</option></select></label>`;
   enhanceCustomSelects(els.printPresetOutputSettings);
 }
 
@@ -28364,7 +29064,7 @@ function savePrintPreset() {
   if (els.printPresetModalBackdrop) els.printPresetModalBackdrop.hidden = false;
   if (els.printPresetModal) {
     els.printPresetModal.hidden = false;
-    const workspace = els.printPresetModal.querySelector(".print-preset-workspace-v007");
+    const workspace = els.printPresetModal.querySelector(".print-preset-workspace-v227");
     if (workspace) workspace.scrollTop = 0;
   }
   updateModalScrollLock();
@@ -28715,31 +29415,31 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=00060906-mobile-v509", window.location.href).href,
-    new URL("static/css/print.css?v=00060906-mobile-v509", window.location.href).href,
+    new URL("static/css/styles.css?v=20260908-v0.515", window.location.href).href,
+    new URL("static/css/print.css?v=20260908-v0.510", window.location.href).href,
   ];
 }
 
 /** Return only printer-page overrides; reusable and Print-specific styling comes from linked stylesheets. */
 function localPrintPackageStyles(orientation) {
   const landscape = orientation === "landscape";
-  const printableHeight = landscape ? "7.7in" : "10.0in";
+  const printableHeight = landscape ? "7.7in" : "10.2in";
   const pageSize = landscape ? "letter landscape" : "letter portrait";
   return `
     *{box-sizing:border-box}
-    html,body{margin:0;min-height:100%;background:#e5ebf0}
-    body{color:#07100f;font-family:"Segoe UI",Arial,sans-serif}
+    html,body{margin:0;min-height:100%;background:#e5ebf2}
+    body{color:#07122f;font-family:"Segoe UI",Arial,sans-serif}
     @page{size:${pageSize};margin:.4in}
     @media print{
       *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
       html,body{background:#fff}
-      .delivery-print-sheet-v003{width:100%!important;min-width:100%!important;max-width:100%!important;height:${printableHeight}!important;min-height:${printableHeight}!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;overflow:hidden!important;box-shadow:none!important;page-break-after:always;break-after:page}
-      .delivery-print-sheet-v003:last-child{page-break-after:auto;break-after:auto}
-      .delivery-print-sheet-v003.rush::before{inset:.09in}
-      .delivery-print-sheet-v003.remake{padding:.1in!important}
-      .delivery-print-sheet-v003.remake::after{inset:.00in}
-      .delivery-print-sheet-v003 .sheet-footer{left:0;bottom:0}
-      .delivery-print-sheet-v003.remake .sheet-footer{left:.1in;bottom:.04in}
+      .delivery-print-sheet-v203{width:100%!important;min-width:100%!important;max-width:100%!important;height:${printableHeight}!important;min-height:${printableHeight}!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;overflow:hidden!important;box-shadow:none!important;page-break-after:always;break-after:page}
+      .delivery-print-sheet-v203:last-child{page-break-after:auto;break-after:auto}
+      .delivery-print-sheet-v203.rush::before{inset:.09in}
+      .delivery-print-sheet-v203.remake{padding:.1in!important}
+      .delivery-print-sheet-v203.remake::after{inset:.02in}
+      .delivery-print-sheet-v203 .sheet-footer{left:0;bottom:0}
+      .delivery-print-sheet-v203.remake .sheet-footer{left:.1in;bottom:.04in}
     }`;
 }
 
@@ -28785,7 +29485,7 @@ function launchLocalPrintPackage(preview) {
 
 
 /* ========================================================================== */
-/* v0.043 formatted XLSX and raw CSV exports                                  */
+/* v0.243 formatted XLSX and raw CSV exports                                  */
 /* ========================================================================== */
 /*
  * XLSX intentionally uses a small built-in OOXML writer instead of a remote
@@ -28794,7 +29494,7 @@ function launchLocalPrintPackage(preview) {
  * Excel handles the resulting workbook without a server round trip.
  */
 const PRINT_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=00060906-mobile-v509";
+const PRINT_XLSX_LOGO_PATH = "static/images/barefoot-company-builders-firstsource-print-logo.png?v=20260908-v0.510";
 
 function printExportFileStem(preview = {}) {
   const route = printSheetRouteLabel().replace(/\s*\|\s*/g, "-");
@@ -28862,8 +29562,8 @@ function xlsxColumnName(index) {
   let name = "";
   while (value) {
     value -= 1;
-    name = String.fromCharCode(65 + (value % 06)) + name;
-    value = Math.floor(value / 06);
+    name = String.fromCharCode(65 + (value % 26)) + name;
+    value = Math.floor(value / 26);
   }
   return name;
 }
@@ -28889,7 +29589,7 @@ function xlsxSafeSheetName(value, usedNames) {
     .trim()
     .slice(0, 31) || "Delivery List";
   let candidate = base;
-  let suffix = 0;
+  let suffix = 2;
   while (usedNames.has(candidate.toLowerCase())) {
     const tail = ` ${suffix}`;
     candidate = `${base.slice(0, Math.max(1, 31 - tail.length))}${tail}`;
@@ -28909,24 +29609,24 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   const filterSummary = String(sheet.filterSummary || printCurrentFilterSummary());
   const generatedLabel = `Prepared ${printPreviewTimestamp(generatedAt)}`;
   const rowXml = [];
-  const merges = ["C1:H1", "C0:H0", "C3:E3", "F3:H3", "C4:H4", "A5:E5", "F5:H5"];
+  const merges = ["C1:H1", "C2:H2", "C3:E3", "F3:H3", "C4:H4", "A5:E5", "F5:H5"];
 
   // Rows 1-5 form a branded document header. A:B are intentionally reserved
   // for the logo so the image never competes with title/meta copy for space.
   rowXml.push(xlsxRowXml(1, [xlsxInlineCell("C1", title, 15)], { height: 30 }));
-  rowXml.push(xlsxRowXml(0, [xlsxInlineCell("C0", dateLabel, 16)], { height: 04 }));
+  rowXml.push(xlsxRowXml(2, [xlsxInlineCell("C2", dateLabel, 16)], { height: 24 }));
   rowXml.push(xlsxRowXml(3, [
     xlsxInlineCell("C3", `Orders: ${totalOrders}`, 17),
     xlsxInlineCell("F3", `Rows: ${rows.length}   |   QTY: ${totalQty}`, 17),
-  ], { height: 00 }));
+  ], { height: 22 }));
   rowXml.push(xlsxRowXml(4, [xlsxInlineCell("C4", filterSummary, 18)], { height: 30 }));
   rowXml.push(xlsxRowXml(5, [
     xlsxInlineCell("A5", generatedLabel, 14),
     xlsxInlineCell("F5", "Checked By: ____________________", 13),
-  ], { height: 00 }));
+  ], { height: 22 }));
 
   const headers = ["Job Nr.", "Order", "Item", "QTY", "Dimensions", "Customer", "Route", "Check"];
-  rowXml.push(xlsxRowXml(6, headers.map((label, index) => xlsxInlineCell(`${xlsxColumnName(index + 1)}6`, label, 5)), { height: 04 }));
+  rowXml.push(xlsxRowXml(6, headers.map((label, index) => xlsxInlineCell(`${xlsxColumnName(index + 1)}6`, label, 5)), { height: 24 }));
 
   let excelRow = 7;
   let visibleRowIndex = 0;
@@ -28934,15 +29634,15 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   for (const row of rows) {
     const glass = String(row.glassType || "Unspecified Glass");
     if (glass !== currentGlass) {
-      rowXml.push(xlsxRowXml(excelRow, [xlsxInlineCell(`A${excelRow}`, glass, 6)], { height: 01 }));
+      rowXml.push(xlsxRowXml(excelRow, [xlsxInlineCell(`A${excelRow}`, glass, 6)], { height: 21 }));
       merges.push(`A${excelRow}:H${excelRow}`);
       excelRow += 1;
       currentGlass = glass;
     }
-    const alternate = visibleRowIndex % 0 === 1;
+    const alternate = visibleRowIndex % 2 === 1;
     const textStyle = alternate ? 8 : 7;
     const centeredStyle = alternate ? 10 : 9;
-    const checkStyle = alternate ? 10 : 11;
+    const checkStyle = alternate ? 12 : 11;
     const values = [
       row.job || row.glassType || "",
       row.order || "",
@@ -28960,7 +29660,7 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
       if (index === 7) return xlsxInlineCell(reference, value, checkStyle);
       return xlsxInlineCell(reference, value, textStyle);
     });
-    rowXml.push(xlsxRowXml(excelRow, cells, { height: 00 }));
+    rowXml.push(xlsxRowXml(excelRow, cells, { height: 20 }));
     excelRow += 1;
     visibleRowIndex += 1;
   }
@@ -28972,13 +29672,13 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   const printArea = `'${sheetName.replace(/'/g, "''")}'!$A$1:$H$${footerRow}`;
   const printTitles = `'${sheetName.replace(/'/g, "''")}'!$6:$6`;
   const worksheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/0006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/0006/relationships">
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
   <dimension ref="A1:H${footerRow}"/>
   <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>
-    <col min="1" max="1" width="30" customWidth="1"/><col min="0" max="0" width="14" customWidth="1"/>
+    <col min="1" max="1" width="30" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>
     <col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="8" customWidth="1"/>
     <col min="5" max="5" width="18" customWidth="1"/><col min="6" max="6" width="31" customWidth="1"/>
     <col min="7" max="7" width="13" customWidth="1"/><col min="8" max="8" width="9" customWidth="1"/>
@@ -28986,7 +29686,7 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
   <sheetData>${rowXml.join("")}</sheetData>
   <mergeCells count="${merges.length}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>
   <printOptions horizontalCentered="1"/>
-  <pageMargins left="0.05" right="0.05" top="0.35" bottom="0.35" header="0.15" footer="0.00"/>
+  <pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.22"/>
   <pageSetup paperSize="1" orientation="${orientation}" fitToWidth="1" fitToHeight="0" horizontalDpi="300" verticalDpi="300"/>
   <headerFooter><oddFooter>&amp;LDelivery List Scanner&amp;C${xlsxXmlEscape(sheetName)}&amp;RPage &amp;P of &amp;N</oddFooter></headerFooter>
   <drawing r:id="rId1"/>
@@ -28996,23 +29696,23 @@ function xlsxSheetDocument(sheet, orientation, generatedAt, sheetIndex, sheetNam
 
 function xlsxStylesDocument() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/0006/main">
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <fonts count="7">
-    <font><sz val="10"/><name val="Aptos"/><family val="0"/></font>
-    <font><b/><sz val="17"/><color rgb="FF17395F"/><name val="Aptos Display"/><family val="0"/></font>
-    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/><family val="0"/></font>
-    <font><b/><sz val="10"/><color rgb="FF17395F"/><name val="Aptos"/><family val="0"/></font>
-    <font><sz val="9"/><color rgb="FF3E536D"/><name val="Aptos"/><family val="0"/></font>
-    <font><i/><sz val="9"/><color rgb="FF506078"/><name val="Aptos"/><family val="0"/></font>
-    <font><b/><sz val="17"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/><family val="0"/></font>
+    <font><sz val="10"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="17"/><color rgb="FF17395F"/><name val="Aptos Display"/><family val="2"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="10"/><color rgb="FF17395F"/><name val="Aptos"/><family val="2"/></font>
+    <font><sz val="9"/><color rgb="FF3E536D"/><name val="Aptos"/><family val="2"/></font>
+    <font><i/><sz val="9"/><color rgb="FF526078"/><name val="Aptos"/><family val="2"/></font>
+    <font><b/><sz val="17"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/><family val="2"/></font>
   </fonts>
   <fills count="7">
-    <fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray105"/></fill>
+    <fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1D4F91"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFDCE9F5"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFDDEEDF"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFF4F7FA"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFEAF0FB"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFEAF2FB"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
   <borders count="3">
     <border><left/><right/><top/><bottom/><diagonal/></border>
@@ -29022,11 +29722,11 @@ function xlsxStylesDocument() {
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
   <cellXfs count="19">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="2" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" shrinkToFit="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" shrinkToFit="1"/></xf>
@@ -29036,14 +29736,14 @@ function xlsxStylesDocument() {
     <xf numFmtId="0" fontId="3" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
+    <xf numFmtId="0" fontId="6" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
     <xf numFmtId="0" fontId="3" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" indent="1"/></xf>
     <xf numFmtId="0" fontId="3" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="5" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1" indent="1"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
-  <tableStyles count="0" defaultTableStyle="TableStyleMedium0" defaultPivotStyle="PivotTableStyleLight16"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotTableStyleLight16"/>
 </styleSheet>`;
 }
 
@@ -29052,7 +29752,7 @@ function xlsxDrawingDocument(imageId = 1, logoMetrics = {}) {
   const naturalHeight = Math.max(Number(logoMetrics.height || 1), 1);
   const aspect = naturalWidth / naturalHeight;
   const emuPerInch = 914400;
-  const maxWidth = Math.round(0.35 * emuPerInch);
+  const maxWidth = Math.round(2.35 * emuPerInch);
   const maxHeight = Math.round(0.95 * emuPerInch);
   let width = maxWidth;
   let height = Math.round(width / aspect);
@@ -29061,7 +29761,7 @@ function xlsxDrawingDocument(imageId = 1, logoMetrics = {}) {
     width = Math.round(height * aspect);
   }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/0006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/0006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/0006/relationships">
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <xdr:oneCellAnchor>
     <xdr:from><xdr:col>0</xdr:col><xdr:colOff>90000</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>90000</xdr:rowOff></xdr:from>
     <xdr:ext cx="${width}" cy="${height}"/>
@@ -29076,12 +29776,12 @@ function xlsxDrawingDocument(imageId = 1, logoMetrics = {}) {
 }
 
 let xlsxCrcTable = null;
-function xlsxCrc30(bytes) {
+function xlsxCrc32(bytes) {
   if (!xlsxCrcTable) {
-    xlsxCrcTable = new Uint30Array(056);
-    for (let index = 0; index < 056; index += 1) {
+    xlsxCrcTable = new Uint32Array(256);
+    for (let index = 0; index < 256; index += 1) {
       let value = index;
-      for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? (0xEDB88300 ^ (value >>> 1)) : (value >>> 1);
+      for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? (0xEDB88320 ^ (value >>> 1)) : (value >>> 1);
       xlsxCrcTable[index] = value >>> 0;
     }
   }
@@ -29092,7 +29792,7 @@ function xlsxCrc30(bytes) {
 
 function xlsxZipDateParts(date = new Date()) {
   const year = Math.max(1980, date.getFullYear());
-  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 0);
+  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
   const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
   return { dosTime, dosDate };
 }
@@ -29118,56 +29818,56 @@ function xlsxStoredZip(entries) {
   for (const entry of entries) {
     const nameBytes = encoder.encode(entry.name);
     const dataBytes = entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data));
-    const crc = xlsxCrc30(dataBytes);
+    const crc = xlsxCrc32(dataBytes);
     const localHeader = new Uint8Array(30);
     const localView = new DataView(localHeader.buffer);
-    localView.setUint30(0, 0x04034B50, true);
-    localView.setUint16(4, 00, true);
+    localView.setUint32(0, 0x04034B50, true);
+    localView.setUint16(4, 20, true);
     localView.setUint16(6, 0x0800, true);
     localView.setUint16(8, 0, true);
     localView.setUint16(10, dosTime, true);
-    localView.setUint16(10, dosDate, true);
-    localView.setUint30(14, crc, true);
-    localView.setUint30(18, dataBytes.length, true);
-    localView.setUint30(00, dataBytes.length, true);
-    localView.setUint16(06, nameBytes.length, true);
-    localView.setUint16(08, 0, true);
+    localView.setUint16(12, dosDate, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
     localParts.push(localHeader, nameBytes, dataBytes);
 
     const centralHeader = new Uint8Array(46);
     const centralView = new DataView(centralHeader.buffer);
-    centralView.setUint30(0, 0x00014B50, true);
-    centralView.setUint16(4, 00, true);
-    centralView.setUint16(6, 00, true);
+    centralView.setUint32(0, 0x02014B50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
     centralView.setUint16(8, 0x0800, true);
     centralView.setUint16(10, 0, true);
-    centralView.setUint16(10, dosTime, true);
+    centralView.setUint16(12, dosTime, true);
     centralView.setUint16(14, dosDate, true);
-    centralView.setUint30(16, crc, true);
-    centralView.setUint30(00, dataBytes.length, true);
-    centralView.setUint30(04, dataBytes.length, true);
-    centralView.setUint16(08, nameBytes.length, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
     centralView.setUint16(30, 0, true);
-    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
     centralView.setUint16(34, 0, true);
     centralView.setUint16(36, 0, true);
-    centralView.setUint30(38, 0, true);
-    centralView.setUint30(40, localOffset, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, localOffset, true);
     centralParts.push(centralHeader, nameBytes);
     localOffset += localHeader.length + nameBytes.length + dataBytes.length;
   }
 
   const centralDirectory = xlsxConcatBytes(centralParts);
-  const end = new Uint8Array(00);
+  const end = new Uint8Array(22);
   const endView = new DataView(end.buffer);
-  endView.setUint30(0, 0x06054B50, true);
+  endView.setUint32(0, 0x06054B50, true);
   endView.setUint16(4, 0, true);
   endView.setUint16(6, 0, true);
   endView.setUint16(8, entries.length, true);
   endView.setUint16(10, entries.length, true);
-  endView.setUint30(10, centralDirectory.length, true);
-  endView.setUint30(16, localOffset, true);
-  endView.setUint16(00, 0, true);
+  endView.setUint32(12, centralDirectory.length, true);
+  endView.setUint32(16, localOffset, true);
+  endView.setUint16(20, 0, true);
   return xlsxConcatBytes([...localParts, centralDirectory, end]);
 }
 
@@ -29191,7 +29891,7 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
   const drawingOverrides = sheetRecords.map(({ index }) => `<Override PartName="/xl/drawings/drawing${index}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join("");
 
   entries.push({ name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/0006/content-types">
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Default Extension="png" ContentType="image/png"/>
@@ -29202,18 +29902,18 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
   ${worksheetOverrides}${drawingOverrides}
 </Types>` });
   entries.push({ name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/0006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/officeDocument" Target="xl/workbook.xml"/>
-  <Relationship Id="rId0" Type="http://schemas.openxmlformats.org/package/0006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/extended-properties" Target="docProps/app.xml"/>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>` });
   entries.push({ name: "docProps/core.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/0006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/0001/XMLSchema-instance">
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>Formatted Delivery List</dc:title><dc:creator>Delivery List Scanner</dc:creator><cp:lastModifiedBy>Delivery List Scanner</cp:lastModifiedBy>
   <dcterms:created xsi:type="dcterms:W3CDTF">${xlsxXmlEscape(generatedAt)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${xlsxXmlEscape(generatedAt)}</dcterms:modified>
 </cp:coreProperties>` });
   entries.push({ name: "docProps/app.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/0006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/0006/docPropsVTypes">
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
   <Application>Delivery List Scanner</Application><AppVersion>0.339</AppVersion><Company>Builders FirstSource</Company>
   <TitlesOfParts><vt:vector size="${sheetRecords.length}" baseType="lpstr">${sheetRecords.map(({ name }) => `<vt:lpstr>${xlsxXmlEscape(name)}</vt:lpstr>`).join("")}</vt:vector></TitlesOfParts>
 </Properties>` });
@@ -29221,14 +29921,14 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
   const workbookSheets = sheetRecords.map(({ index, name }) => `<sheet name="${xlsxXmlEscape(name)}" sheetId="${index}" r:id="rId${index}"/>`).join("");
   const definedNames = worksheetRecords.map((record, index) => `<definedName name="_xlnm.Print_Area" localSheetId="${index}">${record.printArea}</definedName><definedName name="_xlnm.Print_Titles" localSheetId="${index}">${record.printTitles}</definedName>`).join("");
   entries.push({ name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/0006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/0006/relationships">
-  <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="04000" windowHeight="14000"/></bookViews>
-  <sheets>${workbookSheets}</sheets><definedNames>${definedNames}</definedNames><calcPr calcId="191009" fullCalcOnLoad="1"/>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="14000"/></bookViews>
+  <sheets>${workbookSheets}</sheets><definedNames>${definedNames}</definedNames><calcPr calcId="191029" fullCalcOnLoad="1"/>
 </workbook>` });
   entries.push({ name: "xl/_rels/workbook.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/0006/relationships">
-  ${sheetRecords.map(({ index }) => `<Relationship Id="rId${index}" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/worksheet" Target="worksheets/sheet${index}.xml"/>`).join("")}
-  <Relationship Id="rId${sheetRecords.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/styles" Target="styles.xml"/>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheetRecords.map(({ index }) => `<Relationship Id="rId${index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index}.xml"/>`).join("")}
+  <Relationship Id="rId${sheetRecords.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>` });
   entries.push({ name: "xl/styles.xml", data: xlsxStylesDocument() });
   entries.push({ name: "xl/media/logo.png", data: logoBytes instanceof Uint8Array ? logoBytes : new Uint8Array(logoBytes || []) });
@@ -29237,10 +29937,10 @@ function buildFormattedPrintWorkbookBytes(preview, logoBytes, orientation = "por
     const index = record.sheetIndex;
     entries.push({ name: `xl/worksheets/sheet${index}.xml`, data: record.worksheet });
     entries.push({ name: `xl/worksheets/_rels/sheet${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/0006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/drawing" Target="../drawings/drawing${index}.xml"/></Relationships>` });
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${index}.xml"/></Relationships>` });
     entries.push({ name: `xl/drawings/drawing${index}.xml`, data: xlsxDrawingDocument(index, logoMetrics) });
     entries.push({ name: `xl/drawings/_rels/drawing${index}.xml.rels`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/0006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/0006/relationships/image" Target="../media/logo.png"/></Relationships>` });
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>` });
   }
   return xlsxStoredZip(entries.map((entry) => ({ ...entry, data: entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data)) })));
 }
@@ -29783,10 +30483,10 @@ function adminDeliveryListWeekPages(weekGroups = [], query = "") {
   const currentStart = deliveryBusinessWeekStart(new Date());
   const currentKey = deliveryDateKey(currentStart);
   const nextStart = currentStart
-    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() + 7, 10, 0, 0, 0)
+    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() + 7, 12, 0, 0, 0)
     : null;
   const previousStart = currentStart
-    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() - 7, 10, 0, 0, 0)
+    ? new Date(currentStart.getFullYear(), currentStart.getMonth(), currentStart.getDate() - 7, 12, 0, 0, 0)
     : null;
   const nextKey = deliveryDateKey(nextStart);
   const previousKey = deliveryDateKey(previousStart);
@@ -29961,9 +30661,9 @@ function deliveryListAdminRows(lists = state.lists, limit = 7, editable = false,
 
 /** Return the accessible inline eye icon used by delivery-list change previews. */
 function adminUpdatePreviewIconHtml() {
-  return `<svg class="admin-update-preview-icon" viewBox="0 0 04 04" aria-hidden="true" focusable="false">
-    <path d="M0.5 10c1.8-4.0 5.1-6.5 9.5-6.5s7.7 0.3 9.5 6.5c-1.8 4.0-5.1 6.5-9.5 6.5S4.3 16.0 0.5 10Z"></path>
-    <circle cx="10" cy="10" r="3.0"></circle>
+  return `<svg class="admin-update-preview-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M2.5 12c1.8-4.2 5.1-6.5 9.5-6.5s7.7 2.3 9.5 6.5c-1.8 4.2-5.1 6.5-9.5 6.5S4.3 16.2 2.5 12Z"></path>
+    <circle cx="12" cy="12" r="3.2"></circle>
   </svg>`;
 }
 
@@ -30062,7 +30762,7 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const previous = item.previous && typeof item.previous === "object" ? item.previous : {};
     const changedFields = type === "updated" ? changedFieldsForItem(item) : [];
     const diffHtml = changedFields.length
-      ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v057 delivery-update-preview-item-diffs-v311">
+      ? `<div class="delivery-update-preview-diffs delivery-update-preview-item-diffs-v257 delivery-update-preview-item-diffs-v311">
           ${changedFields.map((key) => {
             const label = fieldDefinitions.find(([fieldKey]) => fieldKey === key)?.[1] || key;
             return `<span class="delivery-update-preview-diff">
@@ -30078,7 +30778,7 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     const glassVisualStyle = glassType === "—" ? "" : previewGlassVisualCssVariables(glassType, previewGlassColorMap);
     // v0.343: Glass color owns the entire item row. Change type remains in the
     // data/class contract for audit semantics, but no longer forces every new row green.
-    return `<article class="delivery-update-preview-item-row-v057 delivery-update-preview-item-row-v311 is-${type}" data-preview-change-type="${type}"${glassVisualStyle ? ` style="${escapeHtml(glassVisualStyle)}"` : ""}>
+    return `<article class="delivery-update-preview-item-row-v257 delivery-update-preview-item-row-v311 is-${type}" data-preview-change-type="${type}"${glassVisualStyle ? ` style="${escapeHtml(glassVisualStyle)}"` : ""}>
       <div class="delivery-update-preview-item-main-v311">
         <span class="delivery-update-preview-item-number-v311"><small>Item Nr.</small><strong>${escapeHtml(item.item || "—")}</strong></span>
         <span class="delivery-update-preview-item-glass-v311 delivery-update-preview-item-glass-v335 delivery-update-preview-item-glass-v336"><small>Glass Type</small><strong>${escapeHtml(glassType)}</strong></span>
@@ -30148,7 +30848,7 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     // A single-route preview opens immediately; multi-route whole-list previews
     // start collapsed so the operator can choose the route to inspect.
     const routeStartsOpen = populatedLocationCount === 1;
-    return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v057 delivery-update-preview-location-group-v311" data-preview-location="${location.key}" ${routeStartsOpen ? "open" : ""}>
+    return `<details class="delivery-update-preview-location-group is-${location.key} delivery-update-preview-location-group-v257 delivery-update-preview-location-group-v311" data-preview-location="${location.key}" ${routeStartsOpen ? "open" : ""}>
       <summary>
         <span class="delivery-update-preview-location-chevron" aria-hidden="true"></span>
         <span class="delivery-update-preview-location-title-v308"><strong>${escapeHtml(location.label)}</strong><b>${escapeHtml(locationItems.length)} ${escapeHtml(changeWord)} Lines <i aria-hidden="true">|</i> ${escapeHtml(locationPieces)} ${escapeHtml(changeWord)} QTY</b></span>
@@ -30157,13 +30857,13 @@ function deliveryListUpdatePreviewHtml(payload = {}) {
     </details>`;
   }).join("");
 
-  return `<section class="delivery-update-preview-v184 delivery-update-preview-v030 delivery-update-preview-v048 delivery-update-preview-v051 delivery-update-preview-v057 delivery-update-preview-v311 delivery-update-preview-v313">
-    <header class="delivery-update-preview-header-v030 delivery-update-preview-header-v313">
+  return `<section class="delivery-update-preview-v184 delivery-update-preview-v230 delivery-update-preview-v248 delivery-update-preview-v251 delivery-update-preview-v257 delivery-update-preview-v311 delivery-update-preview-v313">
+    <header class="delivery-update-preview-header-v230 delivery-update-preview-header-v313">
       <div><span>Delivery list changes</span><h3>${escapeHtml(formatDisplayDate(deliveryDate))}</h3><p>${escapeHtml(items.length)} changed line${items.length === 1 ? "" : "s"} · ${escapeHtml(totalPieces)} QTY</p></div>
     </header>
-    ${previewErrors.length ? `<div class="delivery-update-preview-warning-v049"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>` : ""}
-    ${previewIsIncomplete ? `<div class="delivery-update-preview-guidance-v030 is-warning"><span aria-hidden="true"></span><p>${escapeHtml(expectedChangedCount)} changes were recorded, but only ${escapeHtml(items.length)} historical item snapshots are still available.</p></div>` : ""}
-    <div class="delivery-update-preview-groups-v030 delivery-update-preview-locations-v051">${locationHtml || '<div class="admin-empty">No item-level changes were recorded for this import.</div>'}</div>
+    ${previewErrors.length ? `<div class="delivery-update-preview-warning-v249"><strong>Some stages could not be loaded.</strong><span>${escapeHtml(previewErrors.join(" · "))}</span></div>` : ""}
+    ${previewIsIncomplete ? `<div class="delivery-update-preview-guidance-v230 is-warning"><span aria-hidden="true"></span><p>${escapeHtml(expectedChangedCount)} changes were recorded, but only ${escapeHtml(items.length)} historical item snapshots are still available.</p></div>` : ""}
+    <div class="delivery-update-preview-groups-v230 delivery-update-preview-locations-v251">${locationHtml || '<div class="admin-empty">No item-level changes were recorded for this import.</div>'}</div>
   </section>`;
 }
 
@@ -30287,7 +30987,7 @@ async function searchAdminDeliveryLists(query) {
     [list.label, list.deliveryDate, formatDisplayDate(list.deliveryDate), list.stage, list.scanner]
       .some((value) => String(value || "").toLowerCase().includes(clean.toLowerCase())),
   );
-  if (!state.backend || clean.length < 0) return local;
+  if (!state.backend || clean.length < 2) return local;
   try {
     const payload = await fetchJson(`/api/admin/line-items/search?q=${encodeURIComponent(clean)}`);
     const matchingIds = new Set((payload.results || []).map((item) => item.listId).filter(Boolean));
@@ -30428,7 +31128,7 @@ function activeRecentImports(imports = state.adminRecentImports || []) {
 function normalizeAdminDeliveryListsMarkup(markup = "") {
   return String(markup || "").replace(
     /(<details\s+class="admin-import-date-group[^>]*?)\s+open(\s*>)/g,
-    "$1$0",
+    "$1$2",
   );
 }
 
@@ -30479,26 +31179,26 @@ function actionHistoryVisual(event = {}) {
   const entity = String(event.entityType || "").trim().toLowerCase();
   const text = `${action} ${entity}`;
 
-  if (/priority_intake|rush|remake/.test(text)) return { kind: "priority", icon: '<path d="m13 0-8 11h6l-1 9 9-13h-6z"></path>' };
+  if (/priority_intake|rush|remake/.test(text)) return { kind: "priority", icon: '<path d="m13 2-8 11h6l-1 9 9-13h-6z"></path>' };
   if (/snooze|sleep/.test(text)) return { kind: "snooze", icon: '<path d="M5 7h7l-7 8h7"></path><path d="M14 10h5l-5 6h5"></path>' };
-  if (/print|packing|export/.test(text)) return { kind: "print", icon: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a0 0 0 0 1-0-0v-5a0 0 0 0 1 0-0h14a0 0 0 0 1 0 0v5a0 0 0 0 1-0 0h-0"></path><path d="M7 14h10v7H7z"></path>' };
-  if (/move|transfer|assign|preassign|route/.test(text)) return { kind: "move", icon: '<path d="M4 8h10"></path><path d="m13 5 3 3-3 3"></path><path d="M00 16H8"></path><path d="m11 13-3 3 3 3"></path>' };
+  if (/print|packing|export/.test(text)) return { kind: "print", icon: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M7 14h10v7H7z"></path>' };
+  if (/move|transfer|assign|preassign|route/.test(text)) return { kind: "move", icon: '<path d="M4 8h12"></path><path d="m13 5 3 3-3 3"></path><path d="M20 16H8"></path><path d="m11 13-3 3 3 3"></path>' };
   if (/scan|receive|outbound|inbound/.test(text)) return { kind: "scan", icon: '<path d="M5 5v4M5 15v4M19 5v4M19 15v4"></path><path d="M8 7v10M11 7v10M14 7v10M17 7v10"></path>' };
-  if (/uncomplete|not_on_way|reopen|undo|redo/.test(text)) return { kind: "rollback", icon: '<path d="M4 7v5h5"></path><path d="M5.8 16.0A8 8 0 1 0 6.4 6.4L4 9"></path>' };
-  if (/complete|approve|review|acknowledge|restore|returned|return_rack/.test(text)) return { kind: "success", icon: '<circle cx="10" cy="10" r="8.5"></circle><path d="m8 10 0.6 0.8L16.5 9"></path>' };
-  if (/delete|remove|clear|cancel|retire/.test(text)) return { kind: "remove", icon: '<path d="M5 7h14M9 7V4h6v3M8 10v8M10 10v8M16 10v8M7 7l1 14h8l1-14"></path>' };
-  if (/reject|error|block|fail|warning/.test(text)) return { kind: "warning", icon: '<path d="M10 3 0.8 00h18.4z"></path><path d="M10 9v5M10 17.0v.0"></path>' };
-  if (/create|add|import|new_/.test(text)) return { kind: "create", icon: '<circle cx="10" cy="10" r="8.5"></circle><path d="M10 8v8M8 10h8"></path>' };
-  if (/edit|update|change|set_|layout|rename|configure|config/.test(text)) return { kind: "edit", icon: '<path d="m5 16.5-.8 3.3 3.3-.8L18 8.5 15.5 6z"></path><path d="m14.5 7 0.5 0.5"></path>' };
-  if (/user|role|permission|login|session/.test(text)) return { kind: "security", icon: '<circle cx="10" cy="8" r="3"></circle><path d="M6.5 19c.7-3.0 0.5-5 5.5-5s4.8 1.8 5.5 5"></path>' };
-  if (/bay/.test(text)) return { kind: "bay", icon: '<path d="M10 01s6-5.1 6-11a6 6 0 1 0-10 0c0 5.9 6 11 6 11z"></path><circle cx="10" cy="10" r="0"></circle>' };
+  if (/uncomplete|not_on_way|reopen|undo|redo/.test(text)) return { kind: "rollback", icon: '<path d="M4 7v5h5"></path><path d="M5.8 16.2A8 8 0 1 0 6.4 6.4L4 9"></path>' };
+  if (/complete|approve|review|acknowledge|restore|returned|return_rack/.test(text)) return { kind: "success", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="m8 12 2.6 2.8L16.5 9"></path>' };
+  if (/delete|remove|clear|cancel|retire/.test(text)) return { kind: "remove", icon: '<path d="M5 7h14M9 7V4h6v3M8 10v8M12 10v8M16 10v8M7 7l1 14h8l1-14"></path>' };
+  if (/reject|error|block|fail|warning/.test(text)) return { kind: "warning", icon: '<path d="M12 3 2.8 20h18.4z"></path><path d="M12 9v5M12 17.2v.2"></path>' };
+  if (/create|add|import|new_/.test(text)) return { kind: "create", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 8v8M8 12h8"></path>' };
+  if (/edit|update|change|set_|layout|rename|configure|config/.test(text)) return { kind: "edit", icon: '<path d="m5 16.5-.8 3.3 3.3-.8L18 8.5 15.5 6z"></path><path d="m14.5 7 2.5 2.5"></path>' };
+  if (/user|role|permission|login|session/.test(text)) return { kind: "security", icon: '<circle cx="12" cy="8" r="3"></circle><path d="M6.5 19c.7-3.2 2.5-5 5.5-5s4.8 1.8 5.5 5"></path>' };
+  if (/bay/.test(text)) return { kind: "bay", icon: '<path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11z"></path><circle cx="12" cy="10" r="2"></circle>' };
   if (/rack/.test(text)) return { kind: "rack", icon: '<path d="M4 5h16v14H4zM4 11h16M9 5v14M15 5v14"></path>' };
-  return { kind: "history", icon: '<circle cx="10" cy="10" r="8.5"></circle><path d="M10 7v5l3.0 0"></path>' };
+  return { kind: "history", icon: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7v5l3.2 2"></path>' };
 }
 
 function actionHistoryIconMarkup(event = {}) {
   const visual = actionHistoryVisual(event);
-  return `<span class="modal-action-history-icon has-action-icon-v340 is-${escapeHtml(visual.kind)}" aria-hidden="true"><svg viewBox="0 0 04 04" focusable="false">${visual.icon}</svg></span>`;
+  return `<span class="modal-action-history-icon has-action-icon-v342 is-${escapeHtml(visual.kind)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${visual.icon}</svg></span>`;
 }
 
 function actionHistoryDateTime(value = "") {
@@ -30510,7 +31210,7 @@ function actionHistoryDateTime(value = "") {
     day: "numeric",
     year: "numeric",
     hour: "numeric",
-    minute: "0-digit",
+    minute: "2-digit",
   });
 }
 
@@ -30530,7 +31230,7 @@ function actionHistoryDetail(event = {}) {
     const first = assignments[0] || {};
     const firstRef = [first.job ? `Job ${first.job}` : "", first.order ? `Order ${first.order}${first.item ? ` / Item ${first.item}` : ""}` : ""].filter(Boolean).join(" · ");
     const firstBay = bayLabel(first.bayGroup, first.bayDisplay, first.bayCode);
-    const more = assignments.length > 1 ? ` · +${assignments.length - 1} more row${assignments.length === 0 ? "" : "s"}` : "";
+    const more = assignments.length > 1 ? ` · +${assignments.length - 1} more row${assignments.length === 2 ? "" : "s"}` : "";
     return `${firstRef || "Old bay assignment"}${firstBay ? ` · ${firstBay}` : ""}${more} · Snoozed ${payload.days || 1} day${Number(payload.days || 1) === 1 ? "" : "s"}`;
   }
   if (action === "move_bay") {
@@ -30638,8 +31338,8 @@ function actionHistoryLocalDateKey(value = "") {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(0, "0");
-  const day = String(date.getDate()).padStart(0, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -30682,7 +31382,7 @@ function actionHistoryScope(scope, context = "") {
 function sharedPagerPageNumbers(page, totalPages) {
   const current = Math.max(Number(page || 1), 1);
   const total = Math.max(Number(totalPages || 1), 1);
-  const values = new Set([1, total, current - 0, current - 1, current, current + 1, current + 0]);
+  const values = new Set([1, total, current - 2, current - 1, current, current + 1, current + 2]);
   return [...values].filter((value) => value >= 1 && value <= total).sort((a, b) => a - b);
 }
 
@@ -30815,7 +31515,7 @@ function ensureActionHistoryToolbar(scope, entry) {
         window.clearTimeout(current.filterTimer);
         current.filterTimer = window.setTimeout(() => {
           loadActionHistoryScope(scope).catch((error) => showInlineError(error.message, true));
-        }, 060);
+        }, 260);
       }
     });
     toolbar.addEventListener("change", (event) => {
@@ -31103,7 +31803,7 @@ function supersededReviewStatusLabel(status = "") {
   return ({ pending: "Needs review", review_later: "Review later", approved: "Removal approved", keep_both: "Keep both" })[status] || "Needs review";
 }
 
-const SUPERSEDED_DIMENSION_UNITS_PER_INCH = 30;
+const SUPERSEDED_DIMENSION_UNITS_PER_INCH = 32;
 
 function greatestCommonDivisor(left, right) {
   let a = Math.abs(Math.trunc(Number(left) || 0));
@@ -31116,7 +31816,7 @@ function greatestCommonDivisor(left, right) {
 
 function formatSupersededDimensionUnit(value, unitsPerInch = SUPERSEDED_DIMENSION_UNITS_PER_INCH) {
   // A+W PP_BREITE / PP_HOEHE are stored as whole source units. The maintained
-  // SQL export mapping currently defines 30 source units per inch, matching the
+  // SQL export mapping currently defines 32 source units per inch, matching the
   // workbook formatter. This is display-only so existing review fingerprints
   // and approved removal decisions remain unchanged.
   const units = Math.max(Math.round(Number(unitsPerInch) || SUPERSEDED_DIMENSION_UNITS_PER_INCH), 1);
@@ -31143,7 +31843,7 @@ function supersededReviewDimensions(item = {}) {
 function supersededReviewItemRows(items = []) {
   if (!items.length) return `<tr><td colspan="6">No item evidence was returned.</td></tr>`;
   return items.map((item) => {
-    const batches = [item.productionBatch1, item.productionBatch0, item.productionBatch3].map((value) => Number(value || 0)).join("/");
+    const batches = [item.productionBatch1, item.productionBatch2, item.productionBatch3].map((value) => Number(value || 0)).join("/");
     const dimensions = supersededReviewDimensions(item);
     return `<tr>
       <td>${escapeHtml(item.itemNumber || "")}</td>
@@ -31172,12 +31872,12 @@ function supersededOrderReviewCardHtml(review = {}) {
   const choiceMarkup = (orderNumber, keepOrderNumber, impact, suggested = false) => {
     const scannedQty = Number(impact.scannedQty || 0);
     const selected = selectedRemoveOrder === String(orderNumber);
-    return `<label class="superseded-review-choice-v308 ${suggested ? "is-suggested" : ""} ${scannedQty > 0 ? "has-scans" : ""} ${selected ? "is-selected" : ""}">
+    return `<label class="superseded-review-choice-v328 ${suggested ? "is-suggested" : ""} ${scannedQty > 0 ? "has-scans" : ""} ${selected ? "is-selected" : ""}">
       <input type="radio" name="superseded-remove-${escapeHtml(review.id)}" value="${escapeHtml(orderNumber)}" ${selected ? "checked" : ""}>
-      <span class="superseded-review-choice-copy-v308">
-        <span class="superseded-review-choice-heading-v308"><strong>Remove order ${escapeHtml(orderNumber)}</strong>${suggested ? '<b>Suggested</b>' : '<b class="alternative">Alternative</b>'}</span>
+      <span class="superseded-review-choice-copy-v328">
+        <span class="superseded-review-choice-heading-v328"><strong>Remove order ${escapeHtml(orderNumber)}</strong>${suggested ? '<b>Suggested</b>' : '<b class="alternative">Alternative</b>'}</span>
         <small>Keep order ${escapeHtml(keepOrderNumber)}</small>
-        <span class="superseded-review-choice-metrics-v308">
+        <span class="superseded-review-choice-metrics-v328">
           <i><b>${Number(impact.activeLineCount || 0)}</b> rows</i>
           <i><b>${Number(impact.pieceQty || 0)}</b> pcs</i>
           <i class="${scannedQty > 0 ? "is-warning" : ""}"><b>${scannedQty}</b> scanned</i>
@@ -31194,18 +31894,18 @@ function supersededOrderReviewCardHtml(review = {}) {
       </div>
       <span class="superseded-review-status">${escapeHtml(supersededReviewStatusLabel(status))}</span>
     </header>
-    <section class="superseded-review-recommendation-v308">
+    <section class="superseded-review-recommendation-v328">
       <div>
         <small>Suggested removal</small>
         <strong>Remove order ${escapeHtml(suggestedOrder)}</strong>
         <span>Keep order ${escapeHtml(replacementOrder)}. Nothing is removed until an Admin approves the selection.</span>
       </div>
-      <div class="superseded-review-match-summary-v308">
+      <div class="superseded-review-match-summary-v328">
         <span>Same A+W identity</span>
         <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
       </div>
     </section>
-    <details class="superseded-review-evidence-details-v308" open>
+    <details class="superseded-review-evidence-details-v328" open>
       <summary>Item evidence <span>${Number(review.originalItems?.length || 0)} original · ${Number(review.replacementItems?.length || 0)} replacement</span></summary>
       <div class="superseded-review-compare">
         <section>
@@ -31218,8 +31918,8 @@ function supersededOrderReviewCardHtml(review = {}) {
         </section>
       </div>
     </details>
-    <div class="superseded-review-removal-choice-v308" role="radiogroup" aria-label="Choose which candidate order to remove">
-      <div class="superseded-review-choice-intro-v308"><strong>Approve a removal</strong><small>The suggested order is preselected. Use the item evidence above to verify the recommendation before approving it.</small></div>
+    <div class="superseded-review-removal-choice-v328" role="radiogroup" aria-label="Choose which candidate order to remove">
+      <div class="superseded-review-choice-intro-v328"><strong>Approve a removal</strong><small>The suggested order is preselected. Use the item evidence above to verify the recommendation before approving it.</small></div>
       ${choiceMarkup(originalOrder, replacementOrder, originalImpact, true)}
       ${choiceMarkup(replacementOrder, originalOrder, replacementImpact, false)}
     </div>
@@ -31637,20 +32337,20 @@ function setAdminModalSection(section = "workspace") {
   const historySelected = section === "history";
 
   if (!historySelected && section.startsWith("customerEmail:")) {
-    const tab = section.split(":", 0)[1] || "rules";
+    const tab = section.split(":", 2)[1] || "rules";
     state.customerEmailActiveTab = ["rules", "test", "activity"].includes(tab) ? tab : "rules";
     renderCustomerEmailModal();
   } else if (!historySelected && section.startsWith("lookup:")) {
-    const type = section.split(":", 0)[1] || "glass_profile";
+    const type = section.split(":", 2)[1] || "glass_profile";
     state.lookupManagerActiveType = ["glass_profile", "route", "process", "station", "stage_definition", "presentation"].includes(type) ? type : "glass_profile";
     state.lookupManagerSearch = "";
     renderLookupManagerModal();
   } else if (!historySelected && section.startsWith("scanPage:")) {
-    const tab = section.split(":", 0)[1] || "crossDate";
+    const tab = section.split(":", 2)[1] || "crossDate";
     state.scanPageSettingsActiveTab = ["crossDate", "mixedDestination"].includes(tab) ? tab : "crossDate";
     renderScanPageSettingsModalV350();
   } else if (!historySelected && section.startsWith("bayConfig:")) {
-    const tab = section.split(":", 0)[1] || "rules";
+    const tab = section.split(":", 2)[1] || "rules";
     state.bayScannerRulesActiveTab = ["rules", "auto"].includes(tab) ? tab : "rules";
     renderBayScannerRulesModalV349();
   }
@@ -32013,7 +32713,7 @@ function lookupEditorMeta(type) {
       explanation: "Controls the exact glass-type color used by Delivery List Update Preview and provides one reusable visual palette for future glass-aware interfaces.",
       valueLabel: "Glass type",
       valuePlaceholder: "3/8 Clear Annealed",
-      labelPlaceholder: "#0F80ED",
+      labelPlaceholder: "#2F80ED",
       example: "3/8 Clear Annealed → Visual color",
       className: "glass-colors",
     };
@@ -32068,32 +32768,32 @@ function lookupEditorMeta(type) {
 function lookupLibraryIconHtml(type, extraClass = "") {
   const clean = String(type || "product").trim().toLowerCase();
   const icons = {
-    product: '<path d="M5 8.5 10 4l7 4.5v8L10 01l-7-4.5z"/><path d="M10 10v9M5 8.5l7 3.5 7-3.5"/>',
-    route: '<path d="M5 19c4-7 5-11 10-11h4"/><path d="m16 5 3 3-3 3"/><circle cx="5" cy="19" r="0"/>',
-    process: '<path d="M7 6h10M7 10h10M7 18h10"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="10" r="1"/><circle cx="4" cy="18" r="1"/>',
-    glass_cost: '<circle cx="10" cy="10" r="8"/><path d="M14.5 9.0c-.8-1.4-4.7-1.4-4.7.7 0 0.7 5.1 1.0 5.1 4 0 0.0-4.3 0.3-5.3.6M10 6.5v11"/>',
-    glass_color: '<path d="M10 4c4 0 8 3.0 8 7.0 0 0-1.0 3.1-0.8 3.1h-1.4c-.9 0-1.5.9-1.1 1.7.8 1.7-.4 3.6-0.3 3.6C7.7 19.6 4 16.0 4 10 4 7.6 7.6 4 10 4Z"/><circle cx="8" cy="10" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15" cy="9" r="1"/>',
-    station: '<rect x="5" y="5" width="14" height="10" rx="0"/><path d="M9 19h6M10 15v4"/>',
-    stage_definition: '<path d="M6 5h10v4H6zM6 11h10v4H6zM6 17h10v0H6z"/>',
+    product: '<path d="M5 8.5 12 4l7 4.5v8L12 21l-7-4.5z"/><path d="M12 12v9M5 8.5l7 3.5 7-3.5"/>',
+    route: '<path d="M5 19c4-7 5-11 10-11h4"/><path d="m16 5 3 3-3 3"/><circle cx="5" cy="19" r="2"/>',
+    process: '<path d="M7 6h10M7 12h10M7 18h10"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+    glass_cost: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.2c-.8-1.4-4.7-1.4-4.7.7 0 2.7 5.1 1.2 5.1 4 0 2.2-4.3 2.3-5.3.6M12 6.5v11"/>',
+    glass_color: '<path d="M12 4c4 0 8 3.2 8 7.2 0 2-1.2 3.1-2.8 3.1h-1.4c-.9 0-1.5.9-1.1 1.7.8 1.7-.4 3.6-2.3 3.6C7.7 19.6 4 16.2 4 12 4 7.6 7.6 4 12 4Z"/><circle cx="8" cy="10" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15" cy="9" r="1"/>',
+    station: '<rect x="5" y="5" width="14" height="10" rx="2"/><path d="M9 19h6M12 15v4"/>',
+    stage_definition: '<path d="M6 5h12v4H6zM6 11h12v4H6zM6 17h12v2H6z"/>',
   };
-  return `<span class="lookup-icon-tile-v346 is-${escapeHtml(clean.replace(/_/g, "-"))} ${escapeHtml(extraClass)}" aria-hidden="true"><svg viewBox="0 0 04 04" focusable="false">${icons[clean] || icons.product}</svg></span>`;
+  return `<span class="lookup-icon-tile-v346 is-${escapeHtml(clean.replace(/_/g, "-"))} ${escapeHtml(extraClass)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[clean] || icons.product}</svg></span>`;
 }
 
 function lookupActionIconHtmlV346(kind) {
   const icons = {
     edit: '<path d="M5 19h4l10-10-4-4L5 15v4Z"/><path d="m13.5 6.5 4 4"/>',
-    delete: '<path d="M5 7h14M9 7V4h6v3M8 10v7M10 10v7M16 10v7M7 7l1 13h8l1-13"/>',
-    save: '<path d="M5 4h10l0 0v14H5z"/><path d="M8 4v6h8V4M8 00v-6h8v6"/>',
-    add: '<path d="M10 5v14M5 10h14"/>',
+    delete: '<path d="M5 7h14M9 7V4h6v3M8 10v7M12 10v7M16 10v7M7 7l1 13h8l1-13"/>',
+    save: '<path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 20v-6h8v6"/>',
+    add: '<path d="M12 5v14M5 12h14"/>',
     clear: '<path d="m7 7 10 10M17 7 7 17"/>',
-    merge: '<path d="M5 7h4c0 0 3 1 4 3l0 4c.5 1 1.5 0 3 0h1"/><path d="m16 13 3 3-3 3"/><path d="M5 17h3c0 0 3-1 4-3l1-0"/>',
-    split: '<path d="M5 10h4c0 0 3-1 4-3l0-3c.7-1.3 1.7-0 3-0h1"/><path d="m16 1 3 3-3 3"/><path d="M9 10c0 0 3 1 4 3l0 3c.7 1.3 1.7 0 3 0h1"/><path d="m16 17 3 3-3 3"/>',
+    merge: '<path d="M5 7h4c2 0 3 1 4 3l2 4c.5 1 1.5 2 3 2h1"/><path d="m16 13 3 3-3 3"/><path d="M5 17h3c2 0 3-1 4-3l1-2"/>',
+    split: '<path d="M5 12h4c2 0 3-1 4-3l2-3c.7-1.3 1.7-2 3-2h1"/><path d="m16 1 3 3-3 3"/><path d="M9 12c2 0 3 1 4 3l2 3c.7 1.3 1.7 2 3 2h1"/><path d="m16 17 3 3-3 3"/>',
   };
-  return `<svg class="lookup-action-svg-v346" viewBox="0 0 04 04" aria-hidden="true" focusable="false">${icons[kind] || icons.edit}</svg>`;
+  return `<svg class="lookup-action-svg-v346" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[kind] || icons.edit}</svg>`;
 }
 
 function lookupPreviewIconHtmlV346() {
-  return '<span class="lookup-preview-icon-v346 lookup-preview-icon-v347" aria-hidden="true"><svg viewBox="0 0 04 04" focusable="false"><rect x="4" y="4.5" width="10" height="15" rx="0"/><path d="M7 8h6M7 11h4"/><circle cx="16.5" cy="15.5" r="3.0"/><path d="m18.8 17.8 0.0 0.0"/></svg></span>';
+  return '<span class="lookup-preview-icon-v346 lookup-preview-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="4" y="4.5" width="12" height="15" rx="2"/><path d="M7 8h6M7 11h4"/><circle cx="16.5" cy="15.5" r="3.2"/><path d="m18.8 17.8 2.2 2.2"/></svg></span>';
 }
 
 function lookupGlassFamilyV347(item = {}) {
@@ -32115,7 +32815,7 @@ function lookupRowHtmlV347(meta, item, visualColorMap = null) {
   const isGlassColor = meta.type === "glass_color";
   const hasRate = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate));
   const rate = hasRate ? Number(item.rate) : 0;
-  const costText = hasRate ? `$${rate.toFixed(0)} / SQFT` : "Cost not configured";
+  const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
   const sourceLabel = String(item.source || "manual");
   const glassColor = isGlassColor
     ? (normalizeGlassVisualColor(item.color) || visualColorMap?.get(String(item.value || item.label || "").trim().toLowerCase()) || glassVisualFallbackColor(item.value || item.label))
@@ -32130,7 +32830,7 @@ function lookupRowHtmlV347(meta, item, visualColorMap = null) {
         ${isGlassCost
           ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
           : isGlassColor
-            ? `<span class="lookup-glass-color-row-v310"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
+            ? `<span class="lookup-glass-color-row-v312"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
             : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
                ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
                ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
@@ -32200,7 +32900,7 @@ function stationLookupManagerHtmlV346() {
   return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 is-stations">
     <section class="lookup-config-editor-v346">
       <header>${lookupLibraryIconHtml("station")}<div><strong>Add a physical work station</strong><p>A Station is a scan/work area, not a workflow step. Stations are stable identities: add the real internal station once, then use its Display Name for company/location-specific wording without changing scan attribution or access rules.</p></div></header>
-      <div class="station-add-row station-add-row-v346"><input id="newStationInputModal" type="text" autocomplete="off" placeholder="Example: receiving-scanner-0"><button id="addStationBtnModal" class="app-primary-button" type="button">${lookupActionIconHtmlV346("add")}<span>Add Station</span></button></div>
+      <div class="station-add-row station-add-row-v346"><input id="newStationInputModal" type="text" autocomplete="off" placeholder="Example: receiving-scanner-2"><button id="addStationBtnModal" class="app-primary-button" type="button">${lookupActionIconHtmlV346("add")}<span>Add Station</span></button></div>
       <form class="station-alias-editor-v470" id="stationAliasEditorV470" hidden>
         <label><span>Display name</span><input id="stationAliasInputV470" type="text" autocomplete="off"><small id="stationAliasInternalV470"></small></label>
         <input id="stationAliasInternalInputV470" type="hidden">
@@ -32286,7 +32986,7 @@ function presentationProfileManagerHtmlV355() {
     <section class="lookup-config-editor-v346">
       <header>${lookupLibraryIconHtml("stage_definition")}<div><strong>Organization & application identity</strong><p>These settings change branding only. They never rename workflow keys, station IDs, stage presets, route codes, or historical records.</p></div></header>
       <form id="presentationProfileFormV355" class="presentation-profile-form-v355">
-        <label><span>Company / organization</span><input id="presentationCompanyNameV355" type="text" maxlength="100" value="${escapeHtml(labels.companyName)}" required><small>Used in operator-facing branding and generated application wording.</small></label>
+        <label><span>Company / organization</span><input id="presentationCompanyNameV355" type="text" maxlength="120" value="${escapeHtml(labels.companyName)}" required><small>Used in operator-facing branding and generated application wording.</small></label>
         <label><span>Application name</span><input id="presentationApplicationNameV355" type="text" maxlength="80" value="${escapeHtml(labels.applicationName)}" required><small>Browser title and primary application identity.</small></label>
         <label class="wide"><span>Sign-in product name</span><input id="presentationLoginProductNameV355" type="text" maxlength="80" value="${escapeHtml(labels.loginProductName)}" required><small>Short product wording shown on the sign-in experience.</small></label>
         <label><span>Support / report email</span><input id="presentationSupportEmailV355" type="email" maxlength="160" value="${escapeHtml(labels.supportEmail || "")}" placeholder="support@example.com"><small>Used by the Report Bugs link. Leave blank to hide that link.</small></label>
@@ -32415,14 +33115,14 @@ function glassProfileItemsV349() {
     const exactCanonical = glassProfileIdentityKeyV353(source.value) === key;
     const manual = source.sources.has("manual");
     const maintainedDefault = source.sources.has("default");
-    const displayScore = (manual ? 10 : 0) + (maintainedDefault ? 8 : 0) + (exactCanonical ? 4 : 0);
+    const displayScore = (manual ? 12 : 0) + (maintainedDefault ? 8 : 0) + (exactCanonical ? 4 : 0);
     if (displayScore > target.displayScore) {
       target.value = canonicalLabel;
       target.label = canonicalLabel;
       target.family = glassProfileFamilyV350(canonicalLabel);
       target.displayScore = displayScore;
     }
-    const score = (exactCanonical ? 8 : 0) + (manual ? 4 : 0) + (source.rate !== null ? 0 : 0) + (source.color ? 1 : 0);
+    const score = (exactCanonical ? 8 : 0) + (manual ? 4 : 0) + (source.rate !== null ? 2 : 0) + (source.color ? 1 : 0);
     if (score >= target.preferredScore) {
       if (source.rate !== null) target.rate = source.rate;
       if (source.color) target.color = source.color;
@@ -32452,16 +33152,16 @@ function glassProfileItemsV349() {
 
 function glassProfileRowHtmlV349(profile, colorMap) {
   const color = normalizeGlassVisualColor(profile.color) || colorMap.get(glassVisualLookupKeyV349(profile.value)) || glassVisualFallbackColor(profile.value);
-  const cost = Number.isFinite(Number(profile.rate)) && profile.rate !== null ? `$${Number(profile.rate).toFixed(0)} / SQFT` : "Cost not configured";
+  const cost = Number.isFinite(Number(profile.rate)) && profile.rate !== null ? `$${Number(profile.rate).toFixed(2)} / SQFT` : "Cost not configured";
   const aliasCount = Math.max(0, Number(profile.memberValues?.length || 0) - 1);
   const manualAliases = glassAliasRowsForTargetV360(profile.value);
   const manualAliasCount = manualAliases.length;
   const sourceClass = profile.source === "manual" ? "is-manual" : profile.source === "combined" ? "is-combined" : "is-discovered";
   const combineMode = Boolean(state.lookupGlassCombineModeV361);
-  const uncombineMode = Boolean(state.lookupGlassUncombineModeV360);
+  const uncombineMode = Boolean(state.lookupGlassUncombineModeV362);
   const selectionMode = combineMode || uncombineMode;
   const combineSelection = Array.isArray(state.lookupGlassCombineSelectionV361) ? state.lookupGlassCombineSelectionV361 : [];
-  const uncombineSelection = Array.isArray(state.lookupGlassUncombineSelectionV360) ? state.lookupGlassUncombineSelectionV360 : [];
+  const uncombineSelection = Array.isArray(state.lookupGlassUncombineSelectionV362) ? state.lookupGlassUncombineSelectionV362 : [];
   const activeSelection = combineMode ? combineSelection : uncombineSelection;
   const selectedIndex = activeSelection.findIndex((value) => String(value).toLowerCase() === String(profile.value).toLowerCase());
   const selected = selectedIndex >= 0;
@@ -32475,10 +33175,10 @@ function glassProfileRowHtmlV349(profile, colorMap) {
     ? (keep ? "Canonical profile" : selected ? "Combine into first selection" : "Click row to include")
     : (manualAliasCount ? (selected ? `${manualAliasCount} ${manualAliasCount === 1 ? "alias" : "aliases"}` : "Click row to separate") : "This profile has no manual aliases to separate.");
   return `
-    <article class="lookup-row glass-profile-row-v349 ${combineMode ? "is-combine-selectable-v361" : ""} ${uncombineSelectable ? "is-uncombine-selectable-v360" : ""} ${uncombineMode && !uncombineSelectable ? "is-uncombine-unavailable-v360" : ""} ${selected ? "is-combine-selected-v361" : ""} ${keep ? "is-combine-keep-v361" : ""} ${uncombineMode && selected ? "is-uncombine-selected-v360" : ""}"
+    <article class="lookup-row glass-profile-row-v349 ${combineMode ? "is-combine-selectable-v361" : ""} ${uncombineSelectable ? "is-uncombine-selectable-v362" : ""} ${uncombineMode && !uncombineSelectable ? "is-uncombine-unavailable-v362" : ""} ${selected ? "is-combine-selected-v361" : ""} ${keep ? "is-combine-keep-v361" : ""} ${uncombineMode && selected ? "is-uncombine-selected-v362" : ""}"
       data-lookup-row data-lookup-search="${escapeHtml([profile.value, profile.label, profile.family, ...(profile.memberValues || []), cost, profile.source].join(" ").toLowerCase())}"
       ${combineMode ? `data-glass-combine-select-v361="${escapeHtml(profile.value)}" role="checkbox" aria-checked="${selected}" tabindex="0"` : ""}
-      ${uncombineSelectable ? `data-glass-uncombine-select-v360="${escapeHtml(profile.value)}" role="checkbox" aria-checked="${selected}" tabindex="0"` : ""}>
+      ${uncombineSelectable ? `data-glass-uncombine-select-v362="${escapeHtml(profile.value)}" role="checkbox" aria-checked="${selected}" tabindex="0"` : ""}>
       ${selectionMode ? `<span class="glass-combine-check-v361" aria-hidden="true"><i></i></span>` : `<span class="glass-profile-swatch-v349" style="--lookup-glass-color:${escapeHtml(color)}" aria-hidden="true"></span>`}
       <div class="lookup-row-main">
         <span class="lookup-row-heading"><strong>${escapeHtml(profile.label || profile.value)}</strong><em class="lookup-source-badge ${sourceClass}">${escapeHtml(profile.source)}</em></span>
@@ -32539,7 +33239,7 @@ function glassProfileManagerHtmlV349() {
   if (!profiles.some((profile) => profile.family === activeFamily)) activeFamily = families.find((family) => profiles.some((profile) => profile.family === family)) || "Annealed";
   state.lookupGlassFamilyV350 = activeFamily;
   const visibleProfiles = profiles.filter((profile) => profile.family === activeFamily);
-  const hasManualCombinationsInFamilyV360 = visibleProfiles.some((profile) => glassAliasRowsForTargetV360(profile.value).length > 0);
+  const hasManualCombinationsInFamilyV362 = visibleProfiles.some((profile) => glassAliasRowsForTargetV360(profile.value).length > 0);
   const defaultColor = glassVisualColor("New Glass Type", profiles.map((profile) => profile.value));
   return `
     <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066 lookup-manager-v345 lookup-manager-v349 lookup-manager-v350">
@@ -32555,7 +33255,7 @@ function glassProfileManagerHtmlV349() {
               <label><span>Glass type</span><input id="glassProfileValueV349" type="text" autocomplete="off" placeholder="1/4 Clear Annealed" required><small>Generic non-mirror glass is normalized to Annealed; Tempered remains separate.</small></label>
               <label><span>Display label</span><input id="glassProfileLabelV349" type="text" autocomplete="off" placeholder="1/4 Clear Annealed"><small>Friendly wording shown in Admin lookup choices.</small></label>
               <label><span>Cost per SQFT</span><input id="glassProfileCostV349" type="number" min="0" step="0.01" inputmode="decimal" placeholder="1.83"><small>Leave blank when pricing is not configured yet.</small></label>
-              <label class="lookup-glass-color-field-v310"><span>Preview color</span><span class="lookup-glass-color-picker-v310"><input id="glassProfileColorV349" type="color" value="${escapeHtml(defaultColor)}"><b data-glass-profile-color-v349>${escapeHtml(defaultColor)}</b></span><small>This color drives glass-aware preview interfaces.</small></label>
+              <label class="lookup-glass-color-field-v312"><span>Preview color</span><span class="lookup-glass-color-picker-v312"><input id="glassProfileColorV349" type="color" value="${escapeHtml(defaultColor)}"><b data-glass-profile-color-v349>${escapeHtml(defaultColor)}</b></span><small>This color drives glass-aware preview interfaces.</small></label>
             </div>
             <aside class="lookup-live-preview glass-profile-preview-v349" aria-live="polite">
               ${lookupPreviewIconHtmlV346()}
@@ -32565,7 +33265,7 @@ function glassProfileManagerHtmlV349() {
           </form>
         </section>
         <section class="lookup-manager-list lookup-library glass-profile-library-v349 glass-profile-library-v350">
-          <header>${lookupLibraryIconHtml("product")}<div><h3>Glass type library</h3><p>${state.lookupGlassCombineModeV361 ? "Select two or more matching glass types. The first selection is kept as the canonical profile." : state.lookupGlassUncombineModeV360 ? "Select one or more combined profiles to separate their source glass names." : "Use the family tabs to manage one normalized glass profile at a time."}</p></div><div class="glass-library-header-actions-v361"><strong data-lookup-visible-count>${escapeHtml(visibleProfiles.length)} / ${escapeHtml(profiles.length)}</strong>${state.lookupGlassCombineModeV361 ? `<button type="button" class="secondary" data-glass-combine-cancel-v361>Cancel</button><button type="button" class="app-primary-button" data-glass-combine-apply-v361 ${state.lookupGlassCombineSelectionV361.length < 0 ? "disabled" : ""}><span>Combine selected</span> <b data-glass-combine-count-v361>(${escapeHtml(state.lookupGlassCombineSelectionV361.length)})</b></button>` : state.lookupGlassUncombineModeV360 ? `<button type="button" class="secondary" data-glass-uncombine-cancel-v360>Cancel</button><button type="button" class="app-primary-button glass-library-uncombine-apply-v360" data-glass-uncombine-apply-v360 ${state.lookupGlassUncombineSelectionV360.length < 1 ? "disabled" : ""}><span>Uncombine selected</span> <b data-glass-uncombine-count-v360>(${escapeHtml(state.lookupGlassUncombineSelectionV360.length)})</b></button>` : `<button type="button" class="secondary glass-library-combine-button-v361" data-glass-combine-mode-v361>${lookupActionIconHtmlV346("merge")}<span>Combine Glass Types</span></button><button type="button" class="secondary glass-library-uncombine-button-v360" data-glass-uncombine-mode-v360 ${hasManualCombinationsInFamilyV360 ? "" : "disabled"} title="${hasManualCombinationsInFamilyV360 ? "Separate manually combined glass profiles" : "No combined glass types in this family"}">${lookupActionIconHtmlV346("split")}<span>Uncombine Glass Types</span></button>`}</div></header>
+          <header>${lookupLibraryIconHtml("product")}<div><h3>Glass type library</h3><p>${state.lookupGlassCombineModeV361 ? "Select two or more matching glass types. The first selection is kept as the canonical profile." : state.lookupGlassUncombineModeV362 ? "Select one or more combined profiles to separate their source glass names." : "Use the family tabs to manage one normalized glass profile at a time."}</p></div><div class="glass-library-header-actions-v361"><strong data-lookup-visible-count>${escapeHtml(visibleProfiles.length)} / ${escapeHtml(profiles.length)}</strong>${state.lookupGlassCombineModeV361 ? `<button type="button" class="secondary" data-glass-combine-cancel-v361>Cancel</button><button type="button" class="app-primary-button" data-glass-combine-apply-v361 ${state.lookupGlassCombineSelectionV361.length < 2 ? "disabled" : ""}><span>Combine selected</span> <b data-glass-combine-count-v361>(${escapeHtml(state.lookupGlassCombineSelectionV361.length)})</b></button>` : state.lookupGlassUncombineModeV362 ? `<button type="button" class="secondary" data-glass-uncombine-cancel-v362>Cancel</button><button type="button" class="app-primary-button glass-library-uncombine-apply-v362" data-glass-uncombine-apply-v362 ${state.lookupGlassUncombineSelectionV362.length < 1 ? "disabled" : ""}><span>Uncombine selected</span> <b data-glass-uncombine-count-v362>(${escapeHtml(state.lookupGlassUncombineSelectionV362.length)})</b></button>` : `<button type="button" class="secondary glass-library-combine-button-v361" data-glass-combine-mode-v361>${lookupActionIconHtmlV346("merge")}<span>Combine Glass Types</span></button><button type="button" class="secondary glass-library-uncombine-button-v362" data-glass-uncombine-mode-v362 ${hasManualCombinationsInFamilyV362 ? "" : "disabled"} title="${hasManualCombinationsInFamilyV362 ? "Separate manually combined glass profiles" : "No combined glass types in this family"}">${lookupActionIconHtmlV346("split")}<span>Uncombine Glass Types</span></button>`}</div></header>
           <div class="glass-profile-family-tabs-v350" role="tablist" aria-label="Glass type family">
             ${families.map((family) => { const count = profiles.filter((profile) => profile.family === family).length; const selected = family === activeFamily; return `<button type="button" role="tab" aria-selected="${selected}" class="${selected ? "is-active" : ""}" data-glass-family-tab-v350="${escapeHtml(family)}"><span>${escapeHtml(family)}</span><b>${escapeHtml(count)}</b></button>`; }).join("")}
           </div>
@@ -32573,8 +33273,8 @@ function glassProfileManagerHtmlV349() {
             <div class="lookup-search-copy-v351"><small>Search glass library</small><strong>Find a ${escapeHtml(activeFamily.toLowerCase())} glass type</strong><span>Search thickness, product name, source alias, cost, or color.</span></div>
             <div class="lookup-search-field-v351"><span class="search-icon" aria-hidden="true"></span><input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="Search ${escapeHtml(activeFamily.toLowerCase())} glass types..."><button type="button" data-lookup-search-clear-v351 aria-label="Clear glass type search" ${state.lookupManagerSearch ? "" : "disabled"}>Clear</button></div>
           </div>
-          ${state.lookupGlassCombineModeV361 ? `<div class="glass-combine-guidance-v361"><span><b>1.</b> Select the glass profile you want to keep first.</span><span><b>0.</b> Select every duplicate that should merge into it.</span><span><b>3.</b> Click Combine selected.</span></div>` : state.lookupGlassUncombineModeV360 ? `<div class="glass-combine-guidance-v361 is-uncombine-v360"><span><b>1.</b> Select each combined profile you want to separate.</span><span><b>0.</b> Click Uncombine selected.</span></div>` : ""}
-          <div class="lookup-row-list ${state.lookupGlassCombineModeV361 ? "is-combine-mode-v361" : ""} ${state.lookupGlassUncombineModeV360 ? "is-uncombine-mode-v360" : ""}" data-lookup-row-list>${visibleProfiles.length ? visibleProfiles.map((profile) => glassProfileRowHtmlV349(profile, colorMap)).join("") : `<div class="lookup-empty-state"><strong>No ${escapeHtml(activeFamily)} glass types</strong><span>Save the first ${escapeHtml(activeFamily.toLowerCase())} profile using the editor.</span></div>`}</div>
+          ${state.lookupGlassCombineModeV361 ? `<div class="glass-combine-guidance-v361"><span><b>1.</b> Select the glass profile you want to keep first.</span><span><b>2.</b> Select every duplicate that should merge into it.</span><span><b>3.</b> Click Combine selected.</span></div>` : state.lookupGlassUncombineModeV362 ? `<div class="glass-combine-guidance-v361 is-uncombine-v362"><span><b>1.</b> Select each combined profile you want to separate.</span><span><b>2.</b> Click Uncombine selected.</span></div>` : ""}
+          <div class="lookup-row-list ${state.lookupGlassCombineModeV361 ? "is-combine-mode-v361" : ""} ${state.lookupGlassUncombineModeV362 ? "is-uncombine-mode-v362" : ""}" data-lookup-row-list>${visibleProfiles.length ? visibleProfiles.map((profile) => glassProfileRowHtmlV349(profile, colorMap)).join("") : `<div class="lookup-empty-state"><strong>No ${escapeHtml(activeFamily)} glass types</strong><span>Save the first ${escapeHtml(activeFamily.toLowerCase())} profile using the editor.</span></div>`}</div>
         </section>
       </div>
     </div>`;
@@ -32591,7 +33291,7 @@ function syncGlassProfilePreviewV349() {
   const colorValue = document.querySelector("[data-glass-profile-color-v349]");
   const swatch = document.querySelector("[data-glass-profile-preview-swatch-v349]");
   if (labelNode) labelNode.textContent = label;
-  if (costNode) costNode.textContent = costText && Number.isFinite(Number(costText)) ? `$${Number(costText).toFixed(0)} / SQFT` : "Not configured";
+  if (costNode) costNode.textContent = costText && Number.isFinite(Number(costText)) ? `$${Number(costText).toFixed(2)} / SQFT` : "Not configured";
   if (colorNode) colorNode.textContent = color;
   if (colorValue) colorValue.textContent = color;
   if (swatch) swatch.style.setProperty("--lookup-glass-color", color);
@@ -32682,7 +33382,7 @@ function syncGlassProfileCombineSelectionUiV361() {
     if (small) small.textContent = localizedUiValue(keep ? "Canonical profile" : selected ? "Combine into first selection" : "Click row to include");
   });
   const applyButton = document.querySelector("[data-glass-combine-apply-v361]");
-  if (applyButton) applyButton.disabled = selection.length < 0;
+  if (applyButton) applyButton.disabled = selection.length < 2;
   const count = document.querySelector("[data-glass-combine-count-v361]");
   if (count) count.textContent = `(${selection.length})`;
 }
@@ -32712,10 +33412,10 @@ function toggleGlassProfileCombineSelectionV361(value) {
 /** v0.361: Combine all selected library profiles into the first selected profile. */
 async function saveSelectedGlassProfilesV361() {
   const selection = Array.isArray(state.lookupGlassCombineSelectionV361) ? state.lookupGlassCombineSelectionV361 : [];
-  if (selection.length < 0) throw new Error("Select at least two glass types to combine.");
+  if (selection.length < 2) throw new Error("Select at least two glass types to combine.");
   const profiles = glassProfileItemsV349();
   const selectedProfiles = selection.map((value) => profiles.find((profile) => String(profile.value).toLowerCase() === String(value).toLowerCase())).filter(Boolean);
-  if (selectedProfiles.length < 0) throw new Error("Select at least two glass types to combine.");
+  if (selectedProfiles.length < 2) throw new Error("Select at least two glass types to combine.");
   const target = selectedProfiles[0];
   if (selectedProfiles.some((profile) => profile.family !== target.family)) throw new Error("Only glass types from the same family can be combined.");
   const aliases = new Set();
@@ -32732,8 +33432,8 @@ async function saveSelectedGlassProfilesV361() {
   adoptManualEditLookups(payload);
   state.lookupGlassCombineModeV361 = false;
   state.lookupGlassCombineSelectionV361 = [];
-  state.lookupGlassUncombineModeV360 = false;
-  state.lookupGlassUncombineSelectionV360 = [];
+  state.lookupGlassUncombineModeV362 = false;
+  state.lookupGlassUncombineSelectionV362 = [];
   state.lookupGlassCombineTargetV360 = "";
   state.lookupManagerActiveType = "glass_profile";
   renderLookupManagerModal();
@@ -32741,43 +33441,43 @@ async function saveSelectedGlassProfilesV361() {
   showSaveConfirmation(`${target.value} glass aliases were updated.`);
 }
 
-/** v0.360: Refresh Uncombine selection without rebuilding the Lookup modal. */
-function syncGlassProfileUncombineSelectionUiV360() {
-  const selection = Array.isArray(state.lookupGlassUncombineSelectionV360) ? state.lookupGlassUncombineSelectionV360 : [];
-  document.querySelectorAll("[data-glass-uncombine-select-v360]").forEach((row) => {
-    const value = String(row.dataset.glassUncombineSelectV360 || "");
+/** v0.362: Refresh Uncombine selection without rebuilding the Lookup modal. */
+function syncGlassProfileUncombineSelectionUiV362() {
+  const selection = Array.isArray(state.lookupGlassUncombineSelectionV362) ? state.lookupGlassUncombineSelectionV362 : [];
+  document.querySelectorAll("[data-glass-uncombine-select-v362]").forEach((row) => {
+    const value = String(row.dataset.glassUncombineSelectV362 || "");
     const selected = selection.some((item) => String(item).toLowerCase() === value.toLowerCase());
     const aliasCount = glassAliasRowsForTargetV360(value).length;
     row.classList.toggle("is-combine-selected-v361", selected);
-    row.classList.toggle("is-uncombine-selected-v360", selected);
+    row.classList.toggle("is-uncombine-selected-v362", selected);
     row.setAttribute("aria-checked", String(selected));
     const strong = row.querySelector(".glass-combine-row-state-v361 strong");
     const small = row.querySelector(".glass-combine-row-state-v361 small");
     if (strong) strong.textContent = localizedUiValue(selected ? "Uncombine" : "Select");
     if (small) small.textContent = localizedUiValue(selected ? `${aliasCount} ${aliasCount === 1 ? "alias" : "aliases"}` : "Click row to separate");
   });
-  const applyButton = document.querySelector("[data-glass-uncombine-apply-v360]");
+  const applyButton = document.querySelector("[data-glass-uncombine-apply-v362]");
   if (applyButton) applyButton.disabled = selection.length < 1;
-  const count = document.querySelector("[data-glass-uncombine-count-v360]");
+  const count = document.querySelector("[data-glass-uncombine-count-v362]");
   if (count) count.textContent = `(${selection.length})`;
 }
 
-/** v0.360: Toggle one manually combined profile for separation. */
-function toggleGlassProfileUncombineSelectionV360(value) {
+/** v0.362: Toggle one manually combined profile for separation. */
+function toggleGlassProfileUncombineSelectionV362(value) {
   const clean = String(value || "").trim();
   if (!clean || glassAliasRowsForTargetV360(clean).length < 1) return;
-  const selection = Array.isArray(state.lookupGlassUncombineSelectionV360) ? [...state.lookupGlassUncombineSelectionV360] : [];
+  const selection = Array.isArray(state.lookupGlassUncombineSelectionV362) ? [...state.lookupGlassUncombineSelectionV362] : [];
   const index = selection.findIndex((item) => String(item).toLowerCase() === clean.toLowerCase());
   if (index >= 0) selection.splice(index, 1);
   else selection.push(clean);
-  state.lookupGlassUncombineSelectionV360 = selection;
-  syncGlassProfileUncombineSelectionUiV360();
+  state.lookupGlassUncombineSelectionV362 = selection;
+  syncGlassProfileUncombineSelectionUiV362();
 }
 
-/** v0.360: Separate every selected canonical profile from its manual aliases. */
-async function uncombineSelectedGlassProfilesV360() {
-  const targets = Array.isArray(state.lookupGlassUncombineSelectionV360)
-    ? state.lookupGlassUncombineSelectionV360.filter((target) => glassAliasRowsForTargetV360(target).length > 0)
+/** v0.362: Separate every selected canonical profile from its manual aliases. */
+async function uncombineSelectedGlassProfilesV362() {
+  const targets = Array.isArray(state.lookupGlassUncombineSelectionV362)
+    ? state.lookupGlassUncombineSelectionV362.filter((target) => glassAliasRowsForTargetV360(target).length > 0)
     : [];
   if (!targets.length) throw new Error("Select at least one combined glass type to uncombine.");
   // v0.461: send the persisted alias IDs as the stable ownership key. The
@@ -32791,8 +33491,8 @@ async function uncombineSelectedGlassProfilesV360() {
     body: JSON.stringify({ targets: [...new Set([...targets, ...persistedTargets])], aliasIds }),
   });
   adoptManualEditLookups(payload);
-  state.lookupGlassUncombineModeV360 = false;
-  state.lookupGlassUncombineSelectionV360 = [];
+  state.lookupGlassUncombineModeV362 = false;
+  state.lookupGlassUncombineSelectionV362 = [];
   state.lookupGlassCombineModeV361 = false;
   state.lookupGlassCombineSelectionV361 = [];
   state.lookupManagerActiveType = "glass_profile";
@@ -32872,9 +33572,9 @@ function lookupManagerModalHtml() {
                   <small>Material-only cost used for reject and breakage reporting.</small>
                 </label>
               ` : isGlassColor ? `
-                <label class="lookup-glass-color-field-v310">
+                <label class="lookup-glass-color-field-v312">
                   <span>Visual color</span>
-                  <span class="lookup-glass-color-picker-v310"><input id="lookupColorInput" type="color" value="${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}"><b data-lookup-color-value>${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}</b></span>
+                  <span class="lookup-glass-color-picker-v312"><input id="lookupColorInput" type="color" value="${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}"><b data-lookup-color-value>${escapeHtml(glassVisualColor(meta.example.split(" → ")[0]))}</b></span>
                   <small>Used for this exact glass type anywhere the shared glass palette is applied.</small>
                 </label>
               ` : `
@@ -32945,10 +33645,10 @@ function syncLookupManagerFormGuidance() {
   if (previewLabel) {
     if (type === "glass_cost") {
       const rate = Number(costInput?.value);
-      previewLabel.textContent = Number.isFinite(rate) && costInput?.value !== "" ? `$${rate.toFixed(0)} / SQFT` : "Cost not configured";
+      previewLabel.textContent = Number.isFinite(rate) && costInput?.value !== "" ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
     } else if (type === "glass_color") {
       const color = normalizeGlassVisualColor(colorInput?.value) || glassVisualColor(value);
-      previewLabel.innerHTML = `<span class="lookup-glass-color-preview-v310"><i style="--lookup-glass-color:${escapeHtml(color)}"></i>${escapeHtml(color)}</span>`;
+      previewLabel.innerHTML = `<span class="lookup-glass-color-preview-v312"><i style="--lookup-glass-color:${escapeHtml(color)}"></i>${escapeHtml(color)}</span>`;
       if (colorValue) colorValue.textContent = color;
     } else {
       previewLabel.textContent = label;
@@ -33222,7 +33922,7 @@ async function saveManualEditLookup() {
     if (state.page === "bays") renderBayMapPage();
   }
 
-  // v0.061: Refresh the report summary after a pricing save so the next
+  // v0.261: Refresh the report summary after a pricing save so the next
   // Statistics view and PDF use the new material rate without a browser reload.
   if (type === "glass_cost") await loadHomeReportSummary();
 
@@ -33391,7 +34091,7 @@ function rackManagerRackEditHtml() {
 
       <label>
         <span>Rack code</span>
-        <input id="rackManagerInlineCode" type="text" autocomplete="off" value="${escapeHtml(rack.code)}" ${legacyTruck ? "readonly" : ""} placeholder="R1S or T0">
+        <input id="rackManagerInlineCode" type="text" autocomplete="off" value="${escapeHtml(rack.code)}" ${legacyTruck ? "readonly" : ""} placeholder="R1S or T2">
       </label>
 
       <label>
@@ -33455,15 +34155,15 @@ function rackManagerSetEditHtml() {
         <input id="rackManagerSetNameRootInput" type="text" autocomplete="off" value="${escapeHtml(nameRoot || label)}" placeholder="Example: Rack Steel">
       </label>
 
-      <div class="rack-set-visual-field-v069" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d70")}">
+      <div class="rack-set-visual-field-v269" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d72")}">
         <span>Set icon</span>
         ${rackSetIconLibraryHtml(rackSetVisualIcon(label), "rackManagerSetIconInput")}
       </div>
-      <label class="rack-set-color-field-v069">
+      <label class="rack-set-color-field-v269">
         <span>Icon color</span>
-        <span class="rack-set-color-control-v069">
-          <input id="rackManagerSetColorInput" type="color" value="${escapeHtml(rackSetVisualColor(label) || "#176d70")}" aria-label="Rack set icon color">
-          <output data-rack-set-color-output>${escapeHtml(rackSetVisualColor(label) || "#176d70")}</output>
+        <span class="rack-set-color-control-v269">
+          <input id="rackManagerSetColorInput" type="color" value="${escapeHtml(rackSetVisualColor(label) || "#176d72")}" aria-label="Rack set icon color">
+          <output data-rack-set-color-output>${escapeHtml(rackSetVisualColor(label) || "#176d72")}</output>
         </span>
       </label>
 
@@ -33568,7 +34268,7 @@ async function saveRackSetQuickEdit() {
   const newType = String(document.getElementById("rackManagerSetTypeInput")?.value || oldLabel).trim() || oldLabel;
   const nameRoot = String(document.getElementById("rackManagerSetNameRootInput")?.value || newType).trim() || newType;
   const setIcon = String(document.getElementById("rackManagerSetIconInput")?.value || rackSetVisualIcon(oldLabel) || "rack").trim();
-  const setColor = String(document.getElementById("rackManagerSetColorInput")?.value || rackSetVisualColor(oldLabel) || "#176d70").trim();
+  const setColor = String(document.getElementById("rackManagerSetColorInput")?.value || rackSetVisualColor(oldLabel) || "#176d72").trim();
   /**
    * Purpose: Run the racks workflow for the browser application.
    * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -33634,7 +34334,7 @@ function rackManagerModalHtml() {
   const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
     if (a === "Truck") return -1;
     if (b === "Truck") return 1;
-    const order = { Steel: 1, Wood: 0, Coral: 3 };
+    const order = { Steel: 1, Wood: 2, Coral: 3 };
     return (order[a] || 50) - (order[b] || 50) || a.localeCompare(b);
   });
 
@@ -33678,17 +34378,17 @@ function rackManagerModalHtml() {
 
                   const expanded = state.expandedRackManagerGroups.has(label);
                   return `
-                    <details class="rack-manager-group rack-manager-group-v070" data-rack-manager-group="${escapeHtml(label)}" ${expanded ? "open" : ""}>
-                      <summary class="rack-manager-group-summary-v070">
-                        <span class="rack-manager-group-icon rack-set-visual-icon-v069" data-rack-icon="${escapeHtml(rackSetVisualIcon(label))}" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d70")}" aria-hidden="true"></span>
-                        <div class="rack-manager-group-copy-v070">
+                    <details class="rack-manager-group rack-manager-group-v272" data-rack-manager-group="${escapeHtml(label)}" ${expanded ? "open" : ""}>
+                      <summary class="rack-manager-group-summary-v272">
+                        <span class="rack-manager-group-icon rack-set-visual-icon-v269" data-rack-icon="${escapeHtml(rackSetVisualIcon(label))}" style="--rack-set-icon-color:${escapeHtml(rackSetVisualColor(label) || "#176d72")}" aria-hidden="true"></span>
+                        <div class="rack-manager-group-copy-v272">
                           <h3>${escapeHtml(label)}</h3>
                           <span>${escapeHtml(racks.length)} rack${racks.length === 1 ? "" : "s"} | ${escapeHtml(totalQty)} pcs</span>
                         </div>
-                        <span class="rack-manager-expand-hint-v070" aria-hidden="true">
+                        <span class="rack-manager-expand-hint-v272" aria-hidden="true">
                           <i></i>
-                          <b class="rack-manager-expand-closed-v070">View racks</b>
-                          <b class="rack-manager-expand-open-v070">Hide racks</b>
+                          <b class="rack-manager-expand-closed-v272">View racks</b>
+                          <b class="rack-manager-expand-open-v272">Hide racks</b>
                         </span>
                         <div class="rack-manager-group-actions">
                           <button type="button" class="icon-only icon-plus" data-rack-manager-add-to-set="${escapeHtml(label)}" title="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}" aria-label="Add ${label === "Truck" ? "another truck" : `rack to ${escapeHtml(label)}`}"></button>
@@ -33749,13 +34449,13 @@ function rackFormModalHtml() {
   const selectedType = String(rack.type || availableSets[0] || "Steel");
   const typeChoices = rackSetFormChoices(selectedType);
   const visualIcon = rackSetVisualIcon(selectedType);
-  const visualColor = rackSetVisualColor(selectedType) || "#176d70";
+  const visualColor = rackSetVisualColor(selectedType) || "#176d72";
   return `
-    <form id="rackFormModal" class="admin-form rack-modal-form rack-config-form-v070 rack-individual-form-v070">
+    <form id="rackFormModal" class="admin-form rack-modal-form rack-config-form-v270 rack-individual-form-v270">
       <input id="rackModalOldCode" type="hidden" value="${escapeHtml(rack.oldCode || rack.code || "")}">
 
-      <div class="rack-config-form-nav-v070">
-        <button type="button" class="rack-config-back-v070" data-rack-form-back>
+      <div class="rack-config-form-nav-v270">
+        <button type="button" class="rack-config-back-v270" data-rack-form-back>
           <span aria-hidden="true"></span>
           <strong>Edit Racks</strong>
         </button>
@@ -33763,14 +34463,14 @@ function rackFormModalHtml() {
       </div>
 
 
-      <div class="rack-config-layout-v070">
-        <div class="rack-config-fields-v070">
-          <section class="rack-config-section-v070">
+      <div class="rack-config-layout-v270">
+        <div class="rack-config-fields-v270">
+          <section class="rack-config-section-v270">
             <header>
-              <span class="rack-config-step-v070">1</span>
+              <span class="rack-config-step-v270">1</span>
               <div><strong>Rack identity</strong><small>Use a short code operators can recognize quickly.</small></div>
             </header>
-            <div class="rack-config-field-grid-v070">
+            <div class="rack-config-field-grid-v270">
               <label>
                 <span>Rack code</span>
                 <input id="rackModalCode" type="text" autocomplete="off" required value="${escapeHtml(rack.code || "")}" ${rack.code === "T" ? "readonly" : ""} placeholder="R11S">
@@ -33784,12 +34484,12 @@ function rackFormModalHtml() {
             </div>
           </section>
 
-          <section class="rack-config-section-v070">
+          <section class="rack-config-section-v270">
             <header>
-              <span class="rack-config-step-v070">0</span>
+              <span class="rack-config-step-v270">2</span>
               <div><strong>Rack set</strong><small>Choose the group that controls where this rack is organized.</small></div>
             </header>
-            <label class="rack-config-wide-field-v070">
+            <label class="rack-config-wide-field-v270">
               <span>Rack set / type</span>
               <select id="rackModalType">
                 ${typeChoices.map((type) => `<option value="${escapeHtml(type)}" ${selectedType === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
@@ -33802,23 +34502,23 @@ function rackFormModalHtml() {
             </div>
           </section>
 
-          <div class="rack-config-tip-v070">
+          <div class="rack-config-tip-v270">
             <span aria-hidden="true"></span>
             <div><strong>Keep rack identity unique</strong><p>Rack codes and display names must both be unique so operators never have to guess which rack a scan belongs to.</p></div>
           </div>
           <div class="rack-draft-validation-v307" data-rack-form-validation aria-live="polite"></div>
         </div>
 
-        <aside class="rack-config-preview-v070" aria-label="Rack preview">
+        <aside class="rack-config-preview-v270" aria-label="Rack preview">
           <small>Live Preview</small>
-          <span class="rack-config-preview-icon-v070 rack-set-visual-icon-v069" data-rack-form-preview-icon data-rack-icon="${escapeHtml(visualIcon)}" style="--rack-set-icon-color:${escapeHtml(visualColor)}" aria-hidden="true"></span>
+          <span class="rack-config-preview-icon-v270 rack-set-visual-icon-v269" data-rack-form-preview-icon data-rack-icon="${escapeHtml(visualIcon)}" style="--rack-set-icon-color:${escapeHtml(visualColor)}" aria-hidden="true"></span>
           <strong data-rack-form-preview-code>${escapeHtml(rack.code || "New rack")}</strong>
           <span data-rack-form-preview-name>${escapeHtml(rack.name || "Rack display name")}</span>
-          <div class="rack-config-preview-meta-v070"><small>Rack set</small><b data-rack-form-preview-type>${escapeHtml(selectedType)}</b></div>
+          <div class="rack-config-preview-meta-v270"><small>Rack set</small><b data-rack-form-preview-type>${escapeHtml(selectedType)}</b></div>
         </aside>
       </div>
 
-      <footer class="modal-actions rack-config-actions-v070">
+      <footer class="modal-actions rack-config-actions-v270">
         <div>${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}</div>
         <div>
           <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
@@ -33844,9 +34544,9 @@ function rackSetFormModalHtml() {
   const firstCode = prefix.length <= 3 ? `R${start}${prefix}` : `${prefix}${start}`;
   const lastCode = prefix.length <= 3 ? `R${lastNumber}${prefix}` : `${prefix}${lastNumber}`;
   return `
-    <form id="rackSetFormModal" class="admin-form rack-modal-form rack-config-form-v070 rack-set-form-v069 rack-set-form-v070" style="--rack-set-icon-color:${escapeHtml(setColor)}">
-      <div class="rack-config-form-nav-v070">
-        <button type="button" class="rack-config-back-v070" data-rack-form-back>
+    <form id="rackSetFormModal" class="admin-form rack-modal-form rack-config-form-v270 rack-set-form-v269 rack-set-form-v270" style="--rack-set-icon-color:${escapeHtml(setColor)}">
+      <div class="rack-config-form-nav-v270">
+        <button type="button" class="rack-config-back-v270" data-rack-form-back>
           <span aria-hidden="true"></span>
           <strong>Edit Racks</strong>
         </button>
@@ -33854,14 +34554,14 @@ function rackSetFormModalHtml() {
       </div>
 
 
-      <div class="rack-config-layout-v070 rack-set-config-layout-v070">
-        <div class="rack-config-fields-v070">
-          <section class="rack-config-section-v070">
+      <div class="rack-config-layout-v270 rack-set-config-layout-v270">
+        <div class="rack-config-fields-v270">
+          <section class="rack-config-section-v270">
             <header>
-              <span class="rack-config-step-v070">1</span>
+              <span class="rack-config-step-v270">1</span>
               <div><strong>Set identity</strong><small>Name the group and choose the suffix used in generated rack codes.</small></div>
             </header>
-            <div class="rack-config-field-grid-v070">
+            <div class="rack-config-field-grid-v270">
               <label>
                 <span>Set name</span>
                 <input id="rackSetModalName" type="text" autocomplete="off" required value="${escapeHtml(set.name || "")}" placeholder="Steel">
@@ -33870,17 +34570,17 @@ function rackSetFormModalHtml() {
               <label>
                 <span>Code suffix</span>
                 <input id="rackSetModalPrefix" type="text" autocomplete="off" required value="${escapeHtml(set.prefix || "")}" placeholder="S" maxlength="8">
-                <small>Example: suffix S creates codes such as R1S and R0S.</small>
+                <small>Example: suffix S creates codes such as R1S and R2S.</small>
               </label>
             </div>
           </section>
 
-          <section class="rack-config-section-v070">
+          <section class="rack-config-section-v270">
             <header>
-              <span class="rack-config-step-v070">0</span>
+              <span class="rack-config-step-v270">2</span>
               <div><strong>Numbering</strong><small>Choose how many racks to create and where numbering begins.</small></div>
             </header>
-            <div class="rack-config-field-grid-v070">
+            <div class="rack-config-field-grid-v270">
               <label>
                 <span>Rack count</span>
                 <input id="rackSetModalCount" type="number" min="1" max="100" value="${escapeHtml(set.count || 10)}">
@@ -33896,31 +34596,31 @@ function rackSetFormModalHtml() {
           <div class="rack-draft-validation-v307" data-rack-set-validation aria-live="polite"></div>
         </div>
 
-        <aside class="rack-config-preview-v070 rack-set-preview-v070" aria-label="Rack set preview">
+        <aside class="rack-config-preview-v270 rack-set-preview-v270" aria-label="Rack set preview">
           <small>Set Preview</small>
-          <span class="rack-config-preview-icon-v070 rack-set-visual-icon-v069" data-rack-set-preview-icon data-rack-icon="${escapeHtml(set.icon || "rack")}" style="--rack-set-icon-color:${escapeHtml(setColor)}" aria-hidden="true"></span>
+          <span class="rack-config-preview-icon-v270 rack-set-visual-icon-v269" data-rack-set-preview-icon data-rack-icon="${escapeHtml(set.icon || "rack")}" style="--rack-set-icon-color:${escapeHtml(setColor)}" aria-hidden="true"></span>
           <strong data-rack-set-preview-name>${escapeHtml(set.name || "New rack set")}</strong>
           <span data-rack-set-preview-range>${escapeHtml(count === 1 ? firstCode : `${firstCode} - ${lastCode}`)}</span>
-          <div class="rack-config-preview-meta-v070"><small>Will create</small><b data-rack-set-preview-count>${escapeHtml(count)} rack${count === 1 ? "" : "s"}</b></div>
+          <div class="rack-config-preview-meta-v270"><small>Will create</small><b data-rack-set-preview-count>${escapeHtml(count)} rack${count === 1 ? "" : "s"}</b></div>
         </aside>
       </div>
 
-      <section class="rack-config-section-v070 rack-set-visual-section-v070" style="--rack-set-icon-color:${escapeHtml(setColor)}">
+      <section class="rack-config-section-v270 rack-set-visual-section-v270" style="--rack-set-icon-color:${escapeHtml(setColor)}">
         <header>
-          <span class="rack-config-step-v070">3</span>
+          <span class="rack-config-step-v270">3</span>
           <div><strong>Visual identity</strong><small>Pick an icon and color so this rack set is easy to recognize at a glance.</small></div>
         </header>
-        <div class="rack-set-visual-field-v069">
+        <div class="rack-set-visual-field-v269">
           <span>Set icon</span>
           ${rackSetIconLibraryHtml(set.icon || "rack", "rackSetModalIcon")}
         </div>
-        <div class="rack-set-color-field-v069">
+        <div class="rack-set-color-field-v269">
           <span>Icon color</span>
           ${rackSetColorPickerHtml(setColor)}
         </div>
       </section>
 
-      <footer class="modal-actions rack-config-actions-v070">
+      <footer class="modal-actions rack-config-actions-v270">
         <div></div>
         <div>
           <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
@@ -34236,7 +34936,7 @@ function rolePermissionsModalHtml() {
   const assignedPermissionCount = new Set(roles.flatMap((role) => role.permissions || [])).size;
 
   return `
-    <div class="role-permission-editor role-manager-v140">
+    <div class="role-permission-editor role-manager-v142">
       <section class="role-manager-overview">
         <div>
           <span class="role-manager-eyebrow">Access control</span>
@@ -34298,7 +34998,7 @@ function roleCreateDialogHtml() {
     <header class="role-create-modal-header-v340">
       <div>
         <small>Roles &amp; Permissions</small>
-        <h0 id="roleCreateModalTitleV340">Create New Role</h0>
+        <h2 id="roleCreateModalTitleV340">Create New Role</h2>
         <p>Define what the role can do here. Users are assigned to the finished role separately in User Access Management.</p>
       </div>
       <button type="button" class="gui-close-button" data-role-create-close aria-label="Close Create New Role">×</button>
@@ -34306,7 +35006,7 @@ function roleCreateDialogHtml() {
     <form id="createRoleForm" class="role-create-modal-form-v340">
       <section class="role-create-modal-identity-v340">
         <label><span>Role name <b class="required-mark-v340" aria-hidden="true">*</b></span><input id="newRoleName" name="name" type="text" maxlength="60" autocomplete="off" placeholder="Example: Shipping Lead" required></label>
-        <label><span>Description</span><input id="newRoleDescription" name="description" type="text" maxlength="040" autocomplete="off" placeholder="What this role is responsible for"></label>
+        <label><span>Description</span><input id="newRoleDescription" name="description" type="text" maxlength="240" autocomplete="off" placeholder="What this role is responsible for"></label>
       </section>
       <section class="role-create-modal-permissions-v340">
         <header>
@@ -34778,7 +35478,7 @@ async function ensureManualEditLookupsLoaded() {
     state.bayEvents = bayResult.value.events || state.bayEvents || [];
   }
 
-  const manualLookupResult = lookups[0];
+  const manualLookupResult = lookups[2];
 
   if (manualLookupResult.status === "fulfilled" && manualLookupResult.value) {
     adoptManualEditLookups(manualLookupResult.value);
@@ -34826,7 +35526,7 @@ async function openManualEditForList(listId) {
  * Effects: May call the backend api.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function fetchManualEditBatch(query, listId, limit = 00, offset = 0, filters = state.manualEditFilters, scope = state.manualEditScopeV468) {
+async function fetchManualEditBatch(query, listId, limit = 20, offset = 0, filters = state.manualEditFilters, scope = state.manualEditScopeV468) {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   const wholeList = scope === "whole";
@@ -35044,7 +35744,7 @@ function importHistoryRows(imports = []) {
     // Delivery List Management describes the selected import event. Prefer the
     // post-import quantity saved with that event before falling back to the live
     // catalog. Using the live total first could display only a later route/delta
-    // list and turn a valid 111 + 9 = 100 import into 111 + 9 = 9.
+    // list and turn a valid 111 + 9 = 120 import into 111 + 9 = 9.
     const importedTotal = row.totalQty ?? row.updatedQty ?? row.newQty;
     if (importedTotal !== undefined && importedTotal !== null && importedTotal !== "") {
       return Number(importedTotal || 0);
@@ -35090,7 +35790,7 @@ function importHistoryRows(imports = []) {
     const added = Math.max(Number(addedQty || 0), 0);
     const removed = Math.max(Number(removedQty || 0), 0);
     if (!added && !removed) return `<span class="qty-change is-zero">0</span>`;
-    return `<span class="qty-change-set-v057">${added ? `<span class="qty-change is-added">+${escapeHtml(added)} pcs</span>` : ""}${removed ? `<span class="qty-change is-removed">-${escapeHtml(removed)} pcs</span>` : ""}</span>`;
+    return `<span class="qty-change-set-v257">${added ? `<span class="qty-change is-added">+${escapeHtml(added)} pcs</span>` : ""}${removed ? `<span class="qty-change is-removed">-${escapeHtml(removed)} pcs</span>` : ""}</span>`;
   };
 
   const quantityChangeHtmlForRow = (row, list) => {
@@ -35427,7 +36127,7 @@ function importHistoryRows(imports = []) {
           key: `custom-${slugify(label || row.listId || "route")}`,
           label,
           printRouteGroup: "airport",
-          sort: 00 + stageSortForRow(row),
+          sort: 20 + stageSortForRow(row),
         };
       }
       const managementRow = buildRow([row], definition, row);
@@ -35573,9 +36273,9 @@ function importHistoryRows(imports = []) {
                       <td><span class="qty-before">${escapeHtml(managementRow.originalQty)} pcs</span></td>
                       <td>${changeHtml}</td>
                       <td><strong>${escapeHtml(managementRow.updatedQty)} pcs</strong></td>
-                      <td><span class="admin-import-row-status-v057">${rowStatusHtml}</span></td>
+                      <td><span class="admin-import-row-status-v257">${rowStatusHtml}</span></td>
                       <td>
-                        <span class="admin-import-stage-actions-v030">
+                        <span class="admin-import-stage-actions-v230">
                           ${hasRetainedPreview
                             ? `<button
                                 type="button"
@@ -36029,9 +36729,9 @@ function userInitials(user) {
     .map((part) => part[0])
     .filter(Boolean);
 
-  if (parts.length >= 0) return `${parts[0]}${parts[1]}`.toUpperCase();
+  if (parts.length >= 2) return `${parts[0]}${parts[1]}`.toUpperCase();
 
-  return display.slice(0, 0).toUpperCase() || "?";
+  return display.slice(0, 2).toUpperCase() || "?";
 }
 
 /**
@@ -36207,7 +36907,7 @@ function userCreateDialogHtml() {
     <header class="user-create-modal-header-v340">
       <div>
         <small>User Access Management</small>
-        <h0 id="userCreateModalTitleV340">Create New User</h0>
+        <h2 id="userCreateModalTitleV340">Create New User</h2>
         <p>Create the user profile here. Roles contain permissions; this form only assigns an existing starting role to the new user.</p>
       </div>
       <button type="button" class="gui-close-button" data-user-create-close aria-label="Close Create New User">×</button>
@@ -36378,9 +37078,9 @@ function wireUserManagerControls(saved = {}) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
-function generateTemporaryPassword(length = 10) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz03456789!@#$%";
-  const values = new Uint30Array(length);
+function generateTemporaryPassword(length = 12) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const values = new Uint32Array(length);
 
   if (window.crypto?.getRandomValues) {
     window.crypto.getRandomValues(values);
@@ -36452,7 +37152,7 @@ function confirmWebAppAction({
         <span class="action-confirm-icon" aria-hidden="true"></span>
 
         <div class="action-confirm-copy">
-          <h0 id="actionConfirmTitle">${escapeHtml(title || "Confirm action")}</h0>
+          <h2 id="actionConfirmTitle">${escapeHtml(title || "Confirm action")}</h2>
           <p>${message || "Are you sure you want to continue?"}</p>
           ${details ? `<small>${escapeHtml(details)}</small>` : ""}
         </div>
@@ -36565,7 +37265,7 @@ function promptWebAppAction({
         <button type="button" class="action-confirm-close gui-close-button" data-action-prompt-cancel aria-label="Close">&times;</button>
         <span class="action-confirm-icon" aria-hidden="true"></span>
         <div class="action-confirm-copy">
-          <h0 id="actionPromptTitle">${escapeHtml(title)}</h0>
+          <h2 id="actionPromptTitle">${escapeHtml(title)}</h2>
           ${message ? `<p>${escapeHtml(message)}</p>` : ""}
         </div>
         <label class="action-prompt-field">
@@ -36648,7 +37348,7 @@ function confirmDeactivateUser(username) {
         <span class="user-deactivate-icon" aria-hidden="true"></span>
 
         <div class="user-deactivate-copy">
-          <h0 id="deactivateUserTitle">Deactivate user?</h0>
+          <h2 id="deactivateUserTitle">Deactivate user?</h2>
           <p>Deactivate <strong>${escapeHtml(username)}</strong>? This keeps the profile and history, but the user will no longer be able to sign in until reactivated.</p>
         </div>
 
@@ -37107,13 +37807,13 @@ function customerRouteVisualColorV347(routeCode = "") {
     CPU: "#d77a1f",
     DTC: "#b93f78",
     GNV: "#0f8f9c",
-    "INDIAN-TRAIL": "#0f8f55",
+    "INDIAN-TRAIL": "#2f8f55",
     AIRPORT: "#315f9e",
   };
   if (palette[route]) return palette[route];
 
   // Custom route codes receive one stable color without storing UI-only data.
-  const fallback = ["#315f9e", "#0f8f55", "#0f8f9c", "#7154ad", "#b93f78", "#a06a0a"];
+  const fallback = ["#315f9e", "#2f8f55", "#0f8f9c", "#7154ad", "#b93f78", "#a06a2a"];
   const hash = [...route].reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 0);
   return fallback[hash % fallback.length];
 }
@@ -37294,7 +37994,7 @@ function customerRouteRulesModalHtml() {
     <div class="customer-route-modal-shell customer-route-modern customer-route-modern-v344 customer-route-modern-v349 customer-route-modern-v350 customer-route-modern-v351">
       <section class="customer-route-modal-list customer-route-library-v344">
         <div class="customer-route-modal-list-heading customer-route-list-heading-v344 customer-route-list-heading-v346 customer-route-list-heading-v349">
-          <span class="customer-route-heading-icon-v346 customer-route-heading-icon-v347" aria-hidden="true"><svg viewBox="0 0 04 04"><path d="M10 01V4"/><path d="M10 6H6L3 9l3 3h6"/><path d="M10 11h6l3 3-3 3h-6"/><circle cx="10" cy="3" r="1.5"/></svg></span>
+          <span class="customer-route-heading-icon-v346 customer-route-heading-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21V4"/><path d="M12 6H6L3 9l3 3h6"/><path d="M12 11h6l3 3-3 3h-6"/><circle cx="12" cy="3" r="1.5"/></svg></span>
           <div><strong>Route rules</strong><span>Customer matching is evaluated during import. Save changes on the row you edit.</span></div>
           <b>${escapeHtml(ruleCount)} total</b>
           <button type="button" class="app-primary-button customer-route-create-launch-v344 customer-route-create-launch-v349" data-open-customer-route-create>
@@ -37316,7 +38016,7 @@ function customerRouteCreateDialogHtml() {
     <header class="role-create-modal-header-v340 customer-route-create-header-v344">
       <div>
         <small>Customer Routes</small>
-        <h0 id="customerRouteCreateTitleV344">Create New Customer Route</h0>
+        <h2 id="customerRouteCreateTitleV344">Create New Customer Route</h2>
         <p>Match a customer or job phrase to the route that should receive that work during import.</p>
       </div>
       <button type="button" class="gui-close-button" data-customer-route-create-close aria-label="Close Create New Customer Route">×</button>
@@ -37541,15 +38241,15 @@ function mixedDestinationSettingsHtmlV350() {
     <div class="scan-page-mixed-destination-v350 scan-page-mixed-destination-v351">
       <section class="mixed-destination-card-v351">
         <header class="mixed-destination-header-v351">
-          <span class="mixed-destination-icon-v351" aria-hidden="true"><svg viewBox="0 0 04 04"><path d="M4 7h10M11 4l3 3-3 3M00 17H10M13 14l-3 3 3 3"/><circle cx="5" cy="17" r="0"/><circle cx="19" cy="7" r="0"/></svg></span>
+          <span class="mixed-destination-icon-v351" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h10M11 4l3 3-3 3M20 17H10M13 14l-3 3 3 3"/><circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/></svg></span>
           <div><small>Mixed Destination</small><strong>Temporary rack approval</strong><span>Choose how long an approved destination mismatch remains valid for Bay Map scanning.</span></div>
           <b>${escapeHtml(minutes)} min</b>
         </header>
         <form id="bayOverrideWindowForm" class="mixed-destination-form-v351">
           <label class="mixed-destination-window-v351">
             <span>Approval window</span>
-            <div><input id="bayDestinationOverrideMinutes" type="number" min="1" max="100" step="1" value="${escapeHtml(minutes)}"><b>minutes</b></div>
-            <small>Enter 1–100 minutes.</small>
+            <div><input id="bayDestinationOverrideMinutes" type="number" min="1" max="120" step="1" value="${escapeHtml(minutes)}"><b>minutes</b></div>
+            <small>Enter 1–120 minutes.</small>
           </label>
           <aside class="mixed-destination-note-v351"><span aria-hidden="true">i</span><div><strong>What this changes</strong><p>Only the temporary Bay Map mixed-destination approval window. It does not change route assignment, rack status, or normal scan validation.</p></div></aside>
           <footer><button type="submit" class="icon-only icon-save" title="Save Mixed Destination" aria-label="Save Mixed Destination"></button></footer>
@@ -37592,7 +38292,7 @@ function productionFileSettingsModalHtmlV470() {
   const settings = state.productionFileSettings || {};
   const roots = settings.roots || {};
   const terms = settings.machineTerms || {};
-  const machineColors = settings.machineColors || { denver: "#0563eb", waterjet: "#7c3aed" };
+  const machineColors = settings.machineColors || { denver: "#2563eb", waterjet: "#7c3aed" };
   const availability = settings.availability || {};
   const index = settings.index || {};
   const rootForKindV474 = { hardware: roots.hardware, sketch: roots.sketches, program: roots.programs, completed_wj: roots.completedWaterjet };
@@ -37612,45 +38312,45 @@ function productionFileSettingsModalHtmlV470() {
           ? `Unavailable · ${availabilityError}`
           : "Unavailable";
     const title = [label, detail, rootPath, resolvedNote].filter(Boolean).join(" · ");
-    return `<span class="production-index-status-v470 ${tone}" title="${escapeHtml(title)}"><i aria-hidden="true"></i><span class="production-index-status-copy-v474"><b>${escapeHtml(label)}</b><small>${escapeHtml(detail)}</small>${rootPath ? `<em>${escapeHtml(rootPath)}</em>` : ""}${resolvedNote ? `<em class="is-resolved-v476">${escapeHtml(resolvedNote)}</em>` : ""}</span></span>`;
+    return `<span class="production-index-status-v472 ${tone}" title="${escapeHtml(title)}"><i aria-hidden="true"></i><span class="production-index-status-copy-v474"><b>${escapeHtml(label)}</b><small>${escapeHtml(detail)}</small>${rootPath ? `<em>${escapeHtml(rootPath)}</em>` : ""}${resolvedNote ? `<em class="is-resolved-v476">${escapeHtml(resolvedNote)}</em>` : ""}</span></span>`;
   };
   const indexedAt = Number(index.indexedAt || 0);
   return `
-    <div class="production-settings-shell-v470">
-      <section class="production-settings-summary-v470">
+    <div class="production-settings-shell-v472">
+      <section class="production-settings-summary-v472">
         <div><small>Production evidence</small><strong>Sketch assignment, actual-machine detection, and Staging safety</strong><span>Only the configured recent working window is indexed; old directory trees are skipped instead of recursively walking the full production shares.</span></div>
-        <div class="production-index-grid-v470">
+        <div class="production-index-grid-v472">
           ${statusRow("hardware", "Hardware")}${statusRow("sketch", "Sketches")}${statusRow("program", "Denver")}${statusRow("completed_wj", "Waterjet")}
         </div>
-        <small class="production-index-time-v470">${indexedAt ? `Last indexed ${escapeHtml(new Date(indexedAt * 1000).toLocaleString(appLocale()))}` : "No completed background index yet"} · ${escapeHtml(settings.lookbackDays || index.lookbackDays || 7)}-day lookback</small>
+        <small class="production-index-time-v472">${indexedAt ? `Last indexed ${escapeHtml(new Date(indexedAt * 1000).toLocaleString(appLocale()))}` : "No completed background index yet"} · ${escapeHtml(settings.lookbackDays || index.lookbackDays || 7)}-day lookback</small>
       </section>
       <nav class="production-settings-tabs-v476" aria-label="Machine and production file settings sections">
         <button type="button" class="${state.productionFileSettingsTabV476 === "sources" ? "is-active" : ""}" data-production-settings-tab-v476="sources">Sources & Index</button>
         <button type="button" class="${state.productionFileSettingsTabV476 === "machines" ? "is-active" : ""}" data-production-settings-tab-v476="machines">Machines & Colors</button>
       </nav>
-      <form id="productionFileSettingsFormV470" class="production-settings-form-v470" data-production-settings-active-v476="${escapeHtml(state.productionFileSettingsTabV476 || "sources")}">
-        <section class="production-settings-card-v470 is-controls" data-production-settings-pane-v476="sources">
+      <form id="productionFileSettingsFormV470" class="production-settings-form-v472" data-production-settings-active-v476="${escapeHtml(state.productionFileSettingsTabV476 || "sources")}">
+        <section class="production-settings-card-v472 is-controls" data-production-settings-pane-v476="sources">
           <header><div><strong>Workflow controls</strong><span>Disable the integration without deleting settings, or temporarily make fabrication status informational.</span></div></header>
-          <label class="production-toggle-v470"><input id="productionFilesEnabledV470" type="checkbox" ${settings.enabled !== false ? "checked" : ""}><span><b>Enable production file integration</b><small>Hardware, sketches, programs, and completion evidence are available in the app.</small></span></label>
-          <label class="production-toggle-v470"><input id="productionEnforceStagingV470" type="checkbox" ${settings.enforceStaging !== false ? "checked" : ""}><span><b>Block Staging when assigned fabrication is missing</b><small>Unavailable or ambiguous shares remain nonblocking.</small></span></label>
-          <label class="production-cache-field-v470"><span>Background refresh interval</span><div><input id="productionCacheMinutesV470" type="number" min="1" max="1440" step="1" value="${escapeHtml(settings.cacheMinutes || 5)}"><b>minutes</b></div></label>
-          <label class="production-cache-field-v470"><span>File lookback window</span><div><input id="productionLookbackDaysV473" type="number" min="1" max="365" step="1" value="${escapeHtml(settings.lookbackDays || 7)}"><b>days</b></div><small>Hardware, sketches, programs, Denver .egl evidence, and Waterjet .nce evidence older than this window are not indexed.</small></label>
+          <label class="production-toggle-v472"><input id="productionFilesEnabledV470" type="checkbox" ${settings.enabled !== false ? "checked" : ""}><span><b>Enable production file integration</b><small>Hardware, sketches, programs, and completion evidence are available in the app.</small></span></label>
+          <label class="production-toggle-v472"><input id="productionEnforceStagingV470" type="checkbox" ${settings.enforceStaging !== false ? "checked" : ""}><span><b>Block Staging when assigned fabrication is missing</b><small>Unavailable or ambiguous shares remain nonblocking.</small></span></label>
+          <label class="production-cache-field-v472"><span>Background refresh interval</span><div><input id="productionCacheMinutesV470" type="number" min="1" max="1440" step="1" value="${escapeHtml(settings.cacheMinutes || 5)}"><b>minutes</b></div></label>
+          <label class="production-cache-field-v472"><span>File lookback window</span><div><input id="productionLookbackDaysV473" type="number" min="1" max="365" step="1" value="${escapeHtml(settings.lookbackDays || 7)}"><b>days</b></div><small>Hardware, sketches, programs, Denver .egl evidence, and Waterjet .nce evidence older than this window are not indexed.</small></label>
         </section>
-        <section class="production-settings-card-v470 is-paths" data-production-settings-pane-v476="sources">
+        <section class="production-settings-card-v472 is-paths" data-production-settings-pane-v476="sources">
           <header><div><strong>Production folders</strong><span>Use local, mapped-drive, or UNC paths maintained by the plant.</span></div></header>
           <label><span>Hardware Lists</span><input id="productionHardwarePathV470" type="text" autocomplete="off" value="${escapeHtml(roots.hardware || "")}"></label>
           <label><span>Sketches</span><input id="productionSketchPathV470" type="text" autocomplete="off" value="${escapeHtml(roots.sketches || "")}"></label>
           <label><span>Denver Programs</span><input id="productionProgramPathV470" type="text" autocomplete="off" value="${escapeHtml(roots.programs || "")}"></label>
           <label><span>Completed Waterjet</span><input id="productionWaterjetPathV470" type="text" autocomplete="off" value="${escapeHtml(roots.completedWaterjet || "")}"></label>
         </section>
-        <section class="production-settings-card-v470 is-machines production-machine-visuals-v476" data-production-settings-pane-v476="machines">
+        <section class="production-settings-card-v472 is-machines production-machine-visuals-v476" data-production-settings-pane-v476="machines">
           <header><div><strong>Machine detection & colors</strong><span>Machine terms identify assignments in sketch pages. Colors are shared by Scan Progress, Smart Search, and Order Details.</span></div></header>
           <label><span>Denver terms</span><textarea id="productionDenverTermsV470" rows="3">${escapeHtml((terms.denver || []).join(", "))}</textarea></label>
           <label><span>Waterjet terms</span><textarea id="productionWaterjetTermsV470" rows="3">${escapeHtml((terms.waterjet || []).join(", "))}</textarea></label>
-          <label class="production-machine-color-v476"><span>Denver color</span><div><input id="productionDenverColorV476" type="color" value="${escapeHtml(safeProgressColorV476(machineColors.denver, "#0563eb"))}"><b>Denver</b></div></label>
+          <label class="production-machine-color-v476"><span>Denver color</span><div><input id="productionDenverColorV476" type="color" value="${escapeHtml(safeProgressColorV476(machineColors.denver, "#2563eb"))}"><b>Denver</b></div></label>
           <label class="production-machine-color-v476"><span>Waterjet color</span><div><input id="productionWaterjetColorV476" type="color" value="${escapeHtml(safeProgressColorV476(machineColors.waterjet, "#7c3aed"))}"><b>WaterJet</b></div></label>
         </section>
-        <footer class="production-settings-actions-v470">
+        <footer class="production-settings-actions-v472">
           <button type="button" class="secondary" data-production-index-refresh-v470>Refresh index</button>
           <button type="submit" class="icon-only icon-save" title="Save Machine Settings" aria-label="Save Machine Settings"></button>
         </footer>
@@ -37710,7 +38410,7 @@ async function saveProductionFileSettingsV470() {
       waterjet: splitTerms(document.getElementById("productionWaterjetTermsV470")?.value),
     },
     machineColors: {
-      denver: document.getElementById("productionDenverColorV476")?.value || "#0563eb",
+      denver: document.getElementById("productionDenverColorV476")?.value || "#2563eb",
       waterjet: document.getElementById("productionWaterjetColorV476")?.value || "#7c3aed",
     },
   };
@@ -37772,49 +38472,49 @@ function bayAutoAssignerModalHtml() {
   const manualCount = policyRows.filter((row) => manual.has(row.target)).length;
 
   return `
-    <div class="bay-auto-assigner-shell bay-auto-assigner-shell-v350">
-      <section class="bay-auto-summary-v350">
-        <span class="bay-auto-summary-icon-v350" aria-hidden="true"><svg viewBox="0 0 04 04"><path d="M4 6h16v10H4zM8 10h3v4H8zM15 9h0v6h-0z"/><path d="M10 4v16"/></svg></span>
+    <div class="bay-auto-assigner-shell bay-auto-assigner-shell-v352">
+      <section class="bay-auto-summary-v352">
+        <span class="bay-auto-summary-icon-v352" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h3v4H8zM15 9h2v6h-2z"/><path d="M12 4v16"/></svg></span>
         <div><small>${escapeHtml(portable.outboundStage)} → ${escapeHtml(portable.receivingSite)}</small><strong>Reserve the right empty bay before receiving</strong><span>When qualifying ${escapeHtml(portable.receivingSite)} glass is scanned ${escapeHtml(portable.outboundStage)}, the system classifies the order and can reserve the first empty bay in the matching physical bay family.</span></div>
-        <div class="bay-auto-summary-stats-v350"><span><b>${escapeHtml(settings.tallMinInches ?? 60)}&quot;</b><small>Tall starts</small></span><span><b>${escapeHtml(settings.oversizeMinInches ?? 96)}&quot;</b><small>Oversize</small></span><span><b>${escapeHtml(manualCount)}</b><small>Manual groups</small></span></div>
+        <div class="bay-auto-summary-stats-v352"><span><b>${escapeHtml(settings.tallMinInches ?? 60)}&quot;</b><small>Tall starts</small></span><span><b>${escapeHtml(settings.oversizeMinInches ?? 96)}&quot;</b><small>Oversize</small></span><span><b>${escapeHtml(manualCount)}</b><small>Manual groups</small></span></div>
       </section>
 
-      <form id="bayAutoAssignerForm" class="bay-auto-assigner-form bay-auto-assigner-form-v350">
-        <section class="bay-auto-card bay-auto-purpose-v350">
-          <header><span class="bay-auto-card-step-v350">1</span><div><strong>What Auto Assignment actually does</strong><span>It reserves a bay for the whole Order Nr. during the Outbound workflow; it does not move glass that is already in a bay.</span></div></header>
-          <div class="bay-auto-flow-v350" aria-label="Auto assignment flow">
+      <form id="bayAutoAssignerForm" class="bay-auto-assigner-form bay-auto-assigner-form-v352">
+        <section class="bay-auto-card bay-auto-purpose-v352">
+          <header><span class="bay-auto-card-step-v352">1</span><div><strong>What Auto Assignment actually does</strong><span>It reserves a bay for the whole Order Nr. during the Outbound workflow; it does not move glass that is already in a bay.</span></div></header>
+          <div class="bay-auto-flow-v352" aria-label="Auto assignment flow">
             <div><b>1</b><span><strong>${escapeHtml(portable.outboundStage)} scan</strong><small>Only ${escapeHtml(portable.receivingSite)} destination work enters this workflow.</small></span></div>
             <i aria-hidden="true">→</i>
-            <div><b>0</b><span><strong>Classify order</strong><small>Mirror type is checked first; other glass uses the largest dimension.</small></span></div>
+            <div><b>2</b><span><strong>Classify order</strong><small>Mirror type is checked first; other glass uses the largest dimension.</small></span></div>
             <i aria-hidden="true">→</i>
             <div><b>3</b><span><strong>Reserve empty bay</strong><small>The first available bay of that type is preassigned to the entire order.</small></span></div>
           </div>
-          <aside class="bay-auto-safety-v350"><strong>Built-in safeguards</strong><span>Existing order assignments are reused, one physical bay cannot mix Order Nrs., Manual categories stop before reservation, and a full matching bay family never falls back to Standard.</span></aside>
+          <aside class="bay-auto-safety-v352"><strong>Built-in safeguards</strong><span>Existing order assignments are reused, one physical bay cannot mix Order Nrs., Manual categories stop before reservation, and a full matching bay family never falls back to Standard.</span></aside>
         </section>
 
-        <section class="bay-auto-card bay-auto-thresholds-v350">
-          <header><span class="bay-auto-card-step-v350">0</span><div><strong>Size classification</strong><span>Only two dimensions need tuning. Standard is everything below the Tall threshold.</span></div></header>
-          <div class="bay-auto-threshold-grid-v350">
-            <label><span>Tall starts at</span><div class="bay-auto-unit-field-v350"><input id="bayAutoTallMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.tallMinInches ?? 60)}"><b>inches</b></div><small>Standard glass stays below this value.</small></label>
-            <label><span>Oversize starts at</span><div class="bay-auto-unit-field-v350"><input id="bayAutoOversizeMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.oversizeMinInches ?? 96)}"><b>inches</b></div><small>Tall glass remains between the two thresholds.</small></label>
+        <section class="bay-auto-card bay-auto-thresholds-v352">
+          <header><span class="bay-auto-card-step-v352">2</span><div><strong>Size classification</strong><span>Only two dimensions need tuning. Standard is everything below the Tall threshold.</span></div></header>
+          <div class="bay-auto-threshold-grid-v352">
+            <label><span>Tall starts at</span><div class="bay-auto-unit-field-v352"><input id="bayAutoTallMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.tallMinInches ?? 60)}"><b>inches</b></div><small>Standard glass stays below this value.</small></label>
+            <label><span>Oversize starts at</span><div class="bay-auto-unit-field-v352"><input id="bayAutoOversizeMin" type="number" min="1" step="0.01" value="${escapeHtml(settings.oversizeMinInches ?? 96)}"><b>inches</b></div><small>Tall glass remains between the two thresholds.</small></label>
           </div>
         </section>
 
-        <section class="bay-auto-card bay-auto-policy-card-v350">
-          <header><span class="bay-auto-card-step-v350">3</span><div><strong>Auto vs. manual placement</strong><span>Leave routine categories on Auto. Mark a category Manual when an operator should choose the physical bay intentionally.</span></div></header>
-          <div class="bay-auto-policy-list-v350">
+        <section class="bay-auto-card bay-auto-policy-card-v352">
+          <header><span class="bay-auto-card-step-v352">3</span><div><strong>Auto vs. manual placement</strong><span>Leave routine categories on Auto. Mark a category Manual when an operator should choose the physical bay intentionally.</span></div></header>
+          <div class="bay-auto-policy-list-v352">
             ${policyRows.map((row) => `
-              <label class="bay-auto-policy-row-v350">
+              <label class="bay-auto-policy-row-v352">
                 <input type="checkbox" value="${escapeHtml(row.target)}" ${manual.has(row.target) ? "checked" : ""}>
-                <span class="bay-auto-policy-copy-v350"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></span>
-                <span class="bay-auto-target-v350">Bay type: <b>${escapeHtml(row.target)}</b></span>
-                <span class="bay-auto-policy-state-v350"><span class="is-auto">Auto preassign</span><span class="is-manual">Manual placement</span></span>
+                <span class="bay-auto-policy-copy-v352"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></span>
+                <span class="bay-auto-target-v352">Bay type: <b>${escapeHtml(row.target)}</b></span>
+                <span class="bay-auto-policy-state-v352"><span class="is-auto">Auto preassign</span><span class="is-manual">Manual placement</span></span>
               </label>
             `).join("")}
           </div>
         </section>
 
-        <div class="bay-auto-actions bay-auto-actions-v350">
+        <div class="bay-auto-actions bay-auto-actions-v352">
           <span>These settings affect future Outbound preassignment only. Existing bay assignments and historical records are never rewritten.</span>
           <button type="submit" class="icon-only icon-save" title="Save Auto Assignment" aria-label="Save Auto Assignment"></button>
         </div>
@@ -37849,8 +38549,8 @@ async function saveBayAutoAssignerSettings() {
   const payload = {
     tallMinInches: Number(document.getElementById("bayAutoTallMin")?.value || 60),
     oversizeMinInches: Number(document.getElementById("bayAutoOversizeMin")?.value || 96),
-    manualAssignTypes: [...new Set([...document.querySelectorAll(".bay-auto-policy-list-v350 input:checked")].map((input) => input.value))],
-    // Preserve established mapping keys for upgraded installations. v0.350
+    manualAssignTypes: [...new Set([...document.querySelectorAll(".bay-auto-policy-list-v352 input:checked")].map((input) => input.value))],
+    // Preserve established mapping keys for upgraded installations. v0.352
     // intentionally removes arbitrary remapping from the normal GUI because
     // those mappings are implementation details, not routine operator choices.
     standardBayType: current.standardBayType || "Standard",
@@ -37885,7 +38585,7 @@ function bayScannerRulesModalHtml() {
 
   const ruleSection = (kind, title, description, rules, formHtml) => `
     <section class="bay-scanner-rule-library-v349 is-${escapeHtml(kind)}">
-      <header><span class="bay-scanner-rule-icon-v349" aria-hidden="true">${kind === "manual" ? '<svg viewBox="0 0 04 04"><path d="M4 6h16v10H4zM7 10h5M7 14h8"/></svg>' : '<svg viewBox="0 0 04 04"><path d="M4 5v14M7 5v14M11 5v14M14 5v14M19 5v14"/></svg>'}</span><div><small>${kind === "manual" ? "Remembered input" : "Barcode format"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div><b>${escapeHtml(rules.length)}</b></header>
+      <header><span class="bay-scanner-rule-icon-v349" aria-hidden="true">${kind === "manual" ? '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM7 10h5M7 14h8"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 5v14M7 5v14M11 5v14M14 5v14M19 5v14"/></svg>'}</span><div><small>${kind === "manual" ? "Remembered input" : "Barcode format"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div><b>${escapeHtml(rules.length)}</b></header>
       ${formHtml}
       <div class="bay-scanner-rule-list-v349">
         ${rules.length ? rules.map((rule) => `<article><div><strong>${escapeHtml(rule.pattern)}</strong><span>${escapeHtml(kind === "manual" ? `${rule.matchType}${rule.label ? ` · ${rule.label}` : ""}` : (rule.label || "Accepted bay barcode"))}</span></div><button class="icon-only icon-trash danger bay-scanner-rule-remove-v349" type="button" ${kind === "manual" ? `data-remove-bay-manual-rule="${escapeHtml(rule.id)}"` : `data-remove-bay-barcode-rule="${escapeHtml(rule.id)}"`} title="Remove rule" aria-label="Remove rule"></button></article>`).join("") : `<div class="admin-empty">No ${escapeHtml(kind === "manual" ? "remembered inputs" : "extra barcode formats")} yet.</div>`}
@@ -38299,7 +38999,7 @@ function emailDraftPreviewHtml(email) {
       <header class="email-activity-detail-header-v344">
         <div>
           <small>Email Activity · ${escapeHtml(emailStatusLabel(email.status))}</small>
-          <h0 id="emailActivityDetailTitleV344">${escapeHtml(email.subject || "Customer email")}</h0>
+          <h2 id="emailActivityDetailTitleV344">${escapeHtml(email.subject || "Customer email")}</h2>
           <p>${escapeHtml(email.customerName || "Customer email")} · ${escapeHtml(formatDisplayDate(email.deliveryDate))} · ${escapeHtml(email.emailType || "email")}</p>
         </div>
         <button class="gui-close-button" type="button" data-close-email-draft aria-label="Close Email Activity">×</button>
@@ -38406,7 +39106,7 @@ async function copyEmailDraftBody(id) {
  */
 function mailtoParam(name, value) {
   // Do not use URLSearchParams for mailto body text. Some email clients keep
-  // plus signs as literal characters, so spaces must be encoded as %00.
+  // plus signs as literal characters, so spaces must be encoded as %20.
   return `${encodeURIComponent(name)}=${encodeURIComponent(value || "")}`;
 }
 
@@ -38789,7 +39489,7 @@ async function createUserFromForm(form = document.getElementById("createUserForm
  */
 async function runManualEditSearch() {
   const query = els.manualEditSearch?.value.trim() || "";
-  if (query.length < 0 && !els.manualEditStageSelect?.value) return;
+  if (query.length < 2 && !els.manualEditStageSelect?.value) return;
   renderManualEditResults(await fetchManualEditResults(query, els.manualEditStageSelect?.value || ""));
 }
 
@@ -39000,7 +39700,7 @@ function manualEditShowCustomChoice(control, startingValue = "") {
   if (customInput) {
     customInput.value = startingValue;
     manualEditSetChoiceValue(control, startingValue, false);
-    window.setTimeout(() => customInput.focus(), 00);
+    window.setTimeout(() => customInput.focus(), 20);
   }
 }
 
@@ -39029,7 +39729,7 @@ function manualEditShowSelectChoice(control) {
     }
 
     manualEditSetChoiceValue(control, select.value, true);
-    window.setTimeout(() => select.focus(), 00);
+    window.setTimeout(() => select.focus(), 20);
   }
 }
 
@@ -39844,7 +40544,7 @@ function applyOperationsModalProfile(kind, options = {}) {
   if (els.operationsModalRackStatus) {
     const showRackStatus = kind === "rack-details" && Boolean(profile.rackStatus);
     els.operationsModalRackStatus.hidden = !showRackStatus;
-    els.operationsModalRackStatus.className = `operations-modal-rack-status-v306 ${escapeHtml(profile.rackStatusClass || "open")}`;
+    els.operationsModalRackStatus.className = `operations-modal-rack-status-v326 ${escapeHtml(profile.rackStatusClass || "open")}`;
     els.operationsModalRackStatus.replaceChildren();
     if (showRackStatus) {
       const statusLabel = document.createElement("small");
@@ -39858,7 +40558,7 @@ function applyOperationsModalProfile(kind, options = {}) {
     const showRackRoute = kind === "rack-details" && Boolean(profile.rackRoute);
     const rackRouteClass = String(profile.rackRouteClass || "unassigned").trim().toLowerCase();
     els.operationsModalRackRoute.hidden = !showRackRoute;
-    els.operationsModalRackRoute.className = `operations-modal-rack-route-v309 is-${rackRouteClass}`;
+    els.operationsModalRackRoute.className = `operations-modal-rack-route-v329 is-${rackRouteClass}`;
     els.operationsModalRackRoute.replaceChildren();
     if (showRackRoute) {
       const routeLabel = document.createElement("small");
@@ -40004,15 +40704,15 @@ function compactRackItemHtml(item, currentRackCode = state.selectedRackOverviewC
     ? `class="icon-only icon-trash danger is-blocked" aria-disabled="true" data-blocked-reason="${escapeHtml(sourceBlockedReason)}" title="${escapeHtml(sourceBlockedReason)}"`
     : `class="icon-only icon-trash danger" title="Clear item"`;
   return `
-    <article class="rack-modal-line rack-modal-line-v381 rack-modal-line-v380">
+    <article class="rack-modal-line rack-modal-line-v381 rack-modal-line-v382">
       <div class="rack-modal-line-primary">
         <strong>${escapeHtml(itemLabel)}</strong>
         <span>Qty ${escapeHtml(item.rackQty || 1)}</span>
       </div>
-      <div class="rack-modal-line-details rack-modal-line-details-v381 rack-modal-line-details-v380">
+      <div class="rack-modal-line-details rack-modal-line-details-v381 rack-modal-line-details-v382">
         <span class="rack-modal-customer-v383"><small>Customer</small><b>${escapeHtml(item.customer || "No customer")}</b></span>
         <span class="rack-modal-job-v383"><small>Job Nr.</small><b>${escapeHtml(item.job || "Not provided")}</b></span>
-        <span class="rack-modal-glass-type-v381 rack-modal-glass-type-v380 glass-tone-inline rack-modal-glass-type-v383" ${glassToneAttributes(rackGlassLabel)}><small>Glass Type</small><b>${escapeHtml(rackGlassLabel)}</b></span>
+        <span class="rack-modal-glass-type-v381 rack-modal-glass-type-v382 glass-tone-inline rack-modal-glass-type-v383" ${glassToneAttributes(rackGlassLabel)}><small>Glass Type</small><b>${escapeHtml(rackGlassLabel)}</b></span>
         <span class="rack-modal-size-v383"><small>Size</small><b>${escapeHtml(item.dimensions || "No dimensions")}</b></span>
       </div>
       ${item.rackAddedAt ? `<small class="rack-modal-line-time">Scanned ${escapeHtml(formatDateTime(item.rackAddedAt))}</small>` : ""}
@@ -40040,14 +40740,14 @@ function rackTransferOptions(currentRackCode) {
 
 function rackModalActionIconSvg(kind) {
   const paths = {
-    complete: '<path d="M5 10.5 9.0 17 19 7"></path><circle cx="10" cy="10" r="9"></circle>',
-    onWay: '<path d="M4 16h11"></path><path d="m10 11 5 5-5 5"></path><path d="M5 8h5"></path><circle cx="18" cy="7" r="0.0"></circle>',
+    complete: '<path d="M5 12.5 9.2 17 19 7"></path><circle cx="12" cy="12" r="9"></circle>',
+    onWay: '<path d="M4 16h11"></path><path d="m12 11 5 5-5 5"></path><path d="M5 8h5"></path><circle cx="18" cy="7" r="2.2"></circle>',
     uncomplete: '<path d="M4 7v5h5"></path><path d="M5.6 16.4A8 8 0 1 0 6.3 6.3L4 9"></path>',
-    returned: '<path d="M00 7v5h-5"></path><path d="M18.4 16.4A8 8 0 1 1 17.7 6.3L00 9"></path>',
-    notOnWay: '<path d="M10 7 5 10l5 5"></path><path d="M5 10h9a5 5 0 0 1 5 5v1"></path>',
-    print: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a0 0 0 0 1-0-0v-5a0 0 0 0 1 0-0h14a0 0 0 0 1 0 0v5a0 0 0 0 1-0 0h-0"></path><path d="M7 14h10v7H7z"></path><path d="M17 11h1"></path>',
+    returned: '<path d="M20 7v5h-5"></path><path d="M18.4 16.4A8 8 0 1 1 17.7 6.3L20 9"></path>',
+    notOnWay: '<path d="M10 7 5 12l5 5"></path><path d="M5 12h9a5 5 0 0 1 5 5v1"></path>',
+    print: '<path d="M7 8V3h10v5"></path><path d="M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M7 14h10v7H7z"></path><path d="M17 11h1"></path>',
   };
-  return `<svg class="rack-modal-action-icon-v341" viewBox="0 0 04 04" aria-hidden="true">${paths[kind] || paths.complete}</svg>`;
+  return `<svg class="rack-modal-action-icon-v341" viewBox="0 0 24 24" aria-hidden="true">${paths[kind] || paths.complete}</svg>`;
 }
 
 function rackModalHeaderActionsHtml(rack) {
@@ -40111,7 +40811,7 @@ function rackDetailsModalHtml(rack) {
         <details class="rack-modal-date-group" open>
           <summary>
             <strong>${escapeHtml(deliveryDate === "No delivery date" ? deliveryDate : formatDisplayDate(deliveryDate))}</strong>
-            <span class="rack-modal-date-count-v440">${escapeHtml(rows.length)} line${rows.length === 1 ? "" : "s"} · ${escapeHtml(pieceQty)} pc${pieceQty === 1 ? "" : "s"}</span>
+            <span class="rack-modal-date-count-v442">${escapeHtml(rows.length)} line${rows.length === 1 ? "" : "s"} · ${escapeHtml(pieceQty)} pc${pieceQty === 1 ? "" : "s"}</span>
             ${canTransfer && deliveryDate !== "No delivery date" ? `<button class="icon-only icon-move rack-scope-move-button${moveBlockedReason ? " is-blocked" : ""}" type="button" data-rack-modal-move-date="${escapeHtml(deliveryDate)}" data-source-rack="${escapeHtml(rack.code)}" ${moveBlockedReason ? `aria-disabled="true" data-blocked-reason="${escapeHtml(moveBlockedReason)}" title="${escapeHtml(moveBlockedReason)}"` : `title="Move this delivery date"`} aria-label="Move all items for ${escapeHtml(formatDisplayDate(deliveryDate))}"></button>` : ""}
           </summary>
           <div class="rack-modal-date-lines">${rows.map((item) => compactRackItemHtml(item, rack.code)).join("")}</div>
@@ -40153,7 +40853,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
         <button class="modal-close-x gui-close-button rack-transfer-close" type="button" data-rack-transfer-cancel aria-label="Close">&times;</button>
         <div class="rack-transfer-dialog-copy">
           <small>Rack transfer</small>
-          <h0 id="rackTransferTitle">Move ${escapeHtml(scopeText)}</h0>
+          <h2 id="rackTransferTitle">Move ${escapeHtml(scopeText)}</h2>
           <p>Choose an open destination rack. This uses the same route, rack-status, and rack-set presentation as the Scan page.</p>
         </div>
         <label class="rack-transfer-dialog-field rack-transfer-dialog-field-v356">
@@ -40164,8 +40864,8 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
           </select>
         </label>
         <div class="rack-transfer-dialog-actions rack-transfer-dialog-actions-v347">
-          <button type="button" class="secondary rack-transfer-cancel-v347" data-rack-transfer-cancel><svg viewBox="0 0 04 04" aria-hidden="true"><path d="M6 6l10 10M18 6 6 18"></path></svg><span>Cancel</span></button>
-          <button type="button" class="app-primary-button rack-transfer-continue-v347" data-rack-transfer-confirm disabled><span>Continue</span><svg viewBox="0 0 04 04" aria-hidden="true"><path d="M5 10h14M13 6l6 6-6 6"></path></svg></button>
+          <button type="button" class="secondary rack-transfer-cancel-v347" data-rack-transfer-cancel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg><span>Cancel</span></button>
+          <button type="button" class="app-primary-button rack-transfer-continue-v347" data-rack-transfer-confirm disabled><span>Continue</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
         </div>
       </section>`;
 
@@ -40281,7 +40981,7 @@ function packingHistoryDateTokens(value = "") {
   const clean = String(value || "").trim();
   if (!clean) return [];
   const tokens = new Set([clean.toLowerCase()]);
-  const isoDate = clean.match(/^(\d{4})-(\d{0})-(\d{0})/);
+  const isoDate = clean.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoDate) {
     const [, year, monthText, dayText] = isoDate;
     const monthNumber = Number(monthText);
@@ -40297,9 +40997,9 @@ function packingHistoryDateTokens(value = "") {
   const day = parsed.getDate();
   const year = parsed.getFullYear();
   tokens.add(`${month}/${day}/${year}`);
-  tokens.add(`${String(month).padStart(0, "0")}/${String(day).padStart(0, "0")}/${year}`);
+  tokens.add(`${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`);
   tokens.add(`${month}-${day}-${year}`);
-  tokens.add(`${String(month).padStart(0, "0")}-${String(day).padStart(0, "0")}-${year}`);
+  tokens.add(`${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}-${year}`);
   tokens.add(parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }).toLowerCase());
   tokens.add(parsed.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" }).toLowerCase());
   return [...tokens];
@@ -40370,10 +41070,10 @@ function packingHistoryRowHtml(row) {
   const snapshotId = Number(row.id || 0);
   const searchText = packingHistorySearchText(row);
   return `
-    <article class="packing-history-row packing-history-row-v070" data-packing-history-search="${escapeHtml(searchText)}">
+    <article class="packing-history-row packing-history-row-v272" data-packing-history-search="${escapeHtml(searchText)}">
       <div class="packing-history-snapshot-identity-v333">
         <span class="packing-history-document-icon-v333" aria-hidden="true"></span>
-        <div class="packing-history-rack-v070">
+        <div class="packing-history-rack-v272">
           <small>Snapshot #${escapeHtml(snapshotId || "-")}</small>
           <strong>${escapeHtml(row.rack_name || row.rack_code)}</strong>
           <span>${escapeHtml(row.rack_code)} · ${escapeHtml(packingHistoryReferenceSummary(row))}</span>
@@ -40383,7 +41083,7 @@ function packingHistoryRowHtml(row) {
       <div class="packing-history-meta-cell-v333"><small>Printed</small><strong>${escapeHtml(formatDateTime(row.printed_at))}</strong></div>
       <div class="packing-history-meta-cell-v333"><small>Contents</small><strong>${escapeHtml(row.piece_qty)} pcs · ${escapeHtml(row.line_count)} lines</strong></div>
       <div class="packing-history-meta-cell-v333"><small>Printed by</small><strong>${escapeHtml(row.printed_by || "system")}</strong></div>
-      <div class="packing-history-row-actions-v070">
+      <div class="packing-history-row-actions-v272">
         <button type="button" class="secondary" data-packing-history-preview="${escapeHtml(row.id)}">Preview</button>
         <button type="button" class="app-primary-button" data-packing-history-print="${escapeHtml(row.id)}">Print Snapshot</button>
       </div>
@@ -40410,42 +41110,42 @@ function packingHistoryModalHtml(history = state.packingListHistory) {
   const cleanQuery = String(state.packingHistoryQuery || "").trim();
 
   return `
-    <section class="packing-history-shell packing-history-shell-v184 packing-history-shell-v070" data-rack-history-panel="packing">
-      <div class="packing-history-intro packing-history-intro-v070">
+    <section class="packing-history-shell packing-history-shell-v184 packing-history-shell-v272" data-rack-history-panel="packing">
+      <div class="packing-history-intro packing-history-intro-v272">
         <div class="packing-history-intro-copy-v333">
-          <span class="packing-history-intro-icon-v333" aria-hidden="true"><svg viewBox="0 0 04 04" focusable="false"><path d="M7 3.5h7l4 4v13H7z"></path><path d="M14 3.5v4h4M9.5 11h6M9.5 14.5h6M9.5 18h4.0M4 6.5v14h10"></path></svg></span>
+          <span class="packing-history-intro-icon-v333" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 3.5h7l4 4v13H7z"></path><path d="M14 3.5v4h4M9.5 11h6M9.5 14.5h6M9.5 18h4.2M4 6.5v14h10"></path></svg></span>
           <div><strong>Previously printed packing lists</strong><span>Search saved snapshots by print/delivery date, rack, Order Nr., Job Nr., or user.</span></div>
         </div>
         <label class="search-box"><span class="search-icon"></span><input id="packingHistorySearch" type="search" autocomplete="off" value="${escapeHtml(state.packingHistoryQuery || "")}" placeholder="Search date, rack, Order Nr., Job Nr., or user..."></label>
       </div>
-      <div class="packing-history-page-summary-v070">
-        <span class="packing-history-page-summary-copy-v073">
+      <div class="packing-history-page-summary-v272">
+        <span class="packing-history-page-summary-copy-v273">
           ${cleanQuery ? `<span class="packing-history-query-chip-v333">Matches for “${escapeHtml(cleanQuery)}”</span>` : ""}
           ${totalWeeks ? `<b>${escapeHtml(startWeek)}-${escapeHtml(endWeek)} of ${escapeHtml(totalWeeks)}</b> business weeks <i aria-hidden="true">&middot;</i> ` : ""}
           <b>${escapeHtml(visibleSnapshotCount)}</b> snapshot${visibleSnapshotCount === 1 ? "" : "s"}${totalWeeks ? "" : " found"}
         </span>
       </div>
-      <div class="packing-history-groups packing-history-groups-v184 packing-history-groups-v070" id="packingHistoryGroups">
+      <div class="packing-history-groups packing-history-groups-v184 packing-history-groups-v272" id="packingHistoryGroups">
         ${weeks.length ? weeks.map((week) => {
           const weekSnapshots = week.days.reduce((sum, day) => sum + day.rows.length, 0);
           return `
-            <details class="packing-history-week-v070" ${cleanQuery ? "open" : ""}>
+            <details class="packing-history-week-v272" ${cleanQuery ? "open" : ""}>
               <summary>
-                <span class="packing-history-week-chevron-v070" aria-hidden="true"></span>
+                <span class="packing-history-week-chevron-v272" aria-hidden="true"></span>
                 <div><strong>${escapeHtml(week.label)}</strong><span>${escapeHtml(week.days.length)} day${week.days.length === 1 ? "" : "s"} · ${escapeHtml(weekSnapshots)} snapshot${weekSnapshots === 1 ? "" : "s"}</span></div>
-                <span class="packing-history-week-action-v070"><b class="is-closed">View snapshots</b><b class="is-open">Hide snapshots</b></span>
+                <span class="packing-history-week-action-v272"><b class="is-closed">View snapshots</b><b class="is-open">Hide snapshots</b></span>
               </summary>
-              <div class="packing-history-week-body-v070">
+              <div class="packing-history-week-body-v272">
                 ${week.days.map((day) => `
-                  <section class="packing-history-day-v070">
+                  <section class="packing-history-day-v272">
                     <header><span class="packing-history-day-marker-v333" aria-hidden="true"></span><strong>${escapeHtml(day.date === "Unknown date" ? day.date : formatDisplayDate(day.date))}</strong><span>${escapeHtml(day.rows.length)} print${day.rows.length === 1 ? "" : "s"}</span></header>
-                    <div class="packing-history-day-rows-v070">${day.rows.map(packingHistoryRowHtml).join("")}</div>
+                    <div class="packing-history-day-rows-v272">${day.rows.map(packingHistoryRowHtml).join("")}</div>
                   </section>`).join("")}
               </div>
             </details>`;
         }).join("") : `<div class="admin-empty">${state.packingHistoryQuery ? "No packing-list snapshots match this search." : "No packing lists have been printed since history tracking was installed."}</div>`}
       </div>
-      <footer class="packing-history-pagination-v070" ${totalWeeks <= weeksPerPage ? "hidden" : ""}>
+      <footer class="packing-history-pagination-v272" ${totalWeeks <= weeksPerPage ? "hidden" : ""}>
         <button type="button" class="secondary" data-packing-history-page="${Math.max(state.packingHistoryPage - 1, 1)}" ${state.packingHistoryPage <= 1 ? "disabled" : ""}>Previous</button>
         <strong>Page ${escapeHtml(state.packingHistoryPage)} of ${escapeHtml(totalPages)}</strong>
         <button type="button" class="secondary" data-packing-history-page="${Math.min(state.packingHistoryPage + 1, totalPages)}" ${state.packingHistoryPage >= totalPages ? "disabled" : ""}>Next</button>
@@ -40480,7 +41180,7 @@ function filterPackingHistoryRows(query = "") {
 async function openPackingHistoryPreview(historyId) {
   const cleanId = Number(historyId || 0);
   if (!cleanId) return;
-  document.querySelector(".packing-snapshot-preview-backdrop-v070")?.remove();
+  document.querySelector(".packing-snapshot-preview-backdrop-v272")?.remove();
 
   const response = await fetch(`/api/racks/packing-history/${encodeURIComponent(cleanId)}/print`, { cache: "no-store" });
   if (!response.ok) {
@@ -40493,14 +41193,14 @@ async function openPackingHistoryPreview(historyId) {
     .replace(/<\/head>/i, "<style>button{display:none!important}body{margin:16px!important}.packing-sheet{page-break-after:auto!important}</style></head>");
 
   const shell = document.createElement("div");
-  shell.className = "packing-snapshot-preview-backdrop-v070";
+  shell.className = "packing-snapshot-preview-backdrop-v272";
   shell.innerHTML = `
-    <section class="packing-snapshot-preview-dialog-v070" role="dialog" aria-modal="true" aria-labelledby="packingSnapshotPreviewTitle">
+    <section class="packing-snapshot-preview-dialog-v272" role="dialog" aria-modal="true" aria-labelledby="packingSnapshotPreviewTitle">
       <header>
-        <div><small>Packing List History</small><h0 id="packingSnapshotPreviewTitle">Snapshot Preview</h0><p>Exact saved rack contents from the original packing-list print.</p></div>
+        <div><small>Packing List History</small><h2 id="packingSnapshotPreviewTitle">Snapshot Preview</h2><p>Exact saved rack contents from the original packing-list print.</p></div>
         <button type="button" class="gui-close-button" data-packing-preview-close aria-label="Close snapshot preview">&times;</button>
       </header>
-      <div class="packing-snapshot-preview-frame-v070"><iframe title="Historical packing list snapshot" sandbox=""></iframe></div>
+      <div class="packing-snapshot-preview-frame-v272"><iframe title="Historical packing list snapshot" sandbox=""></iframe></div>
       <footer>
         <button type="button" class="app-primary-button" data-packing-preview-print="${escapeHtml(cleanId)}">Print Snapshot</button>
       </footer>
@@ -40815,11 +41515,11 @@ async function openRacksHistoryModal() {
 
 function rejectDateKey(offsetDays = 0) {
   const value = new Date();
-  value.setHours(10, 0, 0, 0);
+  value.setHours(12, 0, 0, 0);
   value.setDate(value.getDate() + Number(offsetDays || 0));
   const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(0, "0");
-  const day = String(value.getDate()).padStart(0, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -40835,8 +41535,8 @@ function rejectTwoWeekWindow() {
   currentSunday.setDate(currentMonday.getDate() + 6);
   const dateKey = (value) => {
     const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(0, "0");
-    const day = String(value.getDate()).padStart(0, "0");
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
   return { from: dateKey(previousMonday), to: dateKey(currentSunday) };
@@ -40900,7 +41600,7 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
     els.rejectDateFrom.value = rejectDateKey(-6);
     els.rejectDateTo.value = rejectDateKey(0);
   } else if (preset === "30-days") {
-    els.rejectDateFrom.value = rejectDateKey(-09);
+    els.rejectDateFrom.value = rejectDateKey(-29);
     els.rejectDateTo.value = rejectDateKey(0);
   }
   state.rejectHistoryPage = 1;
@@ -40973,36 +41673,36 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
         ? "Enter the order and item, verify the exact piece, then record the reject."
         : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
   return `
-    <form id="rejectLogForm" class="reject-log-form reject-log-form-v180">
+    <form id="rejectLogForm" class="reject-log-form reject-log-form-v182">
 
-      <section class="reject-log-step-v180 reject-identify-step-v180">
+      <section class="reject-log-step-v182 reject-identify-step-v182">
         <header><span>1</span><div><strong>Identify Piece</strong><small>Enter the order number and item number to find the exact piece.</small></div></header>
-        <div class="reject-log-identify-grid-v180">
+        <div class="reject-log-identify-grid-v182">
           <label><span>Order Number *</span><input id="rejectOrderInput" name="order" autocomplete="off" required></label>
           <label><span>Item Number (Piece) *</span><input id="rejectItemInput" name="item" autocomplete="off" required></label>
           <label><span>Quantity Rejected *</span><input id="rejectQtyInput" name="qty" type="number" min="1" value="1" required></label>
           <button id="rejectVerifyBtn" class="primary reject-verify-button" type="button"><span class="reject-verify-icon" aria-hidden="true"></span><span>Find Piece</span></button>
         </div>
-        <small class="reject-identify-help-v180">Use the exact order and item number. The delivery date is resolved automatically.</small>
+        <small class="reject-identify-help-v182">Use the exact order and item number. The delivery date is resolved automatically.</small>
       </section>
 
-      <section class="reject-log-step-v180 reject-match-step-v180">
-        <header><span>0</span><div><strong>Matched Piece Summary</strong><small>The verified piece and active workflow details appear below.</small></div><b id="rejectMatchStatusPill">Waiting for piece</b></header>
-        <div id="rejectMatchPreview" class="reject-match-preview reject-match-preview-v180" aria-live="polite"><span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Find Piece will locate the active delivery date and affected stages automatically.</span></div></div>
+      <section class="reject-log-step-v182 reject-match-step-v182">
+        <header><span>2</span><div><strong>Matched Piece Summary</strong><small>The verified piece and active workflow details appear below.</small></div><b id="rejectMatchStatusPill">Waiting for piece</b></header>
+        <div id="rejectMatchPreview" class="reject-match-preview reject-match-preview-v182" aria-live="polite"><span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Find Piece will locate the active delivery date and affected stages automatically.</span></div></div>
       </section>
 
-      <section class="reject-log-step-v180 reject-details-step-v180">
+      <section class="reject-log-step-v182 reject-details-step-v182">
         <header><span>3</span><div><strong>Reject Details</strong><small>Provide the standard reason, rejected quantity, source/location, and useful notes.</small></div></header>
-        <div class="reject-log-incident-grid-v180">
+        <div class="reject-log-incident-grid-v182">
           <label><span>Reject Reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons)}</select></label>
           <label><span>Source / Location *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading locations..." : "Choose location..."}</option>${rejectCatalogOptions(locations)}</select></label>
           <label class="reject-notes"><span>Notes / Comments</span><textarea name="notes" rows="3" maxlength="500" placeholder="Optional details about the defect, handling issue, or equipment condition..."></textarea></label>
         </div>
       </section>
 
-      <footer class="reject-log-actions reject-log-actions-v180">
+      <footer class="reject-log-actions reject-log-actions-v182">
         <span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span>
-        <div class="reject-log-action-buttons"><button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="primary reject-log-submit-v180" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
+        <div class="reject-log-action-buttons"><button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
         <small>This action cannot be undone.</small>
       </footer>
     </form>`;
@@ -41012,7 +41712,7 @@ function formatRejectTime(value) {
   if (!value) return "Unknown time";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "0-digit" });
+  return date.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
 }
 
 function rejectSelectedLocation() {
@@ -41522,7 +42222,7 @@ async function previewRejectMatch() {
   if (!target) return;
   if (!order || !item) {
     state.rejectMatches = [];
-    target.className = "reject-match-preview reject-match-preview-v180";
+    target.className = "reject-match-preview reject-match-preview-v182";
     target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Waiting for an order and item</strong><span>Enter both values before verification.</span></div>`;
     if (statusPill) { statusPill.textContent = "Waiting for piece"; statusPill.className = ""; }
     return;
@@ -41531,7 +42231,7 @@ async function previewRejectMatch() {
     verifyButton.disabled = true;
     verifyButton.classList.add("is-loading");
   }
-  target.className = "reject-match-preview reject-match-preview-v180 is-loading";
+  target.className = "reject-match-preview reject-match-preview-v182 is-loading";
   target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Checking active delivery lists</strong><span>Verifying the order, item, delivery date, and affected stages...</span></div>`;
   if (statusPill) { statusPill.textContent = "Searching"; statusPill.className = "is-loading"; }
   try {
@@ -41540,7 +42240,7 @@ async function previewRejectMatch() {
     state.rejectMatches = payload.matches || [];
     if (!state.rejectMatches.length) {
       target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>No active match found</strong><span>Check the order and item, or confirm the delivery list is active.</span></div>`;
-      target.className = "reject-match-preview reject-match-preview-v180 is-error";
+      target.className = "reject-match-preview reject-match-preview-v182 is-error";
       if (statusPill) { statusPill.textContent = "Not Found"; statusPill.className = "is-error"; }
       return;
     }
@@ -41559,7 +42259,7 @@ async function previewRejectMatch() {
       : "";
     target.innerHTML = `
       <span class="reject-match-state-icon" aria-hidden="true"></span>
-      <div class="reject-match-summary-v180">
+      <div class="reject-match-summary-v182">
         <div><small>Customer</small><strong>${escapeHtml(selectedMatch.customer || "Not listed")}</strong></div>
         <div><small>Job / Project</small><strong>${escapeHtml(selectedMatch.job || "Not listed")}</strong></div>
         <div class="glass-tone-inline" ${glassToneAttributes(selectedMatch.product || "Not listed")}><small>Glass Type</small><strong>${escapeHtml(selectedMatch.product || "Not listed")}</strong></div>
@@ -41570,16 +42270,16 @@ async function previewRejectMatch() {
         <div><small>Scan Progress</small><strong>${escapeHtml(selectedMatch.scanned_qty || 0)} / ${escapeHtml(selectedMatch.qty || 0)} pcs</strong></div>
         <div><small>Current Bay</small><strong>${escapeHtml(selectedMatch.current_bay || selectedMatch.suggested_bay || "Not assigned")}</strong></div>
         <div><small>Delivery Date</small><strong>${escapeHtml(formatDisplayDate(selectedMatch.delivery_date))}</strong></div>
-        <div class="reject-match-stages-v180"><small>Active Stages</small><span class="reject-match-stage-list">${stageList.map((stage) => `<b>${escapeHtml(stage)}</b>`).join("")}</span></div>
+        <div class="reject-match-stages-v182"><small>Active Stages</small><span class="reject-match-stage-list">${stageList.map((stage) => `<b>${escapeHtml(stage)}</b>`).join("")}</span></div>
         ${dateChoice}
       </div>`;
-    target.className = "reject-match-preview reject-match-preview-v180 is-valid";
+    target.className = "reject-match-preview reject-match-preview-v182 is-valid";
     if (statusPill) { statusPill.textContent = "Piece Found"; statusPill.className = "is-valid"; }
   } catch (error) {
     if (requestId !== state.rejectMatchRequestId) return;
     state.rejectMatches = [];
     target.innerHTML = `<span class="reject-match-state-icon" aria-hidden="true"></span><div><strong>Verification failed</strong><span>${escapeHtml(error.message)}</span></div>`;
-    target.className = "reject-match-preview reject-match-preview-v180 is-error";
+    target.className = "reject-match-preview reject-match-preview-v182 is-error";
     if (statusPill) { statusPill.textContent = "Check Entry"; statusPill.className = "is-error"; }
   } finally {
     if (requestId === state.rejectMatchRequestId && verifyButton) {
@@ -41630,9 +42330,9 @@ async function submitRejectLog(form) {
 
 function rejectSettingsIconV347(kind) {
   if (kind === "location") {
-    return '<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M10 01s6-5.4 6-11a6 6 0 1 0-10 0c0 5.6 6 11 6 11Z"/><circle cx="10" cy="10" r="0"/></svg>';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.4 6-11a6 6 0 1 0-12 0c0 5.6 6 11 6 11Z"/><circle cx="12" cy="10" r="2"/></svg>';
   }
-  return '<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M10 3 3.5 19h17Z"/><path d="M10 8v5M10 16h.01"/></svg>';
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3.5 19h17Z"/><path d="M12 8v5M12 16h.01"/></svg>';
 }
 
 function rejectSettingsModalHtml() {
@@ -41649,8 +42349,8 @@ function rejectSettingsModalHtml() {
         <b>${escapeHtml(rows.length)}</b>
       </header>
       <form class="reject-catalog-add reject-catalog-add-v347" data-reject-catalog-form="${escapeHtml(kind)}">
-        <label><span>Add ${escapeHtml(kind === "reason" ? "reject reason" : "break location")}</span><input name="label" required autocomplete="off" placeholder="${escapeHtml(kind === "reason" ? "Example: Scratch / surface defect" : "Example: Tempering Line 0")}"></label>
-        <button type="submit" class="app-primary-button reject-catalog-add-button-v347"><svg viewBox="0 0 04 04" aria-hidden="true"><path d="M10 5v14M5 10h14"/></svg><span>Add</span></button>
+        <label><span>Add ${escapeHtml(kind === "reason" ? "reject reason" : "break location")}</span><input name="label" required autocomplete="off" placeholder="${escapeHtml(kind === "reason" ? "Example: Scratch / surface defect" : "Example: Tempering Line 2")}"></label>
+        <button type="submit" class="app-primary-button reject-catalog-add-button-v347"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
       </form>
       <div class="reject-catalog-list reject-catalog-list-v347">
         ${rows.map((row, index) => `
@@ -41668,7 +42368,7 @@ function rejectSettingsModalHtml() {
   return `
     <div class="reject-settings-shell-v347">
       <section class="reject-settings-overview-v347">
-        <span class="reject-settings-overview-icon-v347" aria-hidden="true"><svg viewBox="0 0 04 04"><path d="M10 3 5 6v5c0 4.7 0.8 8.1 7 10 4.0-1.9 7-5.3 7-10V6z"/><path d="M9 10h6M10 9v6"/></svg></span>
+        <span class="reject-settings-overview-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6z"/><path d="M9 12h6M12 9v6"/></svg></span>
         <div><small>Reject Tracking Setup</small><strong>Reasons &amp; Break Locations</strong><span>Maintain the two floor-facing libraries used when an internal reject is recorded.</span></div>
         <div class="reject-settings-stats-v347"><span><b>${escapeHtml(reasons.length)}</b><small>Reasons</small></span><span><b>${escapeHtml(locations.length)}</b><small>Locations</small></span></div>
       </section>
@@ -41725,7 +42425,7 @@ function manualOrderCreateDialogHtml() {
     <header class="manual-order-modal-header-v338">
       <div>
         <small>Manual Delivery List Edit</small>
-        <h0 id="manualOrderCreateTitle">Create New Order</h0>
+        <h2 id="manualOrderCreateTitle">Create New Order</h2>
         <p>Create the order once and keep its workflow copies synchronized across Airport and the selected route.</p>
       </div>
       <button type="button" class="gui-close-button manual-order-modal-close-v338" data-manual-order-close aria-label="Close Create New Order">×</button>
@@ -41748,7 +42448,7 @@ function manualOrderCreateDialogHtml() {
         <label class="manual-order-field-v337 manual-order-customer-field-v337"><span>Customer <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="customer" required placeholder="Customer name"></label>
         <label class="manual-order-field-v337"><span>Job Nr.</span><input name="job" placeholder="Optional job number"></label>
         <label class="manual-order-field-v337"><span>Glass / Product <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="product" required placeholder="Glass or product"></label>
-        <label class="manual-order-field-v337"><span>Dimensions <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="dimensions" placeholder='Example: 70" x 36"' required></label>
+        <label class="manual-order-field-v337"><span>Dimensions <b class="required-mark-v340" aria-hidden="true">*</b></span><input name="dimensions" placeholder='Example: 72" x 36"' required></label>
         <label class="manual-order-field-v337 manual-order-note-field-v337"><span>Process note</span><input name="processState" placeholder="Optional workflow note"></label>
       </div>
 
@@ -41862,7 +42562,7 @@ function importRunLocalDate(entry = {}) {
   const timestamp = importRunTime(entry);
   const parsed = parseAutomationDateValue(timestamp);
   if (!parsed) return "";
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(0, "0")}-${String(parsed.getDate()).padStart(0, "0")}`;
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
 }
 
 
@@ -41992,13 +42692,13 @@ async function refreshAdminTodayImportRuns({ render = true } = {}) {
   try {
     const [notificationPayload, firstHistoryPage] = await Promise.all([
       fetchJson("/api/notifications/history?limit=500"),
-      fetchJson("/api/admin/delivery-automation/recent-imports?page=1&pageSize=0000"),
+      fetchJson("/api/admin/delivery-automation/recent-imports?page=1&pageSize=2000"),
     ]);
     const historyPageCount = Math.max(Number(firstHistoryPage.totalPages || 1), 1);
     const additionalHistoryPages = historyPageCount > 1
       ? await Promise.all(
           Array.from({ length: historyPageCount - 1 }, (_value, index) => (
-            fetchJson(`/api/admin/delivery-automation/recent-imports?page=${index + 0}&pageSize=0000`)
+            fetchJson(`/api/admin/delivery-automation/recent-imports?page=${index + 2}&pageSize=2000`)
           )),
         )
       : [];
@@ -42013,7 +42713,7 @@ async function refreshAdminTodayImportRuns({ render = true } = {}) {
       const source = String(notification?.details?.source || "").toLowerCase();
       const created = parseAutomationDateValue(notification.createdAt || notification?.details?.completedAt || "");
       if (source !== "sql-delivery-automation" || !created) return false;
-      const localKey = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(0, "0")}-${String(created.getDate()).padStart(0, "0")}`;
+      const localKey = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}-${String(created.getDate()).padStart(2, "0")}`;
       return localKey === today;
     });
     const notificationEntries = automationNotifications.flatMap(importEntriesFromNotification);
@@ -42038,8 +42738,8 @@ async function refreshAdminTodayImportRuns({ render = true } = {}) {
         const started = parseAutomationDateValue(notificationEntry.runStartedAt || notificationEntry.importedAt || "");
         const completed = parseAutomationDateValue(notificationEntry.runCompletedAt || notificationEntry.importedAt || "");
         if (!historyTime || (!started && !completed)) return false;
-        const startMs = (started || completed).getTime() - 0 * 60 * 1000;
-        const endMs = (completed || started).getTime() + 0 * 60 * 1000;
+        const startMs = (started || completed).getTime() - 2 * 60 * 1000;
+        const endMs = (completed || started).getTime() + 2 * 60 * 1000;
         return historyTime.getTime() >= startMs && historyTime.getTime() <= endMs;
       });
     };
@@ -42116,7 +42816,7 @@ function renderAdminImportRunBrowser(imports = []) {
       <button type="button" class="admin-import-run-tab ${group.key === selected.key ? "is-active" : ""} ${escapeHtml(status.key)} ${removedPieces ? "has-removals" : ""}" data-admin-import-run="${escapeHtml(group.key)}" role="tab" aria-selected="${group.key === selected.key ? "true" : "false"}" tabindex="${group.key === selected.key ? "0" : "-1"}">
         <span>${escapeHtml(group.time ? formatDateTime(group.time) : "Active lists")}</span>
         <strong>${escapeHtml(status.label)}</strong>
-        <small class="admin-import-run-tab-meta-v057"><span>${escapeHtml(dateCount || group.entries.length)} date${(dateCount || group.entries.length) === 1 ? "" : "s"}</span>${removedPieces ? `<b>-${escapeHtml(removedPieces)} removed</b>` : ""}</small>
+        <small class="admin-import-run-tab-meta-v257"><span>${escapeHtml(dateCount || group.entries.length)} date${(dateCount || group.entries.length) === 1 ? "" : "s"}</span>${removedPieces ? `<b>-${escapeHtml(removedPieces)} removed</b>` : ""}</small>
       </button>`;
   }).join("");
   const status = importRunClassification(selected.entries);
@@ -42139,7 +42839,7 @@ function renderAdminImportRunBrowser(imports = []) {
   const removedPieces = selected.entries.reduce((sum, entry) => sum + Number(entry.removedPieceQty || 0), 0);
   const fileResultCount = groups.reduce((sum, group) => sum + group.entries.length, 0);
   return `
-    <section class="admin-import-run-browser admin-import-run-browser-v048 admin-import-run-browser-v049 admin-import-run-browser-v056 admin-import-run-browser-v057" data-selected-run="${escapeHtml(selected.key)}">
+    <section class="admin-import-run-browser admin-import-run-browser-v248 admin-import-run-browser-v249 admin-import-run-browser-v256 admin-import-run-browser-v257" data-selected-run="${escapeHtml(selected.key)}">
       <div class="admin-import-run-day-heading">
         <div><small>Today's import activity</small><strong>${escapeHtml(formatDisplayDate(todayKey()))}</strong></div>
         <div class="admin-import-run-day-stats"><span><b>${escapeHtml(groups.length)}</b> run${groups.length === 1 ? "" : "s"}</span><span><b>${escapeHtml(fileResultCount)}</b> file result${fileResultCount === 1 ? "" : "s"}</span></div>
@@ -42269,43 +42969,43 @@ function parseAutomationDateValue(value, { dateOnlyAtNoon = false } = {}) {
 
   // Automation history may contain ISO values, Windows PowerShell values, or
   // display-formatted dates. Normalize the unambiguous forms first so a
-  // two-digit year cannot silently become 0001 instead of 0006.
-  const dateOnly = text.match(/^(\d{4})-(\d{0})-(\d{0})$/);
+  // two-digit year cannot silently become 2001 instead of 2026.
+  const dateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (dateOnly) {
     const [, year, month, day] = dateOnly;
-    const parsed = new Date(`${year}-${month}-${day}T${dateOnlyAtNoon ? "10:00:00" : "00:00:00"}`);
+    const parsed = new Date(`${year}-${month}-${day}T${dateOnlyAtNoon ? "12:00:00" : "00:00:00"}`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  const localStamp = text.match(/^(\d{4})-(\d{0})-(\d{0})[ T](\d{1,0}):(\d{0})(?::(\d{0})(?:\.\d+)?)?$/);
+  const localStamp = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
   if (localStamp) {
     const [, year, month, day, hour, minute, second = "00"] = localStamp;
     const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  const usStamp = text.match(/^(\d{1,0})[\/-](\d{1,0})[\/-](\d{0}|\d{4})(?:[ ,T]+(\d{1,0}):(\d{0})(?::(\d{0}))?\s*(AM|PM)?)?$/i);
+  const usStamp = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
   if (usStamp) {
-    let [, month, day, year, hour = "10", minute = "00", second = "00", meridiem = ""] = usStamp;
-    const numericYear = Number(year.length === 0 ? `00${year}` : year);
+    let [, month, day, year, hour = "12", minute = "00", second = "00", meridiem = ""] = usStamp;
+    const numericYear = Number(year.length === 2 ? `20${year}` : year);
     let numericHour = Number(hour);
     if (meridiem) {
-      if (numericHour === 10) numericHour = 0;
-      if (meridiem.toUpperCase() === "PM") numericHour += 10;
+      if (numericHour === 12) numericHour = 0;
+      if (meridiem.toUpperCase() === "PM") numericHour += 12;
     }
     const parsed = new Date(numericYear, Number(month) - 1, Number(day), numericHour, Number(minute), Number(second));
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  const displayStamp = text.match(/^([A-Za-z]{3,9})\s+(\d{1,0}),?\s+(\d{1,0}):(\d{0})\s*(AM|PM)$/i);
+  const displayStamp = text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (displayStamp) {
     const [, monthName, day, hour, minute, meridiem] = displayStamp;
     const monthIndex = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
       .findIndex((name) => monthName.toLowerCase().startsWith(name));
     if (monthIndex >= 0) {
       let numericHour = Number(hour);
-      if (numericHour === 10) numericHour = 0;
-      if (meridiem.toUpperCase() === "PM") numericHour += 10;
+      if (numericHour === 12) numericHour = 0;
+      if (meridiem.toUpperCase() === "PM") numericHour += 12;
       const parsed = new Date(new Date().getFullYear(), monthIndex, Number(day), numericHour, Number(minute), 0);
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
@@ -42328,7 +43028,7 @@ function automationHistoryRunLabel(timestampText) {
   const text = String(timestampText || "").trim();
   const parsed = parseAutomationDateValue(text);
   if (!parsed) return text || "Unknown run time";
-  return parsed.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "0-digit" });
+  return parsed.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
 }
 
 function automationHistoryStatus(entries) {
@@ -42339,7 +43039,7 @@ function automationHistoryStatus(entries) {
 }
 
 function enhanceAutomationImportHistoryResults(results) {
-  if (!results || results.dataset.v049Grouped === "true") return;
+  if (!results || results.dataset.v249Grouped === "true") return;
   const entries = [...results.children].filter((child) => child.matches?.("details.import-history-entry"));
   if (!entries.length) return;
 
@@ -42352,7 +43052,7 @@ function enhanceAutomationImportHistoryResults(results) {
     ).trim();
     const parsed = parseAutomationDateValue(rawTimestamp);
     const dayKey = parsed
-      ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(0, "0")}-${String(parsed.getDate()).padStart(0, "0")}`
+      ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`
       : `unknown-${rawTimestamp || index}`;
     const runKey = String(entry.dataset.historyRunId || rawTimestamp || `run-${index}`);
     if (!days.has(dayKey)) {
@@ -42386,7 +43086,7 @@ function enhanceAutomationImportHistoryResults(results) {
     const noChangeCount = dayEntries.filter((entry) => entry.classList.contains("is-no-changes")).length;
     const activityCount = dayEntries.length - noChangeCount;
     const day = document.createElement("details");
-    day.className = `automation-history-day automation-history-day-v049 ${dayStatus.className}`;
+    day.className = `automation-history-day automation-history-day-v249 ${dayStatus.className}`;
     day.open = false;
     day.innerHTML = `<summary>
       <span class="automation-history-chevron" aria-hidden="true"></span>
@@ -42448,7 +43148,7 @@ function enhanceAutomationImportHistoryResults(results) {
           0,
         );
         const run = document.createElement("details");
-        run.className = `automation-history-run automation-history-run-v049 ${runStatus.className}`;
+        run.className = `automation-history-run automation-history-run-v249 ${runStatus.className}`;
         run.open = false;
         run.innerHTML = `<summary>
           <span class="automation-history-chevron" aria-hidden="true"></span>
@@ -42509,13 +43209,13 @@ function enhanceAutomationImportHistoryResults(results) {
     });
 
   results.replaceChildren(fragment);
-  results.dataset.v049Grouped = "true";
+  results.dataset.v249Grouped = "true";
 }
 
 function initializeAutomationHistoryGrouping() {
   const regroup = (results) => {
     if (!results || ![...results.children].some((child) => child.matches?.("details.import-history-entry"))) return;
-    delete results.dataset.v049Grouped;
+    delete results.dataset.v249Grouped;
     window.queueMicrotask(() => enhanceAutomationImportHistoryResults(results));
   };
   let resultsObserver = null;
@@ -42568,7 +43268,7 @@ function wireV135OperationsEvents() {
     els.rejectSearchInput._timer = window.setTimeout(() => {
       state.rejectHistoryPage = 1;
       refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
-    }, 050);
+    }, 250);
   });
   els.rejectDatePreset?.addEventListener("change", () => setRejectDatePreset(els.rejectDatePreset.value));
   els.rejectDateFrom?.addEventListener("change", () => {
@@ -42856,7 +43556,7 @@ function wireV135OperationsEvents() {
       window.clearTimeout(state.rackHistoryFilterTimer);
       state.rackHistoryFilterTimer = window.setTimeout(() => {
         loadRackHistoryPage().catch((error) => showInlineError(error.message, true));
-      }, 060);
+      }, 260);
     }
     if (event.target.matches("#rejectOrderInput, #rejectItemInput")) {
       state.rejectMatches = [];
@@ -42886,10 +43586,10 @@ function wireV135OperationsEvents() {
       toggleGlassProfileCombineSelectionV361(glassCombineRow.dataset.glassCombineSelectV361 || "");
       return;
     }
-    const glassUncombineRow = event.target.closest?.("[data-glass-uncombine-select-v360]");
-    if (glassUncombineRow && state.lookupGlassUncombineModeV360 && ["Enter", " "].includes(event.key)) {
+    const glassUncombineRow = event.target.closest?.("[data-glass-uncombine-select-v362]");
+    if (glassUncombineRow && state.lookupGlassUncombineModeV362 && ["Enter", " "].includes(event.key)) {
       event.preventDefault();
-      toggleGlassProfileUncombineSelectionV360(glassUncombineRow.dataset.glassUncombineSelectV360 || "");
+      toggleGlassProfileUncombineSelectionV362(glassUncombineRow.dataset.glassUncombineSelectV362 || "");
       return;
     }
     if (event.key !== "Enter" || !event.target.matches("#rejectOrderInput, #rejectItemInput")) return;
@@ -42900,10 +43600,10 @@ function wireV135OperationsEvents() {
   document.addEventListener("input", (event) => {
     const colorInput = event.target.closest?.("#rackSetModalColor, #rackManagerSetColorInput");
     if (colorInput) {
-      const output = colorInput.closest(".rack-set-color-control-v069")?.querySelector("[data-rack-set-color-output]");
+      const output = colorInput.closest(".rack-set-color-control-v269")?.querySelector("[data-rack-set-color-output]");
       if (output) output.textContent = String(colorInput.value || "").toUpperCase();
       const form = colorInput.closest("form");
-      form?.querySelectorAll(".rack-set-visual-icon-v069").forEach((icon) => icon.style.setProperty("--rack-set-icon-color", colorInput.value));
+      form?.querySelectorAll(".rack-set-visual-icon-v269").forEach((icon) => icon.style.setProperty("--rack-set-icon-color", colorInput.value));
     }
     if (event.target.closest?.("#rackFormModal")) syncRackFormPreview();
     if (event.target.closest?.("#rackSetFormModal")) syncRackSetFormPreview();
@@ -42984,7 +43684,7 @@ function startPolling() {
     } catch {
       // Keep polling quiet so scanning is not interrupted.
     }
-  }, 10000);
+  }, 12000);
 }
 
 /**
@@ -43023,7 +43723,7 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
   // Defer it until the browser is idle so login/bootstrap and Scan/Home controls
   // remain responsive on large historical databases.
   const warmHomeReport = () => loadHomeReportSummary().catch?.(() => {});
-  if ("requestIdleCallback" in window) window.requestIdleCallback(warmHomeReport, { timeout: 0500 });
+  if ("requestIdleCallback" in window) window.requestIdleCallback(warmHomeReport, { timeout: 2500 });
   else window.setTimeout(warmHomeReport, 700);
   if (params.get("list")) {
     showPage("scan");
@@ -43079,7 +43779,7 @@ function replayExpandableListAnimation(details) {
   target.style.setProperty("animation", "none", "important");
   void target.offsetHeight;
   requestAnimationFrame(() => {
-    target.style.setProperty("animation", "delivery-expand-replay-v003 0.08s cubic-bezier(0.0, 0.8, 0.0, 1) both", "important");
+    target.style.setProperty("animation", "delivery-expand-replay-v023 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both", "important");
   });
 }
 
@@ -43137,7 +43837,7 @@ function wirePrintPresetEvents() {
   addOptionalUiEventListener(els.printPresetOutputSettings, "input", (event) => {
     const input = event.target.closest?.("[data-preset-copies]");
     if (!input) return;
-    const digits = String(input.value || "").replace(/\D+/g, "").slice(0, 0);
+    const digits = String(input.value || "").replace(/\D+/g, "").slice(0, 2);
     input.value = digits ? String(Math.min(Number(digits), 10)) : "";
   });
   addOptionalUiEventListener(els.printPresetOutputSettings, "focusout", (event) => {
@@ -43278,7 +43978,7 @@ function wireEvents() {
       if (state.page !== "scan") return;
       const mobileViewport = window.matchMedia("(max-width: 760px)").matches;
       if (mobileViewport !== state.scanViewportMobile) scheduleScanRender();
-    }, 100);
+    }, 120);
   });
 
   document.addEventListener("toggle", (event) => {
@@ -43486,6 +44186,8 @@ function wireEvents() {
     try {
       await loadDeliveryLists();
       await loadHomeReportSummary();
+      await ensureTodayProductionReportV514({ force: true });
+      if (state.homeChartMetric === "production-count") await ensureStatisticsProductionReportV514({ force: true });
       renderStatisticsPage();
       showFloatingNotice("Statistics refreshed.", "success");
     } catch (error) {
@@ -43525,7 +44227,8 @@ function wireEvents() {
     if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
-    if (state.homeChartMetric === "glass-sizes" && !(activeHomeReportSummaryV470()?.glassSizeFrequencyByType || []).length) {
+    if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();
+    if (state.homeChartMetric === "glass-sizes" && !(activeHomeReportSummaryV472()?.glassSizeFrequencyByType || []).length) {
       void loadHomeReportSummary();
     }
   });
@@ -43560,6 +44263,10 @@ function wireEvents() {
     state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     state.statisticsIncludeExternalRemakes = false;
+    state.statisticsProductionIncludeRemakesV514 = false;
+    state.statisticsProductionIncludeRejectsV514 = false;
+    state.statisticsProductionIncludeRushesV514 = false;
+    state.statisticsProductionDetailedV514 = false;
     state.statisticsBreakageMeasure = "sqft";
     state.statisticsGlassSizeType = "";
     renderStatisticsPage();
@@ -43568,6 +44275,25 @@ function wireEvents() {
     state.statisticsIncludeExternalRemakes = Boolean(els.statsIncludeExternalRemakes.checked);
     state.homeChartSelectedLabel = "";
     renderStatisticsPage();
+  });
+  els.statisticsProductionIncludeRemakesV514?.addEventListener("change", () => {
+    state.statisticsProductionIncludeRemakesV514 = Boolean(els.statisticsProductionIncludeRemakesV514.checked);
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
+  });
+  els.statisticsProductionIncludeRejectsV514?.addEventListener("change", () => {
+    state.statisticsProductionIncludeRejectsV514 = Boolean(els.statisticsProductionIncludeRejectsV514.checked);
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
+  });
+  els.statisticsProductionIncludeRushesV514?.addEventListener("change", () => {
+    state.statisticsProductionIncludeRushesV514 = Boolean(els.statisticsProductionIncludeRushesV514.checked);
+    state.homeChartSelectedLabel = "";
+    renderStatisticsAnalytics();
+  });
+  els.statisticsProductionDetailedV514?.addEventListener("change", () => {
+    state.statisticsProductionDetailedV514 = Boolean(els.statisticsProductionDetailedV514.checked);
+    renderStatisticsAnalytics();
   });
   els.statsChartShowMoreBtn?.addEventListener("click", () => {
     state.homeChartLimit = statisticsNextDisplayLimit(state.homeChartLimit);
@@ -43688,7 +44414,7 @@ function wireEvents() {
             target?.classList.remove("is-searching");
           }
         });
-    }, 000);
+    }, 220);
   });
   els.homeStageFilter?.addEventListener("change", () => {
     state.homeStageFilter = els.homeStageFilter.value;
@@ -43711,9 +44437,12 @@ function wireEvents() {
     state.homeChartSelectedLabel = "";
     state.homeReportSummary = null;
     state.homeReportSummaryRangeKey = "";
+    state.statisticsProductionReportV514 = null;
+    state.statisticsProductionReportRangeV514 = "";
     closeStatisticsDateCalendar();
     renderStatisticsPage();
     void loadHomeReportSummary();
+    if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();
   });
   els.statisticsCalendarPrev?.addEventListener("click", () => {
     const month = printCalendarMonthDate(state.statisticsCalendarMonth || todayKey());
@@ -43733,7 +44462,7 @@ function wireEvents() {
     if (day) chooseStatisticsCalendarDate(day.dataset.statisticsCalendarDate);
   });
   els.homePageSize?.addEventListener("change", () => {
-    state.homePageSize = Number(els.homePageSize.value) || 05;
+    state.homePageSize = Number(els.homePageSize.value) || 25;
     state.homePageIndex = 1;
     renderHome();
   });
@@ -43877,7 +44606,7 @@ function wireEvents() {
       || eventPath.includes(els.printSearchSuggestions)
       || eventPath.includes(els.printSearchInput);
     if (!clickedSmartSearch) hidePrintSearchSuggestions();
-    const clickedDateControl = event.target.closest(".print-header-date-control-v003") || eventPath.includes(els.printDateCalendar);
+    const clickedDateControl = event.target.closest(".print-header-date-control-v203") || eventPath.includes(els.printDateCalendar);
     const clickedDateSelectMenu = event.target.closest('.custom-select-menu[data-select-id="printDateQuickSelect"]');
     // Calendar day grids are rerendered after each click, which detaches the
     // original button before this document handler runs. composedPath preserves
@@ -44441,7 +45170,7 @@ function wireEvents() {
   });
   els.manualEditSearchBtn?.addEventListener("click", () => runManualEditSearch().catch((error) => showInlineError(error.message)));
   els.manualEditStageSelect?.addEventListener("change", () => {
-    if ((els.manualEditSearch?.value.trim() || "").length >= 0) runManualEditSearch().catch((error) => showInlineError(error.message));
+    if ((els.manualEditSearch?.value.trim() || "").length >= 2) runManualEditSearch().catch((error) => showInlineError(error.message));
   });
   els.manualEditSearch?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -44498,7 +45227,7 @@ function wireEvents() {
     const supersededRemovalChoice = event.target.closest('input[type="radio"][name^="superseded-remove-"]');
     if (supersededRemovalChoice) {
       const card = supersededRemovalChoice.closest(".superseded-review-card");
-      card?.querySelectorAll(".superseded-review-choice-v308").forEach((choice) => {
+      card?.querySelectorAll(".superseded-review-choice-v328").forEach((choice) => {
         const radio = choice.querySelector('input[type="radio"]');
         choice.classList.toggle("is-selected", Boolean(radio?.checked));
       });
@@ -44708,8 +45437,8 @@ function wireEvents() {
       event.preventDefault();
       event.stopPropagation();
       const section = columnButton.dataset.baySection || "";
-      const current = Math.max(1, Math.min(Number(state.bayGroupColumns[section] || 1), 0));
-      state.bayGroupColumns[section] = columnButton.dataset.bayColAction === "inc" ? Math.min(current + 1, 0) : Math.max(current - 1, 1);
+      const current = Math.max(1, Math.min(Number(state.bayGroupColumns[section] || 1), 2));
+      state.bayGroupColumns[section] = columnButton.dataset.bayColAction === "inc" ? Math.min(current + 1, 2) : Math.max(current - 1, 1);
       renderBayMapPage();
       return;
     }
@@ -45206,8 +45935,8 @@ function wireEvents() {
       event.preventDefault();
       container.querySelectorAll(".is-drag-over").forEach((node) => node.classList.remove("is-drag-over"));
       target.classList.add("is-drag-over");
-      if (event.clientY < 90) window.scrollBy({ top: -04, behavior: "auto" });
-      if (window.innerHeight - event.clientY < 90) window.scrollBy({ top: 04, behavior: "auto" });
+      if (event.clientY < 90) window.scrollBy({ top: -24, behavior: "auto" });
+      if (window.innerHeight - event.clientY < 90) window.scrollBy({ top: 24, behavior: "auto" });
       event.dataTransfer.dropEffect = "move";
     });
     container?.addEventListener("dragleave", (event) => {
@@ -45297,8 +46026,8 @@ function wireEvents() {
       state.lookupGlassCombineTargetV360 = "";
       state.lookupGlassCombineModeV361 = false;
       state.lookupGlassCombineSelectionV361 = [];
-      state.lookupGlassUncombineModeV360 = false;
-      state.lookupGlassUncombineSelectionV360 = [];
+      state.lookupGlassUncombineModeV362 = false;
+      state.lookupGlassUncombineSelectionV362 = [];
       renderLookupManagerModal();
       return;
     }
@@ -45306,16 +46035,16 @@ function wireEvents() {
     if (event.target.closest("[data-glass-combine-mode-v361]")) {
       state.lookupGlassCombineModeV361 = true;
       state.lookupGlassCombineSelectionV361 = [];
-      state.lookupGlassUncombineModeV360 = false;
-      state.lookupGlassUncombineSelectionV360 = [];
+      state.lookupGlassUncombineModeV362 = false;
+      state.lookupGlassUncombineSelectionV362 = [];
       state.lookupManagerSearch = "";
       renderLookupManagerModal();
       return;
     }
 
-    if (event.target.closest("[data-glass-uncombine-mode-v360]")) {
-      state.lookupGlassUncombineModeV360 = true;
-      state.lookupGlassUncombineSelectionV360 = [];
+    if (event.target.closest("[data-glass-uncombine-mode-v362]")) {
+      state.lookupGlassUncombineModeV362 = true;
+      state.lookupGlassUncombineSelectionV362 = [];
       state.lookupGlassCombineModeV361 = false;
       state.lookupGlassCombineSelectionV361 = [];
       state.lookupManagerSearch = "";
@@ -45330,9 +46059,9 @@ function wireEvents() {
       return;
     }
 
-    if (event.target.closest("[data-glass-uncombine-cancel-v360]")) {
-      state.lookupGlassUncombineModeV360 = false;
-      state.lookupGlassUncombineSelectionV360 = [];
+    if (event.target.closest("[data-glass-uncombine-cancel-v362]")) {
+      state.lookupGlassUncombineModeV362 = false;
+      state.lookupGlassUncombineSelectionV362 = [];
       renderLookupManagerModal();
       return;
     }
@@ -45343,9 +46072,9 @@ function wireEvents() {
       return;
     }
 
-    const glassUncombineSelectV360 = event.target.closest("[data-glass-uncombine-select-v360]");
-    if (glassUncombineSelectV360 && state.lookupGlassUncombineModeV360) {
-      toggleGlassProfileUncombineSelectionV360(glassUncombineSelectV360.dataset.glassUncombineSelectV360 || "");
+    const glassUncombineSelectV362 = event.target.closest("[data-glass-uncombine-select-v362]");
+    if (glassUncombineSelectV362 && state.lookupGlassUncombineModeV362) {
+      toggleGlassProfileUncombineSelectionV362(glassUncombineSelectV362.dataset.glassUncombineSelectV362 || "");
       return;
     }
 
@@ -45354,8 +46083,8 @@ function wireEvents() {
       return;
     }
 
-    if (event.target.closest("[data-glass-uncombine-apply-v360]")) {
-      uncombineSelectedGlassProfilesV360().catch((error) => showInlineError(error.message, true));
+    if (event.target.closest("[data-glass-uncombine-apply-v362]")) {
+      uncombineSelectedGlassProfilesV362().catch((error) => showInlineError(error.message, true));
       return;
     }
 
@@ -45610,7 +46339,7 @@ function wireEvents() {
     if (rackSetColorChoice) {
       event.preventDefault();
       const colorInput = document.getElementById("rackSetModalColor");
-      if (colorInput) colorInput.value = String(rackSetColorChoice.dataset.rackSetColorChoice || "#176d70");
+      if (colorInput) colorInput.value = String(rackSetColorChoice.dataset.rackSetColorChoice || "#176d72");
       syncRackSetFormPreview();
       return;
     }
@@ -45943,8 +46672,12 @@ function wireEvents() {
     }
     const filterButton = event.target.closest("[data-filter]");
     if (filterButton) {
-      toggleScanFilter(filterButton.dataset.filter || "all");
+      const filter = filterButton.dataset.filter || "all";
+      toggleScanFilter(filter);
       state.pageIndex = 1;
+      if (["machine", "production"].includes(scanFilterGroup(filter))) {
+        hydrateFabricationFilterCatalogV512().catch(() => {});
+      }
       scheduleScanRender();
       return;
     }
@@ -46546,11 +47279,11 @@ init().catch((error) => {
 
   function localDateIso(offset = 0) {
     const date = new Date();
-    date.setHours(10, 0, 0, 0);
+    date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + offset);
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(0, "0");
-    const day = String(date.getDate()).padStart(0, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   }
 
@@ -46563,7 +47296,7 @@ init().catch((error) => {
       day: "numeric",
       year: "numeric",
       hour: "numeric",
-      minute: "0-digit",
+      minute: "2-digit",
     });
   }
 
@@ -46728,9 +47461,9 @@ init().catch((error) => {
 
     const refreshVisibleActiveList = () => {
       if (document.visibilityState === "hidden" || appModalUiIsOpen()) return;
-      refreshDeliveryListCatalog(true);
-      const activeListId = String(state.activeListId || "");
-      if (activeListId) dlsAutomationRefreshActiveListDetail(activeListId);
+      // The catalog publisher owns revision-based detail refresh. Focus and
+      // visibility often arrive together; neither should reload unchanged rows.
+      refreshDeliveryListCatalog(false);
     };
     window.addEventListener("focus", refreshVisibleActiveList);
     document.addEventListener("visibilitychange", refreshVisibleActiveList);
@@ -47134,9 +47867,9 @@ init().catch((error) => {
           data-history-removed-pieces="${escapeHtml(removedPieces)}"
         >
           <summary class="import-history-entry-summary">
-            <span class="import-history-entry-status-stack-v057">
+            <span class="import-history-entry-status-stack-v257">
               <span class="automation-recent-import-status">${escapeHtml(status.label)}</span>
-              ${removedPieces ? `<span class="import-history-removed-v057">-${escapeHtml(removedPieces)} removed pc${removedPieces === 1 ? "" : "s"}</span>` : ""}
+              ${removedPieces ? `<span class="import-history-removed-v257">-${escapeHtml(removedPieces)} removed pc${removedPieces === 1 ? "" : "s"}</span>` : ""}
             </span>
             <span class="import-history-entry-copy">
               <strong>${escapeHtml(formatDeliveryDate(item.deliveryDate))}</strong>
@@ -47209,7 +47942,7 @@ init().catch((error) => {
     }
   }
 
-  function scheduleRecentImportsRefresh(delay = 050, options = {}) {
+  function scheduleRecentImportsRefresh(delay = 250, options = {}) {
     clearTimeout(recentImportsRefreshTimer);
     recentImportsRefreshTimer = setTimeout(() => refreshRecentImports(options), delay);
   }
@@ -47263,7 +47996,7 @@ init().catch((error) => {
     const viewport = modal.querySelector("#automationLogViewport");
     if (!viewport) return;
 
-    // The log is a dedicated bounded viewport in v0.330. Two animation frames
+    // The log is a dedicated bounded viewport in v0.332. Two animation frames
     // allow both text wrapping and the Status grid to settle before resolving
     // the true bottom, including the explicit end-of-log clearance marker.
     window.requestAnimationFrame(() => {
@@ -47290,7 +48023,7 @@ init().catch((error) => {
       <header class="delivery-automation-header">
         <div class="delivery-automation-heading">
           <span class="delivery-automation-eyebrow">Delivery List Management</span>
-          <h0 id="deliveryAutomationTitle">Automation Control Center</h0>
+          <h2 id="deliveryAutomationTitle">Automation Control Center</h2>
           <p>Run a one-time update, choose what this computer does automatically, and review the latest result without leaving the scanner.</p>
         </div>
         <div class="delivery-automation-header-actions">
@@ -47322,7 +48055,7 @@ init().catch((error) => {
           </div>
 
           <div class="automation-section-heading">
-            <div><small>Step 0</small><h3>Choose the delivery-date window</h3></div>
+            <div><small>Step 2</small><h3>Choose the delivery-date window</h3></div>
           </div>
 
           <section class="automation-range-panel">
@@ -47369,7 +48102,7 @@ init().catch((error) => {
           </div>
 
           <section class="automation-settings-panel">
-            <div class="automation-settings-section automation-schedule-row-v308">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Incremental schedule</strong>
                 <span>Frequent workday check</span>
@@ -47381,7 +48114,7 @@ init().catch((error) => {
               </div>
             </div>
 
-            <div class="automation-settings-section automation-schedule-row-v308">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Daily full refresh</strong>
                 <span>Broader safety sweep</span>
@@ -47441,14 +48174,14 @@ init().catch((error) => {
                 <label class="automation-toggle-card"><input id="automationProductionIncludeCutting" type="checkbox"><span><strong>Confirm physical Cutting bookings</strong><small>Use positive FS_BOOK_HISTORY Automatic Cutting bookings as completion evidence in addition to verified optimization lifecycle status.</small></span></label>
               </div>
             </div>
-            <div class="automation-settings-section automation-schedule-row-v308">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>Performance &amp; history</strong>
                 <span>Production SQL stays bounded, but also covers recently delivered A+W orders so Order Details keeps Batch/Optimization/Cutting evidence after a delivery date leaves the normal incremental window.</span>
               </div>
               <div class="automation-settings-grid">
                 <label><span>Orders per SQL batch</span><input id="automationProductionQueryBatchSize" type="number" min="10" max="150" step="5"></label>
-                <label><span>SQL timeout</span><div class="automation-number-unit"><input id="automationProductionQueryTimeout" type="number" min="00" max="300" step="5"><b>seconds</b></div></label>
+                <label><span>SQL timeout</span><div class="automation-number-unit"><input id="automationProductionQueryTimeout" type="number" min="20" max="300" step="5"><b>seconds</b></div></label>
                 <label><span>Cut booking lookback</span><div class="automation-number-unit"><input id="automationProductionCutLookback" type="number" min="14" max="730"><b>days</b></div></label>
                 <label><span>Order coverage lookback</span><div class="automation-number-unit"><input id="automationProductionOrderLookback" type="number" min="1" max="90"><b>days</b></div><small>Only expands Batch/Optimization/Cutting enrichment; it does not import extra delivery-list dates.</small></label>
                 <label><span>Generations refreshed per item</span><div class="automation-number-unit"><input id="automationProductionHistoryDepth" type="number" min="1" max="10"><b>generations</b></div></label>
@@ -47462,7 +48195,7 @@ init().catch((error) => {
               <div class="automation-status-summary automation-aw-production-source-v499">
                 <span><small>Generations / batch</small><strong>PROD_JOBITEM + PROD_JOB</strong></span>
                 <span><small>Optimization membership</small><strong>PROD_OPTI_SEQUENCE</strong></span>
-                <span><small>Optimization lifecycle</small><strong>100 Optimized · 000 Cutting · 460/500 Booked</strong></span>
+                <span><small>Optimization lifecycle</small><strong>100 Optimized · 200 Cutting · 460/500 Booked</strong></span>
                 <span><small>Cut confirmation</small><strong>FS_BOOK_HISTORY · Automatic Cutting</strong></span>
               </div>
             </div>
@@ -47501,7 +48234,7 @@ init().catch((error) => {
                 <label class="automation-toggle-card"><input type="checkbox" checked disabled><span><strong>Internal Reject ownership</strong><small>A+W rejects are Internal Rejects. Raw A+W source rows remain attached for audit and refresh safety.</small></span></label>
               </div>
             </div>
-            <div class="automation-settings-section automation-schedule-row-v308">
+            <div class="automation-settings-section automation-schedule-row-v328">
               <div class="automation-settings-section-heading">
                 <strong>History windows</strong>
                 <span>Choose how far each SQL run looks back for new or changed A+W breakage records.</span>
@@ -47531,7 +48264,7 @@ init().catch((error) => {
           </section>
         </section>
 
-        <section class="delivery-automation-tab automation-status-workspace-v308" data-automation-panel="status" role="tabpanel">
+        <section class="delivery-automation-tab automation-status-workspace-v328" data-automation-panel="status" role="tabpanel">
           <div class="automation-section-heading">
             <div><small>Runtime health</small><h3>Latest automation result</h3></div>
             <button type="button" class="automation-text-button" id="automationRefreshStatusBtn">Refresh Status</button>
@@ -47544,8 +48277,8 @@ init().catch((error) => {
           </section>
 
           <div id="automationStatusSummary" class="automation-status-summary"></div>
-          <section class="automation-log-panel-v330" id="automationLogDetails" aria-label="Live command log">
-            <header class="automation-log-header-v330">
+          <section class="automation-log-panel-v332" id="automationLogDetails" aria-label="Live command log">
+            <header class="automation-log-header-v332">
               <span>Live command log</span>
               <small id="automationLogLineCount">0 lines</small>
             </header>
@@ -47558,19 +48291,19 @@ init().catch((error) => {
               <button type="button" class="automation-text-button" id="automationJumpLogBtn">Newest</button>
               <button type="button" class="automation-text-button" id="automationCopyLogBtn">Copy Full Log</button>
             </div>
-            <div class="automation-log-viewport-v330" id="automationLogViewport" tabindex="0" aria-label="Automation command output">
+            <div class="automation-log-viewport-v332" id="automationLogViewport" tabindex="0" aria-label="Automation command output">
               <pre id="automationStatusLog">No command output yet.</pre>
-              <span class="automation-log-end-v330" id="automationLogEnd" aria-hidden="true"></span>
+              <span class="automation-log-end-v332" id="automationLogEnd" aria-hidden="true"></span>
             </div>
           </section>
         </section>
 
-        <section class="delivery-automation-tab import-history-workspace import-history-workspace-v049" data-automation-panel="history" role="tabpanel">
+        <section class="delivery-automation-tab import-history-workspace import-history-workspace-v249" data-automation-panel="history" role="tabpanel">
           <div class="import-history-panel-heading">
             <div>
               <small>Delivery List Management</small>
               <h3>Import Audit History</h3>
-              <p>Normal browsing shows three business weeks per page. Filters show every matching import for up to 05 activity dates per page.</p>
+              <p>Normal browsing shows three business weeks per page. Filters show every matching import for up to 25 activity dates per page.</p>
             </div>
             <button class="automation-secondary-button automation-refresh-button-v334" id="importHistoryRefreshBtn" type="button"><span class="automation-refresh-icon-v334" aria-hidden="true"></span><span data-import-history-refresh-label>Refresh</span></button>
           </div>
@@ -47773,7 +48506,7 @@ init().catch((error) => {
     const modeInput = modal.querySelector(`input[name="automationMode"][value="${CSS.escape(mode)}"]`);
     if (modeInput) modeInput.checked = true;
     modal.querySelector("#automationInterval").value = settings.intervalMinutes ?? 60;
-    modal.querySelector("#automationPastDays").value = settings.incrementalPastDays ?? 0;
+    modal.querySelector("#automationPastDays").value = settings.incrementalPastDays ?? 2;
     modal.querySelector("#automationFutureDays").value = settings.incrementalFutureDays ?? 14;
     modal.querySelector("#automationFullTime").value = settings.fullRefreshTime || "17:00";
     modal.querySelector("#automationFullPastDays").value = settings.fullPastDays ?? 7;
@@ -47897,7 +48630,7 @@ init().catch((error) => {
       lastCompletedRunKey = completedRunKey;
       scheduleRecentImportsRefresh(150);
       window.setTimeout(() => refreshDeliveryListCatalog(true), 175);
-      window.setTimeout(() => refreshLatestImportResult(true), 000);
+      window.setTimeout(() => refreshLatestImportResult(true), 200);
 
       // v0.487: A+W synchronization can add Internal Rejects and therefore
       // change both the Reject timeline and breakage Statistics. Invalidate the
@@ -47906,10 +48639,10 @@ init().catch((error) => {
       state.homeReportSummary = null;
       state.homeReportSummaryRangeKey = "";
       if (state.page === "rejects") {
-        window.setTimeout(() => refreshRejectPage().catch((error) => showInlineError(error.message, true)), 005);
+        window.setTimeout(() => refreshRejectPage().catch((error) => showInlineError(error.message, true)), 225);
       }
       if (state.page === "statistics") {
-        window.setTimeout(() => void loadHomeReportSummary(), 050);
+        window.setTimeout(() => void loadHomeReportSummary(), 250);
       }
     }
 
@@ -48143,8 +48876,8 @@ init().catch((error) => {
     if (Number.isNaN(date.getTime())) return String(value || "Unknown time");
     const sameDay = date.toDateString() === new Date().toDateString();
     return date.toLocaleString(appLocale(), sameDay
-      ? { hour: "numeric", minute: "0-digit", second: "0-digit" }
-      : { month: "short", day: "numeric", hour: "numeric", minute: "0-digit" });
+      ? { hour: "numeric", minute: "2-digit", second: "2-digit" }
+      : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   }
 
   function typeSymbol(type) {
@@ -48243,8 +48976,8 @@ init().catch((error) => {
   function positionPanel() {
     if (!panel || panel.hidden || !button) return;
     const rect = button.getBoundingClientRect();
-    const width = Math.min(410, window.innerWidth - 04);
-    panel.style.left = `${Math.max(10, Math.min(window.innerWidth - width - 10, rect.right - width))}px`;
+    const width = Math.min(410, window.innerWidth - 24);
+    panel.style.left = `${Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))}px`;
     panel.style.top = `${Math.min(window.innerHeight - 80, rect.bottom + 9)}px`;
   }
 
@@ -48410,7 +49143,7 @@ init().catch((error) => {
     toast.hidden = false;
     requestAnimationFrame(() => toast.classList.add("is-visible"));
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(dismissToast, 00000);
+    toastTimer = window.setTimeout(dismissToast, 20000);
   }
 
   async function refreshNotifications(options = {}) {
@@ -48617,14 +49350,14 @@ init().catch((error) => {
     if (elements.summary) elements.summary.textContent = copy.summary;
     if (elements.review) {
       const reviewLabel = updatedFilterActive ? "Review Open" : copy.reviewLabel;
-      elements.review.innerHTML = `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.0 18.0 0 0"></path></svg><span>${escapeHtml(reviewLabel)}</span>`;
+      elements.review.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>${escapeHtml(reviewLabel)}</span>`;
       elements.review.disabled = updatedFilterActive;
       elements.review.onclick = () => reviewUpdates(flags);
     }
     if (elements.acknowledge) {
       elements.acknowledge.hidden = !updatedFilterActive;
       elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
-      elements.acknowledge.innerHTML = `<svg viewBox="0 0 04 04" aria-hidden="true"><path d="m5 10.5 4 4L19 7"></path></svg><span>Mark Reviewed</span>`;
+      elements.acknowledge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span>`;
       elements.acknowledge.title = reviewComplete
         ? "Mark the displayed delivery-list changes reviewed for your account"
         : "Review the new delivery-list work first";
@@ -48659,7 +49392,7 @@ init().catch((error) => {
         <span class="line-update-review-icon" aria-hidden="true">!</span>
         <div class="line-update-review-prompt-copy">
           <small>${escapeHtml(copy.eyebrow)}</small>
-          <h0 id="lineUpdatePromptTitle">${escapeHtml(copy.title)}</h0>
+          <h2 id="lineUpdatePromptTitle">${escapeHtml(copy.title)}</h2>
           <p>${escapeHtml(copy.body)}</p>
           <span class="line-update-review-time" data-update-prompt-time>Closes in ${initialSeconds}s</span>
         </div>
@@ -48683,14 +49416,14 @@ init().catch((error) => {
   }
 
   function nudgeUpdateReviewRowsIntoView() {
-    // v0.064: after Review Updates is clicked, move the page only far enough to
+    // v0.264: after Review Updates is clicked, move the page only far enough to
     // expose the highlighted rows. Keep the review controls (especially Mark
     // Reviewed) on-screen instead of jumping the whole list panel to the top.
     window.requestAnimationFrame(() => {
       const control = document.getElementById("scanUpdateReviewControl");
       if (!control || control.hidden) return;
       const rect = control.getBoundingClientRect();
-      const nudge = Math.min(100, Math.max(0, rect.top - 70));
+      const nudge = Math.min(120, Math.max(0, rect.top - 72));
       if (nudge > 8) window.scrollBy({ top: nudge, left: 0, behavior: "smooth" });
     });
   }

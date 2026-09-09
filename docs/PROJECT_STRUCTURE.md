@@ -40,6 +40,7 @@ backend/
   import_safety.py       guarded import integration
   operations.py          operational feature service
   production_files.py    production-share index, live evidence, and durable observed EGL history
+  sketch_geometry.py     bounded read-only DXF outlines for generated references
 ```
 
 `database` owns database-specific contracts and migration tooling.

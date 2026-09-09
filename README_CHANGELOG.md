@@ -1,3 +1,152 @@
+## v0.517 - Scan Return Reliability and Source-Grounded Sketch Recovery
+
+### Startup and Scan
+- Diagnosed the September 9 startup delay from the migration ledger: schema 19 took 21.451 seconds of the approximately 31-second process-to-health startup. Added verified-backup/initialization timings and removed duplicate production-index priming. No new migration is required.
+- Prevented successful foreground date loads from cancelling themselves and starting again during navigation. Focus/visibility now use the compact catalog's revision check; Scan remains visible when browser animation frames are suspended.
+- Preserved pagination on same-date refresh, kept the date control synchronized, and retried stale date data on page entry. Corrected the compact date trigger's year/update-dot overlap.
+
+### Sketches
+- Added bounded, exact `<A&W order>.pdf` discovery independent of the recent index, with durable requested-file metadata, exact item-page reuse, partial-file recovery and replacement detection. No share traversal was added to Scan/catalog hot paths.
+- Added reference-only DXF outlines using Shower Programmer geometry principles: native orientation, source units, retained internal cuts/curves, exact item identity and direct/rotated dimension validation. Conflicting, stale or unsupported geometry is not treated as a proven outline.
+- Fixed mixed-fraction parsing and aspect-ratio distortion. Missing geometry is explicitly a size envelope; generated sheets do not invent hinge-side markers or fabrication completion. Corrected MOD 13's fallback to 32 units per inch.
+
+### Validation and delivery
+- SQLite remains schema **19**. Production data and prior user edits are preserved.
+- See `docs/V0517_VALIDATION.md` for the maintained suite, browser workflow, real-file evidence, limitations and exact changed-file manifest.
+- Delivered as the project-root-relative `Delivery_List_Scanner_v0.517_Changed_Files.zip` overlay for v0.516.
+
+## v0.516 - Sketch Memory, A+W Eastern Time, and Order Production Workspace
+
+### Sketches / Production files
+- Added an in-app generated reference sketch for items whose authoritative shop sketch is unavailable. The fallback mirrors the established shop-sheet layout using known Order/Item, glass, dimensions, job/customer, fabrication machine and proven shape metadata while clearly identifying itself as generated reference material.
+- Added a persistent read-through cache for exact matched sketch PDF pages under the existing `data` runtime area. Exact item pages are cached on first preview and then reopen locally without repeated network PDF extraction; the production share/index remains authoritative.
+- Kept v0.515 stale-index recovery and bounded browser retry behavior, while allowing the real sketch to replace a generated fallback as soon as it becomes available.
+
+### Order Details / Scan
+- Reworked the Order Details progress geometry so stage icon/name and `0/1` or `1/1` quantity remain on one row and the timestamp occupies one deliberate row below. Cutting now reports physical quantity instead of the `CUT` abbreviation.
+- Expanded the desktop Order Details workspace and uses a two-column sketch/Cutting-Label row plus a full-width production-information row at common workstation widths, avoiding horizontal progress scrolling.
+- Changed item headings to Order / Item with smaller glass-type text and expanded the repeated item fact grid. Moved item actions to the bottom right.
+- Added a dedicated A+W information section with current Batch, Optimization and Optimization Status. Internal Reject history now includes the A+W generation in effect at each reject while current generation values reflect the newest remake/re-cut generation.
+- Widened compact Scan progress checkpoints without restoring Scan timestamps or increasing their maintained height.
+
+### Time / database contract
+- Established `America/New_York` as the explicit plant timezone for offset-free A+W SQL Server datetime values. New A+W reject and Cutting timestamps are converted from Monroe/Charlotte wall-clock time to canonical UTC at ingestion, while aware timestamps retain their absolute instant.
+- Added schema migration **19** to repair historical A+W reject/cutting timestamps from preserved source evidence, synchronize mirrored A+W Internal Reject timestamps and reject cutoffs, and preserve event identities/rows through the maintained verified-backup migration system.
+- Browser operational timestamp formatting now explicitly renders in the plant timezone instead of inheriting the workstation timezone.
+
+### Validation
+- Added focused regression coverage for Eastern DST conversion, A+W reject/Cutting ingestion, migration-19 historical repair/idempotent rerun behavior, persistent exact-page sketch caching, generated-sketch fallback, Order Details A+W generation context, and responsive progress geometry.
+- The focused v0.516 set passes **5/5** and the complete maintained suite passes **288/288 tests**. Node syntax validation passes; all **33 Python source files** parse without bytecode generation and changed modules import successfully.
+- A verified isolated schema-11 → schema-19 upgrade creates a valid pre-upgrade backup, preserves all 44 pre-existing table row counts except the expected migration ledger, passes SQLite integrity/foreign-key checks, and applies nothing on a second migration pass.
+- Isolated server/API startup, v0.516 display/cache keys, and clean shutdown pass. Headless Chromium times out before producing a localhost screenshot, so final responsive visual verification remains deployment-side.
+
+## v0.515 - Progress Layout and Sketch Recovery
+
+### Scan / Search / Order Details
+- Returned Smart Search progress to the left edge of its existing dedicated wide row so long Cutting/fabrication/scanner sequences start from a stable position and remain easier to read.
+- Centered Scan progress checkpoint content, reduced the timestamp-free checkpoint height to 30 pixels, and enlarged/normalized the arrows between stages.
+- Widened the Order Details dialog and A+W Cutting Label column again, centered a larger physical-label frame without overflowing side margins, and normalized Order Details progress into separate stage-name, state/count, and timestamp rows.
+
+### Sketch reliability
+- Added bounded missing-sketch recovery for network-backed production files. An exact item miss schedules one deduplicated sketch-only background index refresh instead of synchronously scanning the share on the request thread.
+- Stopped persisting transient empty sketch-page assignments and stopped caching PDF read/copy exceptions as authoritative empty results; successful no-match parses use only a short in-memory coalescing window.
+- Added an explicit `sketchRefreshPending` signal to the existing production payload and a maximum two-attempt Order Details retry that bypasses the long media cache only while the same missing-sketch dialog remains open. Closing Order Details cancels the pending retry.
+
+### Validation
+- Added focused backend coverage for transient PDF recovery and stale network-index refresh plus structural coverage for progress geometry, label width, cache keys, and bounded browser sketch retry behavior.
+- The focused v0.512-v0.515 compatibility/sketch-recovery set passes **5/5** and the complete maintained suite passes **283/283 tests**. Node syntax validation passes; all **33 Python source files** parse without bytecode generation and the changed modules import cleanly.
+- A verified isolated schema-11 -> schema-18 upgrade creates a valid backup, preserves all 44 pre-existing table row counts except the expected migration ledger, passes integrity/foreign-key checks, and is idempotent on a second migration pass. v0.515 itself adds no migration, reset, seed, or production database replacement.
+- Isolated server/API startup, v0.515 display/cache keys, and clean shutdown pass. Headless Chromium again times out before producing a localhost screenshot, so final responsive visual verification remains deployment-side.
+
+## v0.514 - Workflow Filters and Production Reporting
+
+### Scan / Search / Order Details
+- Removed per-step operational timestamps from the Scan progress column while preserving the compact Cutting, fabrication/No Fab, and scanner checkpoints.
+- Moved Smart Search progress onto its own wider right-aligned row, increased progress and result typography, and surfaced External Remake plus its reason directly beside Customer.
+- Widened desktop Order Details and its A+W Cutting Label column so the full reconstructed label remains visible beside the sketch; removed the redundant `Piece x of y / CUT` summary strip while preserving Order Details stage timestamps and deferred sketch loading.
+- Removed the duplicate Production Progress filter group. Complete, Partial, and Not Complete now evaluate the entire required workflow by default and evaluate the selected WaterJet/Denver fabrication checkpoint when combined with Machine.
+
+### Statistics / Production Count
+- Split the prominent Production Count card from the chart range: Today’s Production Count always queries the current local day and shows new-production totals by glass type and fabrication machine using short numeric dates.
+- Added a table-only Production count by machine dataset to the analytics workspace. External Remakes, Internal Rejects, and Rushes are opt-in additions, while Detailed report exposes piece-level machine, activity time, Order/Item, Qty, customer, job, glass, dimensions, route, delivery date, barcode, process state, queue state, and reason.
+- Extended durable first-seen activity detail with Rush identity plus barcode/process/queue/reason fields so detailed reporting does not need per-row Order Details requests. Machine hydration remains bounded and report-only.
+- Polished the Daily Production Count email with a clearer Today-at-a-glance hierarchy, short dates, new-production machine totals, glass totals, and separate Internal Reject / External Remake sections.
+- Allowed report-viewing roles to reuse the maintained bounded production-status batch endpoint while retaining the existing stage-access request filter; production-file open/download permissions remain unchanged.
+
+### Validation
+- Added v0.514 structural coverage for consolidated Machine + Status filtering, Scan timestamp removal, Smart Search layout, wider Order Details, Today-only production reporting, table-only machine reporting, opt-in activity toggles, detailed report fields, short dates, cache keys, and unchanged schema 18.
+- Extended the real SQLite Production Count regression to verify Rush classification and durable barcode/process/queue fields survive synchronized-stage deduplication.
+- The focused v0.514 compatibility/production-report set passes **4/4**, and the complete maintained suite passes **281/281 tests**. Node syntax validation passes; all **33 Python source files** parse without bytecode generation and the changed backend/database modules import cleanly.
+- A verified isolated schema-11 → schema-18 upgrade preserves all pre-existing table row counts except the expected migration-ledger growth, passes SQLite integrity/foreign-key checks, and is idempotent on a second migration pass. v0.514 itself adds no migration, reset, seed, or production database replacement.
+- Isolated server/API startup, v0.514 display/cache keys, and clean shutdown pass. Chromium times out before rendering the isolated localhost app in this environment, so final responsive visual verification remains deployment-side.
+
+## v0.513 - Smart Search Production Progress and Attention Polish
+
+### Production / Search
+- Restricted reconstructed A+W Cutting Label `REMAKE` text to true External Remake items. Internal Reject replacement generations may still retain their A+W generation history without being mislabeled as customer remakes.
+- Added the synchronized A+W Cutting state to the final bounded Smart Search result set and expanded Smart Search progress from the legacy two-step pair into the visible Cutting → fabrication/No Fab → scanner-stage sequence.
+- Added per-step operational timestamps to Smart Search progress, green completion treatment, neutral No Fab treatment, and distinct Cutting/Denver/WaterJet icons/colors using the same maintained progress vocabulary as Scan and Order Details.
+
+### Scan / Interface
+- Reordered Scan Attention filters to Internal Rejects, External Remakes, then Rushes. Production Progress spans the drawer, while Route and Machine now share one equal-width row.
+- Increased the vertical REMAKE row-rail text size without widening the priority gutter.
+- Anchored the Old Bays count badge to the current Bay tool card even before hover/focus; the previous selector still targeted the retired launcher class.
+- Allowed the superseded-order review launcher to overflow its pending-count badge so the top-right notification remains visible outside the button border.
+
+### Validation
+- Added focused regression coverage for bounded Smart Search Cutting enrichment and the v0.513 frontend/layout contracts; the focused compatibility set passes **4/4** and the complete maintained suite passes **280/280 tests**.
+- JavaScript syntax and Python parse/import checks pass. A verified isolated schema-11 → schema-18 upgrade preserves all pre-existing application rows, passes SQLite integrity/foreign-key checks, and confirms v0.513 adds no migration, reset, seed, or database replacement.
+- Isolated server/API startup, v0.513 display/cache keys, and clean shutdown pass. Headless Chromium cannot complete localhost rendering in this environment, so final responsive visual verification remains deployment-side.
+
+## v0.512 - Scan Re-entry, Production Filters, and Order Detail Recovery
+
+### Reliability
+- Replaced the Scan page's non-cancelable date-wide loading latch with an abortable foreground request, a bounded timeout, and route-transition cleanup/restart. A slow or abandoned `/api/scan/date` response can no longer require a whole-page browser refresh before Scan works again.
+- Restored the existing deferred Order Details sketch loader by rendering sketch iframes through its data-source contract, loading the first sketch immediately, and virtualizing remaining pages until they approach the dialog viewport.
+- Reused the maintained priority-banner annotation in focused Order Details payloads so Remake/Rush type and reason stay consistent with Scan and Smart Search.
+- Allowed the status-only fabrication batch route to support list-viewing Scan roles while filtering every requested Order/Item against active delivery-list stages that user can already access. Production asset open/download routes remain unchanged.
+
+### Scan and Order Details
+- Promoted No Fab into the actual Denver/WaterJet checkpoint position in Scan and Order Details instead of showing it as detached fabrication text.
+- Added operational timestamps beneath Scan progress checkpoints, matching the compact timestamp treatment already used in Order Details.
+- Renamed Not Scanned to Not Complete and made it include both unstarted and partial final scanner states.
+- Added Machine filters for No Fab, WaterJet, and Denver plus Production Progress filters for Cutting complete/not complete, WaterJet complete/partial/not complete, and Denver complete/not complete. Whole-date fabrication classification hydrates in bounded windows only when those filters are requested.
+- Moved the Scan delivery-date selector back to the left side of the scanning panel while retaining the centered Airport Rd station track.
+- Moved each A+W Cutting Label beside its item sketch on wide layouts, preserved stacked responsive layouts, and removed the Cutting Label maximize button.
+
+### Bay Map
+- Slowed the in-transit glass/truck sequence so individual loading/unloading direction is readable.
+- Changed outbound transfer so the right-most pane loads first through the rear/left side of the outbound-facing truck, mirrored inbound unloading into the receiving stack, and added two subtle road-bump motions on each travel leg.
+
+### Validation
+- Added focused backend and structural regression coverage for the new Scan/Order Details/filter/access/animation contracts; the focused v0.512 set passes **4/4** and the complete maintained suite passes **278/278 tests**.
+- JavaScript syntax validation passes; all **39 Python source files** parse without bytecode generation and the changed backend/database modules import cleanly.
+- A verified isolated upgrade of the supplied schema-11 SQLite database applied migrations 12-18, preserved all pre-existing table row counts except the expected migration-ledger growth, reached schema **18**, and passed integrity/foreign-key checks. v0.512 itself does not add a migration, reset, seed, or database replacement.
+- The supplied 486-row heavy Scan date remains about **105 ms median** across three isolated date-bundle runs; the new bounded 80-row production-status access validation is about **4.1 ms median** across five runs.
+- Isolated server/API health, v0.512 display, changed-asset cache keys, and clean shutdown pass. Chromium localhost navigation is blocked by the validation environment administrator policy, so final visual inspection at desktop/tablet/phone/TC22 sizes remains a deployment-side check.
+
+## v0.511 - Scan Cutting Progress and Label Reliability
+
+### Scan and Order Details
+- Made the Scan page's pre-hydration/fallback progress markup use the same compact paired layout as the current date-wide workflow so a slow or transient load no longer flashes the legacy oversized progress treatment.
+- Added A+W Cutting as the production step before Denver/WaterJet fabrication with its own Cutting icon. The date-wide Scan bundle enriches all visible copies in bounded Order batches, reuses the existing `aw_cutting_state` contract, and avoids per-row database calls.
+- Treated unknown Cutting data as informational so a missing A+W Cutting snapshot cannot conceal known downstream Denver/WaterJet or scanner progress.
+- Added best-available timestamps beneath Cutting, fabrication, and scanner stages in Order Details. Scanner stage timestamps come from the latest positive `scan_events` row for the physical line; existing production evidence supplies Cutting/fabrication times.
+- Corrected No Fab precedence so a detected Denver or WaterJet machine prevents the No Fab badge even when an older fabrication-required flag says false.
+
+### Interface and labels
+- Compressed the Internal Reject detail ribbon, extended it from Glass Type through the end of the Progress column, and kept the information on a shorter single desktop row where available width allows.
+- Centered the Scan panel's Airport Rd station text and placed the delivery-list date immediately to its right at desktop, tablet, phone, and TC22 widths; equal outer tracks preserve the station centerline on compact scanners.
+- Changed generated A+W Cutting Label delivery dates to short `M/D/YYYY` format.
+- Fixed Code 39 validation to accept the maintained 16-character canonical barcode (`T200 + Order(6) + Item(3) + 000`), restoring the barcode graphic on generated labels.
+
+### Validation
+- Added focused regression coverage for date-wide A+W Cutting enrichment and Order Details scanner-stage timestamps plus structural guards for Cutting placement/iconography, No Fab precedence, compact fallback progress, Internal Reject span/height, scanner context alignment, cache keys, and Cutting Label barcode/date formatting.
+- SQLite remains schema **18**; this release adds no migration, reset, or database replacement.
+- JavaScript syntax and no-bytecode Python compile/import checks pass; the complete maintained suite passes **276/276 tests**.
+- A verified isolated upgrade of the supplied schema-11 database reached schema 18, preserved all pre-existing table row counts except the expected `schema_migrations` entries, and passed SQLite integrity/foreign-key checks. The heaviest supplied active date (486 line rows across five lists) completed the date-wide Scan bundle in **98.0 ms median** across three runs.
+- Isolated server health and v0.511 version/cache delivery pass. Chromium is blocked from localhost by the validation environment (`ERR_BLOCKED_BY_ADMINISTRATOR`), so final affected-page visual verification at desktop/tablet/phone/TC22 sizes remains an operator-side deployment check.
+
 ## v0.510 - Automation Completion and Scan Date Recovery
 
 ### Reliability
@@ -5,10 +154,13 @@
 - Serialized browser-run status writes, replaced the shared temporary filename with a unique file, and added bounded Windows sharing-violation retries. A status-file collision can no longer stop stdout consumption and suspend an otherwise completed import.
 - Removed the obsolete Stage-selector dependency from delivery-catalog refreshes. The single Scan delivery-date selector now repaints from the current compact catalog and keeps its custom control synchronized.
 - Added a bounded retry for the initial compact delivery-list catalog request so a transient startup response cannot strand the Scan page without selectable dates.
+- Repaired the unfinished editor's broad JavaScript numeric/date-constant corruption before release and added maintained sentinels around representative date formatting, status-code, barcode, page-size, color, and workflow constants.
 
 ### Validation
-- Added regression coverage for transient Windows status-file replacement failures, browser log-path preservation, the one-selector Scan catalog contract, and startup catalog retries.
-- SQLite remains schema **18**; this release does not migrate, reset, or replace application data.
+- Added regression coverage for transient Windows status-file replacement failures, browser log-path preservation, the one-selector Scan catalog contract, startup catalog retries, and the interrupted numeric/date-constant corruption pattern.
+- JavaScript syntax and Python compile/import checks pass; the complete maintained automated suite passes **274/274 tests**.
+- A verified isolated upgrade of the supplied schema-11 SQLite copy applied migrations 12-18, preserved row counts across all 43 pre-existing application tables, and passed SQLite integrity and foreign-key checks. Schema remains **18** for v0.510; this release adds no new migration.
+- The isolated HTTP server/API health smoke check passes. Chromium page navigation is blocked by the validation environment's administrator policy, so final desktop/tablet/phone/TC22 visual verification remains an operator-side deployment check.
 
 ## v0.509 - Mobile Tutorial and Shared Control Polish
 

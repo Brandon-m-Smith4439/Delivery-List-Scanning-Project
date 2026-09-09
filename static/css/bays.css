@@ -29258,3 +29258,20 @@ body.bay-move-mode .bay-layout-drop-zone {
   align-self: center !important;
   justify-self: center !important;
 }
+
+
+/* ========================================================================== */
+/* v0.513 Old Bays attention badge containment                               */
+/* ========================================================================== */
+/* v0.470 changed the launcher wrapper class, so the older position:relative
+   owner no longer matched until hover created a temporary containing block. */
+#bayActionButtons.bay-tool-card-grid-v470 > .bay-tool-card-v470[data-bay-action="old-bays"] {
+  position: relative !important;
+  overflow: visible !important;
+}
+#bayActionButtons.bay-tool-card-grid-v470 .old-bay-attention-count {
+  position: absolute !important;
+  top: 4px !important;
+  right: 5px !important;
+  z-index: 6 !important;
+}

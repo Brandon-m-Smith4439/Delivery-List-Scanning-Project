@@ -103,6 +103,24 @@ class ProductionFileService:
         # The share index itself stays metadata-only so hundreds of recent sketches
         # cannot keep the entire application busy while Settings says Refreshing.
         self._sketch_page_cache: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
+        # Empty PDF page maps are kept only briefly in memory. A sketch can be
+        # requested while A+W is still copying/writing the PDF on the network
+        # share; treating that transient empty parse as durable made Order Details
+        # intermittently miss a sketch that existed moments later.
+        self._sketch_empty_cache_at: dict[str, float] = {}
+        # Exact, operator-requested order PDFs live outside the rolling index.
+        # Their metadata/page memory survives both TTL refresh and restart.
+        self._requested_sketches: dict[str, ProductionAsset] = {}
+        self._sketch_order_checked: dict[str, float] = {}
+        self._sketch_order_lock = threading.Lock()
+        self._reference_geometry_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any] | None]] = {}
+        # v0.516: exact sketch PDF pages that an operator has opened are cached
+        # locally under data/. This is a read-through preview cache only; source
+        # production files remain authoritative and are never replaced or moved.
+        # Keeping the extracted item page locally avoids re-reading a large order
+        # PDF from the production share every time Order Details is reopened.
+        self._sketch_preview_cache_dir = Path(config.data_dir) / "production-sketch-page-cache"
+        self._sketch_preview_lock = threading.Lock()
         self._lock = threading.RLock()
         self._persist_write_lock = threading.Lock()
         self._persist_pending = False
@@ -174,6 +192,10 @@ class ProductionFileService:
                 self._fabrication_cache.clear()
                 self._machine_text_cache.clear()
                 self._sketch_page_cache.clear()
+                self._sketch_empty_cache_at.clear()
+                self._requested_sketches.clear()
+                self._sketch_order_checked.clear()
+                self._reference_geometry_cache.clear()
                 self._load_persisted_index()
             elif terms_changed:
                 self._cache.pop("sketch", None)
@@ -181,6 +203,7 @@ class ProductionFileService:
                     self._asset_lookup.pop(asset_id, None)
                 self._fabrication_cache.clear()
                 self._sketch_page_cache.clear()
+                self._sketch_empty_cache_at.clear()
         if roots_changed or lookback_changed:
             self.refresh_async()
         elif terms_changed:
@@ -298,6 +321,15 @@ class ProductionFileService:
         availability = payload.get("availability")
         if isinstance(availability, dict):
             self._availability_cache = (indexed_at, {kind: bool(availability.get(kind)) for kind in self.roots})
+        if str(saved_roots.get("sketch") or "").casefold() == str(self.roots["sketch"]).casefold():
+            requested = payload.get("requestedSketches")
+            for row in (requested if isinstance(requested, list) else [])[:512]:
+                if not isinstance(row, dict):
+                    continue
+                asset = self._deserialize_asset("sketch", row)
+                if asset and asset.extension == ".pdf":
+                    self._requested_sketches[asset.asset_id] = asset
+                    self._asset_lookup[asset.asset_id] = asset
         saved_pages = payload.get("sketchPages")
         if isinstance(saved_pages, list):
             for row in saved_pages:
@@ -317,7 +349,10 @@ class ProductionFileService:
                 ):
                     continue
                 clean_assignments = [dict(value) for value in assignments if isinstance(value, dict)]
-                self._sketch_page_cache[asset_id] = (asset.modified_at, order_token, clean_assignments)
+                # Empty page maps are intentionally not restored. They may have
+                # been captured while a network PDF was still being written.
+                if clean_assignments:
+                    self._sketch_page_cache[asset_id] = (asset.modified_at, order_token, clean_assignments)
 
     def _persist_index(self) -> None:
         if not self._background_refresh_enabled:
@@ -337,6 +372,7 @@ class ProductionFileService:
                     {**self._serialize_asset(asset), "lastSeenAt": float(last_seen)}
                     for asset, last_seen in self._egl_history.values()
                 ],
+                "requestedSketches": [self._serialize_asset(asset) for asset in self._requested_sketches.values()],
                 "sketchPages": [
                     {
                         "assetId": asset_id,
@@ -345,7 +381,7 @@ class ProductionFileService:
                         "assignments": [dict(row) for row in assignments],
                     }
                     for asset_id, (modified_at, order_token, assignments) in self._sketch_page_cache.items()
-                    if asset_id in self._asset_lookup
+                    if asset_id in self._asset_lookup and assignments
                 ],
             }
         with self._persist_write_lock:
@@ -516,6 +552,8 @@ class ProductionFileService:
                 self._asset_lookup.pop(asset_id, None)
             for asset in assets:
                 self._asset_lookup[asset.asset_id] = asset
+            if kind == "sketch":
+                self._asset_lookup.update(self._requested_sketches)
             availability = dict(self._availability_cache[1]) if self._availability_cache else {}
             availability[kind] = bool(available)
             self._availability_cache = (now, availability)
@@ -712,6 +750,71 @@ class ProductionFileService:
                 return candidate
         return None
 
+    def _sketch_preview_cache_path(self, asset: ProductionAsset, page_number: int) -> Path:
+        signature = f"{asset.asset_id}|{float(asset.modified_at or 0):.6f}|{int(page_number)}"
+        digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+        return self._sketch_preview_cache_dir / f"{digest}.pdf"
+
+    def cached_sketch_page(self, asset_id: str, page_number: int) -> tuple[Path, ProductionAsset] | None:
+        """Return/create one exact sketch page in the local read-through cache.
+
+        The cache is keyed by source asset id + source mtime + page, so a revised
+        production PDF automatically receives a new cached page. A previously
+        cached page can still be served when the network share is temporarily
+        unavailable, provided the persisted production index still identifies the
+        original asset metadata.
+        """
+        clean = str(asset_id or "").strip()
+        page = max(int(page_number or 0), 0)
+        if not clean or page <= 0:
+            return None
+        asset = self._asset_lookup.get(clean)
+        if asset is None:
+            kind = clean.split("-", 1)[0]
+            # A network-backed persisted index can restore metadata before the
+            # share is reachable; ``assets`` is non-blocking for network roots.
+            for candidate in self.assets(kind, refresh=False):
+                if candidate.asset_id == clean:
+                    asset = candidate
+                    break
+        if asset is None or asset.kind != "sketch" or asset.extension.lower() != ".pdf":
+            return None
+        target = self._sketch_preview_cache_path(asset, page)
+        if target.exists() and target.is_file() and target.stat().st_size > 0:
+            return target, asset
+        if not asset.path.exists():
+            return None
+
+        with self._sketch_preview_lock:
+            if target.exists() and target.is_file() and target.stat().st_size > 0:
+                return target, asset
+            try:
+                from pypdf import PdfReader, PdfWriter  # type: ignore
+
+                reader = PdfReader(str(asset.path))
+                page_index = page - 1
+                if page_index < 0 or page_index >= len(reader.pages):
+                    return None
+                writer = PdfWriter()
+                writer.add_page(reader.pages[page_index])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temporary = target.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+                try:
+                    with temporary.open("wb") as handle:
+                        writer.write(handle)
+                    temporary.replace(target)
+                finally:
+                    try:
+                        temporary.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        pass
+            except Exception:
+                return None
+        return (target, asset) if target.exists() and target.stat().st_size > 0 else None
+
+
     def _asset_mentions_item(self, asset: ProductionAsset, order: Any, item: Any) -> bool:
         """Require item evidence tied to the order, avoiding date/revision digit false positives."""
         raw_item = str(item or "").strip()
@@ -807,7 +910,11 @@ class ProductionFileService:
         refresh: bool = False,
     ) -> list[ProductionAsset]:
         scored: list[tuple[int, float, ProductionAsset]] = []
-        for asset in self.assets(kind, refresh=refresh):
+        candidates = {a.asset_id: a for a in self.assets(kind, refresh=refresh)}
+        if kind == "sketch":
+            with self._lock:
+                candidates.update(self._requested_sketches)
+        for asset in candidates.values():
             score = self._score(asset, order, item, job, require_item=require_item)
             if score > 0:
                 scored.append((score, asset.modified_at, asset))
@@ -916,11 +1023,21 @@ class ProductionFileService:
             return []
         cached = self._sketch_page_cache.get(asset.asset_id)
         if cached and cached[0] == asset.modified_at and cached[1] == order_token:
-            return [dict(row) for row in cached[2]]
+            if cached[2]:
+                return [dict(row) for row in cached[2]]
+            # Reuse an empty parse only long enough to coalesce adjacent item
+            # lookups from one Order Details request. After that, try the PDF
+            # again because A+W/network copies can become readable moments later.
+            empty_at = float(self._sketch_empty_cache_at.get(asset.asset_id) or 0)
+            if empty_at and time.time() - empty_at < 3.0:
+                return []
+            self._sketch_page_cache.pop(asset.asset_id, None)
+            self._sketch_empty_cache_at.pop(asset.asset_id, None)
         if not allow_content_read:
             return []
 
         assignments: list[dict[str, Any]] = []
+        parse_succeeded = False
         try:
             from pypdf import PdfReader  # type: ignore
 
@@ -945,8 +1062,12 @@ class ProductionFileService:
                         "pageNumber": page_index + 1,
                         "machine": machine,
                     })
+            parse_succeeded = True
         except Exception:
-            assignments = []
+            # A locked/partially copied network PDF is not authoritative evidence
+            # that no sketch exists. Leave it uncached so the bounded frontend
+            # retry can recover without waiting for a process restart.
+            return []
 
         # Keep one deterministic page per item when a PDF happens to repeat a
         # title/marker in annotations or revision notes.
@@ -954,8 +1075,13 @@ class ProductionFileService:
         for row in assignments:
             unique.setdefault(str(row.get("item") or ""), row)
         result = list(unique.values())
-        self._sketch_page_cache[asset.asset_id] = (asset.modified_at, order_token, [dict(row) for row in result])
-        self._schedule_persist_index(asset.root)
+        if parse_succeeded:
+            self._sketch_page_cache[asset.asset_id] = (asset.modified_at, order_token, [dict(row) for row in result])
+            if result:
+                self._sketch_empty_cache_at.pop(asset.asset_id, None)
+                self._schedule_persist_index(asset.root)
+            else:
+                self._sketch_empty_cache_at[asset.asset_id] = time.time()
         return result
 
     def _public_asset_view(
@@ -975,6 +1101,61 @@ class ProductionFileService:
             row["machineHint"] = str(machine_hint)
         return row
 
+    def _exact_order_sketches(self, order: Any) -> list[ProductionAsset]:
+        """Probe the maintained <A&W order>.pdf path, irrespective of file age.
+
+        Only deferred Order Details media calls use this bounded lookup. No
+        directory walk or PDF read is added to Scan/status/catalog hot paths.
+        A failed share probe retains learned pages for offline preview.
+        """
+        token = str(order or "").strip()
+        if not self.enabled or not re.fullmatch(r"\d{6}", token):
+            return []
+        with self._sketch_order_lock:
+            now = time.time()
+            learned = [a for a in self._requested_sketches.values() if a.path.stem == token]
+            ttl = self.cache_seconds if learned else 3
+            if now - self._sketch_order_checked.get(token, 0) < ttl:
+                return learned
+            root = Path(self._resolved_roots.get("sketch") or self.roots["sketch"])
+            path = root / f"{token}.pdf"
+            try:
+                info = path.stat()
+                if not stat_module.S_ISREG(info.st_mode):
+                    return []
+            except FileNotFoundError:
+                # A reachable folder proves deletion; a disconnected share does not.
+                try:
+                    reachable = root.is_dir()
+                except OSError:
+                    reachable = False
+                if reachable:
+                    with self._lock:
+                        for old in learned:
+                            self._requested_sketches.pop(old.asset_id, None)
+                            self._asset_lookup.pop(old.asset_id, None)
+                    learned = []
+                self._sketch_order_checked[token] = now
+                return learned
+            except OSError:
+                self._sketch_order_checked[token] = now
+                return learned
+            relative = path.relative_to(root).as_posix()
+            asset = ProductionAsset("sketch", root, path, relative, path.name, ".pdf",
+                                    self._asset_id("sketch", relative), _compact(relative), info.st_mtime)
+            with self._lock:
+                self._requested_sketches[asset.asset_id] = asset
+                self._asset_lookup[asset.asset_id] = asset
+                self._sketch_order_checked[token] = now
+                while len(self._requested_sketches) > 512:
+                    oldest = next(iter(self._requested_sketches))
+                    self._requested_sketches.pop(oldest)
+                if len(self._sketch_order_checked) > 1024:
+                    self._sketch_order_checked.pop(next(iter(self._sketch_order_checked)))
+            if not learned or learned[0].modified_at != asset.modified_at:
+                self._schedule_persist_index(root)
+            return [asset]
+
     def sketch_item_views(self, order: Any, item: Any, job: Any = "") -> list[dict[str, Any]]:
         """Return exact sketch pages for one item from order-level sketch PDFs."""
         item_number = self._normalized_item_number(item)
@@ -983,14 +1164,17 @@ class ProductionFileService:
         views: list[dict[str, Any]] = []
         # Sketch filenames identify the order, not the item. Item association is
         # determined only by the Order.Item marker inside each PDF page.
-        for sketch in self.matches("sketch", order, "", job, limit=8, require_item=False):
+        candidates = {asset.asset_id: asset for asset in self.matches("sketch", order, "", job, limit=8, require_item=False)}
+        candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order)})
+        for sketch in candidates.values():
             if sketch.extension == ".pdf":
                 for assignment in self._sketch_page_assignments(sketch, order, allow_content_read=True):
                     if str(assignment.get("item") or "") != item_number:
                         continue
+                    page_number = int(assignment.get("pageNumber") or 0)
                     views.append(self._public_asset_view(
                         sketch,
-                        page_number=int(assignment.get("pageNumber") or 0),
+                        page_number=page_number,
                         item_marker=str(assignment.get("marker") or ""),
                         machine_hint=str(assignment.get("machine") or ""),
                     ))
@@ -999,7 +1183,52 @@ class ProductionFileService:
                 # sketches. The plant PDF contract remains Order.Item-by-page.
                 machine = self._detect_machine(self._read_machine_text(sketch)) if sketch.extension in _TEXT_EXTENSIONS else ""
                 views.append(self._public_asset_view(sketch, machine_hint=machine))
+        if not views and self._is_network_root(self.roots["sketch"]):
+            # ``assets()`` intentionally returns the current network snapshot while
+            # a refresh runs. If a sketch was created after that snapshot, request
+            # one background sketch-only refresh so Order Details can retry shortly
+            # without synchronously walking the production share on this request.
+            self.refresh_async(["sketch"])
         return views
+
+    def reference_geometry(self, order: Any, item: Any, *, evidence_after: Any = "") -> dict[str, Any] | None:
+        """Read exact item DXFs only when the authoritative PDF is unavailable."""
+        from backend.sketch_geometry import read_reference_geometry
+
+        order_token, item_token = str(order or "").strip(), self._normalized_item_number(item)
+        if not self.enabled or not re.fullmatch(r"\d{6}", order_token) or not item_token:
+            return None
+        key = (order_token, item_token, str(evidence_after or ""))
+        now = time.time()
+        cached = self._reference_geometry_cache.get(key)
+        if cached and now - cached[0] < (self.cache_seconds if cached[1] else 3):
+            return cached[1]
+        root = Path(self._resolved_roots.get("program") or self.roots["program"])
+        # Shower Programmer sends six-digit Order + two-digit Item programs.
+        # Also support the scanner's legacy three-digit Item representation.
+        names = {f"{order_token}{int(item_token):02d}.dxf", f"{order_token}{int(item_token):03d}.dxf"}
+        paths = {root / name for name in names}
+        paths.update(a.path for a in self.matches("program", order_token, item_token, require_item=True, limit=12)
+                     if a.extension == ".dxf" and a.name.lower() in names)
+        candidates = []
+        for path in paths:
+            try:
+                info = path.stat()
+                if not stat_module.S_ISREG(info.st_mode): continue
+                asset = ProductionAsset("program", root, path, path.name, path.name, ".dxf", "", "", info.st_mtime)
+                cutoff = self._evidence_cutoff_timestamp(evidence_after)
+                if not self._evidence_is_after(asset, cutoff): continue
+                geometry = read_reference_geometry(path)
+                if geometry: candidates.append(geometry)
+            except (OSError, ValueError):
+                continue
+        # Multiple different outlines require review, even if their sizes agree.
+        distinct = {json.dumps(g["paths"], separators=(",", ":")) for g in candidates}
+        result = candidates[0] if candidates and len(distinct) == 1 else None
+        self._reference_geometry_cache[key] = (now, result)
+        while len(self._reference_geometry_cache) > 256:
+            self._reference_geometry_cache.pop(next(iter(self._reference_geometry_cache)))
+        return result
 
     def machine_assignment(
         self,
@@ -1256,9 +1485,14 @@ class ProductionFileService:
         # programs are item-specific production records. Keep sibling item files
         # out of an item's Order Details card when an item number is available.
         require_item = bool(str(item or "").strip())
+        sketches = self.sketch_item_views(order, item, job) if require_item else []
+        with self._lock:
+            sketch_refresh_pending = "sketch" in self._refreshing
         return {
             "hardware": [asset.public() for asset in self.matches("hardware", order, item, job, limit=8)],
-            "sketches": self.sketch_item_views(order, item, job) if require_item else [],
+            "sketches": sketches,
+            "referenceGeometry": self.reference_geometry(order, item, evidence_after=evidence_after) if require_item and not sketches else None,
+            "sketchRefreshPending": bool(sketch_refresh_pending),
             "programs": [
                 asset.public()
                 for asset in self.matches("program", order, item, job, limit=12, require_item=require_item)

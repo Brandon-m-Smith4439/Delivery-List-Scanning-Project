@@ -21,8 +21,8 @@ from automation.sql_delivery_export.import_delivery_folder import direct_sql_syn
 from backend.production_files import ProductionFileService
 from backend.operations import OperationsFeatureService
 from backend.automation_control import DeliveryAutomationController
-from database.migrations import run_sqlite_migrations
-from database.time_utils import normalize_utc_timestamp, parse_utc_timestamp
+from database.migrations import _migration_019_v516_aw_eastern_timestamp_contract, run_sqlite_migrations
+from database.time_utils import normalize_aw_plant_timestamp, normalize_utc_timestamp, parse_aw_plant_timestamp, parse_utc_timestamp
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,7 +136,7 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 con.execute("UPDATE aw_reject_events SET breakage_date=? WHERE event_key=?", (source["breakageDate"], expected_event_key))
                 con.execute("UPDATE aw_reject_source_rows SET last_changed_at=? WHERE aw_row_id=?", (source["sourceLastChangedAt"], "timestamp-row-1"))
-                con.execute("DELETE FROM schema_migrations WHERE version=18")
+                con.execute("DELETE FROM schema_migrations WHERE version IN (18, 19)")
                 run_sqlite_migrations(con, store)
                 repaired = con.execute(
                     "SELECT event_key, breakage_date FROM aw_reject_events WHERE event_key=?",
@@ -147,10 +147,10 @@ class ImportConsistencyTests(unittest.TestCase):
                     ("timestamp-row-1",),
                 ).fetchone()
                 installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
-            self.assertEqual(installed, 18)
+            self.assertEqual(installed, 19)
             self.assertEqual(repaired["event_key"], expected_event_key)
-            self.assertEqual(repaired["breakage_date"], "2026-09-04T10:00:33+00:00")
-            self.assertEqual(repaired_source["last_changed_at"], "2026-09-04T10:01:34+00:00")
+            self.assertEqual(repaired["breakage_date"], "2026-09-04T14:00:33+00:00")
+            self.assertEqual(repaired_source["last_changed_at"], "2026-09-04T14:01:34+00:00")
             self.assertEqual(normalize_utc_timestamp("2026-09-04T10:00:33Z"), "2026-09-04T10:00:33+00:00")
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
@@ -880,11 +880,19 @@ class ImportConsistencyTests(unittest.TestCase):
             )
             egl = programs / "23809101-test.egl"
             egl.write_text("ORIGINAL DENVER PROGRAM", encoding="utf-8")
-            before_reject = datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc).timestamp()
+            # Keep the synthetic evidence comfortably inside the maintained
+            # seven-day production-file index. A fixed September 1 timestamp
+            # made this regression expire exactly one week later even though
+            # the reject/reset behavior itself was still correct.
+            now_utc = datetime.now(timezone.utc)
+            before_reject_dt = now_utc - timedelta(hours=2)
+            reject_dt = now_utc - timedelta(hours=1)
+            after_reject_dt = now_utc - timedelta(minutes=30)
+            before_reject = before_reject_dt.timestamp()
             os.utime(egl, (before_reject, before_reject))
             service = ProductionFileService(config, cache_seconds=15)
             service.assets("program", refresh=True)
-            reject_time = "2026-09-01T15:27:42+00:00"
+            reject_time = reject_dt.isoformat()
 
             stale = service.fabrication_status("238091", "1", "6455", evidence_after=reject_time)
             self.assertFalse(stale["fabricated"])
@@ -895,7 +903,7 @@ class ImportConsistencyTests(unittest.TestCase):
             # Overwriting the exact same program after the reject creates new
             # fabrication evidence even though the filename did not change.
             egl.write_text("RE-FABRICATED DENVER PROGRAM", encoding="utf-8")
-            after_reject = datetime(2026, 9, 1, 16, 0, tzinfo=timezone.utc).timestamp()
+            after_reject = after_reject_dt.timestamp()
             os.utime(egl, (after_reject, after_reject))
             service.assets("program", refresh=True)
             refreshed = service.fabrication_status("238091", "1", "6455", evidence_after=reject_time)
@@ -3109,6 +3117,64 @@ class ImportConsistencyTests(unittest.TestCase):
             if verification_root.exists():
                 shutil.rmtree(verification_root)
 
+    def test_v515_sketch_transient_read_and_stale_index_recover(self) -> None:
+        """A temporary PDF read miss must not become a durable Order Details miss."""
+        verification_root = ROOT / "_verification_v515_sketch_retry"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir()
+        sketches_dir = verification_root / "Sketches"
+        sketches_dir.mkdir()
+        try:
+            from reportlab.pdfgen import canvas
+            from pypdf import PdfReader as RealPdfReader
+
+            sketch = sketches_dir / "238455 Sketch.pdf"
+            pdf = canvas.Canvas(str(sketch))
+            pdf.setFont("Helvetica-Bold", 18)
+            pdf.drawString(210, 410, "238455.1")
+            pdf.drawString(230, 380, "DENVER 2")
+            pdf.save()
+
+            config = replace(
+                load_config(ROOT),
+                root=verification_root,
+                data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists",
+                sketches_dir=sketches_dir,
+                programs_dir=verification_root / "Programs",
+                completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.programs_dir, config.completed_wj_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+            service = ProductionFileService(config)
+            asset = service.matches("sketch", "238455", "", "", limit=8, require_item=False)[0]
+            calls = 0
+
+            def flaky_reader(path):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise OSError("network PDF still being copied")
+                return RealPdfReader(path)
+
+            with mock.patch("pypdf.PdfReader", side_effect=flaky_reader):
+                self.assertEqual(service.sketch_item_views("238455", "1", ""), [])
+                self.assertNotIn(asset.asset_id, service._sketch_page_cache)
+                recovered = service.sketch_item_views("238455", "1", "")
+            self.assertEqual(calls, 2)
+            self.assertEqual(len(recovered), 1)
+            self.assertEqual(recovered[0]["pageNumber"], 1)
+            self.assertEqual(recovered[0]["itemMarker"], "238455.1")
+            self.assertEqual(recovered[0]["machineHint"], "Denver CNC")
+
+            with mock.patch.object(service, "matches", return_value=[]), \
+                 mock.patch.object(service, "_is_network_root", return_value=True), \
+                 mock.patch.object(service, "refresh_async") as refresh_async:
+                self.assertEqual(service.sketch_item_views("238999", "1", ""), [])
+                refresh_async.assert_called_once_with(["sketch"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_v0475_global_search_reports_physical_stage_progress_once(self) -> None:
         """Smart Search receives one progress record per synchronized stage, not duplicated stage rows."""
         verification_root = ROOT / "_verification_v0475_search_progress"
@@ -3135,6 +3201,48 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(presets["airport_outbound"]["qty"], 2)
             self.assertEqual(presets["airport_outbound"]["scanned"], 0)
             self.assertEqual(len(stages), len({row.get("stagePreset") for row in stages}))
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
+    def test_v0513_global_search_attaches_current_cutting_state_after_final_match(self) -> None:
+        """Smart Search enriches only its final result set with the current A+W Cutting generation."""
+        verification_root = ROOT / "_verification_v0513_search_cutting"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            order = "279513"
+            delivery_date = "2026-09-08"
+            item = imported_item(order, "1", 1, "v0513-cutting:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": delivery_date, "items": [item]},
+                "fileName": "Delivery List 09-08-2026.xlsx",
+                "user": "admin",
+            })
+            now = "2026-09-08T14:10:00+00:00"
+            with store.connect() as con:
+                con.execute(
+                    """
+                    INSERT INTO aw_cutting_generations (
+                        order_no, item_no, key_index, batch_job_number,
+                        optimization_number, optimization_status_code,
+                        batch_creation_at, optimization_last_changed_at,
+                        first_seen_at, last_seen_at, synced_at
+                    ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (order, "001", "9513", 8513, 500, now, now, now, now, now),
+                )
+                con.commit()
+
+            match = next(row for row in store.global_search(order) if row["order"] == order)
+            cutting = match.get("cutting") or {}
+            self.assertTrue(cutting.get("dataAvailable"))
+            self.assertTrue(cutting.get("complete"))
+            self.assertEqual(cutting.get("state"), "cut")
+            self.assertEqual(cutting.get("optimization"), 8513)
+            self.assertIn("progressStages", match)
         finally:
             if verification_root.exists():
                 shutil.rmtree(verification_root)
@@ -3390,6 +3498,19 @@ class ImportConsistencyTests(unittest.TestCase):
                 connection.execute(
                     "UPDATE line_update_notices SET created_at = '2026-11-05T08:00:00+00:00'"
                 )
+                rush_notices = connection.execute(
+                    "SELECT id, snapshot_json FROM line_update_notices"
+                ).fetchall()
+                for notice in rush_notices:
+                    snapshot = json.loads(str(notice["snapshot_json"] or "{}"))
+                    if str(snapshot.get("order") or "") != "281001":
+                        continue
+                    snapshot["processState"] = "Rush"
+                    snapshot["queueState"] = "Priority Rush"
+                    connection.execute(
+                        "UPDATE line_update_notices SET snapshot_json = ? WHERE id = ?",
+                        (json.dumps(snapshot, sort_keys=True, separators=(",", ":")), notice["id"]),
+                    )
                 connection.execute(
                     """
                     INSERT INTO reject_events (
@@ -3416,6 +3537,12 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(activity["newProduction"]["itemCount"], 2)
             self.assertEqual(activity["newProduction"]["orderCount"], 2)
             self.assertEqual(activity["newProduction"]["rows"][0]["order"], "281001")
+            new_rows_by_order = {row["order"]: row for row in activity["newProduction"]["rows"]}
+            self.assertTrue(new_rows_by_order["281001"]["rush"])
+            self.assertFalse(new_rows_by_order["281004"]["rush"])
+            self.assertEqual(new_rows_by_order["281001"]["barcode"], new_item["barcode"])
+            self.assertEqual(new_rows_by_order["281001"]["processState"], "Rush")
+            self.assertEqual(new_rows_by_order["281001"]["queueState"], "Priority Rush")
             by_glass = {row["glassType"]: row for row in activity["newProduction"]["byGlass"]}
             self.assertEqual(by_glass['1/4 Mirror']["pieces"], 5)
             self.assertEqual(by_glass['1/4 Mirror']["itemCount"], 1)
@@ -3642,6 +3769,98 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_v0511_scan_bundle_cutting_and_order_detail_step_timestamps(self) -> None:
+        verification_root = ROOT / "_verification_v0511_cutting_progress"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            item = imported_item("511101", "1", 1, "v511-cutting-progress:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-22", "items": [item]},
+                "fileName": "Delivery List 09-22-2026.xlsx",
+                "user": "admin",
+            })
+            store.sync_aw_cutting_rows([{
+                "sourceRowId": "v511-cutting-row", "orderNr": "511101", "itemNr": "1", "bomId": 0,
+                "keyIndex": 0, "batchJobNumber": "9511", "batchStatusCode": 400,
+                "batchCreatedAt": "2026-09-21T08:00:00", "optimizationNumber": 8511,
+                "optimizationStatusCode": 100, "optimizationLastChangedAt": "2026-09-21T09:15:00",
+                "quantity": 1, "cutQuantity": 0,
+            }])
+
+            bundle = store.get_delivery_date_scan_bundle("2026-09-22")
+            bundle_items = [
+                row
+                for record in bundle["records"]
+                for row in record["payload"]["items"]
+                if row["order"] == "511101" and str(row["item"]).lstrip("0") == "1"
+            ]
+            self.assertTrue(bundle_items)
+            self.assertTrue(all(row["cutting"]["optimization"] == 8511 for row in bundle_items))
+            self.assertTrue(all(row["cutting"]["state"] == "optimized" for row in bundle_items))
+
+            scan_time = "2026-09-22T14:35:00+00:00"
+            with store.connect() as con:
+                stage_line = con.execute(
+                    """
+                    SELECT li.id, li.list_id, li.barcode
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    WHERE li.order_no='511101' AND li.item_no='001'
+                    ORDER BY CASE lower(dl.stage) WHEN 'staging' THEN 0 ELSE 1 END, dl.id
+                    LIMIT 1
+                    """
+                ).fetchone()
+                self.assertIsNotNone(stage_line)
+                con.execute(
+                    """
+                    INSERT INTO scan_events (
+                        list_id, line_item_id, barcode, canonical_barcode, user_name, station,
+                        event_type, message, reason, qty_delta, created_at
+                    ) VALUES (?, ?, ?, ?, 'admin', 'Airport Rd', 'scan', 'v0.511 timestamp', '', 1, ?)
+                    """,
+                    (stage_line["list_id"], stage_line["id"], stage_line["barcode"], stage_line["barcode"], scan_time),
+                )
+
+            detail = store.get_order_detail("511101", include_production=False)
+            stage_times = [stage["lastScannedAt"] for stage in detail["items"][0]["stages"] if stage["lastScannedAt"]]
+            self.assertIn(scan_time, stage_times)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0512_order_detail_remake_reason_and_production_status_access_filter(self) -> None:
+        verification_root = ROOT / "_verification_v0512_order_detail_priority"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            remake = imported_item("512101", "1", 2, "v512-remake:1")
+            remake["processState"] = "External Remake"
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-23", "items": [remake]},
+                "fileName": "Delivery List 09-23-2026.xlsx",
+                "user": "admin",
+            })
+
+            detail = store.get_order_detail("512101", include_production=False)
+            self.assertTrue(detail["items"])
+            priority = detail["items"][0].get("priorityBanner") or {}
+            self.assertEqual(priority.get("kind"), "remake")
+            self.assertEqual(priority.get("label"), "External Remake")
+            self.assertEqual(priority.get("reason"), "Imported A+W RM marker")
+
+            requested = [
+                {"key": "allowed", "order": "512101", "item": "1", "job": ""},
+                {"key": "missing", "order": "999999", "item": "1", "job": ""},
+            ]
+            allowed = store.filter_accessible_production_status_requests({"stageAccess": ["*"]}, requested)
+            self.assertEqual([row["key"] for row in allowed], ["allowed"])
+            denied = store.filter_accessible_production_status_requests({"stageAccess": ["No Such Stage"]}, requested)
+            self.assertEqual(denied, [])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_v0507_runtime_indexes_compact_catalog_and_focused_summaries(self) -> None:
         verification_root = ROOT / "_verification_v0507_runtime"
         shutil.rmtree(verification_root, ignore_errors=True)
@@ -3663,7 +3882,7 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
                 indexes = {str(row["name"]) for row in con.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
-                self.assertEqual(installed, 18)
+                self.assertEqual(installed, 19)
             for name in {
                 "idx_line_items_active_order_item_v507",
                 "idx_delivery_lists_active_date_revision_v507",
@@ -4099,6 +4318,132 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+
+    def test_v0516_aw_plant_time_uses_eastern_dst_and_preserves_absolute_values(self) -> None:
+        self.assertEqual(normalize_aw_plant_timestamp("2026-09-03T05:04:41"), "2026-09-03T09:04:41+00:00")
+        self.assertEqual(normalize_aw_plant_timestamp("2026-12-03T05:04:41"), "2026-12-03T10:04:41+00:00")
+        self.assertEqual(normalize_aw_plant_timestamp("2026-09-03T05:04:41+00:00"), "2026-09-03T05:04:41+00:00")
+        self.assertEqual(parse_aw_plant_timestamp("2026-09-03T05:04:41").timestamp(), datetime(2026, 9, 3, 9, 4, 41, tzinfo=timezone.utc).timestamp())
+
+    def test_v0516_aw_reject_and_cutting_sync_normalize_naive_plant_clocks(self) -> None:
+        verification_root = ROOT / "_verification_v0516_aw_eastern_sync"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True)
+        try:
+            store = self.make_store(verification_root)
+            reject = {
+                "awRowId": "v516-reject-1", "orderNr": "298516", "itemNr": "1", "bomId": 1, "keyIndex": 0,
+                "quantity": 1, "breakageDate": "2026-09-03T05:04:41", "reasonCode": "137", "reasonLabel": "Chipped",
+                "locationCode": "5", "locationLabel": "Grinding", "sourceLastChangedAt": "2026-09-03T05:05:41",
+            }
+            store.sync_aw_reject_rows([reject])
+            with store.connect() as con:
+                source = con.execute("SELECT breakage_date, last_changed_at FROM aw_reject_source_rows WHERE aw_row_id=?", ("v516-reject-1",)).fetchone()
+                logical = con.execute("SELECT breakage_date FROM aw_reject_events WHERE order_no='298516'").fetchone()
+            self.assertEqual(source["breakage_date"], "2026-09-03T09:04:41+00:00")
+            self.assertEqual(source["last_changed_at"], "2026-09-03T09:05:41+00:00")
+            self.assertEqual(logical["breakage_date"], "2026-09-03T09:04:41+00:00")
+
+            store.sync_aw_cutting_rows([{
+                "orderNr": "298516", "itemNr": "1", "keyIndex": 0, "batchJobNumber": "9516",
+                "batchStatusCode": 460, "batchDescription": "Booked", "batchCreatedAt": "2026-09-03T06:00:00",
+                "batchLastChangedAt": "2026-09-03T06:10:00", "optimizationNumber": 8516,
+                "optimizationStatusCode": 200, "optimizationDate": "2026-09-03T06:05:00",
+                "optimizationLastChangedAt": "2026-09-03T06:08:00", "quantity": 1, "cutQuantity": 0,
+            }])
+            with store.connect() as con:
+                row = con.execute("SELECT batch_creation_at, optimization_date FROM aw_cutting_generations WHERE order_no='298516'").fetchone()
+            self.assertEqual(row["batch_creation_at"], "2026-09-03T10:00:00+00:00")
+            self.assertEqual(row["optimization_date"], "2026-09-03T10:05:00+00:00")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0516_migration_19_repairs_legacy_aw_clocks_and_is_repeat_safe(self) -> None:
+        verification_root = ROOT / "_verification_v0516_migration19"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True)
+        try:
+            store = self.make_store(verification_root)
+            delivery_date = "2026-09-08"
+            item = imported_item("298519", "1", 1, "v516-m19:1")
+            store.import_delivery_list({"payload": {"deliveryDate": delivery_date, "items": [item]}, "fileName": "Delivery List 09-08-2026.xlsx", "user": "admin"})
+            raw_reject = {
+                "awRowId": "v516-m19-reject", "orderNr": "298519", "itemNr": "1", "bomId": 1, "keyIndex": 0,
+                "quantity": 1, "breakageDate": "2026-09-03T05:04:41", "reasonCode": "137", "reasonLabel": "Chipped",
+                "locationCode": "5", "locationLabel": "Grinding", "sourceLastChangedAt": "2026-09-03T05:05:41",
+            }
+            store.sync_aw_reject_rows([raw_reject])
+            store.sync_aw_cutting_rows([{
+                "orderNr": "298519", "itemNr": "1", "keyIndex": 0, "batchJobNumber": "9519",
+                "batchStatusCode": 460, "batchDescription": "Booked", "batchCreatedAt": "2026-09-03T06:00:00",
+                "optimizationNumber": 8519, "optimizationStatusCode": 200,
+                "optimizationDate": "2026-09-03T06:05:00", "optimizationPlateLastChangedAt": "2026-09-03T06:08:00",
+                "quantity": 1, "cutQuantity": 0,
+            }])
+            with store.connect() as con:
+                event_key = con.execute("SELECT event_key FROM aw_reject_source_rows WHERE aw_row_id='v516-m19-reject'").fetchone()[0]
+                # Simulate schema-18 storage: A+W wall clock was tagged +00:00,
+                # while preserved source JSON still contains the original naive SQL clock.
+                con.execute("UPDATE aw_reject_source_rows SET breakage_date='2026-09-03T05:04:41+00:00', last_changed_at='2026-09-03T05:05:41+00:00' WHERE aw_row_id='v516-m19-reject'")
+                con.execute("UPDATE aw_reject_events SET breakage_date='2026-09-03T05:04:41+00:00', source_last_changed_at='2026-09-03T05:05:41+00:00' WHERE event_key=?", (event_key,))
+                con.execute("UPDATE reject_events SET rejected_at='2026-09-03T05:04:41+00:00' WHERE source_type='aw' AND source_external_key=?", (event_key,))
+                cutting_payload = con.execute("SELECT source_payload_json FROM aw_cutting_generations WHERE order_no='298519'").fetchone()[0]
+                payload = json.loads(cutting_payload)
+                payload.setdefault("cutEvidence", {})["plateLastChangedAt"] = "2026-09-03T06:08:00"
+                con.execute("UPDATE aw_cutting_generations SET batch_creation_at='2026-09-03T06:00:00', optimization_date='2026-09-03T06:05:00', source_payload_json=? WHERE order_no='298519'", (json.dumps(payload),))
+                con.commit()
+                _migration_019_v516_aw_eastern_timestamp_contract(con)
+                first = con.execute("SELECT breakage_date, last_changed_at FROM aw_reject_source_rows WHERE aw_row_id='v516-m19-reject'").fetchone()
+                mirrored = con.execute("SELECT rejected_at FROM reject_events WHERE source_type='aw' AND source_external_key=?", (event_key,)).fetchone()
+                cutting = con.execute("SELECT batch_creation_at, optimization_date, source_payload_json FROM aw_cutting_generations WHERE order_no='298519'").fetchone()
+                self.assertEqual(first["breakage_date"], "2026-09-03T09:04:41+00:00")
+                self.assertEqual(first["last_changed_at"], "2026-09-03T09:05:41+00:00")
+                self.assertEqual(mirrored["rejected_at"], "2026-09-03T09:04:41+00:00")
+                self.assertEqual(cutting["batch_creation_at"], "2026-09-03T10:00:00+00:00")
+                self.assertEqual(cutting["optimization_date"], "2026-09-03T10:05:00+00:00")
+                self.assertEqual(json.loads(cutting["source_payload_json"])["cutEvidence"]["plateLastChangedAt"], "2026-09-03T10:08:00+00:00")
+                snapshot = tuple(first) + (mirrored["rejected_at"], cutting["batch_creation_at"], cutting["optimization_date"], cutting["source_payload_json"])
+                _migration_019_v516_aw_eastern_timestamp_contract(con)
+                second = con.execute("SELECT breakage_date, last_changed_at FROM aw_reject_source_rows WHERE aw_row_id='v516-m19-reject'").fetchone()
+                mirrored2 = con.execute("SELECT rejected_at FROM reject_events WHERE source_type='aw' AND source_external_key=?", (event_key,)).fetchone()
+                cutting2 = con.execute("SELECT batch_creation_at, optimization_date, source_payload_json FROM aw_cutting_generations WHERE order_no='298519'").fetchone()
+                self.assertEqual(snapshot, tuple(second) + (mirrored2["rejected_at"], cutting2["batch_creation_at"], cutting2["optimization_date"], cutting2["source_payload_json"]))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0516_persistent_exact_sketch_page_cache_survives_source_outage(self) -> None:
+        verification_root = ROOT / "_verification_v0516_sketch_memory"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        sketches_dir = verification_root / "Sketches"
+        sketches_dir.mkdir(parents=True)
+        try:
+            from reportlab.pdfgen import canvas
+
+            sketch_path = sketches_dir / "298516 Sketch.pdf"
+            pdf = canvas.Canvas(str(sketch_path))
+            pdf.drawString(180, 400, "298516.1 DENVER")
+            pdf.save()
+            config = replace(
+                load_config(ROOT), root=verification_root, data_dir=verification_root / "data",
+                hardware_lists_dir=verification_root / "Hardware Lists", sketches_dir=sketches_dir,
+                programs_dir=verification_root / "Programs", completed_wj_dir=verification_root / "Completed WJ",
+            )
+            for folder in (config.data_dir, config.hardware_lists_dir, config.programs_dir, config.completed_wj_dir):
+                Path(folder).mkdir(parents=True, exist_ok=True)
+            service = ProductionFileService(config)
+            assets = service.assets("sketch", refresh=True)
+            self.assertEqual(len(assets), 1)
+            cached = service.cached_sketch_page(assets[0].asset_id, 1)
+            self.assertIsNotNone(cached)
+            cached_path = cached[0]
+            self.assertTrue(cached_path.exists())
+            sketch_path.unlink()
+            offline = service.cached_sketch_page(assets[0].asset_id, 1)
+            self.assertIsNotNone(offline)
+            self.assertEqual(offline[0], cached_path)
+            self.assertGreater(cached_path.stat().st_size, 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
     def test_v0507_route_destination_scan_matrix_and_statistics_dedupe(self) -> None:
         """Exercise every maintained delivery route through staging/outbound/destination scans.

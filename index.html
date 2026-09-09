@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260908-v0.515">
     <link rel="stylesheet" href="static/css/rejects.css?v=20260908-v0.510">
     <link rel="stylesheet" href="static/css/home.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260908-v0.514">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260908-v0.516">
     <link rel="stylesheet" href="static/css/racks.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260908-v0.513">
     <link rel="stylesheet" href="static/css/print.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.513">
     <link rel="stylesheet" href="static/css/shell.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/mobile.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260908-v0.516">
+    <link rel="stylesheet" href="static/css/mobile.css?v=20260909-v0.517">
 </head>
 <body data-page="home">
   <!-- SECTION: Authentication and password reset -->
@@ -327,9 +327,9 @@
         <section class="statistics-production-count-v505" aria-labelledby="statisticsProductionCountTitle">
           <header class="statistics-production-count-heading-v505">
             <div>
-              <span>Daily production activity</span>
-              <h2 id="statisticsProductionCountTitle">Production count</h2>
-              <p>Actual new-piece counts by glass type, plus Internal Rejects and external remakes for the selected reporting range.</p>
+              <span>Live production activity · <b id="statisticsTodayProductionDateV514">Today</b></span>
+              <h2 id="statisticsProductionCountTitle">Today’s Production Count</h2>
+              <p>Actual new-piece counts by glass type and machine for today. The chart workspace below provides range reporting, machine totals, optional Remake/Internal Reject/Rush inclusion, and detailed piece reports.</p>
             </div>
             <button id="statisticsDailyProductionEmailBtn" class="statistics-production-email-v505 app-primary-button" type="button" title="Draft today's formatted production count email">
               <span class="statistics-production-email-icon-v505" aria-hidden="true"></span>
@@ -377,6 +377,7 @@
                 <optgroup label="Production mix">
                   <option value="glass" selected>Glass type quantity</option>
                   <option value="glass-sizes">Common glass sizes</option>
+                  <option value="production-count">Production count by machine</option>
                 </optgroup>
                 <optgroup label="Breakage &amp; rejects">
                   <option value="breakage-machines">Machine breakage overview</option>
@@ -478,6 +479,12 @@
               <span class="statistics-control-label-v0258"><i class="statistics-control-icon-v0258 is-search" aria-hidden="true"></i>Filter categories</span>
               <input id="statsChartFilterInput" type="search" autocomplete="off" placeholder="Search labels or details...">
             </label>
+            <div id="statisticsProductionOptionsV514" class="statistics-production-options-v514" hidden aria-label="Production count inclusion options">
+              <label><input id="statisticsProductionIncludeRemakesV514" type="checkbox"><span><b>External Remakes</b><small>Include replacement work</small></span></label>
+              <label><input id="statisticsProductionIncludeRejectsV514" type="checkbox"><span><b>Internal Rejects</b><small>Include reject production</small></span></label>
+              <label><input id="statisticsProductionIncludeRushesV514" type="checkbox"><span><b>Rushes</b><small>Include rush-marked pieces</small></span></label>
+              <label><input id="statisticsProductionDetailedV514" type="checkbox"><span><b>Detailed report</b><small>Show every included piece</small></span></label>
+            </div>
             <label id="statisticsExternalRemakesControl" class="statistics-remake-toggle-v0260 statistics-remake-toggle-v0262" title="Include external remake pieces in breakage comparisons without assigning them to a production machine." hidden>
               <input id="statsIncludeExternalRemakes" type="checkbox">
               <span class="statistics-remake-toggle-icon-v0260" aria-hidden="true"></span>
@@ -558,7 +565,7 @@
                       <span>Select one or more scan states</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab" data-filter="remaining" type="button">Not Scanned <span id="countRemaining">0</span></button>
+                      <button class="tab" data-filter="remaining" type="button">Not Complete <span id="countRemaining">0</span></button>
                       <button class="tab" data-filter="partial" type="button">Partial <span id="countPartial">0</span></button>
                       <button class="tab" data-filter="complete" type="button">Complete <span id="countComplete">0</span></button>
                       <!-- v0.465: New Orders and Errors are Status filters, not priority Attention filters. -->
@@ -572,11 +579,12 @@
                       <span>Find priority or changed pieces</span>
                     </div>
                     <div class="scan-filter-options">
-                      <button class="tab priority-tab" data-filter="remakes" type="button">Remakes <span id="countRemakes">0</span></button>
-                      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">0</span></button>
                       <button class="tab priority-tab internal-reject-filter" data-filter="internal-rejects" type="button">Internal Rejects <span id="countInternalRejects">0</span></button>
+                      <button class="tab priority-tab" data-filter="remakes" type="button">External Remakes <span id="countRemakes">0</span></button>
+                      <button class="tab priority-tab" data-filter="rushes" type="button">Rushes <span id="countRushes">0</span></button>
                     </div>
                   </section>
+
                   <section class="scan-filter-section scan-filter-route-section-v465" aria-label="Route filters">
                     <div class="scan-filter-section-heading">
                       <h3>Route</h3>
@@ -587,6 +595,17 @@
                       <button class="tab route-filter-tab" data-filter="cpu-route" type="button"><span data-portable-label-v355="cpuRoute">CPU</span> <span id="countCpuRoute">0</span></button>
                       <button class="tab route-filter-tab" data-filter="dtc-route" type="button"><span data-portable-label-v355="dtcRoute">DTC</span> <span id="countDtcRoute">0</span></button>
                       <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">0</span></button>
+                    </div>
+                  </section>
+                  <section class="scan-filter-section scan-filter-machine-section-v512" aria-label="Machine filters">
+                    <div class="scan-filter-section-heading">
+                      <h3>Machine</h3>
+                      <span>Filter by required fabrication path</span>
+                    </div>
+                    <div class="scan-filter-options">
+                      <button class="tab" data-filter="machine-no-fab" type="button">No Fab <span data-filter-count>0</span></button>
+                      <button class="tab" data-filter="machine-waterjet" type="button">WaterJet <span data-filter-count>0</span></button>
+                      <button class="tab" data-filter="machine-denver" type="button">Denver <span data-filter-count>0</span></button>
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
@@ -1643,9 +1662,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.510">
+        <span class="footer-version-v0163" aria-label="Application version 0.517">
           <small>Version</small>
-          <strong>0.510</strong>
+          <strong>0.517</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -2025,6 +2044,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260908-v0.510"></script>
+  <script src="static/js/app.js?v=20260909-v0.517"></script>
 </body>
 </html>

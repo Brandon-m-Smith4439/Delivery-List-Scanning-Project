@@ -3290,3 +3290,81 @@
     overflow-wrap: anywhere !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.511 Scan station/date alignment                                         */
+/* ========================================================================== */
+/* Keep the assigned station visually centered even on compact scanners while
+   the selected delivery date sits immediately to its right. The equal outer
+   tracks preserve the station centerline without forcing a second header row. */
+@media (max-width: 760px) {
+  .scan-page .scanner-summary-header .scanner-panel-context-row-v196 {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+  .scan-page .scanner-panel-station-v196 {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: auto !important;
+    min-width: 90px !important;
+    justify-self: center !important;
+    padding-top: 0 !important;
+    text-align: center !important;
+  }
+  .scan-page .scanner-panel-station-v196 > strong {
+    width: auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    font-size: 12px !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-self: start !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.512 Scan date selector returns to the left of the centered station      */
+/* ========================================================================== */
+@media (max-width: 760px) {
+  .scan-page .scanner-panel-date-select-v196 {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    justify-self: stretch !important;
+  }
+  /* v0.517: reserve separate space for the full date, update dot and arrow.
+     The old 49px inset covered the year on the TC22's equal outer tracks. */
+  .scan-page .scanner-panel-date-select-v196 button.custom-select-trigger {
+    padding-left: 5px !important;
+    padding-right: 16px !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 button.custom-select-trigger.has-indicator {
+    padding-right: 30px !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 .custom-select-value {
+    font-size: 11px !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 .custom-select-value-indicator {
+    right: 15px !important;
+    width: 12px !important;
+    height: 12px !important;
+    min-width: 12px !important;
+    min-height: 12px !important;
+    font-size: 9px !important;
+  }
+  .scan-page .scanner-panel-date-select-v196 .custom-select-arrow {
+    right: 5px !important;
+    width: 6px !important;
+    height: 6px !important;
+  }
+  .scan-page .scanner-panel-station-v196 {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+}

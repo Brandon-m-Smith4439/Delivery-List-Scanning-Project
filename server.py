@@ -1699,43 +1699,47 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_production_asset(self, asset_id: str, *, download: bool = False, page_number: int = 0) -> None:
-        """Stream one allow-listed production-share asset without exposing a raw path."""
+        """Stream one allow-listed production asset, using local sketch-page memory when available."""
         service = getattr(STORE, "production_files", None)
-        asset = service.resolve_asset(asset_id) if service is not None else None
-        if not asset:
-            self.send_json({"error": "Production file was not found or is no longer available."}, HTTPStatus.NOT_FOUND)
-            return
-        # v0.474: an item sketch may point at one page inside an order-level
-        # PDF. Extract just that page when possible so Preview/Print operates on
-        # the exact piece instead of forcing the operator to find the page again.
-        if page_number > 0 and asset.extension.lower() == ".pdf":
-            try:
-                import io
-                from pypdf import PdfReader, PdfWriter  # type: ignore
+        page = max(0, int(page_number or 0))
 
-                reader = PdfReader(str(asset.path))
-                page_index = int(page_number) - 1
-                if page_index < 0 or page_index >= len(reader.pages):
-                    raise IndexError("Sketch page is outside the PDF page range")
-                writer = PdfWriter()
-                writer.add_page(reader.pages[page_index])
-                output = io.BytesIO()
-                writer.write(output)
-                payload = output.getvalue()
-                safe_name = f"{asset.path.stem}-item-page-{page_number}.pdf".replace('"', "'")
+        # v0.516: exact sketch pages are read-through cached under data/. A proven
+        # Order.Item page therefore reopens quickly and can remain viewable during
+        # a temporary production-share outage. The source file/index stays
+        # authoritative; this cache contains only already matched page previews.
+        if service is not None and page > 0:
+            cached = service.cached_sketch_page(asset_id, page)
+            if cached is not None:
+                cached_path, asset = cached
+                try:
+                    size = cached_path.stat().st_size
+                    body = cached_path.open("rb")
+                except OSError as exc:
+                    self.send_json({"error": f"Unable to read cached sketch page: {exc}"}, HTTPStatus.NOT_FOUND)
+                    return
+                safe_name = f"{Path(asset.name).stem}-item-page-{page}.pdf".replace('"', "'")
                 disposition = "attachment" if download else "inline"
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/pdf")
                 self.send_header("Content-Disposition", f'{disposition}; filename="{safe_name}"')
+                self.send_header("Cache-Control", "private, no-cache")
                 self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Length", str(size))
                 self.end_headers()
-                self.wfile.write(payload)
+                try:
+                    while True:
+                        chunk = body.read(256 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                finally:
+                    body.close()
                 return
-            except Exception:
-                # If page extraction is unavailable on a workstation, fall back
-                # to the full order PDF rather than making the sketch unusable.
-                pass
+
+        asset = service.resolve_asset(asset_id) if service is not None else None
+        if not asset:
+            self.send_json({"error": "Production file was not found or is no longer available."}, HTTPStatus.NOT_FOUND)
+            return
 
         try:
             size = asset.path.stat().st_size
@@ -1749,6 +1753,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'{disposition}; filename="{safe_name}"')
+        self.send_header("Cache-Control", "private, no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(size))
         self.end_headers()
@@ -2999,13 +3004,20 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/production-files/status-batch":
-                if not self.require_permission("global_search"):
+                # v0.514: Statistics machine reporting reuses this bounded, status-only
+                # endpoint. Row access is still constrained below to active list stages.
+                user = self.require_any_permission("global_search", "view_delivery_lists", "view_reports")
+                if not user:
                     return
                 service = getattr(STORE, "production_files", None)
                 if service is None:
                     self.send_json({"results": []})
                     return
                 raw_items = data.get("items") if isinstance(data.get("items"), list) else []
+                # v0.512: Scan filters may use this status-only route without the
+                # broader Global Search permission. Keep every requested Order/Item
+                # constrained to active list stages this user can already view.
+                raw_items = STORE.filter_accessible_production_status_requests(user, raw_items)
                 results = []
                 for row in raw_items[:80]:
                     if not isinstance(row, dict):
@@ -3785,11 +3797,9 @@ def main() -> int:
     initialization from port-binding failures.
     """
     print("Initializing Delivery List Scanner database...", flush=True)
+    startup_started = time.perf_counter()
     STORE.initialize()
-    print("Database initialization complete.", flush=True)
-    production_files = getattr(STORE, "production_files", None)
-    if production_files is not None:
-        production_files.refresh_async()
+    print(f"Database initialization complete in {time.perf_counter() - startup_started:.2f}s.", flush=True)
     start_daily_import_scheduler()
     print(f"Binding web server to {CONFIG.host}:{CONFIG.port}...", flush=True)
     server = ThreadingHTTPServer((CONFIG.host, CONFIG.port), Handler)

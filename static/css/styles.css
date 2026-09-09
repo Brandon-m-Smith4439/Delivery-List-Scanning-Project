@@ -30179,3 +30179,216 @@ body button.app-primary-button.global-result-action-v475 {
 @media (max-width: 520px) {
   body button.app-primary-button.global-result-action-v475 { width:104px !important; min-width:104px !important; }
 }
+
+
+/* ========================================================================== */
+/* v0.513 Smart Search full production/workflow progress                      */
+/* ========================================================================== */
+.header-search-results .global-result-stage-scan-cell-v440.global-result-progress-v513,
+.header-search-results .global-result-progress-v476 {
+  max-width: 100% !important;
+  white-space: normal !important;
+}
+.header-search-results .global-result-progress-flow-v513 {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.header-search-results .global-result-progress-step-v513 {
+  display: grid !important;
+  grid-template-columns: 14px minmax(0, auto) !important;
+  grid-template-areas: "icon label" "icon value" "time time" !important;
+  align-items: center !important;
+  column-gap: 4px !important;
+  row-gap: 0 !important;
+  min-width: 76px !important;
+  min-height: 40px !important;
+  padding: 4px 6px !important;
+  border: 1px solid color-mix(in srgb, var(--step-color) 38%, #cdd8e2) !important;
+  border-radius: 7px !important;
+  background: color-mix(in srgb, var(--step-color) 7%, #fff) !important;
+  box-shadow: inset 3px 0 0 var(--step-color) !important;
+  color: color-mix(in srgb, var(--step-color) 76%, #1e354c) !important;
+  white-space: normal !important;
+}
+.header-search-results .global-result-progress-step-v513 > .global-result-chip-icon-v433 {
+  grid-area: icon !important;
+  width: 13px !important;
+  height: 13px !important;
+  margin: 0 !important;
+  color: var(--step-color) !important;
+}
+.header-search-results .global-result-progress-step-v513 > b {
+  grid-area: label;
+  font-size: 8.5px !important;
+  font-weight: 950 !important;
+  line-height: 1.05 !important;
+  color: inherit !important;
+}
+.header-search-results .global-result-progress-step-v513 > strong {
+  grid-area: value;
+  font-size: 8.5px !important;
+  font-weight: 900 !important;
+  line-height: 1.05 !important;
+  color: inherit !important;
+}
+.header-search-results .global-result-progress-step-v513 > time {
+  grid-area: time;
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(87, 109, 130, .13);
+  color: #687b8e !important;
+  font-size: 7px !important;
+  font-weight: 800 !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.header-search-results .global-result-progress-step-v513.is-complete-v513 {
+  --step-color: #3fa866 !important;
+  border-color: #9fd2b1 !important;
+  background: linear-gradient(180deg, #edf9f1, #f7fcf9) !important;
+  color: #245f3c !important;
+  box-shadow: inset 3px 0 0 #3fa866 !important;
+}
+.header-search-results .global-result-progress-step-v513.is-no-fab-v513 {
+  --step-color: #8b96a0 !important;
+  border-color: #d1d7dc !important;
+  background: linear-gradient(180deg, #f1f3f5, #f8f9fa) !important;
+  color: #68737d !important;
+  box-shadow: inset 3px 0 0 #a2abb3 !important;
+}
+.header-search-results .global-result-progress-step-v513.is-partial-v513 {
+  background: color-mix(in srgb, var(--step-color) 12%, #fff) !important;
+}
+.header-search-results .global-result-progress-flow-v513 > i {
+  flex: 0 0 auto;
+  color: #7c8b9b !important;
+  font-size: 9px !important;
+  font-style: normal !important;
+  font-weight: 950 !important;
+}
+.header-search-results .global-result-progress-empty-v513 {
+  color: #7c8a99;
+  font-size: 9px;
+  font-weight: 850;
+}
+@media (max-width: 780px) {
+  .header-search-results .global-result-progress-step-v513 { min-width: 72px !important; }
+}
+
+/* ========================================================================== */
+/* v0.514 Smart Search readability + full-width progress row                  */
+/* ========================================================================== */
+.header-search-results .global-result-primary-v433 {
+  align-items: center;
+  column-gap: 9px;
+  row-gap: 4px;
+}
+.header-search-results .global-result-order-v433 { font-size: 13px !important; }
+.header-search-results .global-result-meta-v433,
+.header-search-results .global-result-plain-field-v433,
+.header-search-results .global-result-chip-v433,
+.header-search-results .global-result-inline-label-v427 { font-size: 10px !important; }
+.header-search-results .global-result-dd-chip-v433,
+.header-search-results .global-result-route-cell-v430 { font-size: 10.5px !important; }
+.header-search-results .global-result-remake-meta-v514 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid #d9b8e6;
+  border-radius: 7px;
+  background: #fbf4ff;
+  color: #6d3689;
+  font-size: 9.5px;
+  font-weight: 850;
+  line-height: 1.15;
+}
+.header-search-results .global-result-remake-meta-v514 b {
+  color: #8b2d6f;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .06em;
+}
+.header-search-results .global-result-remake-meta-v514 span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-search-results .global-result-progress-row-v514 {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 3px;
+}
+.header-search-results .global-result-progress-row-v514 .global-result-stage-scan-cell-v440 {
+  width: min(100%, 1080px) !important;
+  max-width: 100% !important;
+  margin-left: auto;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  align-items: center !important;
+  justify-items: end !important;
+  gap: 7px !important;
+  padding: 5px 7px !important;
+}
+.header-search-results .global-result-progress-row-v514 .global-result-inline-label-v427 {
+  justify-self: end;
+  font-size: 9.5px !important;
+}
+.header-search-results .global-result-progress-flow-v513 {
+  width: 100% !important;
+  justify-content: flex-end !important;
+}
+.header-search-results .global-result-progress-step-v513 {
+  min-width: 92px !important;
+  min-height: 46px !important;
+  padding: 5px 7px !important;
+}
+.header-search-results .global-result-progress-step-v513 > b,
+.header-search-results .global-result-progress-step-v513 > strong { font-size: 9.5px !important; }
+.header-search-results .global-result-progress-step-v513 > time { font-size: 8.25px !important; }
+@media (max-width: 780px) {
+  .header-search-results .global-result-progress-row-v514 .global-result-stage-scan-cell-v440 {
+    grid-template-columns: 1fr !important;
+    justify-items: stretch !important;
+  }
+  .header-search-results .global-result-progress-row-v514 .global-result-inline-label-v427 { justify-self: end; }
+  .header-search-results .global-result-progress-step-v513 { min-width: 82px !important; }
+}
+
+/* ========================================================================== */
+/* v0.515 Smart Search progress alignment                                     */
+/* ========================================================================== */
+/* Progress owns its full row but reads from the natural left edge. Let the
+   workflow grow toward the right so long Cutting/fabrication routes are easier
+   to scan without the eye jumping to a moving right-hand starting point. */
+.header-search-results .global-result-progress-row-v514 {
+  justify-content: flex-start !important;
+}
+.header-search-results .global-result-progress-row-v514 .global-result-stage-scan-cell-v440 {
+  width: min(100%, 1180px) !important;
+  margin-left: 0 !important;
+  margin-right: auto !important;
+  justify-items: start !important;
+}
+.header-search-results .global-result-progress-row-v514 .global-result-inline-label-v427 {
+  justify-self: start !important;
+}
+.header-search-results .global-result-progress-flow-v513 {
+  justify-content: flex-start !important;
+}
+@media (max-width: 780px) {
+  .header-search-results .global-result-progress-row-v514 .global-result-inline-label-v427 {
+    justify-self: start !important;
+  }
+}

@@ -3570,3 +3570,464 @@ body button.app-primary-button.production-detail-action-v480:hover {
   .cutting-label-preview-body-v502 { justify-content:start; }
   .cutting-label-preview-body-v502 .production-cutting-label-v502.is-maximized-v502 { transform:scale(.82); transform-origin:top left; margin-right:-78px; margin-bottom:-94px; }
 }
+
+/* ========================================================================== */
+/* v0.511 Order Details per-step timestamps                                   */
+/* ========================================================================== */
+.production-order-item-v481 .production-item-progress-v476 > span {
+  display: grid !important;
+  grid-template-columns: 20px minmax(0, 1fr) auto !important;
+  grid-template-rows: auto auto !important;
+  align-items: center !important;
+  min-height: 66px !important;
+  column-gap: 7px !important;
+  row-gap: 4px !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > .global-result-chip-icon-v433,
+.production-order-item-v481 .production-item-progress-v476 > span > .cutting-progress-spinner-v498 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > b {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > strong {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  margin-left: 0 !important;
+}
+.production-progress-time-v511 {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  min-width: 0;
+  padding-top: 3px;
+  border-top: 1px solid color-mix(in srgb, var(--progress-color) 20%, #dce5ec);
+  color: #687d90;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+/* ========================================================================== */
+/* v0.512 Order Details sketch/label pairing + explicit No Fab checkpoint     */
+/* ========================================================================== */
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+  grid-template-columns: minmax(330px, 370px) minmax(246px, 264px) minmax(0, 1fr) !important;
+  align-items: start;
+}
+.production-item-cutting-label-v512 {
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 10px 4px;
+  border-right: 1px solid #d9e4ed;
+  background: #f6f9fb;
+}
+.production-item-cutting-label-v512 .production-cutting-label-set-v501 {
+  width: min(100%, 264px);
+  margin: 0;
+}
+/* v0.512 intentionally removes the A+W label maximize affordance. The label
+   stays as a physical-size thumbnail beside the sketch; the sketch retains its
+   dedicated large viewer. */
+.production-item-progress-v476 > span.is-no-fab-v512 {
+  --progress-color: #8b96a0 !important;
+  border-color: #d0d6dc !important;
+  background: #f2f4f5 !important;
+  color: #69757f !important;
+  box-shadow: inset 3px 0 0 #9da7af !important;
+}
+.production-item-progress-v476 > span.is-no-fab-v512 .global-result-chip-icon-v433 { color: #818d96 !important; }
+.production-item-progress-v476 > span.is-no-fab-v512 time { color: #87919a !important; }
+
+@media (max-width: 1180px) and (min-width: 981px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: minmax(390px, 430px) minmax(246px, 264px) !important;
+  }
+  .production-order-item-v512 .production-item-main-v481 { grid-column: 1 / -1; }
+}
+@media (max-width: 980px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: 1fr !important;
+  }
+  .production-item-cutting-label-v512 {
+    border-top: 1px solid #d9e4ed;
+    border-right: 0;
+    border-bottom: 1px solid #d9e4ed;
+  }
+}
+
+/* ========================================================================== */
+/* v0.514 Wider Order Details + readable full Cutting Label                   */
+/* ========================================================================== */
+.production-explorer-panel-v470[data-mode="order"] {
+  width: min(1580px, calc(100vw - 22px)) !important;
+  max-height: min(96vh, 1120px) !important;
+}
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+  grid-template-columns: minmax(360px, 420px) minmax(304px, 326px) minmax(0, 1fr) !important;
+}
+.production-item-cutting-label-v512 { padding: 10px 8px !important; }
+.production-item-cutting-label-v512 .production-cutting-label-set-v501 {
+  width: min(100%, 326px) !important;
+}
+.production-item-cutting-label-v512 .production-cutting-label-frame-v502 {
+  width: 300px !important;
+  height: 357px !important;
+}
+.production-item-cutting-label-v512 .production-cutting-label-scale-v502 {
+  transform: scale(.686) !important;
+  transform-origin: top left !important;
+}
+.production-item-cutting-label-v512 .production-cutting-piece-summary-v507 { display: none !important; }
+@media (max-width: 1320px) and (min-width: 981px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: minmax(390px, 430px) minmax(304px, 326px) !important;
+  }
+  .production-order-item-v512 .production-item-main-v481 { grid-column: 1 / -1; }
+}
+@media (max-width: 980px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.515 Order Details label width + normalized progress                     */
+/* ========================================================================== */
+/* The v0.514 300px label frame plus its old horizontal margins was wider than
+   the piece container's usable content width, so the physical A+W label could
+   be clipped on the right. Allocate the label a real column and center a wider
+   frame with no side-margin overflow. */
+.production-explorer-panel-v470[data-mode="order"] {
+  width: min(1680px, calc(100vw - 18px)) !important;
+}
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+  grid-template-columns: minmax(370px, 420px) minmax(364px, 382px) minmax(0, 1fr) !important;
+}
+.production-item-cutting-label-v512 {
+  padding: 10px 8px !important;
+}
+.production-item-cutting-label-v512 .production-cutting-label-set-v501 {
+  width: min(100%, 372px) !important;
+}
+.production-item-cutting-label-v512 .production-cutting-label-frame-v502 {
+  width: 340px !important;
+  height: 405px !important;
+  margin: 0 auto 8px !important;
+}
+.production-item-cutting-label-v512 .production-cutting-label-scale-v502 {
+  transform: scale(.775) !important;
+  transform-origin: top left !important;
+}
+
+/* Normalize each Order Details checkpoint into three deliberate rows:
+   icon/name, count/state, timestamp. This removes the label/count collision
+   visible in the v0.514 screenshot while retaining the useful detail timing. */
+.production-order-item-v481 .production-item-progress-v476 {
+  align-items: stretch !important;
+  gap: 9px !important;
+  min-height: 0 !important;
+  padding: 1px 2px 3px !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span {
+  flex: 1 0 126px !important;
+  width: auto !important;
+  min-width: 126px !important;
+  min-height: 74px !important;
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: center !important;
+  align-items: center !important;
+  column-gap: 6px !important;
+  row-gap: 3px !important;
+  padding: 7px 9px !important;
+  overflow: hidden !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > .global-result-chip-icon-v433,
+.production-order-item-v481 .production-item-progress-v476 > span > .cutting-progress-spinner-v498 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: 17px !important;
+  height: 17px !important;
+  justify-self: center !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > b {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: inherit !important;
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > strong {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  justify-self: start !important;
+  margin: 0 !important;
+  color: inherit !important;
+  font-size: 11.5px !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > .production-progress-time-v511 {
+  grid-column: 1 / -1 !important;
+  grid-row: 3 !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding-top: 4px !important;
+  overflow: hidden !important;
+  font-size: 8.75px !important;
+  line-height: 1.1 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > i {
+  width: 17px !important;
+  flex: 0 0 17px !important;
+  align-self: center !important;
+  color: #708395 !important;
+  font-size: 18px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+}
+@media (max-width: 1380px) and (min-width: 981px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: minmax(390px, 430px) minmax(364px, 382px) !important;
+  }
+  .production-order-item-v512 .production-item-main-v481 { grid-column: 1 / -1; }
+}
+@media (max-width: 980px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: 1fr !important;
+  }
+  .production-item-cutting-label-v512 .production-cutting-label-set-v501 {
+    width: min(100%, 372px) !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.516 Order Details workspace, generated sketches, and A+W generation info */
+/* ========================================================================== */
+.production-explorer-panel-v470[data-mode="order"] {
+  width: min(1900px, calc(100vw - 8px)) !important;
+  max-width: none !important;
+}
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+  grid-template-columns: minmax(390px, 440px) minmax(400px, 430px) minmax(0, 1fr) !important;
+  gap: 12px !important;
+}
+.production-item-main-v481 {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.production-item-heading-v516 > div > strong {
+  font-size: 18px !important;
+  letter-spacing: -.01em !important;
+}
+.production-item-heading-v516 > div > span {
+  color: #536b80 !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+}
+.production-item-facts-v516 {
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) !important;
+}
+.production-item-facts-v516 > span {
+  min-width: 0 !important;
+}
+.production-item-facts-v516 > span b {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Keep progress on one intentional line. The count shares the stage-name row so
+   0/1 and 1/1 never wrap beneath the label, while the operational timestamp gets
+   one full-width line below. */
+.production-order-item-v481 .production-item-progress-v476 {
+  width: 100% !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  gap: 7px !important;
+  overflow-x: visible !important;
+  padding: 2px 0 4px !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  min-width: 112px !important;
+  min-height: 58px !important;
+  display: grid !important;
+  grid-template-columns: 17px minmax(0, 1fr) auto !important;
+  grid-template-rows: auto auto !important;
+  align-content: center !important;
+  align-items: center !important;
+  column-gap: 6px !important;
+  row-gap: 5px !important;
+  padding: 7px 8px !important;
+  overflow: hidden !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > .global-result-chip-icon-v433,
+.production-order-item-v481 .production-item-progress-v476 > span > .cutting-progress-spinner-v498 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: 17px !important;
+  height: 17px !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > b {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  min-width: 0 !important;
+  font-size: 11.5px !important;
+  line-height: 1.1 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > strong {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  justify-self: end !important;
+  margin: 0 !important;
+  font-size: 11.5px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > span > .production-progress-time-v511 {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding-top: 4px !important;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
+  font-size: 8.75px !important;
+  line-height: 1.05 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.production-order-item-v481 .production-item-progress-v476 > i {
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  align-self: center !important;
+  font-size: 20px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+  color: #60778d !important;
+}
+
+.production-aw-info-v516 {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #cbd9e5;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbfe 0%, #f2f7fb 100%);
+}
+.production-aw-info-heading-v516 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.production-aw-info-heading-v516 div { display: grid; gap: 1px; }
+.production-aw-info-heading-v516 small,
+.production-aw-info-current-v516 small,
+.production-aw-reject-generation-v516 small {
+  color: #56728b;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.production-aw-info-heading-v516 strong { color: #173e61; font-size: 13px; }
+.production-aw-info-heading-v516 time { color: #56728b; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.production-aw-info-current-v516 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.production-aw-info-current-v516 > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d4e0e9;
+  border-radius: 9px;
+  background: #fff;
+}
+.production-aw-info-current-v516 b { color: #123b61; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.production-aw-info-v516 .production-aw-rejects-v484 { margin: 10px 0 0 !important; }
+.production-aw-reject-generation-v516 {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #ead9d3;
+  color: #6f4a3f;
+  font-size: 10px;
+}
+.production-aw-reject-generation-v516 small { flex: 1 0 100%; color: #9a5543; }
+.production-item-actions-v516 {
+  margin-top: auto !important;
+  padding-top: 12px !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+
+/* Generated reference sketch: mimic the established white shop-sheet layout,
+   but retain an explicit generated-reference warning so it is never mistaken for
+   an authoritative A+W/shop drawing. */
+.production-generated-sketch-v516 { background: #fff !important; }
+.production-generated-sketch-canvas-v516 { background: #fff !important; }
+.production-generated-sketch-canvas-v516 svg { display: block; width: 100%; height: 100%; }
+.production-generated-sketch-canvas-v516 .gsk-small { fill: #252b31; font: 9px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-product { fill: #111827; font: 700 10px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-dim { stroke: #20262c; stroke-width: 1; }
+.production-generated-sketch-canvas-v516 .gsk-fill { fill: #20262c; }
+.production-generated-sketch-canvas-v516 .gsk-dim-text { fill: #20262c; font: 9px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-order { fill: #2177ce; font: 700 16px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-machine { fill: #2177ce; font: 700 14px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-edge { fill: #2c3137; font: 8px Arial, sans-serif; }
+.production-generated-sketch-canvas-v516 .gsk-warning { fill: #a14f25; font: 700 8px Arial, sans-serif; letter-spacing: .4px; }
+.production-generated-sketch-caption-v516 b { color: #8a4c2e !important; }
+
+/* At common 15- to 17-inch workstation widths, keep sketch and label together
+   on top and give the information/progress workspace a full-width row. This is
+   more readable than horizontally scrolling five workflow checkpoints. */
+@media (max-width: 1740px) and (min-width: 981px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: minmax(400px, 1fr) minmax(410px, 430px) !important;
+  }
+  .production-order-item-v512 .production-item-main-v481 { grid-column: 1 / -1 !important; }
+}
+@media (max-width: 980px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512 {
+    grid-template-columns: 1fr !important;
+  }
+  .production-item-facts-v516 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .production-aw-info-current-v516 { grid-template-columns: 1fr !important; }
+  .production-order-item-v481 .production-item-progress-v476 { overflow-x: auto !important; padding-bottom: 7px !important; }
+  .production-order-item-v481 .production-item-progress-v476 > span { flex: 0 0 122px !important; }
+}
+@media (max-width: 560px) {
+  .production-item-facts-v516 { grid-template-columns: 1fr 1fr !important; }
+  .production-item-actions-v516 { justify-content: stretch !important; }
+  .production-item-actions-v516 > button { flex: 1 1 120px !important; }
+}

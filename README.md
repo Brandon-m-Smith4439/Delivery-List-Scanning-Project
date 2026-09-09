@@ -1,29 +1,64 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.510**. SQLite remains the active/default backend.
+Current maintained release: **v0.517**. SQLite remains the active/default backend; schema stays **19**.
 
-v0.510 repairs the manual automation completion handoff and the Scan page's delivery-date recovery. The PowerShell runner and web controller now share one authoritative log, transient Windows status-file locks cannot suspend output consumption, and the single Scan date selector remains synchronized after compact catalog refreshes. SQLite remains schema **18**; no migration or database reset is required.
 
-## Install v0.510
+v0.517 repairs Scan navigation/return-to-tab refreshes, finds older exact-order sketch PDFs outside the rolling index, and generates reference outlines from matching item DXFs using the Shower Programmer's preview/unit/dimension rules.
 
-1. Stop the Delivery List Scanner server before copying files.
-2. Extract the v0.510 changed-files ZIP into the current project root with overwrite enabled. The ZIP must preserve its directories and must not contain `data` or a database.
-3. Start the server. SQLite remains schema **18** and existing scans, racks, bays, users, and settings remain in place.
-4. Hard-refresh open browser sessions (`Ctrl+F5`) so the v0.510 JavaScript is loaded.
-5. On a TC22 or phone, verify the navigation drawer, each main page, Print/Export, All Scans, and the Settings dialogs used by that operator role.
+## Install v0.517
 
-## v0.510 highlights
+1. Stop the scanner server and back up the current project folder, preserving `data/` separately.
+2. Extract `Delivery_List_Scanner_v0.517_Changed_Files.zip` directly into the existing **v0.516** project root and replace matching files. The ZIP excludes databases, runtime data, logs, credentials, and exports.
+3. Start the maintained launcher and hard-refresh browsers (`Ctrl+F5`). Confirm **0.517** in the footer. This release adds no database migration; schema remains **19**.
+4. Return from Settings to Scan, switch browser tabs, and open the delivery-date menu. Unchanged dates retain their loaded rows; the compact catalog controls background refresh.
+5. Open an older order such as **237763 / Item 1**: its exact PDF page remains available outside the seven-day index. Check a missing-sketch item: an exact matching DXF supplies geometry, otherwise a labeled size reference appears.
+6. Perform a controlled floor scan, undo/redo, print preview and rack/bay check before operator rollout.
 
-- Browser-started automation writes to the exact log displayed by Status & Logs.
-- Short-lived Windows file locks are retried with unique temporary files and cannot stop the automation output reader.
-- Compact catalog refreshes update the maintained Scan date selector without relying on the removed Stage selector.
-- Initial delivery-list loading retries transient failures before presenting an error.
-- [Future-chat change guide](docs/FUTURE_CHAT_CHANGE_GUIDE.md) continues to define the `.001` version rule, data-safe changed-files ZIP contract, extraction process, and required validation.
+### v0.517 findings and changes
 
-### v0.510 validation
+- This morning's recorded startup was **31 seconds**. Migration 19 alone recorded **21.451 seconds** on September 9; initialization of an already-upgraded isolated copy measured **0.223 seconds**. This was chiefly a one-time upgrade, not a recurring share-index startup dependency. Startup now logs verified-backup and initialization timings and avoids duplicate index priming.
+- Scan no longer relies on an invisible animation frame, starts a duplicate request after successful date navigation, or forcibly reloads unchanged rows on focus. Background refresh preserves pagination and date controls; cancellation and catalog revision checks remain active.
+- Older `<A&W order>.pdf` files are found by bounded exact-path lookup in deferred media requests. Learned metadata/page assignments survive normal index refresh and restart; partial PDFs can recover, and changed PDFs receive fresh page mappings. The production share stays authoritative.
+- Generated references retain proportions and accept shop mixed fractions such as `29-1/16`. Exact item DXFs in the configured Programs folder preserve their native orientation, curves, holes and cuts, with inch/metric conversion and the Shower Programmer's **0.35-inch direct-or-rotated dimension check**. Conflicting, stale-after-reject or unsupported geometry falls back visibly. No sibling Shower Programmer installation is required.
+- Shape numbers alone do not prove geometry: unknown outlines display a dashed **SIZE ENVELOPE ONLY** reference. No hinge orientation or CNC indicator is invented. MOD 13 label fallback units now correctly use **32 units/inch**.
+- TC22 date text reserves room for the update dot and arrow so the year stays readable.
+- Exact changed files, commands, measured results and operator-only limits are recorded in [v0.517 validation](docs/V0517_VALIDATION.md).
 
-- Regression tests cover Windows status replacement retries, stale-run handling, shared automation logging, and the single-selector Scan catalog refresh.
-- The complete maintained suite and isolated browser/API smoke checks are rerun before release; SQLite remains at schema 18.
+## Previous release: v0.516
+
+v0.516 adds durable sketch-page memory and a generated reference sketch for items whose authoritative shop sketch is unavailable, rebuilds Order Details around a wider no-horizontal-scroll production workspace with current A+W generation/reject context, widens Scan progress checkpoints, and establishes Monroe/Charlotte **America/New_York** as the explicit A+W plant-time contract. SQLite advances to schema **19** so historical A+W reject/cutting timestamps that were previously interpreted as UTC are repaired through the maintained verified-backup migration path.
+
+## Install v0.516
+
+1. Stop the Delivery List Scanner server before copying files and back up the current project folder.
+2. Extract the v0.516 changed-files ZIP into the existing project root with overwrite enabled. Preserve the live `data` folder; the ZIP does not contain a database.
+3. Start the maintained launcher. The normal numbered migration runner creates and verifies a pre-upgrade SQLite backup, then advances schema **18 → 19** without replacing application data.
+4. Hard-refresh open browsers (`Ctrl+F5`) so the v0.516 JavaScript and changed stylesheets load.
+5. Open an Order Details item with a real sketch twice and confirm the second open is fast. Then open a known no-sketch item and confirm the generated reference sheet uses the existing shop-sheet visual vocabulary while remaining clearly marked **GENERATED REFERENCE**.
+6. Verify a current A+W reject and Cutting/Optimization timestamp against the A+W workstation clock. The displayed time should match Monroe, NC Eastern time, including daylight-saving time.
+7. In Order Details, confirm the title is Order / Item with glass type underneath, Cutting uses a quantity such as `1/1`, A+W current Batch/Optimization/Status is above the bottom-right controls, and reject history shows the generation that existed at the reject.
+8. Recheck Scan progress width plus Order Details at desktop, vertical/tablet, common phone, and Zebra TC22 portrait/landscape widths before floor use.
+
+## v0.516 highlights
+
+- **Missing sketches get a generated reference instead of an empty panel.** The generated sheet reuses known Order/Item, glass, dimensions, customer/job, machine, shape number, and proven shape-edge data in a shop-sketch-style page. It is deliberately marked as generated and does not invent unproven shape geometry.
+- **Real sketches gain persistent page memory.** The first exact Order.Item PDF page request is written through to a local page cache under `data/`. Reopening old sketches no longer depends on repeated network-share PDF extraction, and a previously cached page can remain viewable through a temporary share outage. The production share remains authoritative.
+- **Order Details is reorganized for production review.** The dialog can use nearly the full desktop viewport; at common workstation widths the sketch and Cutting Label stay together on the first row while the information/progress workspace receives a full-width row. Checkpoint counts stay on the same row as their stage name, eliminating wrapped `0/1` values, and Cutting reports physical quantity (`1/1`) instead of `CUT`.
+- **A+W generation context is visible where operators need it.** Each item shows the current Batch, Optimization and status (Optimized/Released/Booked). A+W Internal Reject cards also identify the Batch/Optimization/status generation in effect at the reject while the current values continue to represent the newest replacement generation.
+- **Item identity and facts are clearer.** Item headers lead with Order / Item and show glass type underneath; the information grid repeats Order, Item, Glass, Size, Qty, Customer, Route, Job, Process, Queue and Delivery Date. Item controls sit at the bottom right below the A+W information block.
+- **Scan progress checkpoints are wider.** The compact no-timestamp cells remain short, but each production/scanner stage has more horizontal room for readable labels/counts.
+- **A+W timestamps now have an explicit Eastern-time contract.** Offset-free SQL Server `datetime` values are interpreted as `America/New_York` plant wall clocks, canonicalized to UTC for storage, and rendered back in Monroe/Charlotte Eastern time. Scanner-authored aware UTC timestamps retain their existing contract.
+- **SQLite schema 19 repairs historical A+W clocks safely.** Migration 19 normalizes A+W Cutting generation times, repairs previously UTC-tagged A+W reject clocks from preserved raw source payloads, realigns mirrored Internal Reject timestamps, and refreshes reject cutoff summaries without changing event identities.
+- [Future-chat change guide](docs/FUTURE_CHAT_CHANGE_GUIDE.md) continues to define the `.001` release rule, safe changed-files ZIP contract, extraction process, and validation requirements.
+
+### v0.516 validation
+
+- The focused v0.516 Eastern-time/sketch-memory/generated-sketch contracts pass **5/5**, and the complete maintained suite passes **288/288 tests**.
+- `static/js/app.js` passes Node syntax validation; all **33 Python source files** parse without bytecode generation and the five changed database/backend modules import cleanly.
+- A verified isolated copy of the supplied schema-11 SQLite database creates a pre-upgrade backup, applies migrations **12–19**, reaches schema **19**, preserves all **44 pre-existing table row counts** except the expected migration-ledger growth from 11 to 19, passes `integrity_check`, returns **0 foreign-key violations**, and applies nothing on a second migration pass.
+- A focused synthetic schema-18 repair proves migration 19 converts September and winter A+W wall clocks through the correct Eastern DST offset, repairs mirrored A+W Internal Reject evidence, normalizes Cutting-generation timestamps, preserves event identity, and is repeat-safe on the repaired evidence.
+- An isolated v0.516 server starts successfully, `/api/health` returns healthy SQLite status, the root page serves **0.516** plus every changed JS/CSS v0.516 cache key, and the server shuts down cleanly.
+- Headless Chromium starts but times out before producing a localhost screenshot in this environment, so final desktop/tablet/phone/TC22 visual verification remains deployment-side.
 
 ## v0.509
 
