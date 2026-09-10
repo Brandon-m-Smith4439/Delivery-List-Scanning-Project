@@ -1,7 +1,127 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.517**. SQLite remains the active/default backend; schema stays **19**.
+Current maintained release: **v0.522**. SQLite remains the active/default backend; schema stays **19**.
 
+v0.522 remembers fabrication results on the server, checks the complete selected delivery date in bounded background batches, and adds **Check Fab** to each item in Order Details. A matching new production file, changed piece/label data, or reject cutoff invalidates the affected result. SQLite remains schema **19**.
+
+## Install v0.522
+
+1. Stop the server and back up the project, preserving `data/` separately.
+2. Extract `Delivery_List_Scanner_v0.522_Changed_Files.zip` into the existing **v0.521** project root with overwrite enabled. The overlay excludes production data, logs, credentials and exports.
+3. Restart the maintained launcher, hard-refresh browsers (`Ctrl+F5`), and confirm **0.522**. No migration is added.
+4. Open a delivery date. Its full item set warms after Scan paints, using one queued background status request at a time. Results are remembered in the existing `data/production-file-index.json` and reused across browsers/restarts.
+5. Open Order Details and use **Check Fab** beside the piece's other actions to bypass its remembered result. The button shows Checking while the request runs; the last-check time and result update on completion. An unavailable share shows a notice rather than inventing completion.
+6. Verify a controlled floor scan/reject/recut plus the new Check Fab action before rollout. Detailed tests and performance evidence are in [v0.522 validation](docs/V0522_VALIDATION.md).
+
+### v0.522 behavior
+
+- Existing v0.521 whole-date warming and machine definitions remain authoritative. This release queues background requests, yields between batches, and reuses server memory instead of repeatedly reading every piece's production sources.
+- Unrelated index changes preserve remembered results. A source heartbeat is carried on the existing compact catalog, so browsers can refresh their presentation without another polling loop. Unaffected server results return from memory.
+- Piece facts and reject cutoffs for status checks come from authorized database rows. Changed quantity, dimensions, product, job, source identity, or current A+W generation prevents reuse of the prior result.
+- Denver and Waterjet retain their existing completion evidence rules. Archived completion files remain historical evidence for an unchanged piece; a reject or changed generation requires fresh evidence. Custom machines stay informational until a completion source exists.
+- The bounded memory retains up to 10,000 check records. Older evicted records are checked again on demand. Unavailable/unknown results remain retryable.
+
+## Previous release: v0.521
+
+v0.521 centralizes production-machine configuration in Lookup Manager, makes A+W reject rows use the reject Location as the displayed machine, prewarms fabrication status for complete delivery dates with a five-date revision-aware browser cache, and polishes Order Details/Print controls. SQLite remains schema **19**; no migration or database reset is required.
+
+## Install v0.521
+
+1. Stop the Delivery List Scanner server and back up the current project folder. Preserve the live `data/` folder separately.
+2. Extract `Delivery_List_Scanner_v0.521_Changed_Files.zip` directly into the existing **v0.520** project root with overwrite enabled. The ZIP preserves root-relative paths and excludes databases, runtime data, logs, credentials, and generated exports.
+3. Start the maintained launcher and hard-refresh browsers (`Ctrl+F5`). Confirm **0.521** in the footer. SQLite remains schema **19**; this release adds no migration.
+4. Open an A+W Internal Reject in Order Details and confirm the Machine column shows its mapped reject Location instead of the generic Tempering work type. Verify the larger compact reject-row typography and spacing.
+5. Open Lookup Manager → Machines. Verify Denver/WaterJet can be renamed, recolored, repositioned, or have matching terms revised; add a test custom machine and confirm its configured name/color/position propagate to machine filters/progress. Remove the test machine afterward if it is not a real floor machine.
+6. Load several delivery dates in Scan and confirm fabrication classification begins warming for the whole selected date after the date payload paints. Return among the five most recently used dates and confirm known fabrication results appear without another full visible-row reclassification.
+7. Open Print / Export and verify All Machines uses the standard filter style while configured machines use their Lookup Manager colors. Open Scan Filters and confirm opening the drawer uses a smooth eased scroll.
+8. Open Order Details and verify the single-row item header, visible sketch maximize/print controls, edge-to-edge Cutting Label, bottom-left production actions, persistent stage icons, and compact A+W information/reject rows.
+
+## v0.521 highlights
+
+- **Lookup Manager owns Machines.** One maintained definition now controls a machine's display name, detection terms, color, active state, and production-workflow position. Denver and WaterJet keep their existing `.egl`/`.nce` completion evidence; custom machines remain informational until a completion source is integrated.
+- **Production Files is source-only.** The former machine/color editor is removed from that GUI; it now manages integration controls and the Hardware/Sketch/Program/Completed-WaterJet folders only. Presentation-only machine edits do not trigger production-share reindexing; detection-term changes refresh only the sketch metadata needed for assignment.
+- **A+W reject Machine means reject Location.** Order Details uses mapped reject Location first, then source/registration/work context, and only falls back to the generic machine field. Reject rows receive larger normalized text and deliberate compact columns.
+- **Fabrication loading is delivery-aware.** Loading or selecting a delivery date warms fabrication status for the complete date in bounded 80-row batches after Scan paints. The browser retains revision-aware piece results for the five most recently used delivery dates and evicts the oldest date without discarding keys still shared by another retained date.
+- **Machine presentation propagates.** Scan and Print / Export machine filters use configured colors/names; progress placement uses the configured rank while completed stages keep their stage-specific icon.
+- **Order Details controls are consolidated.** Sketch and Cutting Label gain compact print icons; sketch maximize stays top-left; the old standalone Print action is removed; production actions sit at the bottom-left of the right production column; the Cutting Label column gets enough width to expose the full label edge.
+- **Scan filter opening is animated.** The drawer scroll adjustment now uses a short eased animation and respects reduced-motion preferences.
+
+### v0.521 validation
+
+- Focused v0.521 compatibility coverage passes **6/6** and the complete maintained suite passes **305/305 tests** from the release source. JavaScript syntax and Python parse/import checks pass without bytecode churn.
+- An isolated schema-19 SQLite copy remains unchanged on a second initialization, passes `integrity_check`, and reports **0 foreign-key violations**. v0.521 adds no migration or data reset.
+- An isolated v0.521 server returns a healthy `/api/health`, serves the displayed **0.521** version plus v0.521 cache keys for every changed frontend asset, and shuts down cleanly. Chromium is unable to complete localhost rendering in this execution environment, so the responsive desktop/tablet/TC22 visual walkthrough remains deployment-side.
+
+v0.520 extends production-file identity to the A+W **Job Nr.** as well as Order Nr., adds Machine filtering to Print / Export, improves Scan filter opening, and makes a compact second polish pass over Order Details controls, sketch/label spacing, item headings, and A+W reject rows. SQLite remains schema **19**; no migration or database reset is required.
+
+## Install v0.520
+
+1. Stop the Delivery List Scanner server and back up the current project folder. Preserve the live `data/` folder separately.
+2. Extract `Delivery_List_Scanner_v0.520_Changed_Files.zip` directly into the existing **v0.519** project root with overwrite enabled. The ZIP preserves root-relative paths and excludes databases, runtime data, logs, credentials, and generated exports.
+3. Start the maintained launcher and hard-refresh browsers (`Ctrl+F5`). Confirm **0.520** in the footer. SQLite remains schema **19**; this release adds no migration.
+4. Verify an order whose production sketch/program is named by Job Nr. rather than Order Nr.; confirm the exact sketch and recent Denver/WaterJet completion evidence resolve correctly.
+5. Open Scan Filters and confirm the page scrolls just far enough to expose the filter drawer. Open Print / Export and verify Status and Attention remain in the same row with the new Machine section at right.
+6. Open Order Details and verify the compact overview/item sketch, slightly wider Cutting Label, bottom-left production controls, one-line item heading, restored sketch maximize control, and evenly spaced A+W reject rows.
+
+## v0.520 highlights
+
+- Searches production identities by Order Nr. and bounded Job Nr. tokens. Old exact Job-named sketches can be learned outside the rolling index; recent `.egl` and `.nce` machine files named exactly by Job Nr. participate in the existing fabrication evidence path.
+- Scan Filters now scroll the page enough to expose the compact drawer rather than opening partly below the viewport.
+- Print / Export keeps the existing Route/Glass and Status/Attention placement, compresses Status/Attention slightly, and adds an equally sized Machine section with All Machines, No Fab, WaterJet, and Denver.
+- Reduces the Order Details dialog modestly, removes redundant item-sketch caption and Cutting Label piece-count text, slightly widens the label thumbnail, restores the top-left sketch maximize control, and moves item production controls to the bottom-left.
+- The overview Open Sketch action opens the full source PDF, while Hardware remains beside it.
+- Keeps Order/Item, glass, size, quantity, and delivery date horizontal on workstation widths and normalizes A+W reject columns using the shorter `OPT` label; the redundant Prior generations block is removed.
+
+### v0.520 validation
+
+- The focused Job Nr./manual-fabrication/layout compatibility set passes **5/5**, and the complete maintained suite passes **302/302 tests**. `static/js/app.js` passes Node syntax validation; all **36 Python source files** parse without bytecode churn and changed runtime modules import successfully.
+- A copied schema-19 database passes `integrity_check`, reports **0 foreign-key violations**, and repeated v0.520 initialization preserves every table row count. An isolated v0.520 server returns healthy `/api/health`, serves the 0.520 UI/cache keys, and shuts down without leaving an application server running.
+- SQLite remains schema **19**; this release makes no database schema change. Headless Chromium remains blocked from rendering localhost in this environment, so final desktop/tablet/TC22 visual confirmation remains deployment-side.
+
+## v0.519 highlights
+
+- Restores the Page-1 order/shower sketch overview above the item workflow cards.
+- Returns desktop item cards to Sketch → Cutting Label → Progress/A+W columns; common narrower layouts collapse intentionally rather than horizontally scrolling Progress.
+- Tightens the Cutting Label thumbnail to the physical scaled label width with minimal side padding.
+- Uses the shared modal `h2`/Segoe UI typography, colors Route with the maintained route palette, and enlarges the Delivery Date treatment.
+- Keeps Order/Item and glass type on the same line and strengthens the item header band using the configured glass-type color.
+- Widens Scan checkpoints and expands the icon column/padding so stage icons no longer feel crowded against the left edge.
+
+### v0.519 validation
+
+- The maintained static/structure suite passes, and the complete maintained suite passes **300/300 tests**. `static/js/app.js` passes Node syntax validation; changed runtime modules import successfully.
+- An isolated copy of the supplied database starts at schema 11, upgrades through the maintained path to schema **19**, passes `integrity_check`, reports **0 foreign-key violations**, serves healthy `/api/health`, and shuts down cleanly. v0.519 itself adds no migration.
+- Headless Chromium is administratively blocked from localhost in this environment (`127.0.0.1 is blocked`), so final desktop/tablet/TC22 visual confirmation remains deployment-side.
+
+
+v0.518 strengthens fabrication detection for manually edited/older shop sketches and synchronized A+W Cutting Labels, then condenses Order Details into a cleaner production-review workspace.
+
+## Install v0.518
+
+1. Stop the Delivery List Scanner server and back up the current project folder. Preserve the live `data/` folder separately.
+2. Extract `Delivery_List_Scanner_v0.518_Changed_Files.zip` directly into the existing **v0.517** project root with overwrite enabled. The ZIP preserves root-relative paths and excludes databases, runtime data, logs, credentials, and generated exports.
+3. Start the maintained launcher and hard-refresh browsers (`Ctrl+F5`). Confirm **0.518** in the footer. SQLite remains schema **19**; this release adds no migration.
+4. Open a manually edited mirror order such as **238445**. Confirm an older/order-suffixed PDF can be matched by its explicit Order/Item page marker and that WaterJet text stored as PDF markup is recognized.
+5. For a Mirror whose synchronized Cutting Label contains an internal cutout/hole/notch/slot operation, confirm the item is classified **Waterjet** even when the sketch does not provide the machine. For other label-proven fabrication without a named machine, confirm it is marked **Fabrication required - machine review** instead of No Fab.
+6. Open Order Details and verify the Job Nr./customer/route/delivery header, Production Snapshot, compact per-item identity header, tightly fitted Cutting Label, full-width Progress/A+W sections, compact reject rows, and bottom-right controls at desktop/tablet/TC22 sizes before floor rollout.
+
+## v0.518 highlights
+
+- **Manual sketch markup is production evidence.** Deferred PDF parsing now reads operator-entered annotation text in addition to flattened page text, recognizes explicit `Order.Item`, `Order / Item`, `Order-Item`, and `ORDER … ITEM …` markers, and lets old exact/order-prefixed PDF variants participate in machine assignment instead of only sketch viewing.
+- **A+W Cutting Labels close the fabrication gap.** Machine text on synchronized label process rows can assign Denver/Waterjet. A Mirror with an internal cutout, hole, drill, notch, or slot is routed to Waterjet. Generic fabrication evidence is marked required without inventing a machine when the label does not identify one.
+- **Label inference is bounded and reject-aware.** Scan/Search/Statistics status batches fetch current A+W generation label context in one SQLite read for at most 80 accessible rows. Order Details and staging preflight reuse the same current-generation resolver and latest-reject cutoff; frontend code remains database-agnostic.
+- **Order Details is condensed around production decisions.** Job Nr. leads the modal header, customer/route sit beneath it, Delivery Date is adjacent, and the old repeated Order Overview facts are replaced by a compact Production Snapshot for items, pieces, Cutting, fabrication mix, and attention.
+- **Each item is one clear card.** The title row carries Order/Item, glass type in its configured glass color, size, quantity, and delivery date. The repeated information grid and redundant fabricated-status badge are removed; Progress moves directly below sketch/label content.
+- **The Cutting Label no longer wastes horizontal space.** Its column is constrained to the physical scaled label width plus small padding while the sketch receives the remaining row width.
+- **A+W Internal Reject history is one-line operational context.** Each reject presents Eastern date/time, reason, machine, qty, rejected by, Batch, Optimization, and status in a compact row under the current generation.
+
+### v0.518 validation
+
+- The focused v0.518 fabrication/sketch/Order Details set passes **11/11**, and the complete maintained suite passes **299/299 tests**. `static/js/app.js` passes Node syntax validation; all **36 Python source files** parse and the changed runtime modules import successfully without bytecode churn.
+- A verified isolated copy of the supplied schema-11 database upgrades through migrations **12–19**, preserves all **44 pre-existing business-table row counts**, passes `integrity_check`, reports **0 foreign-key violations**, and applies nothing on a second migration pass. v0.518 itself adds no migration.
+- The bounded A+W label-hint resolver handles 80 production-status requests in about **1.4 ms median** on the isolated upgraded copy. Isolated server/API startup, v0.518 display/cache keys, and clean shutdown pass. Headless Chromium still times out before producing a localhost screenshot, so final responsive visual verification remains deployment-side.
+
+## Previous release: v0.517
 
 v0.517 repairs Scan navigation/return-to-tab refreshes, finds older exact-order sketch PDFs outside the rolling index, and generates reference outlines from matching item DXFs using the Shower Programmer's preview/unit/dimension rules.
 

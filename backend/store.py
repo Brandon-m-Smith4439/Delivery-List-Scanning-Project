@@ -2681,11 +2681,15 @@ class BaseDeliveryStore:
                 "order": str(row["order_no"] or ""),
                 "item": str(row["item_no"] or ""),
                 "job": str(row["job"] or ""),
+                "product": str(row["product"] or ""),
                 "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
             }
+        hint_key = f"{identity['order']}:{identity['item']}:{identity['job']}"
+        hints = self.aw_fabrication_hints_for_requests([{**identity, "key": hint_key}])
         status = service.fabrication_status(
             identity["order"], identity["item"], identity["job"], refresh_missing=True,
             evidence_after=identity["lastRejectedAt"],
+            label_hint=hints.get(hint_key),
         )
         return {**identity, **status}
 
@@ -3145,7 +3149,9 @@ class BaseDeliveryStore:
         with self.connect() as con:
             matches = con.execute(
                 f"""
-                SELECT DISTINCT li.order_no, li.item_no, dl.stage, dl.scanner
+                SELECT DISTINCT li.order_no, li.item_no, dl.stage, dl.scanner,
+                       li.job, li.product, li.dimensions, li.qty, li.source_id,
+                       li.process_state, li.queue_state, li.last_rejected_at
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active'
@@ -3160,6 +3166,7 @@ class BaseDeliveryStore:
             return text.lstrip("0") or ("0" if text else "")
 
         allowed_pairs: set[tuple[str, str]] = set()
+        piece_facts: dict[tuple[str, str], list[dict[str, Any]]] = {}
         allowed_orders: set[str] = set()
         for match in matches:
             if not user_can_access_stage(user, row_value(match, "stage", ""), row_value(match, "scanner", "")):
@@ -3167,6 +3174,9 @@ class BaseDeliveryStore:
             order = str(row_value(match, "order_no", "") or "").strip()
             allowed_orders.add(order)
             allowed_pairs.add((order, item_key(row_value(match, "item_no", ""))))
+            pair = (order, item_key(row_value(match, "item_no", "")))
+            piece_facts.setdefault(pair, []).append({key: row_value(match, key, "") for key in
+                ("job", "product", "dimensions", "qty", "source_id", "process_state", "queue_state", "last_rejected_at")})
 
         filtered: list[dict[str, Any]] = []
         for row in requested:
@@ -3176,7 +3186,22 @@ class BaseDeliveryStore:
                 continue
             if item and (order, item) not in allowed_pairs:
                 continue
-            filtered.append(row)
+            facts = piece_facts.get((order, item), [])
+            if facts:
+                canonical = max(facts, key=lambda f: str(f.get("last_rejected_at") or ""))
+                remake = any(is_remake_item({"processState": f.get("process_state"), "queueState": f.get("queue_state")}) for f in facts)
+                remake_generations = [
+                    int(match.group(1))
+                    for fact in facts
+                    for match in [re.search(r"\.(\d+)R(?:\b|$)", str(fact.get("job") or ""), flags=re.IGNORECASE)]
+                    if match
+                ]
+                filtered.append({**row, "job": canonical["job"], "product": canonical["product"],
+                                 "lastRejectedAt": canonical["last_rejected_at"],
+                                 "remake": remake,
+                                 "remakeGeneration": str(max(remake_generations)) if remake_generations else ("1" if remake else "")})
+            else:
+                filtered.append(row)
         return filtered
 
     def get_stations(self) -> list[str]:
@@ -5784,6 +5809,7 @@ class BaseDeliveryStore:
             source_payload = {}
         label_context = source_payload.get("labelContext") if isinstance(source_payload.get("labelContext"), dict) else {}
         cut_evidence = source_payload.get("cutEvidence") if isinstance(source_payload.get("cutEvidence"), dict) else {}
+        progress_memory = source_payload.get("progressMemory") if isinstance(source_payload.get("progressMemory"), dict) else {}
         optimization_status_code = int(row_value(row, "optimization_status_code", 0) or 0)
         if optimization_status_code in AW_OPTI_STATUS_BOOKED_CODES:
             optimization_status_label = "Booked"
@@ -5842,6 +5868,8 @@ class BaseDeliveryStore:
             "optimizationPlateStockBooked": bool(cut_evidence.get("plateStockBooked")),
             "optimizationPlateLastChangedAt": str(cut_evidence.get("plateLastChangedAt") or ""),
             "optimizationPlateLastChangedUser": str(cut_evidence.get("plateLastChangedUser") or ""),
+            "rememberedCutting": bool(progress_memory.get("cutComplete")),
+            "cutFirstConfirmedAt": str(progress_memory.get("cutFirstConfirmedAt") or ""),
             "sourceRowCount": int(row_value(row, "source_row_count", 0) or 0),
             "syncedAt": str(row_value(row, "synced_at", "") or ""),
         }
@@ -6044,6 +6072,37 @@ class BaseDeliveryStore:
                         for row in sorted(generation_rows, key=lambda value: (int(value.get("bomId") or 0), str(value.get("sourceRowId") or "")))
                     ],
                 }
+                incoming_quantity = float(source_payload["cutEvidence"].get("quantity") or 0)
+                incoming_cut_quantity = float(source_payload["cutEvidence"].get("cutQuantity") or 0)
+                incoming_assignments = source_payload["cutEvidence"].get("sequenceAssignments") or []
+                incoming_plates_complete = bool(incoming_assignments) and all(
+                    bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
+                    for row in incoming_assignments if isinstance(row, dict)
+                ) and len(incoming_assignments) >= max(1, int(round(incoming_quantity)))
+                incoming_complete = bool(
+                    booking_row.get("cutCompletedAt")
+                    or int(optimization_row.get("optimizationStatusCode") or 0) in AW_OPTI_STATUS_BOOKED_CODES
+                    or (incoming_quantity > 0 and incoming_cut_quantity >= incoming_quantity)
+                    or incoming_plates_complete
+                    or (
+                        not incoming_assignments and incoming_quantity <= 1
+                        and source_payload["cutEvidence"].get("plateCut")
+                        and source_payload["cutEvidence"].get("plateStockBooked")
+                    )
+                )
+                if incoming_complete:
+                    source_payload["progressMemory"] = {
+                        "cutComplete": True,
+                        "cutFirstConfirmedAt": str(
+                            booking_row.get("cutCompletedAt")
+                            or optimization_row.get("optimizationLastChangedAt")
+                            or plate_row.get("optimizationPlateLastChangedAt")
+                            or primary.get("batchLastChangedAt")
+                            or primary.get("batchCreatedAt")
+                            or ""
+                        ),
+                        "rule": "reset-only-on-reject-or-remake",
+                    }
                 payload_json = json.dumps(source_payload, sort_keys=True, separators=(",", ":"))
                 weight = max((float(row.get("weight") or 0) for row in generation_rows), default=0.0)
                 surface_area = max((float(row.get("surfaceArea") or 0) for row in generation_rows), default=0.0)
@@ -6078,6 +6137,44 @@ class BaseDeliveryStore:
                     "cutting_booking_row_id", "item_barcode_start", "cutting_barcode_start", "weight", "surface_area",
                     "source_row_count", "source_payload_json",
                 )) if existing else None
+                if existing:
+                    previous = self._aw_cutting_public_row(existing)
+                    previous_assignments = [row for row in (previous.get("sequenceAssignments") or []) if isinstance(row, dict)]
+                    previous_quantity = float(previous.get("quantity") or 0)
+                    previous_cut_quantity = float(previous.get("cutQuantity") or 0)
+                    previous_plates_complete = bool(previous_assignments) and all(
+                        bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
+                        for row in previous_assignments
+                    ) and len(previous_assignments) >= max(1, int(round(previous_quantity)))
+                    previous_complete = bool(
+                        previous.get("rememberedCutting")
+                        or previous.get("cutCompletedAt")
+                        or int(previous.get("optimizationStatusCode") or 0) in AW_OPTI_STATUS_BOOKED_CODES
+                        or (previous_quantity > 0 and previous_cut_quantity >= previous_quantity)
+                        or previous_plates_complete
+                        or (
+                            not previous_assignments and previous_quantity <= 1
+                            and previous.get("optimizationPlateCut") and previous.get("optimizationPlateStockBooked")
+                        )
+                    )
+                    if previous_complete:
+                        previous_confirmed_at = str(
+                            previous.get("cutFirstConfirmedAt")
+                            or previous.get("cutCompletedAt")
+                            or previous.get("optimizationLastChangedAt")
+                            or previous.get("batchLastChangedAt")
+                            or previous.get("batchCreatedAt")
+                            or ""
+                        )
+                        source_payload["progressMemory"] = {
+                            "cutComplete": True,
+                            "cutFirstConfirmedAt": previous_confirmed_at,
+                            "rule": "reset-only-on-reject-or-remake",
+                        }
+                        payload_json = json.dumps(source_payload, sort_keys=True, separators=(",", ":"))
+                        mutable_values = list(values)
+                        mutable_values[19] = payload_json
+                        values = tuple(mutable_values)
                 if existing_values == values:
                     unchanged += 1
                     continue
@@ -6153,50 +6250,53 @@ class BaseDeliveryStore:
         current = dict(history[0])
         reject_epoch = self._aw_cutting_timestamp_epoch(last_rejected_at)
         batch_epoch = self._aw_cutting_timestamp_epoch(current.get("batchCreatedAt"))
-        cut_epoch = self._aw_cutting_timestamp_epoch(current.get("cutCompletedAt"))
         optimization_status = int(current.get("optimizationStatusCode") or 0)
         batch_status = int(current.get("batchStatusCode") or 0)
         has_current_generation = not reject_epoch or batch_epoch > reject_epoch
-        cut_after_reject = bool(cut_epoch and (not reject_epoch or cut_epoch > reject_epoch))
-        # A+W exposes Booked through more than one raw optimization status in the
-        # live plant data. 500 was established first; v0.504 adds verified status
-        # 460 from Optimization 8286. Preserve the raw code while accepting either
-        # as positive Booked/Cut evidence. PROD_JOB batch status remains insufficient.
-        # Historical v0.498 contract: optimization_status == AW_OPTI_STATUS_BOOKED
-        booked_status = optimization_status in AW_OPTI_STATUS_BOOKED_CODES
-        source_quantity = float(current.get("quantity") or 0)
-        source_cut_quantity = float(current.get("cutQuantity") or 0)
-        quantity_cut_complete = source_quantity > 0 and source_cut_quantity >= source_quantity
-        # v0.502: the live 238330 probe proves PROD_OPTI_PLATES exposes CUT=1 and
-        # STOCKBOOKED=1 for the current remake optimization (8366) while the pane
-        # is already physically downstream. Treat the pair as positive current-
-        # generation cut evidence; never let an old generation satisfy a newer
-        # reject because has_current_generation remains mandatory.
-        sequence_assignments = [row for row in (current.get("sequenceAssignments") or []) if isinstance(row, dict)]
-        complete_assignments = [
-            row for row in sequence_assignments
-            if bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
-        ]
-        expected_assignments = max(1, int(round(source_quantity))) if source_quantity > 0 else len(sequence_assignments)
-        all_sequence_plates_complete = bool(sequence_assignments) and len(sequence_assignments) >= expected_assignments and len(complete_assignments) == len(sequence_assignments)
-        # Retain the single-row evidence fallback for old payloads. For quantity > 1,
-        # one CUT plate must not imply every physical piece is complete when richer
-        # sequence assignments are available.
-        plate_cut_complete = all_sequence_plates_complete or (
-            not sequence_assignments
-            and source_quantity <= 1
-            and bool(current.get("optimizationPlateCut"))
-            and bool(current.get("optimizationPlateStockBooked"))
-        )
-        cut_evidence_source = ""
-        if cut_after_reject:
-            cut_evidence_source = "automatic_cutting_booking"
-        elif has_current_generation and booked_status:
-            cut_evidence_source = f"optimization_status_{optimization_status}"
-        elif has_current_generation and plate_cut_complete:
-            cut_evidence_source = "optimization_plate_cut"
-        elif has_current_generation and quantity_cut_complete:
-            cut_evidence_source = "prod_jobitem_cut_quantity"
+        # A positive Cutting observation is a physical milestone. A+W can archive
+        # or rebatch a pane and later return a less complete-looking row, so search
+        # every retained row in the current KEYINDEX lifecycle. A newer KEYINDEX
+        # (remake) or evidence after a reject starts a new lifecycle and therefore
+        # cannot inherit the old cut result.
+        current_key_index = int(current.get("keyIndex") or 0)
+
+        def cutting_evidence(candidate: dict[str, Any]) -> str:
+            candidate_batch_epoch = self._aw_cutting_timestamp_epoch(candidate.get("batchCreatedAt"))
+            has_generation = not reject_epoch or candidate_batch_epoch > reject_epoch
+            cut_epoch = self._aw_cutting_timestamp_epoch(candidate.get("cutCompletedAt"))
+            if cut_epoch and (not reject_epoch or cut_epoch > reject_epoch):
+                return "automatic_cutting_booking"
+            if not has_generation:
+                return ""
+            memory_epoch = self._aw_cutting_timestamp_epoch(candidate.get("cutFirstConfirmedAt"))
+            candidate_status = int(candidate.get("optimizationStatusCode") or 0)
+            # A+W exposes Booked through verified status codes 460 and 500.
+            # Historical v0.498 contract: optimization_status == AW_OPTI_STATUS_BOOKED
+            # v0.504 generalized contract: optimization_status in AW_OPTI_STATUS_BOOKED_CODES
+            if candidate_status in AW_OPTI_STATUS_BOOKED_CODES:
+                return f"optimization_status_{candidate_status}"
+            source_quantity = float(candidate.get("quantity") or 0)
+            source_cut_quantity = float(candidate.get("cutQuantity") or 0)
+            assignments = [row for row in (candidate.get("sequenceAssignments") or []) if isinstance(row, dict)]
+            completed_assignments = [row for row in assignments if bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))]
+            expected = max(1, int(round(source_quantity))) if source_quantity > 0 else len(assignments)
+            all_plates_complete = bool(assignments) and len(assignments) >= expected and len(completed_assignments) == len(assignments)
+            single_plate_complete = (
+                not assignments and source_quantity <= 1
+                and bool(candidate.get("optimizationPlateCut"))
+                and bool(candidate.get("optimizationPlateStockBooked"))
+            )
+            if all_plates_complete or single_plate_complete:
+                return "optimization_plate_cut"
+            if source_quantity > 0 and source_cut_quantity >= source_quantity:
+                return "prod_jobitem_cut_quantity"
+            if candidate.get("rememberedCutting") and (not reject_epoch or memory_epoch > reject_epoch):
+                return "remembered_cutting_completion"
+            return ""
+
+        lifecycle_history = [row for row in history if int(row.get("keyIndex") or 0) == current_key_index]
+        cut_evidence_row = next((row for row in lifecycle_history if cutting_evidence(row)), None)
+        cut_evidence_source = cutting_evidence(cut_evidence_row) if cut_evidence_row else ""
 
         if cut_evidence_source:
             state = "cut"
@@ -6232,8 +6332,72 @@ class BaseDeliveryStore:
             "evidenceAfter": str(last_rejected_at or ""),
             "history": history,
             "evidenceSource": cut_evidence_source or str(current.get("evidenceSource") or ""),
+            "rememberedCutting": bool(cut_evidence_row is not None and cut_evidence_row is not history[0]),
+            "cutEvidenceBatch": str((cut_evidence_row or {}).get("batch") or ""),
         })
         return current
+
+    def aw_fabrication_hints_for_requests(self, requests: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Return current A+W label evidence for a bounded Order/Item request set.
+
+        Scan/search/statistics already batch production-file status lookups. Keep
+        label-based fabrication inference equally bounded: one SQLite read gathers
+        all synchronized Cutting generations, then the maintained reject-aware
+        ``aw_cutting_state`` resolver chooses the current generation per item.
+        """
+        requested = [row for row in list(requests or [])[:80] if isinstance(row, dict)]
+        orders = sorted({str(row.get("order") or "").strip() for row in requested if str(row.get("order") or "").strip()})
+        if not orders:
+            return {}
+        placeholders = ",".join("?" for _ in orders)
+        with self.connect() as con:
+            cutting_rows = con.execute(
+                f"""
+                SELECT * FROM aw_cutting_generations
+                WHERE order_no IN ({placeholders})
+                ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
+                """,
+                tuple(orders),
+            ).fetchall()
+        grouped: dict[tuple[str, str], list[Any]] = {}
+        for cutting_row in cutting_rows:
+            order = str(row_value(cutting_row, "order_no", "") or "").strip()
+            item = str(row_value(cutting_row, "item_no", "") or "").strip()
+            if item.isdigit():
+                item = item.zfill(3)
+            grouped.setdefault((order, item), []).append(cutting_row)
+
+        hints: dict[str, dict[str, Any]] = {}
+        for request in requested:
+            order = str(request.get("order") or "").strip()
+            raw_item = str(request.get("item") or "").strip()
+            item = raw_item.zfill(3) if raw_item.isdigit() else raw_item
+            job = str(request.get("job") or "").strip()
+            key = str(request.get("key") or f"{order}:{raw_item}:{job}")
+            state = self.aw_cutting_state(
+                order,
+                raw_item,
+                str(request.get("lastRejectedAt") or "").strip(),
+                grouped.get((order, item), []),
+            )
+            hint = dict(state) if isinstance(state, dict) else {}
+            lifecycle_facts = {
+                "lastRejectedAt": str(request.get("lastRejectedAt") or "").strip(),
+                "remake": bool(request.get("remake")),
+                "remakeGeneration": str(request.get("remakeGeneration") or "").strip(),
+                # A+W KEYINDEX is its durable remake generation. Batch,
+                # optimization, status, and other mutable label facts do not
+                # reset physical progress inside that generation.
+                "keyIndex": int(hint.get("keyIndex") or 0),
+            }
+            hint["lifecycleRevision"] = hashlib.sha256(
+                json.dumps(lifecycle_facts, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()[:20]
+            product = str(request.get("product") or "").strip()
+            if product and not str(hint.get("productDescription") or "").strip():
+                hint["productDescription"] = product
+            hints[key] = hint
+        return hints
 
     def get_order_detail(self, order_no: str, user: dict[str, Any] | None = None, *, include_production: bool = True) -> dict[str, Any]:
         """Return one order grouped by physical item with all active stage copies.
@@ -6374,8 +6538,12 @@ class BaseDeliveryStore:
         service = getattr(self, "production_files", None)
         if include_production and service is not None:
             for item in items:
+                label_hint = dict(item.get("cutting") or {}) if isinstance(item.get("cutting"), dict) else {}
+                if item.get("product") and not str(label_hint.get("productDescription") or "").strip():
+                    label_hint["productDescription"] = str(item.get("product") or "")
                 item_assets = service.item_assets(
-                    clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt")
+                    clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt"),
+                    label_hint=label_hint,
                 )
                 item["productionFiles"] = item_assets
                 fabrication = item_assets.get("fabrication") if isinstance(item_assets, dict) else {}
@@ -6404,6 +6572,10 @@ class BaseDeliveryStore:
             "customer": first.get("customer") or "",
             "job": first.get("job") or "",
             "route": first.get("route") or "",
+            "deliveryDate": max(
+                (str(stage.get("deliveryDate") or "") for item in items for stage in (item.get("stages") or []) if str(stage.get("deliveryDate") or "")),
+                default="",
+            ),
             "items": items,
             "awRejects": aw_rejects,
             "productionLoaded": bool(include_production and service is not None),
@@ -6436,7 +6608,7 @@ class BaseDeliveryStore:
         with self.connect() as con:
             rows = con.execute(
                 """
-                SELECT li.source_id, li.item_no, li.job, li.last_rejected_at,
+                SELECT li.source_id, li.item_no, li.job, li.product, li.last_rejected_at,
                        dl.stage, dl.scanner
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
@@ -6462,6 +6634,7 @@ class BaseDeliveryStore:
                 "order": clean_order,
                 "item": item_no,
                 "job": job,
+                "product": str(row["product"] or ""),
                 "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
             })
             if not item.get("job") and job:
@@ -6474,10 +6647,24 @@ class BaseDeliveryStore:
             grouped.values(),
             key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")),
         )
+        hint_requests = [
+            {
+                "key": f"{clean_order}:{item.get('item')}:{item.get('job')}",
+                "order": clean_order,
+                "item": item.get("item"),
+                "job": item.get("job"),
+                "product": item.get("product"),
+                "lastRejectedAt": item.get("lastRejectedAt"),
+            }
+            for item in items
+        ]
+        label_hints = self.aw_fabrication_hints_for_requests(hint_requests)
         hydrated: list[dict[str, Any]] = []
         for item in items:
+            hint_key = f"{clean_order}:{item.get('item')}:{item.get('job')}"
             assets = service.item_assets(
-                clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt")
+                clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt"),
+                label_hint=label_hints.get(hint_key),
             )
             hydrated.append({**item, "productionFiles": assets})
 
@@ -8112,18 +8299,77 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         terms = values.get("machineTerms") if isinstance(values.get("machineTerms"), dict) else {}
         colors = values.get("machineColors") if isinstance(values.get("machineColors"), dict) else {}
+        raw_machines = values.get("machines") if isinstance(values.get("machines"), list) else []
+        default_machines = defaults.get("machines") if isinstance(defaults.get("machines"), list) else []
+        default_by_code = {str(row.get("code") or "").strip().lower(): dict(row) for row in default_machines if isinstance(row, dict)}
 
-        def normalized_color(machine: str) -> str:
-            fallback = str((defaults.get("machineColors") or {}).get(machine) or ("#2563eb" if machine == "denver" else "#7c3aed"))
-            value = str(colors.get(machine) or fallback).strip()
-            return value if re.fullmatch(r"#[0-9A-Fa-f]{6}", value) else fallback
+        def clean_machine_code(value: Any) -> str:
+            return re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().lower()).strip("-")[:40]
 
-        def normalized_terms(machine: str) -> list[str]:
-            raw = terms.get(machine, defaults["machineTerms"][machine])
+        def clean_machine_terms(raw: Any, fallback: list[str]) -> list[str]:
             if isinstance(raw, str):
                 raw = re.split(r"[,;\n]+", raw)
             cleaned = [str(term or "").strip().upper() for term in (raw or []) if str(term or "").strip()]
-            return list(dict.fromkeys(cleaned)) or list(defaults["machineTerms"][machine])
+            return list(dict.fromkeys(cleaned)) or list(fallback)
+
+        def clean_machine_color(value: Any, fallback: str = "#64748b") -> str:
+            text = str(value or fallback).strip()
+            return text if re.fullmatch(r"#[0-9A-Fa-f]{6}", text) else fallback
+
+        source_machines = raw_machines or default_machines
+        machines: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for raw in source_machines:
+            if not isinstance(raw, dict):
+                continue
+            code = clean_machine_code(raw.get("code"))
+            if not code or code in seen_codes:
+                continue
+            fallback = default_by_code.get(code, {})
+            name = str(raw.get("name") or fallback.get("name") or code.replace("-", " ").title()).strip()[:64]
+            if not name:
+                continue
+            fallback_terms = list(fallback.get("terms") or [name.upper()])
+            machine_terms = clean_machine_terms(raw.get("terms", terms.get(code, fallback_terms)), fallback_terms)
+            fallback_color = clean_machine_color(fallback.get("color"), "#64748b")
+            machine_color = clean_machine_color(raw.get("color", colors.get(code, fallback_color)), fallback_color)
+            try:
+                progress_rank = int(raw.get("progressRank", fallback.get("progressRank", 0)))
+            except (TypeError, ValueError):
+                progress_rank = int(fallback.get("progressRank") or 0)
+            progress_rank = max(-20, min(progress_rank, 50))
+            completion_kind = str(fallback.get("completionKind") or raw.get("completionKind") or "custom").strip().lower()
+            if code == "denver":
+                completion_kind = "denver"
+            elif code == "waterjet":
+                completion_kind = "waterjet"
+            machines.append({
+                "code": code,
+                "name": name,
+                "terms": machine_terms,
+                "color": machine_color,
+                "progressRank": progress_rank,
+                "active": bool(raw.get("active", fallback.get("active", True))),
+                "completionKind": completion_kind,
+            })
+            seen_codes.add(code)
+
+        # The two maintained evidence-backed machine identities cannot disappear;
+        # their display metadata can still be renamed/recolored/repositioned.
+        for code in ("denver", "waterjet"):
+            if code in seen_codes:
+                continue
+            fallback = default_by_code.get(code) or {
+                "code": code,
+                "name": "Denver CNC" if code == "denver" else "Waterjet",
+                "terms": ["DENVER", "DENVER CNC"] if code == "denver" else ["WATER JET", "WATERJET", "WJ"],
+                "color": "#2563eb" if code == "denver" else "#7c3aed",
+                "progressRank": 0, "active": True, "completionKind": code,
+            }
+            machines.append(dict(fallback, terms=list(fallback.get("terms") or [])))
+
+        normalized_terms = {str(row["code"]): list(row.get("terms") or []) for row in machines}
+        normalized_colors = {str(row["code"]): str(row.get("color") or "#64748b") for row in machines}
 
         return {
             "enabled": boolean_value("enabled", bool(defaults["enabled"])),
@@ -8136,15 +8382,51 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "programs": str(roots.get("programs") or default_roots["programs"]).strip(),
                 "completedWaterjet": str(roots.get("completedWaterjet") or default_roots["completedWaterjet"]).strip(),
             },
-            "machineTerms": {
-                "denver": normalized_terms("denver"),
-                "waterjet": normalized_terms("waterjet"),
-            },
-            "machineColors": {
-                "denver": normalized_color("denver"),
-                "waterjet": normalized_color("waterjet"),
-            },
+            "machines": machines,
+            "machineTerms": normalized_terms,
+            "machineColors": normalized_colors,
         }
+
+    def get_machine_configuration(self) -> dict[str, Any]:
+        """Return machine presentation/detection metadata without probing shares."""
+        with self.connect() as con:
+            settings = self.production_file_settings_con(con)
+        return {
+            "machines": settings.get("machines", []),
+            "machineTerms": settings.get("machineTerms", {}),
+            "machineColors": settings.get("machineColors", {}),
+        }
+
+    def update_machine_configuration(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Update only machine metadata in the existing production settings record."""
+        with self.connect() as con:
+            current = self.production_file_settings_con(con)
+        requested = data.get("machines") if isinstance(data, dict) else None
+        if not isinstance(requested, list):
+            raise ValueError("Machines must be provided as a list")
+        settings = self._normalize_production_file_settings({**current, "machines": requested})
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            self.set_system_metadata_value(
+                con,
+                PRODUCTION_FILE_SETTINGS_METADATA_KEY,
+                json.dumps(settings, sort_keys=True, separators=(",", ":")),
+            )
+            self.insert_audit(
+                con,
+                "machine_configuration",
+                "global",
+                "update_machine_configuration",
+                user,
+                "",
+                "",
+                {"machines": settings.get("machines", [])},
+            )
+            con.commit()
+        # configure() refreshes only the sketch index when detection terms change;
+        # color/name/rank-only edits stay local and never trigger a share walk.
+        self.production_files.configure(settings)
+        return self.get_machine_configuration()
 
     def production_file_settings_con(self, con: Any) -> dict[str, Any]:
         raw = self.system_metadata_value(con, PRODUCTION_FILE_SETTINGS_METADATA_KEY)

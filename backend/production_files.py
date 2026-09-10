@@ -68,16 +68,28 @@ class ProductionFileService:
         # v0.473: only a recent working set is indexed from production shares.
         # This avoids recursively cataloging years of files on every refresh.
         self.lookback_days = 7
+        # v0.521: machine definitions are one maintained configuration shared by
+        # Lookup Manager, fabrication detection, progress placement, and UI color.
+        # Stable codes keep Denver/Waterjet completion evidence compatible while
+        # allowing operator-facing names, terms, colors, and progress positions to
+        # change without a schema migration.
+        self.machine_definitions: list[dict[str, Any]] = [
+            {
+                "code": "denver", "name": "Denver CNC",
+                "terms": ["DENVER", "DENVER CNC"], "color": "#2563eb",
+                "progressRank": 0, "active": True, "completionKind": "denver",
+            },
+            {
+                "code": "waterjet", "name": "Waterjet",
+                "terms": ["WATER JET", "WATERJET", "WJ"], "color": "#7c3aed",
+                "progressRank": 0, "active": True, "completionKind": "waterjet",
+            },
+        ]
         self.machine_terms: dict[str, list[str]] = {
-            "denver": ["DENVER", "DENVER CNC"],
-            "waterjet": ["WATER JET", "WATERJET", "WJ"],
+            row["code"]: list(row["terms"]) for row in self.machine_definitions
         }
-        # v0.476: machine colors are presentation settings shared by Scan,
-        # Smart Search, and Order Details. They stay in the existing settings
-        # metadata so no database migration is needed.
         self.machine_colors: dict[str, str] = {
-            "denver": "#2563eb",
-            "waterjet": "#7c3aed",
+            row["code"]: str(row["color"]) for row in self.machine_definitions
         }
         self.roots: dict[str, Path] = {
             "hardware": Path(config.hardware_lists_dir),
@@ -97,7 +109,9 @@ class ProductionFileService:
         # index work. Settings reads this cache instead of probing mapped shares
         # on the request thread.
         self._resolved_roots: dict[str, str] = {}
-        self._fabrication_cache: dict[tuple[str, str, str, bool, str], tuple[float, dict[str, Any]]] = {}
+        self._fabrication_cache: dict[tuple[str, str, str, bool, str, str], tuple[float, dict[str, Any]]] = {}
+        self._fabrication_revision = str(time.time_ns())
+        self._fabrication_check_locks = [threading.RLock() for _ in range(16)]
         self._machine_text_cache: dict[str, tuple[float, str]] = {}
         # v0.474: PDF page assignments are parsed lazily per requested order.
         # The share index itself stays metadata-only so hundreds of recent sketches
@@ -149,17 +163,65 @@ class ProductionFileService:
                 next_roots[kind] = Path(raw).expanduser()
         terms = values.get("machineTerms") if isinstance(values.get("machineTerms"), dict) else {}
         colors = values.get("machineColors") if isinstance(values.get("machineColors"), dict) else {}
-        next_colors = dict(self.machine_colors)
-        for machine, default_color in self.machine_colors.items():
-            raw_color = str(colors.get(machine) or default_color).strip()
-            next_colors[machine] = raw_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", raw_color) else default_color
-        next_terms: dict[str, list[str]] = {}
-        for machine, defaults in self.machine_terms.items():
-            raw_terms = terms.get(machine, defaults)
-            if isinstance(raw_terms, str):
-                raw_terms = re.split(r"[,;\n]+", raw_terms)
-            cleaned = [str(term or "").strip().upper() for term in (raw_terms or []) if str(term or "").strip()]
-            next_terms[machine] = list(dict.fromkeys(cleaned)) or list(defaults)
+        raw_machines = values.get("machines") if isinstance(values.get("machines"), list) else []
+        current_by_code = {str(row.get("code") or "").strip().lower(): dict(row) for row in self.machine_definitions}
+        next_machines: list[dict[str, Any]] = []
+        if raw_machines:
+            for raw in raw_machines:
+                if not isinstance(raw, dict):
+                    continue
+                code = re.sub(r"[^a-z0-9_-]+", "-", str(raw.get("code") or "").strip().lower()).strip("-")
+                if not code:
+                    continue
+                previous = current_by_code.get(code, {})
+                name = str(raw.get("name") or previous.get("name") or code.replace("-", " ").title()).strip()[:64]
+                raw_terms = raw.get("terms", previous.get("terms", terms.get(code, [])))
+                if isinstance(raw_terms, str):
+                    raw_terms = re.split(r"[,;\n]+", raw_terms)
+                cleaned_terms = [str(term or "").strip().upper() for term in (raw_terms or []) if str(term or "").strip()]
+                if not cleaned_terms:
+                    cleaned_terms = list(previous.get("terms") or [name.upper()])
+                fallback_color = str(previous.get("color") or colors.get(code) or "#64748b")
+                color = str(raw.get("color") or fallback_color).strip()
+                if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+                    color = fallback_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", fallback_color) else "#64748b"
+                try:
+                    progress_rank = max(-20, min(int(raw.get("progressRank", previous.get("progressRank", 0))), 50))
+                except (TypeError, ValueError):
+                    progress_rank = int(previous.get("progressRank") or 0)
+                completion_kind = str(previous.get("completionKind") or raw.get("completionKind") or "custom").strip().lower()
+                if code == "denver":
+                    completion_kind = "denver"
+                elif code == "waterjet":
+                    completion_kind = "waterjet"
+                next_machines.append({
+                    "code": code, "name": name, "terms": list(dict.fromkeys(cleaned_terms)),
+                    "color": color, "progressRank": progress_rank,
+                    "active": bool(raw.get("active", previous.get("active", True))),
+                    "completionKind": completion_kind,
+                })
+        else:
+            for code, previous in current_by_code.items():
+                raw_terms = terms.get(code, previous.get("terms", []))
+                if isinstance(raw_terms, str):
+                    raw_terms = re.split(r"[,;\n]+", raw_terms)
+                cleaned_terms = [str(term or "").strip().upper() for term in (raw_terms or []) if str(term or "").strip()]
+                color = str(colors.get(code) or previous.get("color") or "#64748b").strip()
+                next_machines.append({
+                    **previous,
+                    "terms": list(dict.fromkeys(cleaned_terms)) or list(previous.get("terms") or []),
+                    "color": color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else str(previous.get("color") or "#64748b"),
+                })
+        # Denver and Waterjet are maintained system machine identities because
+        # their completion evidence comes from dedicated .egl/.nce sources.
+        for code, fallback in {
+            "denver": {"code":"denver","name":"Denver CNC","terms":["DENVER","DENVER CNC"],"color":"#2563eb","progressRank":0,"active":True,"completionKind":"denver"},
+            "waterjet": {"code":"waterjet","name":"Waterjet","terms":["WATER JET","WATERJET","WJ"],"color":"#7c3aed","progressRank":0,"active":True,"completionKind":"waterjet"},
+        }.items():
+            if not any(row.get("code") == code for row in next_machines):
+                next_machines.append(fallback)
+        next_terms = {str(row["code"]): list(row.get("terms") or []) for row in next_machines if row.get("active", True)}
+        next_colors = {str(row["code"]): str(row.get("color") or "#64748b") for row in next_machines}
         try:
             cache_minutes = max(1, min(int(values.get("cacheMinutes") or max(self.cache_seconds // 60, 1)), 1440))
         except (TypeError, ValueError):
@@ -171,15 +233,22 @@ class ProductionFileService:
         with self._lock:
             roots_changed = any(str(next_roots[kind]).casefold() != str(self.roots[kind]).casefold() for kind in self.roots)
             program_root_changed = str(next_roots["program"]).casefold() != str(self.roots["program"]).casefold()
-            terms_changed = any(next_terms.get(machine, []) != self.machine_terms.get(machine, []) for machine in next_terms)
-            colors_changed = any(next_colors.get(machine) != self.machine_colors.get(machine) for machine in next_colors)
+            terms_changed = next_terms != self.machine_terms
+            colors_changed = next_colors != self.machine_colors
+            machines_changed = next_machines != self.machine_definitions
             lookback_changed = lookback_days != self.lookback_days
             self.enabled = bool(values.get("enabled", True))
             self.enforce_staging = bool(values.get("enforceStaging", True))
             self.cache_seconds = cache_minutes * 60
             self.lookback_days = lookback_days
+            self.machine_definitions = next_machines
             self.machine_terms = next_terms
             self.machine_colors = next_colors
+            if machines_changed:
+                # Presentation/rank/name edits invalidate only lightweight status
+                # results; they must not trigger a production-share rescan.
+                self._retain_completed_fabrication_memory()
+                self._fabrication_revision = str(time.time_ns())
             if roots_changed or lookback_changed:
                 self.roots = next_roots
                 self._cache.clear()
@@ -189,7 +258,7 @@ class ProductionFileService:
                 self._availability_cache = None
                 self._availability_errors.clear()
                 self._resolved_roots.clear()
-                self._fabrication_cache.clear()
+                self._retain_completed_fabrication_memory()
                 self._machine_text_cache.clear()
                 self._sketch_page_cache.clear()
                 self._sketch_empty_cache_at.clear()
@@ -201,7 +270,7 @@ class ProductionFileService:
                 self._cache.pop("sketch", None)
                 for asset_id in [key for key, asset in self._asset_lookup.items() if asset.kind == "sketch"]:
                     self._asset_lookup.pop(asset_id, None)
-                self._fabrication_cache.clear()
+                self._retain_completed_fabrication_memory()
                 self._sketch_page_cache.clear()
                 self._sketch_empty_cache_at.clear()
         if roots_changed or lookback_changed:
@@ -221,6 +290,7 @@ class ProductionFileService:
                 "programs": str(self.roots["program"]),
                 "completedWaterjet": str(self.roots["completed_wj"]),
             },
+            "machines": [dict(row, terms=list(row.get("terms") or [])) for row in self.machine_definitions],
             "machineTerms": {key: list(values) for key, values in self.machine_terms.items()},
             "machineColors": dict(self.machine_colors),
         }
@@ -354,6 +424,55 @@ class ProductionFileService:
                 if clean_assignments:
                     self._sketch_page_cache[asset_id] = (asset.modified_at, order_token, clean_assignments)
 
+        # Persist results alongside the existing production index, never in the
+        # scanner's transaction tables. Config signatures prevent stale machine
+        # settings from reviving a result after a restart.
+        self._restore_fabrication_memory(payload)
+
+    def _restore_fabrication_memory(self, payload: dict[str, Any]) -> None:
+        memory = payload.get("fabricationMemory") if isinstance(payload, dict) else None
+        if isinstance(memory, dict) and memory.get("configuration") == self._fabrication_configuration_signature():
+            self._fabrication_revision = str(memory.get("revision") or self._fabrication_revision)
+            entries = memory.get("entries")
+            for entry in (entries if isinstance(entries, list) else [])[:10000]:
+                if not isinstance(entry, dict): continue
+                key, result = entry.get("key"), entry.get("result")
+                if (isinstance(key, list) and len(key) == 6 and all(isinstance(v, (str, bool)) for v in key)
+                        and isinstance(result, dict) and result.get("checkedAt") and result.get("fabricated") is True):
+                    self._fabrication_cache[tuple(key)] = (0.0, result)
+
+    def _fabrication_configuration_signature(self) -> str:
+        # This is progress memory, not a snapshot of one folder configuration.
+        # A path/name/color setting change cannot make a completed physical pane
+        # unfinished. Version the memory format itself and let lifecycle keys
+        # handle the only valid resets (reject/remake).
+        return "v522-production-progress-lifecycle-1"
+
+    def _retain_completed_fabrication_memory(self) -> None:
+        self._fabrication_cache = {
+            key: value for key, value in self._fabrication_cache.items()
+            if value[1].get("fabricated") is True
+        }
+
+    @staticmethod
+    def _fabrication_lifecycle_signature(label_hint: dict[str, Any] | None) -> str:
+        """Identify only events that start a new physical-piece lifecycle.
+
+        Descriptions, dimensions, quantities, jobs, optimization numbers, and
+        ordinary source updates may improve classification, but they do not make
+        a completed pane become uncut or unfabricated. The store supplies a
+        lifecycle revision made from reject/remake evidence and A+W KEYINDEX.
+        """
+        hint = label_hint if isinstance(label_hint, dict) else {}
+        supplied = str(hint.get("lifecycleRevision") or "").strip()
+        if supplied:
+            return supplied
+        return str(hint.get("keyIndex") or "0").strip() or "0"
+
+    def fabrication_revision(self) -> str:
+        """Cheap heartbeat token; does not touch production shares."""
+        return self._fabrication_revision
+
     def _persist_index(self) -> None:
         if not self._background_refresh_enabled:
             return
@@ -373,6 +492,12 @@ class ProductionFileService:
                     for asset, last_seen in self._egl_history.values()
                 ],
                 "requestedSketches": [self._serialize_asset(asset) for asset in self._requested_sketches.values()],
+                "fabricationMemory": {
+                    "configuration": self._fabrication_configuration_signature(),
+                    "revision": self._fabrication_revision,
+                    "entries": [{"key": list(key), "result": result} for key, (_, result) in self._fabrication_cache.items()
+                                if key[3] and result.get("checkedAt")][-10000:],
+                },
                 "sketchPages": [
                     {
                         "assetId": asset_id,
@@ -396,7 +521,7 @@ class ProductionFileService:
 
     def _schedule_persist_index(self, source_root: Path) -> None:
         """Persist newly discovered PDF page matches away from request threads."""
-        if not self._background_refresh_enabled or not self._is_network_root(source_root):
+        if not self._background_refresh_enabled:
             return
         with self._lock:
             if self._persist_pending:
@@ -542,6 +667,10 @@ class ProductionFileService:
     def _replace_kind_cache(self, kind: str, assets: list[ProductionAsset], available: bool) -> None:
         now = time.time()
         with self._lock:
+            previous = {a.asset_id: a for a in self._cache.get(kind, (0, []))[1]}
+            changed = [a for a in assets if a.asset_id not in previous or a.modified_at != previous[a.asset_id].modified_at]
+            removed = set(previous) - {a.asset_id for a in assets} if available else set()
+            was_available = bool(self._availability_cache and self._availability_cache[1].get(kind))
             if kind == "program":
                 for asset in assets:
                     if asset.extension == ".egl":
@@ -557,7 +686,25 @@ class ProductionFileService:
             availability = dict(self._availability_cache[1]) if self._availability_cache else {}
             availability[kind] = bool(available)
             self._availability_cache = (now, availability)
-            self._fabrication_cache.clear()
+            if kind in {"sketch", "program", "completed_wj"} and (changed or removed or was_available != available):
+                tokens = set()
+                for asset in changed:
+                    for token in re.findall(r"\d{6,12}", asset.relative):
+                        tokens.update((token, token[:6], token[:8]))
+                for key, (_, result) in list(self._fabrication_cache.items()):
+                    evidence = result.get("evidence") or {}
+                    if evidence.get("id") in removed and result.get("fabricated") is True:
+                        result["evidence"] = {**evidence, "historical": True, "existsNow": False}
+                    result["programs"] = [a for a in result.get("programs", []) if a.get("id") not in removed]
+                    result["completedWaterjet"] = [{**a, "historical": True, "existsNow": False} if a.get("id") in removed else a
+                                                    for a in result.get("completedWaterjet", [])]
+                    identity_tokens = {_compact(value) for value in result.get("identityTokens", []) if _compact(value)}
+                    if result.get("fabricated") is not True and (
+                        key[0] in tokens or bool(identity_tokens.intersection(tokens))
+                        or (available and result.get("fabricated") is None)
+                    ):
+                        self._fabrication_cache.pop(key, None)
+                self._fabrication_revision = str(time.time_ns())
 
     def _refresh_kind(self, kind: str) -> None:
         configured_root = self.roots[kind]
@@ -874,26 +1021,43 @@ class ProductionFileService:
         require_item: bool = False,
     ) -> int:
         order_token = _compact(order)
-        job_token = _compact(job)
+        job_tokens = self._job_identity_tokens(job)
         key = asset.search_key
-        score = 0
-        if order_token:
-            if order_token not in key:
-                return 0
-            score += 100
-        elif job_token and job_token in key:
-            score += 65
-        else:
+        order_match = bool(order_token and order_token in key)
+        matched_job = next((token for token in job_tokens if token and token in key), "")
+        if not order_match and not matched_job:
             return 0
-        if job_token and job_token in key:
-            score += 20
+
+        # Order Nr. remains the strongest identity. Job Nr. is an explicit
+        # secondary plant identity because Denver/WaterJet files are sometimes
+        # named only with the Job Nr. rather than the scanner Order Nr.
+        score = 100 if order_match else 78
+        if matched_job:
+            score += 22 if order_match else 0
+
         if str(item or "").strip():
             item_match = self._asset_mentions_item(asset, order, item)
-            if require_item and not item_match:
+            if not item_match and matched_job:
+                item_match = self._asset_mentions_item(asset, matched_job, item)
+
+            # Some completed machine files are named exactly as the Job Nr. with
+            # no Order/Item suffix. For machine evidence only, an exact Job Nr.
+            # filename is an accepted lower-confidence item identity; sketches
+            # still require their page-level Order.Item marker.
+            exact_job_machine_file = bool(
+                matched_job
+                and asset.kind in {"program", "completed_wj"}
+                and _compact(Path(asset.name).stem) == matched_job
+            )
+            if require_item and not item_match and not exact_job_machine_file:
                 return 0
-            score += 70 if item_match else -15
-        # Prefer files with explicit production/fabrication extensions and newer
-        # revisions when two files otherwise describe the same order/item.
+            if item_match:
+                score += 70
+            elif exact_job_machine_file:
+                score += 35
+            else:
+                score -= 15
+
         if asset.extension in {".egl", ".nce"}:
             score += 8
         return score
@@ -986,13 +1150,136 @@ class ProductionFileService:
                 return True
         return False
 
+    def _machine_definition(self, code_or_name: Any) -> dict[str, Any] | None:
+        token = str(code_or_name or "").strip().casefold()
+        if not token:
+            return None
+        for row in self.machine_definitions:
+            code = str(row.get("code") or "").strip().casefold()
+            name = str(row.get("name") or "").strip().casefold()
+            if token in {code, name}:
+                return row
+            if code == "denver" and token in {"denver cnc", "denver"}:
+                return row
+            if code == "waterjet" and token in {"waterjet", "water jet", "wj"}:
+                return row
+        return None
+
+    def _machine_name(self, code_or_name: Any) -> str:
+        row = self._machine_definition(code_or_name)
+        return str(row.get("name") or "").strip() if row else str(code_or_name or "").strip()
+
+    def _machine_code(self, code_or_name: Any) -> str:
+        row = self._machine_definition(code_or_name)
+        return str(row.get("code") or "").strip() if row else ""
+
     def _detect_machine(self, signals: str) -> str:
-        """Resolve one configured sketch assignment without hard-coded request work."""
-        if self._matches_machine_terms(signals, "denver"):
-            return "Denver CNC"
-        if self._matches_machine_terms(signals, "waterjet"):
-            return "Waterjet"
+        """Resolve one configured sketch/label assignment without request-wide scans."""
+        for row in self.machine_definitions:
+            if row.get("active", True) and self._matches_machine_terms(signals, str(row.get("code") or "")):
+                return str(row.get("name") or "").strip()
         return ""
+
+    @staticmethod
+    def _fabrication_hint_signature(label_hint: dict[str, Any] | None) -> str:
+        """Return a stable small cache signature for A+W Cutting Label evidence."""
+        if not isinstance(label_hint, dict) or not label_hint:
+            return ""
+        try:
+            payload = json.dumps(label_hint, sort_keys=True, separators=(",", ":"), default=str)
+        except (TypeError, ValueError):
+            payload = str(label_hint)
+        return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+    @staticmethod
+    def _pdf_annotation_text(page: Any) -> str:
+        """Read operator-entered PDF markup text that ``extract_text`` can miss.
+
+        Manual shop edits are often stored as annotation ``/Contents`` rather
+        than flattened page text. Reading only these tiny metadata fields keeps
+        this deferred Order Details parse bounded and avoids OCR/image work.
+        """
+        values: list[str] = []
+        try:
+            annotations = page.get("/Annots") or []
+        except Exception:
+            annotations = []
+        for reference in annotations:
+            try:
+                annotation = reference.get_object() if hasattr(reference, "get_object") else reference
+            except Exception:
+                continue
+            if not hasattr(annotation, "get"):
+                continue
+            for key in ("/Contents", "/RC", "/Subj", "/T"):
+                try:
+                    value = annotation.get(key)
+                except Exception:
+                    value = None
+                text = str(value or "").strip()
+                if text:
+                    values.append(text)
+        return "\n".join(values)
+
+    def _label_fabrication_assignment(self, label_hint: dict[str, Any] | None) -> dict[str, Any]:
+        """Infer fabrication requirements from synchronized A+W Cutting Label data.
+
+        Machine text on the label is authoritative when present. The one
+        evidence-backed shop rule added in v0.518 is narrower: any Mirror with
+        an internal cutout/cutout macro requires Waterjet. Generic fabrication
+        operations are marked as required without inventing Denver/Waterjet when
+        the A+W row does not identify the machine.
+        """
+        hint = label_hint if isinstance(label_hint, dict) else {}
+        product = str(hint.get("productDescription") or hint.get("product") or "").strip()
+        process_rows = hint.get("processRows") if isinstance(hint.get("processRows"), list) else []
+        fields: list[str] = [product]
+        for row in process_rows:
+            if not isinstance(row, dict):
+                continue
+            fields.extend(str(row.get(key) or "").strip() for key in (
+                "machine", "workType", "processProductDescription", "edgeData"
+            ))
+        signal = "\n".join(value for value in fields if value).upper()
+        if not signal:
+            return {"machine": "", "required": False, "confidence": "unknown", "reason": "", "signal": ""}
+
+        explicit_machine = self._detect_machine(signal)
+        if explicit_machine:
+            return {
+                "machine": explicit_machine, "required": True, "confidence": "label-machine",
+                "reason": "A+W Cutting Label identifies the fabrication machine", "signal": signal[:600],
+            }
+
+        is_mirror = bool(re.search(r"\bMIRROR\b", product, flags=re.IGNORECASE))
+        # Mirrors are not routed through the Denver workflow for cutouts. The
+        # A+W label may describe the same operation as an internal cutout macro,
+        # hole, drill, notch, or slot, so accept those concrete geometry terms
+        # instead of relying on one exact phrase.
+        has_cutout = bool(re.search(
+            r"\bINTERNAL\s+CUT(?:\s*OUT|OUT)\b|\bCUT\s*OUT\b|\bCUTOUT\b|"
+            r"\bHOLE(?:S)?\b|\bDRILL(?:ED|ING)?\b|\bNOTCH(?:ES|ED|ING)?\b|"
+            r"\bSLOT(?:S|TED|TING)?\b",
+            signal,
+            flags=re.IGNORECASE,
+        ))
+        if is_mirror and has_cutout:
+            return {
+                "machine": self._machine_name("waterjet"), "required": True, "confidence": "label-mirror-cutout",
+                "reason": "Mirror with an A+W cutout operation requires Waterjet", "signal": signal[:600],
+            }
+
+        generic_fabrication = bool(re.search(
+            r"\bFABRICAT(?:E|ED|ING|ION)?\b|\bDRILL(?:ED|ING)?\b|\bHOLE(?:S)?\b|"
+            r"\bNOTCH(?:ES|ED|ING)?\b|\bSLOT(?:S|TED|TING)?\b|\bCUT\s*OUT\b|\bCUTOUT\b",
+            signal, flags=re.IGNORECASE,
+        ))
+        if generic_fabrication:
+            return {
+                "machine": "Fabrication", "required": True, "confidence": "label-required",
+                "reason": "A+W Cutting Label contains a fabrication operation; machine needs review", "signal": signal[:600],
+            }
+        return {"machine": "", "required": False, "confidence": "unknown", "reason": "", "signal": signal[:600]}
 
     @staticmethod
     def _normalized_item_number(item: Any) -> str:
@@ -1042,26 +1329,39 @@ class ProductionFileService:
             from pypdf import PdfReader  # type: ignore
 
             reader = PdfReader(str(asset.path))
-            # Exact sketch contract: order and item are separated by a decimal.
-            marker = re.compile(rf"(?<!\d){re.escape(order_token)}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE)
+            # Canonical shop pages use ``Order.Item``. Manual markups sometimes
+            # rewrite that identity as ``Order / Item`` or ``Order ITEM n``; accept
+            # those explicit separators without treating arbitrary nearby numbers
+            # (dimensions/page counts) as item identities. Annotation text is also
+            # included because Bluebeam/Acrobat machine notes may not be flattened.
+            marker_patterns = [
+                re.compile(rf"(?<!\d){re.escape(order_token)}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                re.compile(rf"(?<!\d)(?:ORDER\s*)?{re.escape(order_token)}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+            ]
             for page_index, page in enumerate(reader.pages):
                 try:
                     text = page.extract_text() or ""
                 except Exception:
                     text = ""
+                annotation_text = self._pdf_annotation_text(page)
+                if annotation_text:
+                    text = "\n".join(part for part in (text, annotation_text) if part)
                 if not text:
                     continue
                 machine = self._detect_machine(text)
-                for match in marker.finditer(text):
-                    item_number = self._normalized_item_number(match.group(1))
-                    if not item_number:
-                        continue
-                    assignments.append({
-                        "item": item_number,
-                        "marker": f"{order_token}.{item_number}",
-                        "pageNumber": page_index + 1,
-                        "machine": machine,
-                    })
+                page_items: set[str] = set()
+                for marker in marker_patterns:
+                    for match in marker.finditer(text):
+                        item_number = self._normalized_item_number(match.group(1))
+                        if not item_number or item_number in page_items:
+                            continue
+                        page_items.add(item_number)
+                        assignments.append({
+                            "item": item_number,
+                            "marker": f"{order_token}.{item_number}",
+                            "pageNumber": page_index + 1,
+                            "machine": machine,
+                        })
             parse_succeeded = True
         except Exception:
             # A locked/partially copied network PDF is not authoritative evidence
@@ -1101,30 +1401,72 @@ class ProductionFileService:
             row["machineHint"] = str(machine_hint)
         return row
 
-    def _exact_order_sketches(self, order: Any) -> list[ProductionAsset]:
-        """Probe the maintained <A&W order>.pdf path, irrespective of file age.
+    @staticmethod
+    def _job_identity_tokens(job: Any) -> list[str]:
+        """Return bounded filename/search identities for a Job Nr.
 
-        Only deferred Order Details media calls use this bounded lookup. No
-        directory walk or PDF read is added to Scan/status/catalog hot paths.
-        A failed share probe retains learned pages for offline preview.
+        A+W/browser Job fields can carry descriptive text after the numeric Job Nr.
+        Production files frequently use only that leading number (for example
+        ``89883882.egl``), so do not require the whole display string to be present.
         """
-        token = str(order or "").strip()
-        if not self.enabled or not re.fullmatch(r"\d{6}", token):
+        text = str(job or "").strip()
+        if not text:
+            return []
+        numeric = re.findall(r"(?<!\d)\d{6,12}(?!\d)", text)
+        if numeric:
+            return list(dict.fromkeys(_compact(value) for value in numeric[:2] if _compact(value)))
+        compact = _compact(text)
+        return [compact] if compact else []
+
+    def _exact_sketches_for_token(self, token: str) -> list[ProductionAsset]:
+        """Probe one deferred sketch identity without walking the full share."""
+        token = str(token or "").strip()
+        if not self.enabled or not re.fullmatch(r"\d{6,12}", token):
             return []
         with self._sketch_order_lock:
             now = time.time()
-            learned = [a for a in self._requested_sketches.values() if a.path.stem == token]
+            learned = [a for a in self._requested_sketches.values() if a.path.stem.startswith(token)]
             ttl = self.cache_seconds if learned else 3
             if now - self._sketch_order_checked.get(token, 0) < ttl:
                 return learned
             root = Path(self._resolved_roots.get("sketch") or self.roots["sketch"])
-            path = root / f"{token}.pdf"
+
+            candidate_paths: list[Path] = []
+            exact_path = root / f"{token}.pdf"
             try:
-                info = path.stat()
-                if not stat_module.S_ISREG(info.st_mode):
-                    return []
+                info = exact_path.stat()
+                if stat_module.S_ISREG(info.st_mode):
+                    candidate_paths.append(exact_path)
             except FileNotFoundError:
-                # A reachable folder proves deletion; a disconnected share does not.
+                pass
+            except OSError:
+                self._sketch_order_checked[token] = now
+                return learned
+
+            # Manual/revised files can retain the Order or Job prefix while adding
+            # a human note. Enumerate only that one prefix; never recurse the share.
+            if not candidate_paths:
+                try:
+                    for path in root.glob(f"{token}*.pdf"):
+                        stem = path.stem
+                        if not stem.startswith(token):
+                            continue
+                        suffix = stem[len(token):]
+                        if suffix and suffix[0].isdigit():
+                            continue
+                        try:
+                            info = path.stat()
+                        except OSError:
+                            continue
+                        if stat_module.S_ISREG(info.st_mode):
+                            candidate_paths.append(path)
+                        if len(candidate_paths) >= 8:
+                            break
+                except OSError:
+                    self._sketch_order_checked[token] = now
+                    return learned
+
+            if not candidate_paths:
                 try:
                     reachable = root.is_dir()
                 except OSError:
@@ -1137,24 +1479,61 @@ class ProductionFileService:
                     learned = []
                 self._sketch_order_checked[token] = now
                 return learned
-            except OSError:
+
+            fresh_assets: list[ProductionAsset] = []
+            for path in candidate_paths:
+                try:
+                    info = path.stat()
+                    relative = path.relative_to(root).as_posix()
+                except (OSError, ValueError):
+                    continue
+                asset = ProductionAsset(
+                    "sketch", root, path, relative, path.name, ".pdf",
+                    self._asset_id("sketch", relative), _compact(relative), info.st_mtime,
+                )
+                fresh_assets.append(asset)
+            if not fresh_assets:
                 self._sketch_order_checked[token] = now
                 return learned
-            relative = path.relative_to(root).as_posix()
-            asset = ProductionAsset("sketch", root, path, relative, path.name, ".pdf",
-                                    self._asset_id("sketch", relative), _compact(relative), info.st_mtime)
+
             with self._lock:
-                self._requested_sketches[asset.asset_id] = asset
-                self._asset_lookup[asset.asset_id] = asset
+                fresh_ids = {asset.asset_id for asset in fresh_assets}
+                for old in learned:
+                    if old.asset_id not in fresh_ids:
+                        self._requested_sketches.pop(old.asset_id, None)
+                        self._asset_lookup.pop(old.asset_id, None)
+                for asset in fresh_assets:
+                    self._requested_sketches[asset.asset_id] = asset
+                    self._asset_lookup[asset.asset_id] = asset
                 self._sketch_order_checked[token] = now
                 while len(self._requested_sketches) > 512:
                     oldest = next(iter(self._requested_sketches))
                     self._requested_sketches.pop(oldest)
                 if len(self._sketch_order_checked) > 1024:
                     self._sketch_order_checked.pop(next(iter(self._sketch_order_checked)))
-            if not learned or learned[0].modified_at != asset.modified_at:
+
+            previous = {(a.asset_id, float(a.modified_at or 0)) for a in learned}
+            current = {(a.asset_id, float(a.modified_at or 0)) for a in fresh_assets}
+            if current != previous:
                 self._schedule_persist_index(root)
-            return [asset]
+            return fresh_assets
+
+    def _exact_order_sketches(self, order: Any, job: Any = "") -> list[ProductionAsset]:
+        """Probe deferred exact/variant PDFs by Order Nr. and Job Nr.
+
+        v0.520 keeps Order Nr. first, then tries bounded numeric Job Nr. identities.
+        This covers manually named shop PDFs without adding a recursive network scan.
+        """
+        tokens = []
+        order_token = str(order or "").strip()
+        if re.fullmatch(r"\d{6,12}", order_token):
+            tokens.append(order_token)
+        tokens.extend(token for token in self._job_identity_tokens(job) if token not in tokens)
+        assets: dict[str, ProductionAsset] = {}
+        for token in tokens[:3]:
+            for asset in self._exact_sketches_for_token(token):
+                assets[asset.asset_id] = asset
+        return list(assets.values())
 
     def sketch_item_views(self, order: Any, item: Any, job: Any = "") -> list[dict[str, Any]]:
         """Return exact sketch pages for one item from order-level sketch PDFs."""
@@ -1164,8 +1543,12 @@ class ProductionFileService:
         views: list[dict[str, Any]] = []
         # Sketch filenames identify the order, not the item. Item association is
         # determined only by the Order.Item marker inside each PDF page.
-        candidates = {asset.asset_id: asset for asset in self.matches("sketch", order, "", job, limit=8, require_item=False)}
-        candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order)})
+        try:
+            recent_sketches = self.matches("sketch", order, "", job, limit=8, require_item=False)
+        except OSError:
+            recent_sketches = []
+        candidates = {asset.asset_id: asset for asset in recent_sketches}
+        candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order, job)})
         for sketch in candidates.values():
             if sketch.extension == ".pdf":
                 for assignment in self._sketch_page_assignments(sketch, order, allow_content_read=True):
@@ -1237,9 +1620,42 @@ class ProductionFileService:
         job: Any = "",
         *,
         allow_content_read: bool = True,
+        label_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         item_number = self._normalized_item_number(item)
-        sketches = self.matches("sketch", order, "", job, limit=8, require_item=False)
+        label_assignment = self._label_fabrication_assignment(label_hint)
+        # Current synchronized A+W label evidence is the cheapest and most current
+        # source when it identifies an exact machine (including the Mirror+cutout
+        # Waterjet rule). Resolve it before any deferred network PDF probe so Scan
+        # status batches do not add one share lookup per visible order.
+        if label_assignment.get("required") and self._machine_code(label_assignment.get("machine")) in {"denver", "waterjet"}:
+            return {
+                "machine": str(label_assignment.get("machine") or ""),
+                "machineCode": self._machine_code(label_assignment.get("machine")),
+                "required": True,
+                "confidence": str(label_assignment.get("confidence") or "label-machine"),
+                "source": {
+                    "kind": "aw_label",
+                    "name": "A+W Cutting Label",
+                    "reason": str(label_assignment.get("reason") or ""),
+                },
+                "sketchMatched": False,
+                "assignmentReason": str(label_assignment.get("reason") or "A+W Cutting Label identifies fabrication"),
+                "labelFabricationSignal": str(label_assignment.get("signal") or ""),
+            }
+        try:
+            recent_sketches = self.matches("sketch", order, "", job, limit=8, require_item=False)
+        except OSError:
+            recent_sketches = []
+        candidates = {asset.asset_id: asset for asset in recent_sketches}
+        # Exact/archived sketch probing is deliberately deferred to content reads.
+        # Scan's allow_content_read=False hot path remains metadata-only.
+        if allow_content_read:
+            candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order, job)})
+        sketches = list(candidates.values())
+        matched_source: dict[str, Any] | None = None
+        matched_without_machine = False
+
         for sketch in sketches:
             if sketch.extension == ".pdf":
                 assignments = self._sketch_page_assignments(sketch, order, allow_content_read=allow_content_read)
@@ -1254,12 +1670,18 @@ class ProductionFileService:
                         machine_hint=str(assignment.get("machine") or ""),
                     )
                     machine = str(assignment.get("machine") or "")
-                    return {
-                        "machine": machine,
-                        "confidence": "high" if machine else "item-matched",
-                        "source": source,
-                        "sketchMatched": True,
-                    }
+                    if machine:
+                        return {
+                            "machine": machine,
+                            "machineCode": self._machine_code(machine),
+                            "required": True,
+                            "confidence": "high",
+                            "source": source,
+                            "sketchMatched": True,
+                            "assignmentReason": "Exact sketch page identifies the fabrication machine",
+                        }
+                    matched_source = source
+                    matched_without_machine = True
                 continue
 
             # Legacy item-named text sketches remain readable on demand. They
@@ -1269,18 +1691,45 @@ class ProductionFileService:
                 machine = ""
                 if allow_content_read and sketch.extension in _TEXT_EXTENSIONS:
                     machine = self._detect_machine(self._read_machine_text(sketch))
-                return {
-                    "machine": machine,
-                    "confidence": "high" if machine else "item-matched",
-                    "source": self._public_asset_view(sketch, machine_hint=machine),
-                    "sketchMatched": True,
-                }
+                source = self._public_asset_view(sketch, machine_hint=machine)
+                if machine:
+                    return {
+                        "machine": machine, "machineCode": self._machine_code(machine), "required": True,
+                        "confidence": "high", "source": source, "sketchMatched": True,
+                        "assignmentReason": "Exact legacy sketch identifies the fabrication machine",
+                    }
+                matched_source = source
+                matched_without_machine = True
 
+        if label_assignment.get("required"):
+            return {
+                "machine": str(label_assignment.get("machine") or ""),
+                "machineCode": self._machine_code(label_assignment.get("machine")),
+                "required": True,
+                "confidence": str(label_assignment.get("confidence") or "label-required"),
+                "source": {
+                    "kind": "aw_label",
+                    "name": "A+W Cutting Label",
+                    "reason": str(label_assignment.get("reason") or ""),
+                },
+                "sketchMatched": bool(matched_without_machine),
+                "assignmentReason": str(label_assignment.get("reason") or "A+W Cutting Label requires fabrication"),
+                "labelFabricationSignal": str(label_assignment.get("signal") or ""),
+            }
+
+        if matched_without_machine:
+            return {
+                "machine": "", "required": False, "confidence": "item-matched",
+                "source": matched_source, "sketchMatched": True,
+                "assignmentReason": "Exact sketch page matched the item but did not identify a fabrication machine",
+            }
         return {
             "machine": "",
+            "required": False,
             "confidence": "unknown",
             "source": sketches[0].public() if sketches else None,
             "sketchMatched": False,
+            "assignmentReason": "",
         }
 
     def _historical_egl_match(
@@ -1349,7 +1798,80 @@ class ProductionFileService:
                     continue
                 self._fabrication_cache.pop(key, None)
 
-    def fabrication_status(
+    def _check_item_sources(self, order: Any, item: Any, job: Any) -> bool:
+        """Manual refresh of one item's metadata; never recurse the share."""
+        identities = [str(order or "").strip(), *self._job_identity_tokens(job)]
+        identities = [token for token in identities if re.fullmatch(r"\d{6,12}", token)][:3]
+        if not identities: return False
+        with self._lock:
+            for token in identities: self._sketch_order_checked.pop(token, None)
+            known_sketches = {a.asset_id: a for a in self._cache.get("sketch", (0, []))[1]}
+            known_sketches.update(self._requested_sketches)
+            for asset in known_sketches.values():
+                if self._score(asset, order, "", job) <= 0: continue
+                self._sketch_page_cache.pop(asset.asset_id, None)
+                self._sketch_empty_cache_at.pop(asset.asset_id, None)
+                self._machine_text_cache.pop(asset.asset_id, None)
+            for key in list(self._fabrication_cache):
+                if key[0] == _compact(order) and key[1] == _compact(item): self._fabrication_cache.pop(key, None)
+        sketches = self._exact_order_sketches(order, job)
+        with self._lock:
+            known_sketches.update({a.asset_id: a for a in sketches})
+            self._cache["sketch"] = (time.time(), list(known_sketches.values()))
+        reachable = False
+        for kind, extension in (("program", ".egl"), ("completed_wj", ".nce")):
+            root = Path(self._resolved_roots.get(kind) or self.roots[kind])
+            try:
+                if not root.is_dir():
+                    self._set_kind_availability(kind, False)
+                    continue
+                reachable = True
+                found = []
+                for token in identities:
+                    for path in root.glob(f"{token}*{extension}"):
+                        info = path.stat()
+                        relative = path.relative_to(root).as_posix()
+                        asset = ProductionAsset(kind, root, path, relative, path.name, extension,
+                                                self._asset_id(kind, relative), _compact(relative), info.st_mtime)
+                        if self._score(asset, order, item, job, require_item=True) > 0: found.append(asset)
+                        if len(found) >= 80: break
+                with self._lock:
+                    values = {a.asset_id: a for a in self._cache.get(kind, (0, []))[1]}
+                    values.update({a.asset_id: a for a in found})
+                    self._replace_kind_cache(kind, list(values.values()), True)
+            except OSError as exc:
+                self._set_kind_availability(kind, False, str(exc))
+        return reachable or bool(sketches)
+
+    def fabrication_status(self, order: Any, item: Any = "", job: Any = "", *,
+                           refresh_missing: bool = False, allow_content_read: bool = True,
+                           evidence_after: Any = "", label_hint: dict[str, Any] | None = None,
+                           force_check: bool = False) -> dict[str, Any]:
+        """Coalesce concurrent checks and reuse durable, evidence-aware results."""
+        lock = self._fabrication_check_locks[hash(_compact(order)) % len(self._fabrication_check_locks)]
+        with lock:
+            key = (_compact(order), _compact(item), "", bool(allow_content_read), str(evidence_after or "").strip(), self._fabrication_lifecycle_signature(label_hint))
+            previous = self._fabrication_cache.get(key)
+            reachable = self._check_item_sources(order, item, job) if force_check else True
+            result = self._compute_fabrication_status(order, item, job, refresh_missing=refresh_missing,
+                                                     allow_content_read=allow_content_read,
+                                                     evidence_after=evidence_after, label_hint=label_hint)
+            if force_check:
+                kind = {"denver": "program", "waterjet": "completed_wj"}.get(result.get("assignedMachineCode"))
+                result["checkUnavailable"] = not result.get("availability", {}).get(kind) if kind else not reachable
+                if result["checkUnavailable"] and previous:
+                    result = {**previous[1], "remembered": True, "checkUnavailable": True,
+                              "availability": result.get("availability"), "blockStaging": False, "enforceable": False}
+                    self._fabrication_cache[key] = previous
+                elif previous and previous[1].get("fabricated") is True and not result.get("evidence"):
+                    # File archival is not a reject or a new generation. Keep
+                    # the completion observation for this unchanged identity.
+                    result = {**previous[1], "checkedAt": result["checkedAt"], "remembered": True,
+                              "evidence": {**(previous[1].get("evidence") or {}), "historical": True, "existsNow": False}}
+                    self._fabrication_cache[key] = (time.monotonic(), result)
+            return result
+
+    def _compute_fabrication_status(
         self,
         order: Any,
         item: Any = "",
@@ -1358,16 +1880,27 @@ class ProductionFileService:
         refresh_missing: bool = False,
         allow_content_read: bool = True,
         evidence_after: Any = "",
+        label_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         evidence_after_text = str(evidence_after or "").strip()
         evidence_cutoff = self._evidence_cutoff_timestamp(evidence_after_text)
-        cache_key = (_compact(order), _compact(item), _compact(job), bool(allow_content_read), evidence_after_text)
+        lifecycle_signature = self._fabrication_lifecycle_signature(label_hint)
+        cache_key = (_compact(order), _compact(item), "", bool(allow_content_read), evidence_after_text, lifecycle_signature)
         now = time.monotonic()
         cached = self._fabrication_cache.get(cache_key)
-        cache_is_fresh = bool(cached and now - cached[0] < self.cache_seconds)
+        # Positive completion is a durable milestone. Missing/unknown evidence is
+        # only a snapshot and must expire so a cut-but-unfabricated pane is checked
+        # again after the configured production refresh interval.
+        remembered = bool(cached and cached[1].get("fabricated") is True)
+        cache_is_fresh = bool(cached and (remembered or now - cached[0] < self.cache_seconds))
         if cache_is_fresh and (not refresh_missing or not cached[1].get("blockStaging")):
             # Return a shallow copy so UI-specific callers cannot mutate the cache.
-            return dict(cached[1])
+            result = {**cached[1], "remembered": True}
+            source = {"denver": "program", "waterjet": "completed_wj"}.get(result.get("assignedMachineCode"))
+            available = self._availability_cache[1] if self._availability_cache else {}
+            if source and source in available and not available[source]:
+                result.update(blockStaging=False, enforceable=False, checkUnavailable=True)
+            return result
 
         # A previously missing evidence result requests a targeted index refresh
         # when Staging checks it again. Network shares remain off the scan/request
@@ -1375,9 +1908,11 @@ class ProductionFileService:
         # the background recent-file index and its configured refresh interval.
         refresh_evidence = bool(cache_is_fresh and refresh_missing and cached[1].get("blockStaging"))
         availability = self.availability()
-        assignment = self.machine_assignment(order, item, job, allow_content_read=allow_content_read)
+        assignment = self.machine_assignment(order, item, job, allow_content_read=allow_content_read, label_hint=label_hint)
         assigned_machine = str(assignment.get("machine") or "")
+        assigned_code = str(assignment.get("machineCode") or self._machine_code(assigned_machine) or "")
         actual_machine = assigned_machine
+        actual_code = assigned_code
         programs: list[ProductionAsset] = []
         completed_wj: list[ProductionAsset] = []
         evidence: ProductionAsset | None = None
@@ -1417,49 +1952,61 @@ class ProductionFileService:
         # instead of permanently preferring one machine type.
         if effective_denver_evidence and waterjet_evidence:
             if float(waterjet_evidence.modified_at or 0) >= float(effective_denver_evidence.modified_at or 0):
-                actual_machine, evidence = "Waterjet", waterjet_evidence
+                actual_code, actual_machine, evidence = "waterjet", self._machine_name("waterjet"), waterjet_evidence
             else:
-                actual_machine, evidence = "Denver CNC", effective_denver_evidence
-        elif assigned_machine == "Waterjet" and effective_denver_evidence:
-            actual_machine, evidence = "Denver CNC", effective_denver_evidence
-        elif assigned_machine == "Denver CNC" and waterjet_evidence:
-            actual_machine, evidence = "Waterjet", waterjet_evidence
-        elif assigned_machine == "Denver CNC":
-            evidence = effective_denver_evidence
-        elif assigned_machine == "Waterjet":
-            evidence = waterjet_evidence
+                actual_code, actual_machine, evidence = "denver", self._machine_name("denver"), effective_denver_evidence
+        elif assigned_code == "waterjet" and effective_denver_evidence:
+            actual_code, actual_machine, evidence = "denver", self._machine_name("denver"), effective_denver_evidence
+        elif assigned_code == "denver" and waterjet_evidence:
+            actual_code, actual_machine, evidence = "waterjet", self._machine_name("waterjet"), waterjet_evidence
+        elif assigned_code == "denver":
+            actual_machine, evidence = self._machine_name("denver"), effective_denver_evidence
+        elif assigned_code == "waterjet":
+            actual_machine, evidence = self._machine_name("waterjet"), waterjet_evidence
         elif effective_denver_evidence:
-            actual_machine, evidence = "Denver CNC", effective_denver_evidence
+            actual_code, actual_machine, evidence = "denver", self._machine_name("denver"), effective_denver_evidence
         elif waterjet_evidence:
-            actual_machine, evidence = "Waterjet", waterjet_evidence
+            actual_code, actual_machine, evidence = "waterjet", self._machine_name("waterjet"), waterjet_evidence
 
-        if assigned_machine == "Denver CNC":
+        if assigned_code == "denver":
             enforceable = bool(availability.get("program"))
-        elif assigned_machine == "Waterjet":
+        elif assigned_code == "waterjet":
             enforceable = bool(availability.get("completed_wj"))
-        fabricated = bool(evidence) if assigned_machine and enforceable else (bool(evidence) if evidence else None)
+        required = bool(assignment.get("required"))
+        fabricated = bool(evidence) if assigned_code and enforceable else (bool(evidence) if evidence else None)
 
         if actual_machine and fabricated is True:
             label = f"Fabricated - {actual_machine}"
-        elif assigned_machine and fabricated is False:
-            label = f"Not Fabricated - {assigned_machine}"
+        elif assigned_code in {"denver", "waterjet"} and fabricated is False:
+            label = f"Not Fabricated - {self._machine_name(assigned_code)}"
+        elif assigned_machine == "Fabrication":
+            label = "Fabrication required - machine review"
         elif assigned_machine:
-            label = f"Fabrication status unavailable - {assigned_machine}"
+            label = f"Fabrication status unavailable - {self._machine_name(assigned_code) if assigned_code else assigned_machine}"
+        elif required:
+            label = "Fabrication required - machine review"
         else:
             label = "Fabrication machine not assigned"
 
         result = {
+            "checkedAt": datetime.now(timezone.utc).isoformat(),
+            "remembered": False,
             "machine": actual_machine,
-            "assignedMachine": assigned_machine,
+            "machineCode": actual_code or assigned_code,
+            "assignedMachine": self._machine_name(assigned_code) if assigned_code else assigned_machine,
+            "assignedMachineCode": assigned_code,
             "actualMachine": actual_machine if evidence else "",
-            "machineOverride": bool(evidence and assigned_machine and actual_machine != assigned_machine),
+            "actualMachineCode": actual_code if evidence else "",
+            "machineOverride": bool(evidence and assigned_code and actual_code and actual_code != assigned_code),
             "machineConfidence": assignment.get("confidence") or "unknown",
             "machineSource": assignment.get("source"),
+            "machineAssignmentReason": str(assignment.get("assignmentReason") or ""),
+            "labelFabricationSignal": str(assignment.get("labelFabricationSignal") or ""),
             "sketchMatched": bool(assignment.get("sketchMatched")),
-            "required": bool(assigned_machine),
-            "enforceable": bool(assigned_machine and enforceable),
+            "required": required,
+            "enforceable": bool(assigned_code in {"denver", "waterjet"} and enforceable),
             "fabricated": fabricated,
-            "blockStaging": bool(assigned_machine and enforceable and fabricated is False),
+            "blockStaging": bool(assigned_code in {"denver", "waterjet"} and enforceable and fabricated is False),
             "label": label,
             "evidence": (
                 {**evidence.public(), "historical": True, "existsNow": False, "lastSeenAt": historical_denver_last_seen}
@@ -1471,16 +2018,27 @@ class ProductionFileService:
             "completedWaterjet": [asset.public() for asset in completed_wj],
             "evidenceAfter": evidence_after_text,
             "evidenceResetRequired": bool(evidence_cutoff > 0),
+            "lifecycleRevision": lifecycle_signature,
+            "identityTokens": [str(order or "").strip(), *self._job_identity_tokens(job)],
             "staleEvidence": (
                 {**stale_denver.public(), "reason": "Predates latest Internal Reject"}
                 if stale_denver
                 else ({**stale_waterjet.public(), "reason": "Predates latest Internal Reject"} if stale_waterjet else None)
             ),
         }
-        self._fabrication_cache[cache_key] = (now, result)
+        result["retryAfterSeconds"] = 0 if fabricated is True else self.cache_seconds
+        with self._lock:
+            self._fabrication_cache[cache_key] = (now, result)
+            while len(self._fabrication_cache) > 10000:
+                self._fabrication_cache.pop(next(iter(self._fabrication_cache)))
+        if allow_content_read:
+            self._schedule_persist_index(self.roots["sketch"])
         return dict(result)
 
-    def item_assets(self, order: Any, item: Any = "", job: Any = "", *, evidence_after: Any = "") -> dict[str, Any]:
+    def item_assets(
+        self, order: Any, item: Any = "", job: Any = "", *,
+        evidence_after: Any = "", label_hint: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         # Hardware lists are commonly order-level documents, but sketches and
         # programs are item-specific production records. Keep sibling item files
         # out of an item's Order Details card when an item number is available.
@@ -1497,14 +2055,18 @@ class ProductionFileService:
                 asset.public()
                 for asset in self.matches("program", order, item, job, limit=12, require_item=require_item)
             ],
-            "fabrication": self.fabrication_status(order, item, job, evidence_after=evidence_after),
+            "fabrication": self.fabrication_status(order, item, job, evidence_after=evidence_after, label_hint=label_hint),
         }
 
     def order_assets(self, order: Any, job: Any = "") -> dict[str, Any]:
         """Return order-level documents without assigning them to one item."""
+        sketches = {asset.asset_id: asset for asset in self.matches("sketch", order, "", job, limit=40)}
+        for asset in self._exact_order_sketches(order, job):
+            sketches[asset.asset_id] = asset
+        ordered_sketches = sorted(sketches.values(), key=lambda asset: (-float(asset.modified_at or 0), asset.relative.lower()))
         return {
             "hardware": [asset.public() for asset in self.matches("hardware", order, "", job, limit=20)],
-            "sketches": [asset.public() for asset in self.matches("sketch", order, "", job, limit=40)],
+            "sketches": [asset.public() for asset in ordered_sketches[:40]],
         }
 
     def open_asset(self, asset_id: str) -> dict[str, Any]:

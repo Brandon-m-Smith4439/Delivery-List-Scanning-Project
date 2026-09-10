@@ -2154,7 +2154,9 @@ class Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             compact = str(params.get("compact", ["0"])[0]).lower() in {"1", "true", "yes"}
             lists = STORE.get_delivery_lists_compact(user) if compact else STORE.get_delivery_lists(user)
-            self.send_json({"lists": lists, "compact": compact})
+            service = getattr(STORE, "production_files", None)
+            self.send_json({"lists": lists, "compact": compact,
+                            "fabricationRevision": service.fabrication_revision() if service else ""})
             return
 
         if parsed.path == "/api/scan/date":
@@ -2264,6 +2266,13 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_permission("manage_bay_auto_assigner"):
                 return
             self.send_json(STORE.get_bay_auto_assign_settings())
+            return
+
+        if parsed.path == "/api/machine-configuration":
+            if not self.current_user():
+                self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                return
+            self.send_json(STORE.get_machine_configuration())
             return
 
         if parsed.path == "/api/admin/production-files":
@@ -3018,6 +3027,11 @@ class Handler(SimpleHTTPRequestHandler):
                 # broader Global Search permission. Keep every requested Order/Item
                 # constrained to active list stages this user can already view.
                 raw_items = STORE.filter_accessible_production_status_requests(user, raw_items)
+                force_check = data.get("forceCheck") is True
+                if force_check and len(raw_items) != 1:
+                    self.send_json({"error": "Check Fab accepts one piece at a time."}, HTTPStatus.BAD_REQUEST)
+                    return
+                label_hints = STORE.aw_fabrication_hints_for_requests(raw_items)
                 results = []
                 for row in raw_items[:80]:
                     if not isinstance(row, dict):
@@ -3028,11 +3042,29 @@ class Handler(SimpleHTTPRequestHandler):
                     if not order:
                         continue
                     evidence_after = str(row.get("lastRejectedAt") or "").strip() or STORE.latest_internal_reject_at(order, item)
+                    request_key = str(row.get("key") or f"{order}:{item}:{job}")
                     status = service.fabrication_status(
-                        order, item, job, allow_content_read=True, evidence_after=evidence_after
+                        order, item, job, allow_content_read=True, evidence_after=evidence_after,
+                        label_hint=label_hints.get(request_key),
+                        force_check=force_check,
                     )
-                    results.append({"key": str(row.get("key") or f"{order}:{item}:{job}"), "order": order, "item": item, "job": job, "status": status})
-                self.send_json({"results": results})
+                    cutting = dict(label_hints.get(request_key) or {})
+                    cutting.pop("lifecycleRevision", None)
+                    if status.get("fabricated") is True and not cutting.get("complete"):
+                        # Verified downstream fabrication also proves that this
+                        # lifecycle passed Cutting, even if the next scheduled
+                        # A+W synchronization has not published its booking yet.
+                        cutting.update({
+                            "state": "cut", "label": "Cut", "complete": True,
+                            "inferredFromFabrication": True,
+                            "fabricationMachine": status.get("actualMachine") or status.get("machine") or "Fabrication",
+                        })
+                    results.append({
+                        "key": request_key, "order": order, "item": item, "job": job,
+                        "status": status, "cutting": cutting,
+                        "progressRetryAfterSeconds": service.cache_seconds,
+                    })
+                self.send_json({"results": results, "fabricationRevision": service.fabrication_revision()})
                 return
 
             if parsed.path == "/api/production-files/open":
@@ -3332,6 +3364,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_cross_date_scan_settings(data, user["username"]))
+                return
+
+            if parsed.path == "/api/machine-configuration":
+                user = self.require_any_permission("manage_lookup_values", "manage_production_files")
+                if not user:
+                    return
+                self.send_json(STORE.update_machine_configuration(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/production-files":

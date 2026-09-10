@@ -1,3 +1,92 @@
+## v0.522 - Durable Fabrication Memory and Per-Piece Check Fab
+
+- Remembered fabrication checks now persist in the existing production-file index, keyed by piece identity, reject cutoff, A+W/source evidence and machine/source configuration. Completed observations survive restart and archival.
+- Production-index refresh invalidates affected order/job checks instead of discarding all results. The existing compact catalog carries a source revision so browsers refresh when production evidence changes.
+- Complete selected dates warm in bounded queued background requests after Scan paints; the browser yields between batches, deduplicates pending piece checks and retries unknown results.
+- Added **Check Fab** to each Order Details item, with an in-flight state, last-check timestamp, result feedback and source-unavailable handling. Manual checks use bounded nonrecursive identity probes and do not launch a full share traversal.
+- Status requests use authorized current database facts for product/job, piece changes and reject cutoffs. Custom machines retain their informational completion contract.
+- Application advances exactly one step from v0.521 to v0.522. SQLite remains schema **19**, with no reset or migration. See `docs/V0522_VALIDATION.md` for validation and the exact changed-file manifest.
+
+## v0.521 - Machine Library, Fabrication Warm Cache, and Order Details Controls
+
+### Machines / production files
+- Moved machine names, match terms, colors, active state, and progress placement into a new **Machines** tab in Lookup Manager. Denver and WaterJet remain protected evidence-backed identities; custom machines can be added/removed and positioned anywhere around Cutting/scanner workflow checkpoints without creating a schema migration.
+- Reduced the former Machine & Production Files GUI to **Production Files**. It now owns only integration controls, cache/lookback settings, production-source folders, and index refresh. Name/color/rank-only machine edits stay local; detection-term changes refresh only sketch assignment metadata instead of causing a full production-share rescan.
+- Added authenticated lightweight machine-configuration read/write endpoints backed by the existing production-file settings metadata and audit trail.
+
+### Scan / Print & Export
+- Loading/selecting a delivery date now prewarms fabrication status for the full date in bounded 80-row batches after the Scan payload paints. Revision-aware fabrication keys are retained in a five-delivery LRU; evicting the oldest date removes only keys that are no longer referenced by another retained date.
+- Machine filters are rendered from the shared machine library. Scan and Print / Export use each machine's configured color and display name; All Machines keeps the standard Print filter appearance.
+- Replaced the previous conditional filter jump with a short eased scroll animation that reveals the Scan filter drawer while respecting reduced-motion preferences.
+
+### Order Details / A+W
+- A+W Internal Reject rows now display reject **Location** as Machine first, with source location/registration/work type/machine only as fallbacks, and use larger normalized compact-row typography.
+- Reorganized the item header into one workstation-width row with a larger Order/Item identity plus Customer, Glass, Size, Qty, and Delivery fields.
+- Restored persistent sketch maximize visibility, added compact print icons to the sketch and Cutting Label, removed the old standalone Print action, and placed the remaining production actions at the bottom-left of the right production column.
+- Slightly increased sketch/label allocation while reducing the Progress/A+W column, and kept full stage-specific icons when checkpoints complete.
+
+### Validation
+- Focused v0.521 compatibility coverage passes **6/6** and the complete maintained suite passes **305/305 tests**. JavaScript syntax and Python parse/import checks pass from the release source.
+- A copied schema-19 database changes no table row counts on repeated initialization, passes SQLite integrity validation, and reports **0 foreign-key violations**. The isolated v0.521 server/API/cache-key smoke passes and shuts down cleanly.
+- SQLite remains schema **19**; this release adds no migration, reset, seed, or production-data replacement. Localhost Chromium rendering remains unavailable in this environment, so the final responsive visual walkthrough is deployment-side.
+
+## v0.520 - Job Identity, Print Machine Filters, and Order Details Compaction
+
+### Production files
+- Extended production-file identity matching to bounded A+W Job Nr. tokens as a secondary identity to Order Nr. Archived exact Job-named sketches can be learned by the existing deferred sketch path, and recent Denver `.egl` / completed WaterJet `.nce` files named exactly by Job Nr. participate in the maintained fabrication evidence matcher.
+- Kept the new identity path bounded: no recursive full-share scan was added to Scan, Search, or Print hot paths.
+
+### Scan / Print & Export
+- Opening Scan Filters now scrolls the page just far enough to expose the compact filter panel instead of leaving its lower controls below the viewport.
+- Added a Machine section to Print / Export while preserving the existing two-row filter organization. Status and Attention are slightly more compact and Machine adds All Machines, No Fab, WaterJet, and Denver using the existing bounded fabrication-status cache/API.
+- Machine selections stay selected while their bounded status batch is still loading, avoiding a transient fallback to All Machines.
+
+### Order Details
+- Reduced the desktop Order Details width modestly, kept the item sketch compact, and widened the Cutting Label just enough to expose its edges without excess side whitespace.
+- Removed the redundant Order / Item / Page caption below item sketches, removed the Cutting Label physical-piece subtitle and Prior generations block, and restored the visible top-left item-sketch maximize control.
+- Moved item Open Sketch / Print / Program / Hardware controls to the bottom-left of the complete item card. The overview Open Sketch action opens the full source sketch PDF, with Hardware beside it.
+- Kept Order/Item, glass type, size, quantity, and delivery date horizontal on workstation widths and normalized A+W reject rows with deliberate column spacing and the abbreviated `OPT` heading.
+
+### Validation
+- Focused v0.520 compatibility coverage passes **5/5** and the complete maintained suite passes **302/302 tests**. JavaScript syntax, Python parse/import, copied SQLite integrity/foreign-key, and isolated server/API checks pass.
+- SQLite remains schema **19**; this release adds no migration or production-data reset. Localhost rendering remains administratively unavailable in this environment, so final responsive visual confirmation remains deployment-side.
+
+## v0.519 - Order Details Layout and Header Polish
+
+### Order Details
+- Restored the first-page order/shower sketch overview above the item workflow cards.
+- Returned desktop item layout to a compact small sketch, tightly fitted Cutting Label, and right-side Progress/A+W/reject production column; narrower screens collapse deliberately instead of forcing horizontal progress scrolling.
+- Switched the Order Details title back to the shared modal `h2` hierarchy and Segoe UI typography, added maintained route-color treatment, and enlarged the Delivery Date display.
+- Strengthened the per-item title band with the configured glass-type color while keeping Order/Item and glass type on one line.
+- Reduced Cutting Label whitespace while preserving its full edge-to-edge thumbnail content.
+
+### Scan
+- Increased compact progress checkpoint width slightly and expanded the icon column/left padding so stage icons have more breathing room without increasing row height.
+
+### Validation
+- The complete maintained suite passes **300/300 tests**; JavaScript syntax/import checks and isolated server/API startup pass. SQLite remains schema **19**; this release adds no migration or production-data reset.
+- Headless Chromium is administratively blocked from localhost in this environment, so final responsive visual verification remains deployment-side.
+
+## v0.518 - Manual Fabrication Detection and Order Details Polish
+
+### Fabrication / sketches
+- Extended deferred sketch parsing to include PDF annotation/markup text so manually added WaterJet/Denver notes can participate in machine assignment without OCR. Explicit manual Order/Item marker forms are accepted alongside the canonical `Order.Item` marker.
+- Extended the bounded exact-order sketch fallback to human-suffixed filenames such as `238445 Mirror.pdf`; old exact/variant sketches now feed both sketch display and machine assignment while Scan hot paths remain metadata-only.
+- Added A+W Cutting Label fabrication inference on the existing synchronized generation payload. Explicit machine terms assign Denver/Waterjet; Mirror plus internal cutout/hole/drill/notch/slot evidence assigns Waterjet; generic fabrication evidence remains required but machine-unassigned for operator review.
+- Added one bounded, reject-aware A+W label-hint read for production-status batches and reused it in Order Details, production hydration, and staging preflight instead of creating a second fabrication data layer.
+
+### Order Details
+- Rebuilt the modal header around Job Nr., customer, route, and delivery date and replaced the repetitive order overview with a compact Production Snapshot showing items, pieces, Cutting completion, fabrication mix, and attention.
+- Replaced the repeated per-item information grid with one boxed identity header containing Order/Item, glass type in its configured color, size, quantity, and delivery date. Removed the redundant top-right fabricated-status badge and moved Progress directly into the production workspace.
+- Tightened the Cutting Label column to the rendered label width plus minimal padding so the sketch receives the remaining horizontal space.
+- Condensed each A+W Internal Reject into one operational row with Eastern timestamp, reason, machine, qty, rejected by, Batch, Optimization, and optimization status. Current Batch/Optimization/status remains separate and always describes the newest generation.
+
+### Validation
+- Added regressions for old manually annotated/order-suffixed PDFs, Mirror + cutout label inference, generic fabrication label evidence, bounded A+W generation hint hydration, and the v0.518 Order Details structure/styles. The focused set passes **11/11** and the complete maintained suite passes **299/299 tests**.
+- `static/js/app.js` passes Node syntax validation; all **36 Python source files** parse and changed runtime modules import successfully without bytecode churn.
+- A verified isolated schema-11 → schema-19 upgrade preserves all **44 pre-existing business-table row counts**, passes SQLite integrity/foreign-key checks, and applies nothing on a second migration pass. SQLite remains schema **19**; v0.518 adds no migration, reset, seed, or production-data replacement.
+- The bounded A+W label-hint resolver handles 80 status requests in about **1.4 ms median** on the isolated upgraded copy. Isolated v0.518 server/API startup and clean shutdown pass. Headless Chromium times out without producing a localhost screenshot, so responsive visual verification remains deployment-side.
+
 ## v0.517 - Scan Return Reliability and Source-Grounded Sketch Recovery
 
 ### Startup and Scan

@@ -7472,3 +7472,54 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   .scan-page .delivery-table th:nth-child(8),
   .scan-page .delivery-table td:nth-child(8) { width: 27% !important; }
 }
+
+/* ========================================================================== */
+/* v0.519 Scan progress icon breathing room                                   */
+/* ========================================================================== */
+.scan-page .scan-date-wide-progress-v485 > span,
+.scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+.scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+  width: 104px !important;
+  min-width: 104px !important;
+  flex-basis: 104px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  grid-template-columns: 18px minmax(0, 1fr) auto !important;
+  column-gap: 5px !important;
+  padding-left: 8px !important;
+  padding-right: 6px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  width: 16px !important;
+  height: 16px !important;
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .scan-date-wide-progress-v485 > span,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+    width: 98px !important;
+    min-width: 98px !important;
+    flex-basis: 98px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.521 configurable machine filter palette                                 */
+/* ========================================================================== */
+.scan-filter-machine-section-v512 .scan-machine-filter-v521 {
+  border-color: color-mix(in srgb, var(--machine-filter-color, #64748b) 42%, #cbd9e4) !important;
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521 > i {
+  width: 7px;
+  min-width: 7px;
+  align-self: stretch;
+  border-radius: 4px;
+  background: var(--machine-filter-color, #64748b);
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active,
+.scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] {
+  border-color: var(--machine-filter-color, #64748b) !important;
+  background: color-mix(in srgb, var(--machine-filter-color, #64748b) 12%, #fff) !important;
+}

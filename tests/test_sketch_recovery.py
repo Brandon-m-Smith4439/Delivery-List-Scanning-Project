@@ -115,3 +115,139 @@ def test_reference_lookup_requires_exact_item_and_fresh_unambiguous_source(tmp_p
     other = s.roots['program'] / '238001001.dxf'; write_dxf(other, RECT.replace('30\n','31\n'))
     s._reference_geometry_cache.clear()
     assert s.reference_geometry('238001','001') is None
+
+
+def write_annotated_pdf(path, page_text, annotation_text):
+    """Create one page whose operator markup lives in PDF annotation metadata."""
+    from pypdf import PdfWriter
+    from pypdf.generic import (
+        ArrayObject,
+        DecodedStreamObject,
+        DictionaryObject,
+        FloatObject,
+        NameObject,
+        TextStringObject,
+    )
+    writer = PdfWriter()
+    page = writer.add_blank_page(612, 792)
+    font = DictionaryObject({
+        NameObject('/Type'): NameObject('/Font'),
+        NameObject('/Subtype'): NameObject('/Type1'),
+        NameObject('/BaseFont'): NameObject('/Helvetica'),
+    })
+    page[NameObject('/Resources')] = DictionaryObject({NameObject('/Font'): DictionaryObject({NameObject('/F1'): writer._add_object(font)})})
+    stream = DecodedStreamObject()
+    stream.set_data(f'BT /F1 14 Tf 20 700 Td ({page_text}) Tj ET'.encode())
+    page[NameObject('/Contents')] = writer._add_object(stream)
+    annotation = DictionaryObject({
+        NameObject('/Type'): NameObject('/Annot'),
+        NameObject('/Subtype'): NameObject('/Text'),
+        NameObject('/Contents'): TextStringObject(annotation_text),
+        NameObject('/Rect'): ArrayObject([FloatObject(20), FloatObject(620), FloatObject(60), FloatObject(660)]),
+    })
+    page[NameObject('/Annots')] = ArrayObject([writer._add_object(annotation)])
+    with path.open('wb') as output:
+        writer.write(output)
+
+
+def test_manual_variant_sketch_annotation_can_assign_waterjet(tmp_path):
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '238445 Mirror markup.pdf'
+    write_annotated_pdf(pdf, 'ORDER 238445 ITEM 1', 'WATERJET - manual internal cutout')
+    old = time.time() - 100 * 86400
+    os.utime(pdf, (old, old))
+
+    # The rolling index excludes this old sketch. Deferred exact-order lookup
+    # still finds the human-suffixed filename and reads the manual annotation.
+    assert s.assets('sketch') == []
+    views = s.sketch_item_views('238445', '001')
+    assert len(views) == 1
+    assert views[0]['pageNumber'] == 1
+    assert views[0]['machineHint'] == 'Waterjet'
+    assignment = s.machine_assignment('238445', '001', allow_content_read=True)
+    assert assignment['required'] is True
+    assert assignment['machine'] == 'Waterjet'
+    assert assignment['sketchMatched'] is True
+
+
+def test_cutting_label_infers_mirror_cutout_and_generic_fabrication(tmp_path):
+    s = service(tmp_path)
+    mirror = s.machine_assignment(
+        '238445', '001', allow_content_read=True,
+        label_hint={
+            'productDescription': '1/4 Mirror',
+            'processRows': [{'processProductDescription': 'Internal Cutout Macro'}],
+        },
+    )
+    assert mirror['required'] is True
+    assert mirror['machine'] == 'Waterjet'
+    assert mirror['confidence'] == 'label-mirror-cutout'
+
+    # Mirror labels may name the topology rather than literally saying CUTOUT.
+    mirror_slot = s.machine_assignment(
+        '238445', '002', allow_content_read=True,
+        label_hint={
+            'productDescription': '1/4 Mirror',
+            'processRows': [{'processProductDescription': 'BCU4 Slot MACRO'}],
+        },
+    )
+    assert mirror_slot['required'] is True
+    assert mirror_slot['machine'] == 'Waterjet'
+
+    generic = s.machine_assignment(
+        '238446', '001', allow_content_read=True,
+        label_hint={
+            'productDescription': '3/8 Clear Tempered',
+            'processRows': [{'workType': 'Fabrication'}],
+        },
+    )
+    assert generic['required'] is True
+    assert generic['machine'] == 'Fabrication'
+    assert generic['confidence'] == 'label-required'
+
+
+def test_job_number_identity_finds_archived_sketch_and_machine_files(tmp_path):
+    """Job Nr. is a bounded secondary production-file identity, not an Order-only fallback."""
+    s = service(tmp_path)
+    s.roots['completed_wj'].mkdir(parents=True, exist_ok=True)
+    job = '89883882 RCM75'
+
+    # The archived sketch is older than the rolling seven-day index and named by
+    # Job Nr., while the page itself still carries the authoritative Order.Item.
+    pdf = s.roots['sketch'] / '89883882 manually marked.pdf'
+    write_pdf(pdf, ['Order overview', '238900.1 WATERJET'])
+    old = time.time() - 100 * 86400
+    os.utime(pdf, (old, old))
+    assert s.assets('sketch') == []
+    views = s.sketch_item_views('238900', '001', job)
+    assert len(views) == 1
+    assert views[0]['pageNumber'] == 2
+    assert views[0]['name'] == pdf.name
+
+    # Recent machine outputs sometimes use only the Job Nr. filename. These are
+    # accepted for machine evidence while sketches still require page identity.
+    program = s.roots['program'] / '89883882.egl'
+    program.write_text('DENVER PROGRAM', encoding='utf-8')
+    waterjet = s.roots['completed_wj'] / '89883882.nce'
+    waterjet.write_text('WATERJET COMPLETE', encoding='utf-8')
+    assert [asset.name for asset in s.matches('program', '238900', '001', job, require_item=True)] == [program.name]
+    assert [asset.name for asset in s.matches('completed_wj', '238900', '001', job, require_item=True)] == [waterjet.name]
+    assert not s.matches('program', '238900', '001', '89883883', require_item=True)
+    assert not s.matches('completed_wj', '238900', '001', '89883883', require_item=True)
+
+
+
+def test_v521_configurable_machine_definition_controls_detection_color_and_rank(tmp_path):
+    s = service(tmp_path)
+    s.configure({
+        'machines': [
+            {'code': 'denver', 'name': 'Denver CNC', 'terms': ['DENVER'], 'color': '#2563eb', 'progressRank': 0, 'active': True, 'completionKind': 'denver'},
+            {'code': 'waterjet', 'name': 'WaterJet', 'terms': ['WATERJET'], 'color': '#7c3aed', 'progressRank': 0, 'active': True, 'completionKind': 'waterjet'},
+            {'code': 'edge-polisher', 'name': 'Edge Polisher', 'terms': ['KODIAK POLISHER', 'EDGE POLISH'], 'color': '#118855', 'progressRank': -15, 'active': True, 'completionKind': 'custom'},
+        ]
+    })
+    machines = {row['code']: row for row in s.settings_snapshot()['machines']}
+    assert machines['edge-polisher']['name'] == 'Edge Polisher'
+    assert machines['edge-polisher']['color'] == '#118855'
+    assert machines['edge-polisher']['progressRank'] == -15
+    assert s._detect_machine('Route note: KODIAK POLISHER required') == 'Edge Polisher'

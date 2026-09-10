@@ -4006,6 +4006,15 @@ body button.app-primary-button.production-detail-action-v480:hover {
 .production-generated-sketch-canvas-v516 .gsk-machine { fill: #2177ce; font: 700 14px Arial, sans-serif; }
 .production-generated-sketch-canvas-v516 .gsk-edge { fill: #2c3137; font: 8px Arial, sans-serif; }
 .production-generated-sketch-canvas-v516 .gsk-warning { fill: #a14f25; font: 700 8px Arial, sans-serif; letter-spacing: .4px; }
+
+.production-fab-memory-v522 {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--muted, #526477);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+[data-check-fab-v522] { min-height: 44px; }
 .production-generated-sketch-caption-v516 b { color: #8a4c2e !important; }
 
 /* At common 15- to 17-inch workstation widths, keep sketch and label together
@@ -4030,4 +4039,902 @@ body button.app-primary-button.production-detail-action-v480:hover {
   .production-item-facts-v516 { grid-template-columns: 1fr 1fr !important; }
   .production-item-actions-v516 { justify-content: stretch !important; }
   .production-item-actions-v516 > button { flex: 1 1 120px !important; }
+}
+
+/* ========================================================================== */
+/* v0.518 label-aware fabrication + compact Order Details production workspace */
+/* ========================================================================== */
+.production-explorer-header-v470 .production-explorer-title-group-v518 {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.production-explorer-title-row-v518 {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.production-explorer-title-row-v518 h0 {
+  margin: 0;
+  min-width: 0;
+  color: #0a355c;
+  font-size: clamp(23px, 2vw, 31px);
+  line-height: 1.05;
+  letter-spacing: -.025em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-explorer-title-row-v518 time {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #c4d5e3;
+  border-radius: 999px;
+  background: #f7fafc;
+  color: #31536f;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.production-explorer-title-group-v518 > p {
+  margin: 4px 0 0;
+  color: #527089;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.production-order-overview-v518 {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #c7d9e6;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbfd 0%, #f1f7fb 100%);
+}
+.production-order-overview-v518 > div:first-child {
+  display: grid;
+  gap: 1px;
+}
+.production-order-overview-v518 > div:first-child small {
+  color: #5b7890;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.production-order-overview-v518 > div:first-child strong {
+  color: #123d62;
+  font-size: 15px;
+}
+.production-order-snapshot-v518 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, .7fr)) minmax(210px, 1.6fr) minmax(80px, .7fr);
+  gap: 7px;
+  min-width: 0;
+}
+.production-order-snapshot-v518 > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid #d5e1e9;
+  border-radius: 8px;
+  background: #fff;
+}
+.production-order-snapshot-v518 small {
+  color: #6b8194;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.production-order-snapshot-v518 b {
+  color: #173e61;
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-order-overview-actions-v518 {
+  justify-content: flex-end !important;
+  margin: 0 !important;
+  white-space: nowrap;
+}
+
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+  display: grid !important;
+  grid-template-columns: minmax(470px, 1fr) 354px !important;
+  gap: 10px !important;
+  padding: 0 10px 10px !important;
+  overflow: hidden !important;
+  border: 1px solid #bfcfdb !important;
+  border-radius: 13px !important;
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(25, 58, 84, .08) !important;
+}
+.production-item-card-header-v518 {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(230px, auto) minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  margin: 0 -10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--glass-type-border, #d1dde6);
+  background: linear-gradient(90deg, var(--glass-type-soft-strong, #f5f8fb), #fff 45%, #f8fbfd 100%);
+}
+.production-item-card-identity-v518 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.production-item-card-identity-v518 strong {
+  flex: 0 0 auto;
+  color: #0b3559;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: -.02em;
+}
+.production-item-card-identity-v518 span {
+  min-width: 0;
+  color: var(--glass-type-color, #326e9a);
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-item-card-spec-v518 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: #49677f;
+  font-size: 12px;
+  font-weight: 800;
+}
+.production-item-card-spec-v518 span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-item-card-spec-v518 b {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #eef4f8;
+  color: #234a69;
+  font-size: 11px;
+}
+.production-item-card-header-v518 > time {
+  justify-self: end;
+  color: #244c6b;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.production-item-sketch-v518 {
+  grid-column: 1;
+  min-width: 0;
+}
+.production-item-cutting-label-v518 {
+  grid-column: 2;
+  width: 354px !important;
+  min-width: 354px !important;
+  max-width: 354px !important;
+  justify-self: end;
+  padding: 7px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-set-v501 {
+  width: 340px !important;
+  max-width: 340px !important;
+  margin-inline: auto !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-frame-v502 {
+  width: 340px !important;
+  max-width: 340px !important;
+  margin: 0 auto 6px !important;
+}
+.production-item-main-v518 {
+  grid-column: 1 / -1 !important;
+  width: 100%;
+  min-width: 0;
+  padding-top: 0 !important;
+}
+.production-progress-section-v518 {
+  margin-top: 2px !important;
+}
+.production-item-actions-v518 {
+  margin-top: 10px !important;
+  padding-top: 9px !important;
+  border-top: 1px solid #dce6ed;
+}
+
+/* Reject history is operational context, not another large card. Keep each A+W
+   event to one dense row on desktop and let it wrap only when the viewport needs it. */
+.production-aw-rejects-v518 {
+  margin-top: 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+.production-aw-rejects-heading-v518 {
+  min-height: 0 !important;
+  margin: 0 0 4px !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+.production-aw-rejects-heading-v518 em { display: none !important; }
+.production-aw-reject-list-v518 {
+  display: grid;
+  gap: 4px;
+}
+.production-aw-reject-v518 {
+  display: grid !important;
+  grid-template-columns: minmax(118px, auto) minmax(150px, 1.3fr) minmax(90px, .8fr) 48px minmax(105px, .9fr) 76px 88px 92px !important;
+  align-items: center !important;
+  gap: 7px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 6px 8px !important;
+  border: 1px solid #ead9d2 !important;
+  border-radius: 7px !important;
+  background: #fffaf8 !important;
+}
+.production-aw-reject-v518 > time {
+  color: #98503d;
+  font-size: 9.5px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.production-aw-reject-v518 > span {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.production-aw-reject-v518 > span small {
+  color: #a06c5c;
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.production-aw-reject-v518 > span b {
+  min-width: 0;
+  color: #67483f;
+  font-size: 9.5px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1320px) {
+  .production-order-overview-v518 { grid-template-columns: 1fr auto; }
+  .production-order-snapshot-v518 { grid-column: 1 / -1; grid-row: 2; }
+  .production-aw-reject-v518 {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+  .production-aw-reject-v518 > time,
+  .production-aw-reject-v518 > .is-reason { grid-column: span 2; }
+}
+@media (max-width: 980px) {
+  .production-explorer-title-row-v518 { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .production-order-overview-v518 { grid-template-columns: 1fr; }
+  .production-order-snapshot-v518 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-column: auto; }
+  .production-order-snapshot-v518 .is-fabrication { grid-column: 1 / -1; }
+  .production-order-overview-actions-v518 { justify-content: flex-start !important; }
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: 1fr !important;
+  }
+  .production-item-card-header-v518 {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 10px;
+  }
+  .production-item-card-identity-v518 { grid-column: 1 / -1; }
+  .production-item-card-header-v518 > time { grid-column: 2; grid-row: 2; }
+  .production-item-sketch-v518,
+  .production-item-cutting-label-v518,
+  .production-item-main-v518 { grid-column: 1 !important; }
+  .production-item-cutting-label-v518 {
+    width: min(100%, 354px) !important;
+    min-width: 0 !important;
+    max-width: 354px !important;
+    justify-self: center;
+  }
+  .production-aw-reject-v518 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .production-aw-reject-v518 > time,
+  .production-aw-reject-v518 > .is-reason { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .production-order-snapshot-v518 { grid-template-columns: 1fr 1fr; }
+  .production-item-card-identity-v518 { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .production-item-card-identity-v518 strong { font-size: 18px; }
+  .production-item-card-identity-v518 span { font-size: 15px; white-space: normal; }
+  .production-item-card-spec-v518 { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .production-item-card-header-v518 > time { align-self: end; }
+  .production-aw-reject-v518 { grid-template-columns: 1fr !important; }
+  .production-aw-reject-v518 > time,
+  .production-aw-reject-v518 > .is-reason { grid-column: 1; }
+}
+
+/* ========================================================================== */
+/* v0.519 Order Details three-column production workspace + restored overview */
+/* ========================================================================== */
+.production-explorer-panel-v470[data-mode="order"] {
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  width: min(1900px, calc(100vw - 10px)) !important;
+}
+.production-explorer-title-row-v519 {
+  align-items: center !important;
+  gap: 18px !important;
+}
+.production-explorer-title-row-v519 h2 {
+  margin: 0 !important;
+  min-width: 0;
+  color: var(--navy-dark, #0d3556) !important;
+  font-size: clamp(28px, 2.2vw, 34px) !important;
+  font-weight: 950 !important;
+  line-height: 1.05 !important;
+  letter-spacing: -.02em !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-explorer-title-row-v519 time {
+  display: grid !important;
+  gap: 0 !important;
+  min-width: 132px;
+  padding: 6px 12px !important;
+  border-color: #b7ccdc !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(22, 58, 88, .06);
+}
+.production-explorer-title-row-v519 time small {
+  color: #6b8195 !important;
+  font-size: 8px !important;
+  font-weight: 950 !important;
+  letter-spacing: .08em !important;
+}
+.production-explorer-title-row-v519 time strong {
+  color: #123d62;
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+.production-explorer-title-group-v518 > p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.production-explorer-customer-v519 {
+  color: #49677f;
+  font-size: 13px;
+  font-weight: 800;
+}
+.production-explorer-route-v519 {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--order-route-color) 44%, #ccd8e2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--order-route-color) 12%, #fff);
+  color: color-mix(in srgb, var(--order-route-color) 76%, #25435d);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+/* Restore the full Page-1 shower overview above the piece cards. */
+.production-order-overview-v519 {
+  grid-template-columns: minmax(430px, 560px) minmax(0, 1fr) !important;
+  margin-bottom: 12px;
+  border-color: #b9cedd !important;
+}
+.production-order-overview-visual-v519 { padding: 10px !important; }
+.production-order-overview-copy-v519 {
+  gap: 12px !important;
+  padding: 17px 18px !important;
+  align-content: center !important;
+}
+.production-order-overview-copy-v519 > header strong {
+  color: #0d3556 !important;
+  font-size: 24px !important;
+}
+.production-order-overview-copy-v519 .production-order-snapshot-v518 {
+  grid-template-columns: repeat(2, minmax(90px, .8fr)) minmax(190px, 1.4fr) minmax(90px, .8fr) !important;
+}
+.production-order-overview-actions-v519 { justify-content: flex-start !important; }
+
+/* Desktop piece cards: small exact sketch, compact edge-to-edge Cutting Label,
+   then Progress/A+W/reject context in the right production column. */
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+  grid-template-columns: minmax(320px, 350px) 282px minmax(0, 1fr) !important;
+  gap: 9px !important;
+  align-items: start !important;
+}
+.production-item-sketch-v518 {
+  grid-column: 1 !important;
+  width: 100% !important;
+  max-width: 350px;
+  justify-self: start;
+}
+.production-item-cutting-label-v518 {
+  grid-column: 2 !important;
+  width: 282px !important;
+  min-width: 282px !important;
+  max-width: 282px !important;
+  padding: 5px 6px !important;
+  justify-self: stretch !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-set-v501 {
+  width: 270px !important;
+  max-width: 270px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-frame-v502 {
+  width: 268px !important;
+  max-width: 268px !important;
+  height: 320px !important;
+  margin: 0 0 5px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-scale-v502 {
+  transform: scale(.615) !important;
+  transform-origin: top left !important;
+}
+.production-item-main-v519 {
+  grid-column: 3 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 0 0 2px !important;
+  align-self: stretch;
+}
+.production-progress-section-v519 { margin-top: 0 !important; }
+.production-order-item-v481 .production-progress-section-v519 .production-item-progress-v476 {
+  overflow-x: visible !important;
+  gap: 6px !important;
+}
+.production-order-item-v481 .production-progress-section-v519 .production-item-progress-v476 > span {
+  flex: 1 1 104px !important;
+  min-width: 104px !important;
+  padding-inline: 8px !important;
+}
+.production-order-item-v481 .production-progress-section-v519 .production-item-progress-v476 > i {
+  width: 14px !important;
+  flex-basis: 14px !important;
+  font-size: 17px !important;
+}
+.production-item-actions-v519 { justify-content: flex-end !important; }
+
+/* Make the piece header read like the maintained glass-type bands elsewhere:
+   Order/Item first, glass immediately to its right, with the configured glass
+   color visibly owning the header instead of only coloring the text. */
+.production-item-card-header-v518 {
+  border-left: 5px solid var(--glass-type-color, #4f7d9f) !important;
+  border-bottom-color: color-mix(in srgb, var(--glass-type-color, #4f7d9f) 30%, #d1dde6) !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--glass-type-color, #4f7d9f) 15%, #fff) 0%,
+    color-mix(in srgb, var(--glass-type-color, #4f7d9f) 7%, #fff) 34%,
+    #fff 78%) !important;
+}
+.production-item-card-identity-v518 span {
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--glass-type-color, #4f7d9f) 35%, #d2dce4);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--glass-type-color, #4f7d9f) 10%, #fff);
+  color: color-mix(in srgb, var(--glass-type-color, #4f7d9f) 78%, #183b56) !important;
+}
+
+@media (max-width: 1320px) and (min-width: 1181px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: minmax(300px, 330px) 272px minmax(0, 1fr) !important;
+  }
+  .production-item-sketch-v518 { max-width: 330px; }
+  .production-item-cutting-label-v518 { width: 272px !important; min-width: 272px !important; max-width: 272px !important; padding-inline: 3px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-set-v501 { width: 266px !important; max-width: 266px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-frame-v502 { width: 264px !important; height: 315px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-scale-v502 { transform: scale(.605) !important; }
+  .production-order-item-v481 .production-progress-section-v519 .production-item-progress-v476 > span { min-width: 98px !important; }
+}
+@media (max-width: 1180px) and (min-width: 981px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: minmax(330px, 360px) 282px !important;
+  }
+  .production-item-main-v519 { grid-column: 1 / -1 !important; }
+  .production-order-overview-v519 { grid-template-columns: minmax(390px, 500px) minmax(0, 1fr) !important; }
+}
+@media (max-width: 980px) {
+  .production-order-overview-v519 { grid-template-columns: 1fr !important; }
+  .production-order-overview-visual-v519 { border-right: 0 !important; border-bottom: 1px solid #d7e2ea; }
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 { grid-template-columns: 1fr !important; }
+  .production-item-sketch-v518,
+  .production-item-cutting-label-v518,
+  .production-item-main-v519 { grid-column: 1 !important; }
+  .production-item-sketch-v518 { max-width: 390px; justify-self: center; }
+  .production-item-cutting-label-v518 { justify-self: center !important; }
+  .production-explorer-title-row-v519 { align-items: flex-start !important; }
+  .production-explorer-title-row-v519 time { min-width: 0; text-align: left; }
+}
+
+/* ========================================================================== */
+/* v0.520 Order Details compact production layout and reject-row normalization */
+/* ========================================================================== */
+.production-explorer-panel-v470[data-mode="order"] {
+  width: min(1780px, calc(100vw - 18px)) !important;
+}
+.production-order-overview-v519 {
+  grid-template-columns: minmax(320px, 350px) minmax(0, 1fr) !important;
+}
+.production-order-overview-visual-v519 {
+  max-width: 350px;
+  padding: 8px !important;
+}
+.production-overview-sketch-v480 { grid-template-rows: auto 34px; }
+.production-overview-sketch-v480 > footer { padding: 4px 8px; }
+
+/* Keep each piece identity on one deliberate horizontal header line at desktop. */
+.production-item-card-header-v518 {
+  grid-template-columns: minmax(430px, 1.45fr) minmax(235px, .78fr) auto !important;
+  gap: 15px !important;
+  padding-block: 8px !important;
+}
+.production-item-card-identity-v518,
+.production-item-card-spec-v518 {
+  flex-wrap: nowrap !important;
+  white-space: nowrap;
+}
+.production-item-card-spec-v518 { justify-content: flex-start; }
+.production-item-card-header-v518 > time { font-size: 13px !important; }
+
+/* Small sketch, slightly wider edge-to-edge label, then production context. */
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+  grid-template-columns: minmax(315px, 335px) 300px minmax(0, 1fr) !important;
+  gap: 10px !important;
+}
+.production-item-sketch-v518 { max-width: 335px !important; }
+.production-item-sketch-v518 .production-sketch-caption-v476.production-sketch-caption-v480 { display: none !important; }
+.production-item-sketch-v518 .production-sketch-visual-v476.production-sketch-visual-v479.production-sketch-visual-v480 {
+  grid-template-rows: auto !important;
+}
+.production-item-sketch-v518 .production-sketch-maximize-v479,
+.production-item-sketch-v518 .production-sketch-maximize-v480 {
+  display: grid !important;
+  place-items: center;
+  opacity: 1 !important;
+  visibility: visible !important;
+  top: 8px !important;
+  left: 8px !important;
+  right: auto !important;
+}
+.production-item-cutting-label-v518 {
+  width: 300px !important;
+  min-width: 300px !important;
+  max-width: 300px !important;
+  padding: 5px 6px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-set-v501 {
+  width: 288px !important;
+  max-width: 288px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-frame-v502 {
+  width: 288px !important;
+  max-width: 288px !important;
+  height: 344px !important;
+  margin-inline: 0 !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-scale-v502 {
+  transform: scale(.66) !important;
+  transform-origin: top left !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-set-v502 > header > div { min-height: 14px; }
+
+/* Controls belong to the bottom-left of the complete piece card. */
+.production-item-actions-v520 {
+  grid-column: 1 / -1 !important;
+  justify-content: flex-start !important;
+  align-items: center;
+  margin: 0 !important;
+  padding: 8px 0 0 !important;
+  border-top: 1px solid #dce6ed;
+}
+
+/* Give every reject field its own deliberate column; abbreviated OPT prevents
+   the final metadata pair from colliding at workstation widths. */
+.production-aw-reject-v518 {
+  grid-template-columns: 122px minmax(190px, 1.5fr) minmax(112px, .9fr) 46px minmax(142px, 1.05fr) 72px 66px 82px !important;
+  column-gap: 13px !important;
+  row-gap: 2px !important;
+  padding: 7px 10px !important;
+  align-items: center !important;
+}
+.production-aw-reject-v518 > span { min-width: 0; }
+.production-aw-reject-v518 > span small {
+  display: block;
+  font-size: 7.25px !important;
+  letter-spacing: .035em !important;
+  white-space: nowrap;
+}
+.production-aw-reject-v518 > span b {
+  display: block;
+  overflow: hidden;
+  font-size: 9.25px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-aw-reject-v518 > time { font-size: 9.25px !important; white-space: nowrap; }
+
+@media (max-width: 1320px) and (min-width: 1181px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: minmax(300px, 320px) 286px minmax(0, 1fr) !important;
+  }
+  .production-item-sketch-v518 { max-width: 320px !important; }
+  .production-item-cutting-label-v518 { width: 286px !important; min-width: 286px !important; max-width: 286px !important; padding-inline: 4px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-set-v501 { width: 278px !important; max-width: 278px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-frame-v502 { width: 276px !important; height: 330px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-scale-v502 { transform: scale(.633) !important; }
+  .production-item-card-header-v518 { grid-template-columns: minmax(390px, 1.4fr) minmax(220px, .8fr) auto !important; }
+  .production-aw-reject-v518 {
+    grid-template-columns: 116px minmax(160px, 1.35fr) minmax(96px, .8fr) 42px minmax(120px, 1fr) 66px 58px 74px !important;
+    column-gap: 9px !important;
+  }
+}
+@media (max-width: 1180px) and (min-width: 981px) {
+  .production-order-overview-v519 { grid-template-columns: minmax(300px, 340px) minmax(0, 1fr) !important; }
+  .production-item-card-header-v518 { grid-template-columns: minmax(0, 1fr) auto !important; }
+  .production-item-card-identity-v518 { grid-column: 1; }
+  .production-item-card-spec-v518 { grid-column: 1; grid-row: 2; }
+  .production-item-card-header-v518 > time { grid-column: 2; grid-row: 1 / span 2; }
+  .production-aw-reject-v518 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 6px !important; }
+}
+@media (max-width: 980px) {
+  .production-item-card-identity-v518, .production-item-card-spec-v518 { white-space: normal; flex-wrap: wrap !important; }
+  .production-order-overview-visual-v519 { max-width: none; }
+  .production-aw-reject-v518 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 6px !important; }
+}
+
+/* ========================================================================== */
+/* v0.521 Order Details production controls + machine Lookup Manager           */
+/* ========================================================================== */
+.production-explorer-panel-v470[data-mode="order"] {
+  width: min(1740px, calc(100vw - 18px)) !important;
+}
+
+/* Keep the workstation item identity as one deliberate header row. */
+.production-item-card-header-v521 {
+  display: grid !important;
+  grid-template-columns: minmax(168px, .92fr) minmax(220px, 1.35fr) minmax(190px, 1.12fr) minmax(155px, .92fr) 70px 116px !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 8px 12px !important;
+}
+.production-item-header-field-v521 {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  align-content: center;
+  white-space: nowrap;
+}
+.production-item-header-field-v521 small {
+  color: #637d93;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .075em;
+  line-height: 1;
+}
+.production-item-header-field-v521 b,
+.production-item-header-field-v521 strong {
+  overflow: hidden;
+  color: #123b5d;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+}
+.production-item-header-field-v521.is-identity strong {
+  color: #0c3a61;
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: -.015em;
+}
+.production-item-header-field-v521.is-glass b {
+  color: color-mix(in srgb, var(--glass-type-color, #4f7d9f) 82%, #123b5d);
+  font-weight: 950;
+}
+.production-item-header-field-v521.is-date { text-align: right; }
+.production-item-header-field-v521.is-date b { font-size: 13px; font-weight: 950; }
+
+/* Slightly larger exact sketch and label, leaving a narrower but still fully
+   readable Progress/A+W column. */
+.production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+  grid-template-columns: minmax(340px, 360px) 316px minmax(0, 1fr) !important;
+  gap: 10px !important;
+}
+.production-item-sketch-v518 { max-width: 360px !important; }
+.production-item-cutting-label-v518 {
+  width: 316px !important;
+  min-width: 316px !important;
+  max-width: 316px !important;
+  padding: 5px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-set-v501 {
+  width: 306px !important;
+  max-width: 306px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-frame-v502 {
+  width: 306px !important;
+  max-width: 306px !important;
+  height: 365px !important;
+}
+.production-item-cutting-label-v518 .production-cutting-label-scale-v502 {
+  transform: scale(.70) !important;
+  transform-origin: top left !important;
+}
+.production-cutting-label-v502 .production-cutting-label-title-v500 > time,
+.production-cutting-label-v504 .production-cutting-label-title-v500 > time {
+  font-size: 13px !important;
+  font-weight: 850 !important;
+}
+
+/* Sketch page controls remain visible above the iframe; print owns top-right
+   while maximize remains top-left. */
+.production-sketch-canvas-v480,
+.production-overview-sketch-canvas-v480 { position: relative; }
+.production-item-sketch-v518 .production-sketch-maximize-v479,
+.production-item-sketch-v518 .production-sketch-maximize-v480,
+.production-overview-sketch-v480 .production-sketch-maximize-v479 {
+  z-index: 8 !important;
+  display: grid !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+.production-sketch-print-v521,
+.production-label-print-v521 {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #b8ccdc;
+  border-radius: 8px;
+  background: rgba(255,255,255,.96);
+  color: #174f7a;
+  box-shadow: 0 2px 8px rgba(20,58,89,.14);
+  cursor: pointer;
+}
+.production-sketch-print-v521 {
+  position: absolute;
+  z-index: 8;
+  top: 8px;
+  right: 8px;
+}
+.production-sketch-print-v521 svg,
+.production-label-print-v521 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.production-cutting-label-set-v501 > header { position: relative; }
+.production-label-print-v521 { margin-left: auto; flex: 0 0 30px; }
+
+/* Controls now belong to the bottom-left of the right production column,
+   immediately below A+W information and to the right of the label. */
+.production-item-main-v519 { display: flex !important; flex-direction: column !important; min-height: 100% !important; }
+.production-item-actions-v521 {
+  grid-column: auto !important;
+  justify-content: flex-start !important;
+  align-self: stretch;
+  margin-top: auto !important;
+  padding: 9px 0 0 !important;
+  border-top: 1px solid #dce6ed;
+}
+
+/* Reject history uses the A+W break Location as Machine and gets readable,
+   evenly weighted typography without growing back into large cards. */
+.production-aw-rejects-heading-v518 small { font-size: 10px !important; }
+.production-aw-rejects-heading-v518 strong { font-size: 10px !important; }
+.production-aw-reject-v518 {
+  grid-template-columns: 118px minmax(180px, 1.55fr) minmax(120px, 1fr) 48px minmax(135px, 1.08fr) 68px 62px 78px !important;
+  column-gap: 11px !important;
+  row-gap: 2px !important;
+  padding: 8px 10px !important;
+}
+.production-aw-reject-v518 > time {
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+}
+.production-aw-reject-v518 > span small {
+  font-size: 8.4px !important;
+  font-weight: 900 !important;
+  letter-spacing: .04em !important;
+}
+.production-aw-reject-v518 > span b {
+  font-size: 10.35px !important;
+  font-weight: 800 !important;
+}
+
+/* Lookup Manager owns all machine presentation/matching metadata. */
+.machine-lookup-manager-v521 .machine-lookup-editor-v521 { min-width: 0; }
+.machine-lookup-form-v521 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.machine-lookup-form-v521 > label { display: grid; gap: 6px; min-width: 0; }
+.machine-lookup-form-v521 > label.wide,
+.machine-lookup-form-v521 > aside.wide,
+.machine-lookup-form-v521 > footer { grid-column: 1 / -1; }
+.machine-lookup-form-v521 label > span:first-child {
+  color: #46647b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.machine-lookup-form-v521 input[type="text"],
+.machine-lookup-form-v521 textarea,
+.machine-lookup-form-v521 select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #bfd0dd;
+  border-radius: 9px;
+  background: #fff;
+  padding: 8px 10px;
+  font: inherit;
+}
+.machine-lookup-form-v521 textarea { min-height: 82px; resize: vertical; }
+.machine-lookup-form-v521 label small { color: #6a8193; font-size: 10px; line-height: 1.35; }
+.machine-lookup-color-field-v521 { display: flex; align-items: center; gap: 9px; min-height: 40px; }
+.machine-lookup-color-field-v521 input { width: 54px; height: 38px; padding: 2px; border: 1px solid #bfd0dd; border-radius: 8px; background: #fff; }
+.machine-lookup-color-field-v521 b,
+.machine-lookup-swatch-v521 {
+  --machine-lookup-color: #64748b;
+}
+.machine-lookup-color-field-v521 b { color: var(--machine-lookup-color); }
+.machine-lookup-active-v521 > span:nth-child(2) { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.machine-lookup-form-v521 footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #dce6ed; padding-top: 10px; }
+.machine-lookup-row-v521 {
+  display: grid !important;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.machine-lookup-swatch-v521 {
+  width: 8px;
+  align-self: stretch;
+  min-height: 48px;
+  border-radius: 6px;
+  background: var(--machine-lookup-color);
+}
+.machine-lookup-position-v521 { color: #59758a; font-size: 10px; font-weight: 750; }
+.machine-lookup-library-v521 .lookup-row-actions-v346 { align-items: center; }
+
+@media (max-width: 1450px) and (min-width: 1181px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: minmax(325px, 345px) 304px minmax(0, 1fr) !important;
+  }
+  .production-item-sketch-v518 { max-width: 345px !important; }
+  .production-item-cutting-label-v518 { width: 304px !important; min-width: 304px !important; max-width: 304px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-set-v501,
+  .production-item-cutting-label-v518 .production-cutting-label-frame-v502 { width: 294px !important; max-width: 294px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-frame-v502 { height: 350px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-scale-v502 { transform: scale(.673) !important; }
+  .production-item-card-header-v521 { grid-template-columns: minmax(155px,.9fr) minmax(190px,1.25fr) minmax(170px,1.05fr) minmax(135px,.9fr) 62px 104px !important; gap: 8px !important; }
+}
+@media (max-width: 1180px) {
+  .production-item-card-header-v521 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .production-item-header-field-v521.is-date { text-align: left; }
+}
+@media (max-width: 760px) {
+  .production-item-card-header-v521 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .machine-lookup-form-v521 { grid-template-columns: 1fr; }
+  .machine-lookup-form-v521 > label.wide,
+  .machine-lookup-form-v521 > aside.wide,
+  .machine-lookup-form-v521 > footer { grid-column: 1; }
 }

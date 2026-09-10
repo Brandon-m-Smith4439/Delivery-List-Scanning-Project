@@ -18,13 +18,13 @@
     <link rel="stylesheet" href="static/css/rejects.css?v=20260908-v0.510">
     <link rel="stylesheet" href="static/css/home.css?v=20260908-v0.510">
     <link rel="stylesheet" href="static/css/statistics.css?v=20260908-v0.514">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260908-v0.516">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260909-v0.521">
     <link rel="stylesheet" href="static/css/racks.css?v=20260908-v0.510">
     <link rel="stylesheet" href="static/css/admin.css?v=20260908-v0.513">
-    <link rel="stylesheet" href="static/css/print.css?v=20260908-v0.510">
+    <link rel="stylesheet" href="static/css/print.css?v=20260909-v0.521">
     <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.513">
     <link rel="stylesheet" href="static/css/shell.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260908-v0.516">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260910-v0.522">
     <link rel="stylesheet" href="static/css/mobile.css?v=20260909-v0.517">
 </head>
 <body data-page="home">
@@ -602,7 +602,7 @@
                       <h3>Machine</h3>
                       <span>Filter by required fabrication path</span>
                     </div>
-                    <div class="scan-filter-options">
+                    <div class="scan-filter-options" id="scanMachineFilterOptionsV521">
                       <button class="tab" data-filter="machine-no-fab" type="button">No Fab <span data-filter-count>0</span></button>
                       <button class="tab" data-filter="machine-waterjet" type="button">WaterJet <span data-filter-count>0</span></button>
                       <button class="tab" data-filter="machine-denver" type="button">Denver <span data-filter-count>0</span></button>
@@ -1608,11 +1608,11 @@
 
           <section class="panel admin-compact-panel admin-dashboard-card production-files-overview-card-v472" data-permission-any="manage_production_files">
             <div class="section-heading">
-              <h2>Machine &amp; Production Files</h2>
-              <button class="link-button" type="button" data-admin-modal="productionFiles" data-admin-gui-launch>Edit machine settings</button>
+              <h2>Production Files</h2>
+              <button class="link-button" type="button" data-admin-modal="productionFiles" data-admin-gui-launch>Edit production files</button>
             </div>
             <div id="productionFilesOverview" class="compact-list production-files-overview-v472">
-              <div><strong>Denver &amp; Waterjet</strong><span>Sketch assignment and completed-file evidence.</span></div>
+              <div><strong>Production sources</strong><span>Sketches, hardware, programs, and completed-machine evidence.</span></div>
               <div><strong>Background index</strong><span>Production shares refresh without blocking scans.</span></div>
             </div>
           </section>
@@ -1662,9 +1662,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.517">
+        <span class="footer-version-v0163" aria-label="Application version 0.522">
           <small>Version</small>
-          <strong>0.517</strong>
+          <strong>0.522</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -1764,6 +1764,11 @@
               <section class="print-filter-section-v197 print-attention-section-v203">
                 <strong class="print-filter-label-v197">Attention</strong>
                 <div id="printAttentionOptions" class="print-chip-grid-v197 print-attention-options-v197"></div>
+              </section>
+
+              <section class="print-filter-section-v197 print-machine-section-v520">
+                <strong class="print-filter-label-v197">Machine</strong>
+                <div id="printMachineOptions" class="print-chip-grid-v197 print-machine-options-v520"></div>
               </section>
             </div>
 
@@ -2044,6 +2049,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260909-v0.517"></script>
+  <script src="static/js/app.js?v=20260910-v0.522"></script>
 </body>
 </html>

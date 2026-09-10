@@ -9922,3 +9922,77 @@
   -webkit-text-fill-color: #fff !important;
   border-color: rgba(255,255,255,.38) !important;
 }
+
+/* ========================================================================== */
+/* v0.520 Print / Export machine filter                                       */
+/* ========================================================================== */
+/* Preserve the existing two-row arrangement while compressing Status and
+   Attention just enough to add an equally sized Machine section at right. */
+.print-filter-matrix-v203 {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  grid-template-areas:
+    "routes routes glass glass glass glass"
+    "status status attention attention machine machine" !important;
+  gap: 10px !important;
+}
+.print-machine-section-v520 { grid-area: machine; }
+.print-status-section-v203 .print-status-options-v197,
+.print-attention-section-v203 .print-attention-options-v197,
+.print-machine-section-v520 .print-machine-options-v520 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 5px !important;
+  align-content: start;
+}
+.print-status-section-v203 .print-filter-chip-v197,
+.print-attention-section-v203 .print-filter-chip-v197,
+.print-machine-section-v520 .print-filter-chip-v197 {
+  min-height: 32px !important;
+  padding: 4px 6px !important;
+}
+.print-status-section-v203 .print-filter-chip-v197 span,
+.print-attention-section-v203 .print-filter-chip-v197 span,
+.print-machine-section-v520 .print-filter-chip-v197 span {
+  font-size: 9.5px !important;
+  line-height: 1.08 !important;
+}
+.print-status-section-v203 .print-filter-chip-v197 b,
+.print-attention-section-v203 .print-filter-chip-v197 b,
+.print-machine-section-v520 .print-filter-chip-v197 b {
+  font-size: 11px !important;
+}
+@media (max-width: 860px) {
+  .print-filter-matrix-v203 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "routes" "glass" "status" "attention" "machine" !important;
+  }
+  .print-status-section-v203 .print-status-options-v197,
+  .print-attention-section-v203 .print-attention-options-v197,
+  .print-machine-section-v520 .print-machine-options-v520 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.521 configurable machine colors in Print / Export                       */
+/* ========================================================================== */
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521 {
+  border-color: color-mix(in srgb, var(--print-machine-color, #64748b) 48%, #cbd7df) !important;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--print-machine-color, #64748b) 80%, #fff);
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521 > span {
+  color: color-mix(in srgb, var(--print-machine-color, #64748b) 76%, #173b56);
+  font-weight: 850;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) {
+  border-color: var(--print-machine-color, #64748b) !important;
+  background: var(--print-machine-color, #64748b) !important;
+  box-shadow: none;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > span,
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > b {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+/* All Machines intentionally uses the exact shared chip treatment used by the
+   other All filters; no machine-specific accent is applied to it. */
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-all { box-shadow: none !important; }

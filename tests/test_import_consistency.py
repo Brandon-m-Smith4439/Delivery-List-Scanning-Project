@@ -155,6 +155,39 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_v521_machine_configuration_persists_without_schema_change(self) -> None:
+        verification_root = ROOT / "_verification_machine_configuration_v521"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                before_schema = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
+            saved = store.update_machine_configuration({
+                "machines": [
+                    {"code": "denver", "name": "Denver CNC", "terms": ["DENVER"], "color": "#2563eb", "progressRank": 0, "active": True, "completionKind": "denver"},
+                    {"code": "waterjet", "name": "WaterJet", "terms": ["WATERJET"], "color": "#7c3aed", "progressRank": 0, "active": True, "completionKind": "waterjet"},
+                    {"code": "edge-polisher", "name": "Edge Polisher", "terms": ["EDGE POLISH"], "color": "#118855", "progressRank": 15, "active": True, "completionKind": "custom"},
+                ]
+            }, "v521-test")
+            self.assertEqual(before_schema, 19)
+            with store.connect() as con:
+                after_schema = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
+            self.assertEqual(after_schema, 19)
+            by_code = {row["code"]: row for row in saved["machines"]}
+            self.assertEqual(by_code["edge-polisher"]["name"], "Edge Polisher")
+            self.assertEqual(by_code["edge-polisher"]["color"], "#118855")
+            self.assertEqual(by_code["edge-polisher"]["progressRank"], 15)
+            reread = {row["code"]: row for row in store.get_machine_configuration()["machines"]}
+            self.assertEqual(reread["edge-polisher"]["terms"], ["EDGE POLISH"])
+            with store.connect() as con:
+                audit = con.execute(
+                    "SELECT action FROM audit_events WHERE action='update_machine_configuration' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            self.assertIsNotNone(audit)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_aw_workbook_rm_marker_is_external_remake(self) -> None:
         fake_rows = [
             (1, {"A": '3/8" Clear Tempered'}),
@@ -3632,7 +3665,7 @@ class ImportConsistencyTests(unittest.TestCase):
 
             class FabricatedProductionFiles:
                 @staticmethod
-                def item_assets(order, item, job, *, evidence_after=""):
+                def item_assets(order, item, job, *, evidence_after="", label_hint=None):
                     return {
                         "fabrication": {
                             "fabricated": True, "actualMachine": "Denver CNC", "machine": "Denver CNC",
@@ -3690,6 +3723,32 @@ class ImportConsistencyTests(unittest.TestCase):
             unchanged = store.sync_aw_cutting_rows(booked_rows)
             self.assertEqual(unchanged["unchanged"], 2)
             self.assertEqual(unchanged["updated"], 0)
+
+            # Once Cutting is positively observed, a later incomplete-looking
+            # source snapshot in the same physical KEYINDEX lifecycle cannot
+            # erase it. A reject cutoff or a newer remake KEYINDEX still resets it.
+            regressed_rows = [dict(row) for row in booked_rows]
+            regressed_rows[1].update({
+                "optimizationStatusCode": 100, "cuttingBookingAt": "",
+                "cuttingBookingEmployee": "", "cuttingBookingRowId": "", "cutQuantity": 0,
+            })
+            store.sync_aw_cutting_rows(regressed_rows)
+            remembered_cut = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertTrue(remembered_cut["complete"])
+            self.assertEqual(remembered_cut["evidenceSource"], "remembered_cutting_completion")
+            rejected_again = store.aw_cutting_state("238221", "1", "2026-09-03T08:00:00")
+            self.assertFalse(rejected_again["complete"])
+            self.assertEqual(rejected_again["state"], "needs_recut")
+            remake_row = {
+                **common, "sourceRowId": "next-remake", "bomId": 1, "keyIndex": 3,
+                "batchJobNumber": "9300", "batchStatusCode": 400,
+                "batchCreatedAt": "2026-09-03T09:00:00", "optimizationNumber": 8400,
+                "optimizationStatusCode": 100, "aggregateId": 1000,
+            }
+            store.sync_aw_cutting_rows([remake_row])
+            remake_state = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertFalse(remake_state["complete"])
+            self.assertEqual(remake_state["keyIndex"], 3)
 
             # v0.502 regression from the live 238330 probe: the newest remake
             # generation can prove physical Cutting through PROD_OPTI_PLATES
@@ -4559,6 +4618,48 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(production["orderCount"], 4)
             self.assertEqual(sum(int(row["pieces"]) for row in production["byGlass"]), 10)
             self.assertEqual(production["rows"], [])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v518_aw_fabrication_hints_batch_current_label_context(self) -> None:
+        verification_root = ROOT / "_verification_aw_fabrication_v518"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            now = "2026-09-09T14:00:00+00:00"
+            payload = json.dumps({
+                "labelContext": {
+                    # Exercise request-product fallback so a sparse A+W label row
+                    # can still apply the Mirror + cutout shop rule.
+                    "productDescription": "",
+                    "processRows": [{"processProductDescription": "Internal Cutout Macro"}],
+                }
+            })
+            with store.connect() as con:
+                con.execute(
+                    """
+                    INSERT INTO aw_cutting_generations (
+                        order_no, item_no, key_index, batch_job_number,
+                        source_payload_json, first_seen_at, last_seen_at, synced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("238445", "001", 0, "6501", payload, now, now, now),
+                )
+                con.commit()
+            key = "238445:001:JOB"
+            hints = store.aw_fabrication_hints_for_requests([{
+                "key": key,
+                "order": "238445",
+                "item": "001",
+                "job": "JOB",
+                "product": "1/4 Mirror",
+                "lastRejectedAt": "",
+            }])
+            self.assertIn(key, hints)
+            self.assertEqual(hints[key]["productDescription"], "1/4 Mirror")
+            self.assertEqual(hints[key]["processRows"][0]["processProductDescription"], "Internal Cutout Macro")
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
