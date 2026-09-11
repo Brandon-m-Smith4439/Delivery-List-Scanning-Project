@@ -1,3 +1,118 @@
+## v0.527 - Stable Production Checks, A+W Review Flags, and Faster Navigation
+
+### Scan and production status
+- Fixed overlapping fabrication hydration work that could repeatedly replace Scan rows, flash the hovered item, and prevent Order Details from opening. Missing/partial/error responses now record a bounded attempt, queued chunks recheck freshness before I/O, and each visible hydration repaints Scan at most once.
+- Preserved lifecycle progress semantics: completed Cutting/fabrication remains remembered; unfinished status is periodically rechecked; only reject/remake lifecycle evidence resets physical progress.
+- Closed production PDF sources deterministically and removed local background cleanup races while retaining asynchronous index/preview work for mapped production shares.
+
+### A+W review and navigation performance
+- Added item and order flags for cut records with no batch/optimization and for cut records with a batch but no optimization. Order Details shows the specific review reason.
+- Replaced the ambiguous A+W time presentation with **Batch created** for batch creation timestamps and **Optimization dated** only for the optimization-date fallback.
+- Added bounded adjacent-date prefetch and foreground coalescing, moved date-wide warm ownership ahead of Scan rendering, and canceled stale Scan production work on page leave.
+- Reduced desktop sidebar hover layout/paint work through containment and a shorter, lighter transition.
+
+### Inventory, version, and validation
+- Reviewed Inventory scanning in an isolated copy of the live database: all four tabs, manual entry/history, an actual physical count update, and six responsive widths passed without changing the live database.
+- Advanced the application from **v0.526** to **v0.527**. SQLite schema remains **20**; no migration or data reset is included.
+- Browser reproduction reduced a 117-piece date from 132 fabrication calls to three bounded batches, held hover to zero extra calls, restored Order Details, and measured three date changes at 250-322 ms. JavaScript syntax, focused contracts, and the complete maintained test suite pass.
+- Runtime data, production databases/WAL/SHM, logs, credentials, verification artifacts, and generated exports remain excluded from the changed-files package.
+
+## v0.526 - Scan Cadence, Faster Date Switching, and Shared UI Polish
+
+### Scan / production performance
+- Added a bounded five-date Scan bundle cache keyed to the maintained compact catalog signature. Returning to a recent unchanged delivery date can reuse the synchronized date bundle immediately; explicit post-scan/automation refreshes bypass the cache.
+- Batched delivery-date operational line flags through `line_flags_many`, using one SQLite connection and one bounded multi-list query instead of reopening/reranking the same delivery-date data separately for each stage list.
+- Corrected automatic fabrication retry timing on Scan/prewarm. Pending rows without a `checkedAt` timestamp now fall back to the successful progress-batch timestamp, and automatic Scan/prewarm retries have a ten-minute floor.
+- Added a per-delivery-date fabrication warm lock with at most one lifecycle-signature rerun, preventing overlapping 40/80-piece production checks on large dates. The ten-second compact catalog heartbeat remains lightweight and cannot start another automatic production-progress monitor pass until the ten-minute monitor interval has elapsed.
+
+### Shared controls / machine presentation
+- Added the maintained `app-cancel-button` treatment for generic Cancel actions, preserving the shared primary-blue button system while making destructive/dismissive Cancel actions visually consistent.
+- Promoted `icon-print-btn` into the authoritative shared print-icon component and moved Order Details sketch/Cutting Label print actions onto it rather than carrying separate inline printer SVGs.
+- Fixed pending fabrication color propagation by carrying the configured machine color into both Order Details and Scan progress. A pending WaterJet step can no longer inherit the preceding Denver/left-stage color.
+- Reworked machine filters to use a subtle configured-color button surface plus circular color indicator. Removed the legacy long left-side accent rail from the affected Scan and Print / Export machine filters.
+- Expanded the Order Details header facts to **Job Nr. → Customer → Route → Delivery Date** and increased their typography while keeping the existing responsive Order Details layout.
+
+### Version / schema / validation
+- Advanced the application exactly one step from **v0.525** to **v0.526**. SQLite schema remains **20**; this release adds no migration or database reset. Browser cache keys advance only for changed `scan.css`, `print.css`, `shared-ui.css`, and `app.js`; unchanged Inventory CSS retains its v0.525 key.
+- JavaScript syntax and changed Python parse/import checks pass. Focused v0.526 checks pass **3/3**, and the complete maintained suite passes **321/321**.
+- On an isolated three-stage 9/16-style delivery-date fixture, the new batched operational-flag result matched v0.525 exactly while the measured flag-query portion fell from about **4.67 ms to 1.51 ms** (about **3.1x faster**).
+- Responsive affected-surface inspection covered desktop, vertical-tablet, tablet, phone, TC22 portrait, and TC22 landscape through a bounded static render fallback. Direct headless Chromium hangs in this container before producing a page, so interactive Chromium-only behavior remains a controlled deployment check; all spawned Chromium processes were terminated.
+- Changed-files package overlay verification passes on a freshly reconstructed v0.525 tree: extraction advances the app to v0.526 with schema 20 unchanged, leaves all 77 existing `data/` files byte-for-byte unchanged, and the installed package passes the focused contracts plus **321/321** maintained tests.
+- Runtime data, production databases/WAL/SHM, logs, credentials, verification artifacts, and generated exports remain excluded from release packages.
+
+## v0.525 - Inventory Navigation and Scan Workflow Isolation
+
+### Navigation / operator flow
+- Moved the Inventory side-panel selector from the primary production group to the lower workflow group directly between **Rejects** and **Settings**, matching the requested floor navigation order while preserving the existing Inventory icon, permissions, and responsive drawer behavior.
+- Rebuilt the Inventory sidebar glyph on the maintained SVG-mask icon system so it renders consistently in collapsed desktop navigation and the mobile/TC22 drawer instead of falling back to a solid square.
+- Added explicit Inventory page-leave cleanup: the Inventory barcode field is blurred and Inventory-only Manual Entry/History overlays are dismissed when navigating away. The active Inventory session is deliberately retained so operators can return without losing the physical count.
+
+### Normal Scan isolation
+- Kept Inventory and normal delivery scanning on separate request/write paths. Inventory uses `/api/inventory/*` and the schema-20 inventory tables; normal delivery scanning remains on `/api/scans`, `scan_events`, and `line_items.scanned_qty`.
+- Added a focused regression that starts an Airport inventory, scans a known physical piece, records a manual physical-only piece, completes the inventory, and verifies normal delivery `line_items.scanned_qty` and `scan_events` are unchanged while the Inventory records/audit trail are created.
+- Added static contracts for the **Rejects → Inventory → Settings** sidebar order and for the page-leave cleanup to remain free of normal-scan API/write calls.
+
+### Version / schema
+- Advanced the application exactly one step from **v0.524** to **v0.525** and advanced the changed application JavaScript browser cache key.
+- SQLite schema remains **20**. No migration, database reset, production-data replacement, or Item-ID reseed is included.
+
+### Validation
+- JavaScript syntax and changed Python parse/import checks pass. The focused Inventory isolation + static navigation suite passes **224/224**, and the complete maintained suite passes **319/319**.
+- Responsive sidebar/transition smoke passes 1440x900 desktop, 900x1200 vertical tablet, 768x1024 tablet, 390x844 phone, 360x800 TC22 portrait, and 800x360 TC22 landscape with the requested **Rejects → Inventory → Settings** order, correct Inventory glyph, Inventory-only overlay cleanup, active-session preservation, normal `scanInput` focus on return to Scan, zero transition-triggered `/api/scans` POSTs, and no browser console errors.
+- Runtime data, databases/WAL/SHM, logs, credentials, verification outputs, and generated exports remain excluded from the changed-files package.
+
+## v0.524 - Physical Inventory, Reconciliation, and Cycle Counts
+
+### Inventory workflow
+- Added a dedicated Inventory page for Airport Rd and Indian Trail using the maintained shell, permissions, shared close controls, buttons, modal scroll lock, and responsive navigation.
+- Added Full Inventory and Cycle Inventory sessions. Starting a session freezes the expected-system WIP snapshot so production movement during the count cannot change the comparison target.
+- Airport Rd inventory uses current reject/remake-aware Cutting and scanner quantities through Staging and subtracts Airport Outbound quantity. Indian Trail inventory follows IT-route quantity from Airport Outbound/in-transit through received/active bay-held inventory. Partial quantities are preserved.
+- Added fast physical scans, duplicate protection, manual unknown-piece entry, exact Order/Item smart-fill, maintained Glass Type/Item ID choices, Custom/Other values, and automatic mapping for the supplied inventory Item IDs.
+- Added Qty immediately after SQFT, plus Total SQFT for each physical/system line and glass/Item-ID aggregate totals.
+
+### Reconciliation / history / export
+- Added side-by-side System Snapshot vs Physical Count reconciliation. Matching records receive the positive check state; missing-physical, not-in-system, quantity, and material field mismatches remain explicit exception rows.
+- Open counts keep unscanned expected items in an awaiting-count state; completing the inventory freezes final missing-physical exceptions.
+- Added durable Inventory History so prior snapshots can be reopened and their Excel workbooks regenerated later.
+- Added a four-sheet XLSX export: Summary, Physical Scans, System Snapshot, and Reconciliation. Each detailed record carries scan time, Job Nr., Customer, Order, Item, Glass Type, Item ID, Size, SQFT/piece, Qty, and Total SQFT where applicable.
+
+### Data / performance / parity
+- Advanced SQLite schema **19 -> 20** using the existing numbered migration system. Added only durable inventory session/snapshot/physical-scan/reference-mapping tables and indexes; production line items, scans, bays, rejects, and A+W Cutting rows remain authoritative and are not duplicated.
+- Added the 15 supplied inventory Item-ID mappings without their unused sequence numbers. The mapping remains backend/database-owned rather than hardcoded as frontend production logic.
+- Added Azure SQL schema/compatibility parity for the schema-20 inventory tables.
+- Kept the scan hot path bounded: one inventory scan resolves only likely barcode/Order candidates and returns lightweight totals, while large Inventory views page at 150 rows rather than rendering an unbounded DOM.
+
+### Version / validation
+- Advanced the application exactly one step from **v0.523** to **v0.524** and advanced the changed Inventory CSS / application JavaScript browser cache keys. Tablet/phone/TC22 Inventory actions use the maintained shared-button sizing variables and reach at least 44px at touch breakpoints.
+- JavaScript syntax and changed Python parse/import checks pass. The three focused v0.524 inventory/schema/responsive tests pass **3/3**, and the complete maintained suite passes **318/318**.
+- Isolated schema **19 -> 20** validation applies only migration 20, preserves every pre-existing table row count, seeds all 15 Item-ID mappings once, returns `integrity_check=ok` and zero foreign-key violations, and is idempotent on a second pass.
+- Isolated authenticated API smoke passes catalog/start/manual-entry/Item-ID inference/complete/reconciliation/history/XLSX/logout and shuts its server down. A freshly generated workbook opens without repair warnings and contains the four maintained inventory sheets with SQFT, Qty, and Total SQFT.
+- Isolated responsive rendering passes 1440x900, 900x1200, 768x1024, 390x844, 360x800 TC22 portrait, and 800x360 TC22 landscape for active count, side-by-side reconciliation, Manual Entry/scroll lock, history/shared close, completed-state immutability, and Cycle Inventory start with no page-level horizontal overflow or browser console errors.
+- Live A+W/production-share connectivity, Windows PowerShell, physical scanner input, printers, and the complete normal-navigation TC22 operator route remain controlled deployment checks. The changed-files ZIP excludes production database/WAL/SHM, `data/`, caches, logs, credentials, verification artifacts, and generated exports.
+
+## v0.523 - Lifecycle-Aware Production Checks and Faster Order Details
+
+### Cutting / fabrication polling
+- Added a read-only scanner-store Cutting sync plan that identifies Order/Item generations already proven complete. The PowerShell A+W reader receives only the optimization plan; database-specific lifecycle logic remains in `backend/store.py`.
+- Scheduled A+W production SQL now excludes completed generations at or below their remembered `KEYINDEX` from expensive Batch/Optimization/plate/shape enrichment. A newer `KEYINDEX` is deliberately not excluded, so external remake generations remain discoverable even for older covered orders.
+- Current-run A+W reject rows, changed direct jobs, and changed remake markers remove the affected item from the skip plan before the production query. Manual/forced A+W production synchronization bypasses the plan, and planner failure falls back to the existing full bounded query.
+- Cutting-booking and Cutting Label process-route reads are constrained to items that still need production rows. Existing durable Cutting completion memory remains reset-only-on-reject-or-remake.
+- Browser production-index revisions now retain completed lifecycle-keyed fabrication status instead of clearing every fabrication result. Only incomplete/unknown entries are invalidated; reject/remake lifecycle keys still request fresh evidence.
+
+### Order Details / sketch performance
+- Increased the focused Order Details core cache from 15 seconds to 2 minutes and complete production metadata cache from 100 seconds to 5 minutes. Missing-sketch results continue through the existing bounded retry path instead of being hidden by the longer cache.
+- Prioritized at most two sketch frames when Order Details renders: the order overview and the focused/first item. Remaining frames stay virtualized and begin preloading inside a larger bounded viewport margin.
+- Added `data/production-sketch-page-cache/*.pdf` to `.gitignore`; cached page PDFs remain generated runtime files and are excluded from release packages.
+
+### Version / schema
+- Advanced the application release from **v0.522** to **v0.523** and advanced the changed `static/js/app.js` browser cache key.
+- SQLite schema remains **19**. No migration, database reset, seed, or production-data replacement is included.
+
+### Validation
+- `static/js/app.js` passes Node syntax validation; changed Python runtime modules compile/parse and import without bytecode churn. The focused lifecycle checks pass **2/2** and the complete maintained suite passes **315/315 tests**.
+- The extracted production database/WAL/SHM remain byte-for-byte unchanged from the uploaded baseline. Isolated schema-19 integrity/foreign-key/idempotency validation remains clean with migration version **19**.
+- Windows PowerShell/A+W SQL execution and the complete normal-navigation desktop/tablet/TC22 operator route cannot be exercised in this Linux environment; those remain controlled deployment checks. The affected Order Details/sketch content was rendered through the isolated inline browser harness without console errors.
+
 ## v0.522 - Durable Fabrication Memory and Per-Piece Check Fab
 
 - Remembered fabrication checks now persist in the existing production-file index, keyed by piece identity, reject cutoff, A+W/source evidence and machine/source configuration. Completed observations survive restart and archival.

@@ -1321,7 +1321,6 @@ class DeliveryAutomationController:
             "ok": True,
             "latestImportResults": latest_items,
             "recentImports": latest_items,
-            "lists": [],
             "lastCheckedAt": completed_at,
             "latestRunKey": run_key,
             "latestRun": {

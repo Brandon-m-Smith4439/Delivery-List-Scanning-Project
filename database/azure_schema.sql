@@ -1149,3 +1149,154 @@ IF NOT EXISTS (
     CREATE INDEX idx_aw_cutting_order_item_recent_v507
         ON dbo.aw_cutting_generations(order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC);
 GO
+
+-- v0.524 / schema 20: durable Airport Rd / Indian Trail physical-inventory snapshots.
+IF OBJECT_ID(N'dbo.inventory_sessions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.inventory_sessions (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        session_code nvarchar(96) NOT NULL,
+        location nvarchar(32) NOT NULL,
+        inventory_type nvarchar(16) NOT NULL CONSTRAINT df_inventory_sessions_type_v524 DEFAULT N'full',
+        status nvarchar(16) NOT NULL CONSTRAINT df_inventory_sessions_status_v524 DEFAULT N'open',
+        cycle_filter_json nvarchar(max) NOT NULL CONSTRAINT df_inventory_sessions_cycle_v524 DEFAULT N'{}',
+        started_by nvarchar(160) NOT NULL CONSTRAINT df_inventory_sessions_started_by_v524 DEFAULT N'',
+        started_at nvarchar(64) NOT NULL,
+        completed_by nvarchar(160) NOT NULL CONSTRAINT df_inventory_sessions_completed_by_v524 DEFAULT N'',
+        completed_at nvarchar(64) NOT NULL CONSTRAINT df_inventory_sessions_completed_at_v524 DEFAULT N'',
+        expected_line_count int NOT NULL CONSTRAINT df_inventory_sessions_expected_lines_v524 DEFAULT 0,
+        expected_qty int NOT NULL CONSTRAINT df_inventory_sessions_expected_qty_v524 DEFAULT 0,
+        expected_total_sqft decimal(18,4) NOT NULL CONSTRAINT df_inventory_sessions_expected_sqft_v524 DEFAULT 0,
+        notes nvarchar(max) NOT NULL CONSTRAINT df_inventory_sessions_notes_v524 DEFAULT N'',
+        created_at nvarchar(64) NOT NULL,
+        updated_at nvarchar(64) NOT NULL,
+        CONSTRAINT uq_inventory_sessions_code_v524 UNIQUE (session_code),
+        CONSTRAINT ck_inventory_sessions_location_v524 CHECK (location IN (N'airport_rd', N'indian_trail')),
+        CONSTRAINT ck_inventory_sessions_type_v524 CHECK (inventory_type IN (N'full', N'cycle')),
+        CONSTRAINT ck_inventory_sessions_status_v524 CHECK (status IN (N'open', N'completed', N'cancelled')),
+        CONSTRAINT ck_inventory_sessions_cycle_json_v524 CHECK (ISJSON(cycle_filter_json) = 1),
+        CONSTRAINT ck_inventory_sessions_expected_lines_v524 CHECK (expected_line_count >= 0),
+        CONSTRAINT ck_inventory_sessions_expected_qty_v524 CHECK (expected_qty >= 0),
+        CONSTRAINT ck_inventory_sessions_expected_sqft_v524 CHECK (expected_total_sqft >= 0)
+    );
+END;
+
+IF OBJECT_ID(N'dbo.inventory_expected_items', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.inventory_expected_items (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        session_id bigint NOT NULL,
+        snapshot_key nvarchar(400) NOT NULL,
+        source_line_item_id nvarchar(320) NOT NULL CONSTRAINT df_inventory_expected_source_v524 DEFAULT N'',
+        source_list_id nvarchar(256) NOT NULL CONSTRAINT df_inventory_expected_list_v524 DEFAULT N'',
+        delivery_date nvarchar(32) NOT NULL CONSTRAINT df_inventory_expected_date_v524 DEFAULT N'',
+        job_no nvarchar(160) NOT NULL CONSTRAINT df_inventory_expected_job_v524 DEFAULT N'',
+        customer nvarchar(300) NOT NULL CONSTRAINT df_inventory_expected_customer_v524 DEFAULT N'',
+        order_no nvarchar(80) NOT NULL CONSTRAINT df_inventory_expected_order_v524 DEFAULT N'',
+        item_no nvarchar(40) NOT NULL CONSTRAINT df_inventory_expected_item_v524 DEFAULT N'',
+        glass_type nvarchar(300) NOT NULL CONSTRAINT df_inventory_expected_glass_v524 DEFAULT N'',
+        item_id nvarchar(80) NOT NULL CONSTRAINT df_inventory_expected_itemid_v524 DEFAULT N'',
+        dimensions nvarchar(160) NOT NULL CONSTRAINT df_inventory_expected_dimensions_v524 DEFAULT N'',
+        sqft_each decimal(18,4) NOT NULL CONSTRAINT df_inventory_expected_sqft_each_v524 DEFAULT 0,
+        qty int NOT NULL CONSTRAINT df_inventory_expected_qty_v524 DEFAULT 1,
+        total_sqft decimal(18,4) NOT NULL CONSTRAINT df_inventory_expected_total_sqft_v524 DEFAULT 0,
+        route nvarchar(160) NOT NULL CONSTRAINT df_inventory_expected_route_v524 DEFAULT N'',
+        bay_code nvarchar(120) NOT NULL CONSTRAINT df_inventory_expected_bay_v524 DEFAULT N'',
+        cutting_key_index int NOT NULL CONSTRAINT df_inventory_expected_cutting_key_v524 DEFAULT 0,
+        cutting_state nvarchar(80) NOT NULL CONSTRAINT df_inventory_expected_cutting_state_v524 DEFAULT N'',
+        source_reason nvarchar(500) NOT NULL CONSTRAINT df_inventory_expected_reason_v524 DEFAULT N'',
+        source_payload_json nvarchar(max) NOT NULL CONSTRAINT df_inventory_expected_payload_v524 DEFAULT N'{}',
+        CONSTRAINT fk_inventory_expected_session_v524 FOREIGN KEY(session_id) REFERENCES dbo.inventory_sessions(id) ON DELETE CASCADE,
+        CONSTRAINT uq_inventory_expected_snapshot_v524 UNIQUE(session_id, snapshot_key),
+        CONSTRAINT ck_inventory_expected_sqft_each_v524 CHECK (sqft_each >= 0),
+        CONSTRAINT ck_inventory_expected_qty_v524 CHECK (qty > 0),
+        CONSTRAINT ck_inventory_expected_total_sqft_v524 CHECK (total_sqft >= 0),
+        CONSTRAINT ck_inventory_expected_payload_json_v524 CHECK (ISJSON(source_payload_json) = 1)
+    );
+END;
+
+IF OBJECT_ID(N'dbo.inventory_scans', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.inventory_scans (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        session_id bigint NOT NULL,
+        expected_item_id bigint NULL,
+        source_line_item_id nvarchar(320) NOT NULL CONSTRAINT df_inventory_scans_source_v524 DEFAULT N'',
+        barcode nvarchar(120) NOT NULL CONSTRAINT df_inventory_scans_barcode_v524 DEFAULT N'',
+        entry_type nvarchar(16) NOT NULL CONSTRAINT df_inventory_scans_entry_v524 DEFAULT N'scan',
+        scanned_at nvarchar(64) NOT NULL,
+        scanned_by nvarchar(160) NOT NULL CONSTRAINT df_inventory_scans_user_v524 DEFAULT N'',
+        job_no nvarchar(160) NOT NULL CONSTRAINT df_inventory_scans_job_v524 DEFAULT N'',
+        customer nvarchar(300) NOT NULL CONSTRAINT df_inventory_scans_customer_v524 DEFAULT N'',
+        order_no nvarchar(80) NOT NULL CONSTRAINT df_inventory_scans_order_v524 DEFAULT N'',
+        item_no nvarchar(40) NOT NULL CONSTRAINT df_inventory_scans_item_v524 DEFAULT N'',
+        glass_type nvarchar(300) NOT NULL CONSTRAINT df_inventory_scans_glass_v524 DEFAULT N'',
+        item_id nvarchar(80) NOT NULL CONSTRAINT df_inventory_scans_itemid_v524 DEFAULT N'',
+        dimensions nvarchar(160) NOT NULL CONSTRAINT df_inventory_scans_dimensions_v524 DEFAULT N'',
+        sqft_each decimal(18,4) NOT NULL CONSTRAINT df_inventory_scans_sqft_each_v524 DEFAULT 0,
+        qty int NOT NULL CONSTRAINT df_inventory_scans_qty_v524 DEFAULT 1,
+        total_sqft decimal(18,4) NOT NULL CONSTRAINT df_inventory_scans_total_sqft_v524 DEFAULT 0,
+        notes nvarchar(max) NOT NULL CONSTRAINT df_inventory_scans_notes_v524 DEFAULT N'',
+        manual_fields_json nvarchar(max) NOT NULL CONSTRAINT df_inventory_scans_manual_v524 DEFAULT N'{}',
+        CONSTRAINT fk_inventory_scans_session_v524 FOREIGN KEY(session_id) REFERENCES dbo.inventory_sessions(id) ON DELETE CASCADE,
+        CONSTRAINT fk_inventory_scans_expected_v524 FOREIGN KEY(expected_item_id) REFERENCES dbo.inventory_expected_items(id) ON DELETE SET NULL,
+        CONSTRAINT ck_inventory_scans_entry_v524 CHECK (entry_type IN (N'scan', N'manual')),
+        CONSTRAINT ck_inventory_scans_sqft_each_v524 CHECK (sqft_each >= 0),
+        CONSTRAINT ck_inventory_scans_qty_v524 CHECK (qty > 0),
+        CONSTRAINT ck_inventory_scans_total_sqft_v524 CHECK (total_sqft >= 0),
+        CONSTRAINT ck_inventory_scans_manual_json_v524 CHECK (ISJSON(manual_fields_json) = 1)
+    );
+END;
+
+IF OBJECT_ID(N'dbo.inventory_item_mappings', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.inventory_item_mappings (
+        id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        item_id nvarchar(80) NOT NULL,
+        glass_label nvarchar(160) NOT NULL,
+        description nvarchar(500) NOT NULL CONSTRAINT df_inventory_mapping_description_v524 DEFAULT N'',
+        match_terms_json nvarchar(max) NOT NULL CONSTRAINT df_inventory_mapping_terms_v524 DEFAULT N'[]',
+        sort_order int NOT NULL CONSTRAINT df_inventory_mapping_order_v524 DEFAULT 0,
+        active int NOT NULL CONSTRAINT df_inventory_mapping_active_v524 DEFAULT 1,
+        created_at nvarchar(64) NOT NULL,
+        updated_at nvarchar(64) NOT NULL,
+        CONSTRAINT uq_inventory_mapping_item_v524 UNIQUE(item_id),
+        CONSTRAINT ck_inventory_mapping_terms_json_v524 CHECK (ISJSON(match_terms_json) = 1),
+        CONSTRAINT ck_inventory_mapping_active_v524 CHECK (active IN (0,1))
+    );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.inventory_sessions') AND name=N'idx_inventory_sessions_location_time')
+    CREATE INDEX idx_inventory_sessions_location_time ON dbo.inventory_sessions(location, started_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.inventory_expected_items') AND name=N'idx_inventory_expected_session_order_item')
+    CREATE INDEX idx_inventory_expected_session_order_item ON dbo.inventory_expected_items(session_id, order_no, item_no);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.inventory_scans') AND name=N'idx_inventory_scans_session_time')
+    CREATE INDEX idx_inventory_scans_session_time ON dbo.inventory_scans(session_id, scanned_at DESC, id DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.inventory_scans') AND name=N'idx_inventory_scans_expected_once')
+    CREATE UNIQUE INDEX idx_inventory_scans_expected_once ON dbo.inventory_scans(session_id, expected_item_id) WHERE expected_item_id IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.inventory_scans') AND name=N'idx_inventory_scans_source_once')
+    CREATE UNIQUE INDEX idx_inventory_scans_source_once ON dbo.inventory_scans(session_id, source_line_item_id) WHERE source_line_item_id <> N'';
+
+DECLARE @v524_now nvarchar(64) = CONVERT(nvarchar(64), SYSUTCDATETIME(), 127);
+MERGE dbo.inventory_item_mappings AS target
+USING (VALUES
+    (N'14M4896FA', N'1/4 French Antique Mirror', N'1/4"X48"X96" FRNCH ANTQ MIRROR', N'["FRENCH ANTIQUE MIRROR","FRNCH ANTQ MIRROR","14M4896FA"]', 1),
+    (N'14M4896HA', N'1/4 Hollywood Antique Mirror', N'1/4"X48"X96" HLYWD ANTQ MIRROR', N'["HOLLYWOOD ANTIQUE MIRROR","HLYWD ANTQ MIRROR","14M4896HA"]', 2),
+    (N'14M4896DCA', N'1/4 Dark Cloud Antique Mirror', N'1/4"X48"X96" DKCLD ANTQ MIRROR', N'["DARK CLOUD ANTIQUE MIRROR","DKCLD ANTQ MIRROR","14M4896DCA"]', 3),
+    (N'14M4896SCA', N'1/4 Summer Cloud Antique Mirror', N'1/4"X48"X96" SMCLD ANTQ MIRROR', N'["SUMMER CLOUD ANTIQUE MIRROR","SMALL CLOUD ANTIQUE MIRROR","SMCLD ANTQ MIRROR","14M4896SCA"]', 4),
+    (N'14M4896RCA', N'1/4 Rainbow Antique Mirror', N'1/4"X48"X96" RNBWC ANTQ MIRROR', N'["RAINBOW ANTIQUE MIRROR","RNBWC ANTQ MIRROR","14M4896RCA"]', 5),
+    (N'18MIRRORBULK', N'1/8 Mirror', N'BULK 1/8" MIRROR', N'["1/8 MIRROR","BULK 1/8 MIRROR","18MIRRORBULK"]', 6),
+    (N'14MIRROR', N'1/4 Mirror', N'1/4" MIRROR CLEAR SF', N'["1/4 MIRROR","MIRROR CLEAR","14MIRROR"]', 7),
+    (N'G14CLR', N'1/4 Clear', N'1/4" CLEAR GLASS 6MM SF', N'["1/4 CLEAR","6MM CLEAR","G14CLR"]', 8),
+    (N'G38CLR', N'3/8 Clear', N'3/8" CLEAR GLASS 10MM SF', N'["3/8 CLEAR","10MM CLEAR","G38CLR"]', 9),
+    (N'G12CLR', N'1/2 Clear', N'1/2" CLEAR GLASS 12MM SF', N'["1/2 CLEAR","12MM CLEAR","G12CLR"]', 10),
+    (N'G38UCLR', N'3/8 Ultra Clear', N'3/8" ULTRA CLEAR GLASS 10MM SF', N'["3/8 ULTRA CLEAR","ULTRACLEAR","ULTRA CLEAR","G38UCLR"]', 11),
+    (N'G38SATINCLR', N'3/8 Clear Satin', N'3/8" CLEAR SATIN GLASS 10MM SF', N'["3/8 CLEAR SATIN","SATIN CLEAR","CLEAR SATIN","G38SATINCLR"]', 12),
+    (N'14CWG', N'1/4 Clear Window Glass', N'1/4" CLEAR WINDOW GLASS', N'["1/4 CLEAR WINDOW GLASS","14CWG"]', 13),
+    (N'18CDSWG', N'1/8 Clear DS B-Grade Glass', N'1/8" CLEAR DS B-GRADE GLASS', N'["1/8 CLEAR DS","B-GRADE GLASS","B GRADE GLASS","18CDSWG"]', 14),
+    (N'38CWG', N'3/8 Clear Window Glass', N'3/8" CLEAR WINDOW GLASS', N'["3/8 CLEAR WINDOW GLASS","38CWG"]', 15)
+) AS source(item_id, glass_label, description, match_terms_json, sort_order)
+ON target.item_id = source.item_id
+WHEN NOT MATCHED THEN INSERT(item_id, glass_label, description, match_terms_json, sort_order, active, created_at, updated_at)
+VALUES(source.item_id, source.glass_label, source.description, source.match_terms_json, source.sort_order, 1, @v524_now, @v524_now);
+GO

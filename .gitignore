@@ -24,6 +24,9 @@ tmp*/
 *.tmp
 data/production-file-index.json
 
+# Generated Order Details sketch-page previews
+data/production-sketch-page-cache/*.pdf
+
 # SQLite runtime sidecars
 *.db-wal
 *.db-shm

@@ -2166,9 +2166,14 @@ class Handler(SimpleHTTPRequestHandler):
             delivery_date = parse_qs(parsed.query).get("deliveryDate", [""])[0]
             try:
                 bundle = STORE.get_delivery_date_scan_bundle(delivery_date, user=user)
-                for record in bundle.get("records", []):
-                    list_id = str(record.get("list", {}).get("id") or "")
-                    record["flags"] = OPERATIONS.line_flags(list_id, user["username"])
+                records = [record for record in bundle.get("records", []) if isinstance(record, dict)]
+                list_ids = [str(record.get("list", {}).get("id") or "").strip() for record in records]
+                flags_by_list = OPERATIONS.line_flags_many(
+                    [list_id for list_id in list_ids if list_id],
+                    user["username"],
+                ).get("results", {})
+                for record, list_id in zip(records, list_ids):
+                    record["flags"] = flags_by_list.get(list_id, {"ok": True, "listId": list_id, "items": []})
                 self.send_json(bundle)
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
@@ -2474,6 +2479,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.reports_summary(filters))
             return
 
+        if parsed.path == "/api/reports/sheet-usage-settings":
+            if not self.require_permission("view_reports"):
+                return
+            self.send_json(STORE.get_sheet_usage_settings())
+            return
+
         if parsed.path == "/api/indian-trail/summary":
             if not self.require_permission("view_indian_trail"):
                 return
@@ -2577,6 +2588,108 @@ class Handler(SimpleHTTPRequestHandler):
             body = render_stale_bay_report(rows).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/api/inventory/catalog":
+            user = self.require_permission("view_inventory")
+            if not user:
+                return
+            self.send_json(STORE.inventory_catalog(user))
+            return
+
+        if parsed.path == "/api/inventory/sessions":
+            user = self.require_permission("view_inventory")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            try:
+                sessions = STORE.list_inventory_sessions(
+                    user,
+                    location=params.get("location", [""])[0],
+                    limit=int(params.get("limit", ["50"])[0] or 50),
+                )
+                self.send_json({"sessions": sessions})
+            except PermissionError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+            except (TypeError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/inventory/session":
+            user = self.require_permission("view_inventory")
+            if not user:
+                return
+            try:
+                session_id = int(parse_qs(parsed.query).get("id", ["0"])[0] or 0)
+                self.send_json(STORE.get_inventory_session(session_id, user))
+            except PermissionError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+            except (TypeError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/inventory/items":
+            user = self.require_permission("view_inventory")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            try:
+                self.send_json(STORE.get_inventory_session_items(
+                    int(params.get("sessionId", ["0"])[0] or 0),
+                    params.get("view", ["scans"])[0],
+                    user,
+                    page=int(params.get("page", ["1"])[0] or 1),
+                    page_size=int(params.get("pageSize", ["150"])[0] or 150),
+                ))
+            except PermissionError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+            except (TypeError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/inventory/smart-fill":
+            user = self.require_permission("scan_inventory")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            try:
+                self.send_json(STORE.inventory_smart_fill(
+                    params.get("order", [""])[0],
+                    params.get("item", [""])[0],
+                    user,
+                    params.get("location", [""])[0],
+                ))
+            except PermissionError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/inventory/export.xlsx":
+            user = self.require_permission("view_inventory")
+            if not user:
+                return
+            granted = {canonical_permission_name(value) for value in user.get("permissions", [])}
+            if "print_export" not in granted:
+                self.send_json({"error": "Permission denied", "permission": "print_export"}, HTTPStatus.FORBIDDEN)
+                return
+            try:
+                session_id = int(parse_qs(parsed.query).get("id", ["0"])[0] or 0)
+                body = STORE.export_inventory_xlsx(session_id, user)
+                session = STORE.get_inventory_session(session_id, user)
+            except PermissionError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+                return
+            except (TypeError, ValueError) as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session.get("sessionCode") or f"inventory-{session_id}"))
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f"attachment; filename={safe_name}.xlsx")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -2827,6 +2940,55 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(body)
                 return
 
+            if parsed.path == "/api/inventory/sessions":
+                user = self.require_permission("scan_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.start_inventory_session(data, user))
+                return
+
+            if parsed.path == "/api/inventory/scans":
+                user = self.require_permission("scan_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.record_inventory_scan(int(data.get("sessionId") or 0), str(data.get("scan") or data.get("barcode") or ""), user))
+                return
+
+            if parsed.path == "/api/inventory/manual-entry":
+                user = self.require_permission("scan_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.record_inventory_manual_entry(int(data.get("sessionId") or 0), data, user))
+                return
+
+            if parsed.path == "/api/inventory/complete":
+                user = self.require_permission("scan_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.complete_inventory_session(int(data.get("sessionId") or 0), data, user))
+                return
+
+            if parsed.path == "/api/inventory/system-complete":
+                user = self.require_permission("manage_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.complete_inventory_system_orders(int(data.get("sessionId") or 0), data, user))
+                return
+
+            if parsed.path == "/api/inventory/cancel":
+                user = self.require_permission("manage_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.cancel_inventory_session(int(data.get("sessionId") or 0), data, user))
+                return
+
+            if parsed.path == "/api/inventory/scans/remove":
+                user = self.require_permission("manage_inventory")
+                if not user:
+                    return
+                self.send_json(STORE.remove_inventory_scan(int(data.get("sessionId") or 0), int(data.get("scanId") or 0), data, user))
+                return
+
             if parsed.path == "/api/notifications/acknowledge":
                 user = self.current_user()
                 if not user:
@@ -3059,6 +3221,8 @@ class Handler(SimpleHTTPRequestHandler):
                             "inferredFromFabrication": True,
                             "fabricationMachine": status.get("actualMachine") or status.get("machine") or "Fabrication",
                         })
+                    cutting["irregularities"] = STORE.aw_cutting_irregularities(cutting)
+                    cutting["irregular"] = bool(cutting["irregularities"])
                     results.append({
                         "key": request_key, "order": order, "item": item, "job": job,
                         "status": status, "cutting": cutting,
@@ -3287,6 +3451,20 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     return
                 self.send_json(STORE.update_line_item(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/delivery-progress":
+                user = self.require_permission("edit_delivery_list_items")
+                if not user:
+                    return
+                self.send_json(STORE.advance_delivery_progress(data, user["username"]))
+                return
+
+            if parsed.path == "/api/reports/sheet-usage-settings":
+                user = self.require_permission("manage_lookup_values")
+                if not user:
+                    return
+                self.send_json(STORE.save_sheet_usage_settings(data, user["username"]))
                 return
 
             if parsed.path == "/api/admin/line-item/delete":

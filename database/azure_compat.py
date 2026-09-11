@@ -26,6 +26,8 @@ UNIQUE_KEY_COLUMNS: dict[str, tuple[str, ...]] = {
     "role_permissions": ("role_id", "permission_name"),
     "roles": ("name",),
     "stations": ("name",),
+    "inventory_item_mappings": ("item_id",),
+    "inventory_sessions": ("session_code",),
     "user_roles": ("user_id", "role_id"),
 }
 

@@ -43,6 +43,8 @@ const ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE = 3;
 const MANUAL_EDIT_PAGE_SIZE = 20;
 const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
+const SCAN_DATE_CACHE_LIMIT_V526 = 5;
+const FABRICATION_AUTO_RETRY_MS_V526 = 10 * 60 * 1000;
 const SCAN_FILTER_GROUPS = Object.freeze({
   // v0.514: one Status group owns completion. With no Machine selected it
   // describes the whole required production/scanner workflow; with WaterJet
@@ -130,6 +132,18 @@ const state = {
   orderDetailOpenOrderV474: "",
   orderDetailFocusItemV477: "",
   orderDetailFocusTimerV477: 0,
+  // v0.524: physical inventory keeps its frozen session payload separate from
+  // delivery-list state so normal production refreshes cannot move an active count.
+  inventoryCatalogV524: null,
+  inventorySessionsV524: [],
+  inventorySessionV524: null,
+  inventoryTabV524: "scans",
+  inventoryHistoryOpenV524: false,
+  inventoryBusyV524: false,
+  inventoryPendingManualScanV524: "",
+  inventoryViewDataV524: { scans: [], system: [], reconciliation: [] },
+  inventoryViewMetaV524: { scans: null, system: null, reconciliation: null },
+  inventorySelectedOrdersV527: new Set(),
   scanRowClickV474: { order: "", id: "", at: 0 },
   // Scan projects all accessible workflow stages into one logical row per item.
   scanDateWideDateV485: "",
@@ -142,6 +156,13 @@ const state = {
   scanDateWidePayloadsV485: new Map(),
   scanDateWideCatalogSignatureV486: "",
   scanDateWideLastLoadMsV486: 0,
+  // v0.526: keep only the five most recently used date bundles. Entries are
+  // valid only while the compact delivery-list signature is unchanged.
+  scanDateWideCacheV526: new Map(),
+  scanDateWideCacheLimitV526: SCAN_DATE_CACHE_LIMIT_V526,
+  scanDatePrefetchV527: new Map(),
+  scanDatePrefetchTimerV527: 0,
+  fabricationWarmByDateV526: new Map(),
   deliveryDateSelectSignatureV487: "",
   pageIndex: 1,
   // v0.467: show more delivery-list rows by default; operators can still reduce it.
@@ -323,7 +344,7 @@ const state = {
   manualEditListId: "",
   // v0.468: keep Whole Delivery List as a presentation/search scope while
   // retaining one real stage ID as the delivery-date anchor.
-  manualEditScopeV468: "stage",
+  manualEditScopeV468: "whole",
   manualEditQuery: "",
   manualEditResultRows: [],
   manualEditTotalRows: 0,
@@ -871,7 +892,14 @@ function dlsAutomationApplyImportSnapshot(detail = {}) {
     state.adminTodayImportLoaded = false;
     changed = true;
   }
-  if (Array.isArray(detail.lists)) {
+  // Import-result payloads do not own the catalog. Older controller versions
+  // represented "catalog intentionally omitted" as lists:[], which cleared all
+  // Home/Scan data until a full browser refresh. Accept an empty catalog only
+  // when the application itself is already empty; the dedicated compact-catalog
+  // heartbeat remains authoritative for real list removals.
+  const hasAuthoritativeCatalogV527 = Array.isArray(detail.lists)
+    && (detail.lists.length > 0 || !(state.lists || []).length);
+  if (hasAuthoritativeCatalogV527) {
     changed = dlsAutomationApplyDeliveryCatalog(detail.lists) || changed;
     detailRefreshListId = String(state.activeListId || "");
     const refreshedActiveList = state.lists.find((list) => String(list.id || "") === detailRefreshListId);
@@ -1104,6 +1132,7 @@ const els = {
   statisticsProductionActivity: document.getElementById("statisticsProductionActivity"),
   statisticsTodayProductionDateV514: document.getElementById("statisticsTodayProductionDateV514"),
   statisticsDailyProductionEmailBtn: document.getElementById("statisticsDailyProductionEmailBtn"),
+  statisticsSheetSettingsBtnV527: document.getElementById("statisticsSheetSettingsBtnV527"),
   statisticsProductionOptionsV514: document.getElementById("statisticsProductionOptionsV514"),
   statisticsProductionIncludeRemakesV514: document.getElementById("statisticsProductionIncludeRemakesV514"),
   statisticsProductionIncludeRejectsV514: document.getElementById("statisticsProductionIncludeRejectsV514"),
@@ -1252,6 +1281,66 @@ const els = {
   scanPagerBottom: document.getElementById("scanPagerBottom"),
   undoBtn: document.getElementById("undoBtn"),
   redoBtn: document.getElementById("redoBtn"),
+
+  inventoryPage: document.getElementById("inventoryPage"),
+  inventoryStartPanel: document.getElementById("inventoryStartPanel"),
+  inventoryLocationSelect: document.getElementById("inventoryLocationSelect"),
+  inventoryTypeSelect: document.getElementById("inventoryTypeSelect"),
+  inventoryCycleFieldWrap: document.getElementById("inventoryCycleFieldWrap"),
+  inventoryCycleFieldSelect: document.getElementById("inventoryCycleFieldSelect"),
+  inventoryCycleValueWrap: document.getElementById("inventoryCycleValueWrap"),
+  inventoryCycleValueSelect: document.getElementById("inventoryCycleValueSelect"),
+  inventoryCycleCustomWrap: document.getElementById("inventoryCycleCustomWrap"),
+  inventoryCycleCustomInput: document.getElementById("inventoryCycleCustomInput"),
+  inventoryStartBtn: document.getElementById("inventoryStartBtn"),
+  inventoryStartNote: document.getElementById("inventoryStartNote"),
+  inventoryWorkspace: document.getElementById("inventoryWorkspace"),
+  inventorySessionLocation: document.getElementById("inventorySessionLocation"),
+  inventorySessionCode: document.getElementById("inventorySessionCode"),
+  inventorySessionTitle: document.getElementById("inventorySessionTitle"),
+  inventorySessionMeta: document.getElementById("inventorySessionMeta"),
+  inventoryNewBtn: document.getElementById("inventoryNewBtn"),
+  inventoryExportBtn: document.getElementById("inventoryExportBtn"),
+  inventoryCompleteBtn: document.getElementById("inventoryCompleteBtn"),
+  inventoryCancelBtn: document.getElementById("inventoryCancelBtn"),
+  inventoryExpectedQty: document.getElementById("inventoryExpectedQty"),
+  inventoryExpectedSqft: document.getElementById("inventoryExpectedSqft"),
+  inventoryScannedQty: document.getElementById("inventoryScannedQty"),
+  inventoryScannedSqft: document.getElementById("inventoryScannedSqft"),
+  inventoryMatchedCount: document.getElementById("inventoryMatchedCount"),
+  inventoryIssueCount: document.getElementById("inventoryIssueCount"),
+  inventoryScanPanel: document.getElementById("inventoryScanPanel"),
+  inventoryManualOpenBtn: document.getElementById("inventoryManualOpenBtn"),
+  inventoryScanForm: document.getElementById("inventoryScanForm"),
+  inventoryScanInput: document.getElementById("inventoryScanInput"),
+  inventoryScanFeedback: document.getElementById("inventoryScanFeedback"),
+  inventoryReconcileBadge: document.getElementById("inventoryReconcileBadge"),
+  inventoryView: document.getElementById("inventoryView"),
+  inventoryHistoryBtn: document.getElementById("inventoryHistoryBtn"),
+  inventoryHistoryPanel: document.getElementById("inventoryHistoryPanel"),
+  inventoryHistoryCloseBtn: document.getElementById("inventoryHistoryCloseBtn"),
+  inventoryHistoryList: document.getElementById("inventoryHistoryList"),
+  inventoryManualModal: document.getElementById("inventoryManualModal"),
+  inventoryManualCloseBtn: document.getElementById("inventoryManualCloseBtn"),
+  inventoryManualCancelBtn: document.getElementById("inventoryManualCancelBtn"),
+  inventoryManualForm: document.getElementById("inventoryManualForm"),
+  inventoryManualOrder: document.getElementById("inventoryManualOrder"),
+  inventoryManualItem: document.getElementById("inventoryManualItem"),
+  inventoryManualJob: document.getElementById("inventoryManualJob"),
+  inventoryManualCustomer: document.getElementById("inventoryManualCustomer"),
+  inventoryManualGlass: document.getElementById("inventoryManualGlass"),
+  inventoryManualGlassCustomWrap: document.getElementById("inventoryManualGlassCustomWrap"),
+  inventoryManualGlassCustom: document.getElementById("inventoryManualGlassCustom"),
+  inventoryManualItemId: document.getElementById("inventoryManualItemId"),
+  inventoryManualItemIdCustomWrap: document.getElementById("inventoryManualItemIdCustomWrap"),
+  inventoryManualItemIdCustom: document.getElementById("inventoryManualItemIdCustom"),
+  inventoryManualDimensions: document.getElementById("inventoryManualDimensions"),
+  inventoryManualSqft: document.getElementById("inventoryManualSqft"),
+  inventoryManualQty: document.getElementById("inventoryManualQty"),
+  inventoryManualNotes: document.getElementById("inventoryManualNotes"),
+  inventoryManualSmartFillBtn: document.getElementById("inventoryManualSmartFillBtn"),
+  inventoryManualSmartFillStatus: document.getElementById("inventoryManualSmartFillStatus"),
+  inventoryManualTotalSqft: document.getElementById("inventoryManualTotalSqft"),
 
   racksPage: document.getElementById("racksPage"),
   rackListSelect: document.getElementById("rackListSelect"),
@@ -5415,6 +5504,55 @@ function shouldSkipUiTranslation(element) {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+// v0.527 inventory, progress, and sheet-usage surfaces remain complete in the
+// application-wide Spanish toggle.
+[
+  ["Select visible", "Seleccionar visibles"], ["Clear selection", "Borrar selección"],
+  ["Complete selected", "Completar seleccionados"], ["Complete all", "Completar todos"],
+  ["System orders already gone", "Órdenes del sistema que ya salieron"],
+  ["Complete Delivery List", "Completar lista de entrega"], ["Advance Item", "Avanzar artículo"],
+  ["Complete Order", "Completar orden"], ["Advance progress", "Avanzar progreso"],
+  ["Stock sheets used", "Hojas de inventario utilizadas"], ["Stock sheets used by glass type", "Hojas utilizadas por tipo de vidrio"],
+  ["Sheet settings", "Configuración de hojas"], ["Stock sheets and email recipients", "Hojas de inventario y destinatarios de correo"],
+  ["Stock sheet size", "Tamaño de hoja"], ["Email recipients", "Destinatarios de correo"],
+  ["Save settings", "Guardar configuración"], ["Size not configured", "Tamaño no configurado"],
+  ["Review", "Revisar"], ["Export Excel", "Exportar Excel"], ["Final stage scanned", "Etapa final escaneada"],
+  ["In progress", "En progreso"], ["Optimization created", "Optimización creada"],
+  ["Whole delivery list", "Lista de entrega completa"], ["Open whole list", "Abrir lista completa"],
+  ["at the furthest recorded step", "en el paso registrado mas avanzado"],
+  ["Search active delivery dates and open whole-list edit, reset, or delete actions.", "Busque fechas de entrega activas y abra las acciones para editar, reiniciar o eliminar la lista completa."],
+  ["Review one whole delivery list, correct its line items, and advance item, order, or list progress.", "Revise una lista de entrega completa, corrija sus articulos y avance el progreso del articulo, la orden o la lista."],
+  ["Only glass types present in the selected delivery list are shown.", "Solo se muestran los tipos de vidrio presentes en la lista de entrega seleccionada."],
+  ["Load a delivery list to see its glass types.", "Cargue una lista de entrega para ver sus tipos de vidrio."],
+  ["Preparing lookups and the selected delivery list.", "Preparando catalogos y la lista de entrega seleccionada."],
+  ["Reset delivery list", "Restablecer lista de entrega"],
+  ["Inventory", "Inventario"], ["Physical WIP control", "Control de trabajo fisico en proceso"],
+  ["Count Airport Rd or Indian Trail work in progress, reconcile the physical floor against a frozen system snapshot, and retain every completed count.", "Cuente el trabajo en proceso de Airport Rd o Indian Trail, compare el piso fisico con una captura congelada del sistema y conserve cada conteo terminado."],
+  ["Inventory History", "Historial de inventario"], ["Start a frozen count", "Iniciar un conteo congelado"],
+  ["Choose the floor and count type", "Elija la planta y el tipo de conteo"],
+  ["The expected system inventory is frozen when you start, so production changes during the physical count cannot move the target underneath the operator.", "El inventario esperado del sistema se congela al comenzar, para que los cambios de produccion no modifiquen la referencia durante el conteo fisico."],
+  ["Count type", "Tipo de conteo"], ["Full Inventory", "Inventario completo"], ["Cycle Inventory", "Inventario ciclico"],
+  ["Cycle by", "Ciclo por"], ["Cycle value", "Valor del ciclo"], ["Custom cycle value", "Valor de ciclo personalizado"],
+  ["Start Inventory", "Iniciar inventario"], ["New Inventory", "Nuevo inventario"], ["Finish Inventory", "Finalizar inventario"],
+  ["Current physical count", "Conteo fisico actual"], ["System Qty", "Cantidad del sistema"], ["Physical Qty", "Cantidad fisica"],
+  ["Matched", "Coincide"], ["system + physical", "sistema + fisico"], ["missing / mismatch", "faltante / diferencia"],
+  ["Physical count", "Conteo fisico"], ["Scan the next piece", "Escanee la siguiente pieza"],
+  ["The scanner stays focused after each result so large floor counts remain fast.", "El escaner conserva el enfoque despues de cada resultado para mantener rapidos los conteos grandes."],
+  ["Manual Entry", "Entrada manual"], ["Inventory piece barcode", "Codigo de barras de la pieza de inventario"],
+  ["Scan barcode or enter exact Order / Item...", "Escanee el codigo de barras o ingrese Orden / Articulo exactos..."],
+  ["Count Piece", "Contar pieza"], ["Ready for the first piece.", "Listo para la primera pieza."], ["Ready for the next piece.", "Listo para la siguiente pieza."],
+  ["Completing confirmed system orders...", "Completando las ordenes confirmadas del sistema..."],
+  ["Full inventory physical count", "Conteo fisico de inventario completo"],
+  ["Physical Scans", "Escaneos fisicos"], ["Reconciliation", "Conciliacion"], ["Glass Totals", "Totales de vidrio"], ["System Snapshot", "Captura del sistema"],
+  ["Audit history", "Historial de auditoria"],
+  ["Reopen any prior frozen count, review its original comparison, and export the Excel workbook again.", "Abra cualquier conteo congelado anterior, revise su comparacion original y exporte nuevamente el libro de Excel."],
+  ["Select orders confirmed physically complete. Completion closes their active rack and bay locations.", "Seleccione las ordenes confirmadas como fisicamente terminadas. Al completarlas se cierran sus ubicaciones activas de rack y bahia."],
+  ["Complete all system orders", "Completar todas las ordenes del sistema"],
+  ["Physical item not in the snapshot", "Articulo fisico fuera de la captura"], ["Manual Inventory Entry", "Entrada manual de inventario"],
+  ["Add Physical Item", "Agregar articulo fisico"], ["Smart Fill from Order / Item", "Completar desde Orden / Articulo"],
+  ["Enter an Order / Item to look up known information.", "Ingrese una Orden / Articulo para buscar la informacion conocida."],
+].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
+
 function applyLanguageToRoot(root = document.body, force = false) {
   if (!root) return;
   // v0.353: English is authored directly in the DOM. Unless a language switch
@@ -7909,6 +8047,11 @@ async function logout() {
   state.authenticated = false;
   state.user = null;
   state.permissions = [];
+  state.inventoryCatalogV524 = null;
+  state.inventorySessionsV524 = [];
+  state.inventorySessionV524 = null;
+  state.inventoryViewDataV524 = { scans: [], system: [], reconciliation: [] };
+  state.inventoryViewMetaV524 = { scans: null, system: null, reconciliation: null };
   stopPolling();
   stopNotificationPolling();
   playAppSound("logout", { force: true });
@@ -8556,6 +8699,75 @@ function scanDateWideCatalogSignatureV486(deliveryDate = "", lists = state.lists
     .sort().join("\n");
 }
 
+function cachedScanDateBundleV526(deliveryDate = "") {
+  const date = String(deliveryDate || "").trim();
+  const entry = date ? state.scanDateWideCacheV526.get(date) : null;
+  if (!entry) return null;
+  const signature = scanDateWideCatalogSignatureV486(date);
+  if (!signature || signature !== String(entry.signature || "")) {
+    state.scanDateWideCacheV526.delete(date);
+    return null;
+  }
+  // Touch the entry so Map insertion order acts as a tiny LRU.
+  state.scanDateWideCacheV526.delete(date);
+  state.scanDateWideCacheV526.set(date, entry);
+  return entry;
+}
+
+function rememberScanDateBundleV526(deliveryDate = "", signature = "", records = []) {
+  const date = String(deliveryDate || "").trim();
+  if (!date || !signature || !Array.isArray(records) || !records.length) return;
+  state.scanDateWideCacheV526.delete(date);
+  state.scanDateWideCacheV526.set(date, { signature, records });
+  while (state.scanDateWideCacheV526.size > Number(state.scanDateWideCacheLimitV526 || SCAN_DATE_CACHE_LIMIT_V526)) {
+    const oldest = state.scanDateWideCacheV526.keys().next().value;
+    state.scanDateWideCacheV526.delete(oldest);
+  }
+}
+
+function invalidateScanDateBundleV526(deliveryDate = "") {
+  const date = String(deliveryDate || "").trim();
+  if (date) state.scanDateWideCacheV526.delete(date);
+}
+
+function prefetchScanDateBundleV527(deliveryDate = "") {
+  const date = String(deliveryDate || "").trim();
+  if (!state.backend || !date || cachedScanDateBundleV526(date)) return Promise.resolve(null);
+  const existing = state.scanDatePrefetchV527.get(date);
+  if (existing) return existing;
+  const signature = scanDateWideCatalogSignatureV486(date);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
+  const request = fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controller.signal })
+    .then((bundle) => {
+      const records = Array.isArray(bundle?.records) ? bundle.records.filter(Boolean) : [];
+      if (records.length && signature === scanDateWideCatalogSignatureV486(date)) rememberScanDateBundleV526(date, signature, records);
+      return bundle;
+    })
+    .catch(() => null)
+    .finally(() => {
+      window.clearTimeout(timeout);
+      if (state.scanDatePrefetchV527.get(date) === request) state.scanDatePrefetchV527.delete(date);
+    });
+  state.scanDatePrefetchV527.set(date, request);
+  return request;
+}
+
+function scheduleScanDatePrefetchV527(activeDate = "") {
+  window.clearTimeout(state.scanDatePrefetchTimerV527);
+  const run = () => {
+    if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
+    const dates = listsByDeliveryDate().map((group) => group.date);
+    const index = dates.indexOf(String(activeDate || ""));
+    if (index < 0) return;
+    // Most operators move one day backward or forward. Warming only those two
+    // dates keeps memory/network use bounded while making the next change local.
+    const neighbors = [dates[index - 1], dates[index + 1]].filter(Boolean);
+    void neighbors.reduce((chain, date) => chain.then(() => prefetchScanDateBundleV527(date)), Promise.resolve());
+  };
+  state.scanDatePrefetchTimerV527 = window.setTimeout(run, 450);
+}
+
 function cancelScanDateWideLoadV512() {
   const controller = state.scanDateWideAbortControllerV512;
   if (controller && !controller.signal.aborted) controller.abort();
@@ -8586,9 +8798,15 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     if (state.scanDateWideAbortControllerV512 === controllerV512 && !controllerV512.signal.aborted) controllerV512.abort();
   }, 15000);
   try {
-    const bundle = await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controllerV512.signal });
+    const cachedBundleV526 = cachedScanDateBundleV526(date);
+    const pendingPrefetchV527 = state.scanDatePrefetchV527.get(date);
+    const prefetchedBundleV527 = !cachedBundleV526 && pendingPrefetchV527 ? await pendingPrefetchV527 : null;
+    const bundle = cachedBundleV526
+      ? { deliveryDate: date, records: cachedBundleV526.records, cachedV526: true }
+      : prefetchedBundleV527 || await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controllerV512.signal });
     if (token !== state.scanDateWideLoadTokenV485) return;
     const records = Array.isArray(bundle.records) ? bundle.records.filter(Boolean) : [];
+    if (!bundle.cachedV526) rememberScanDateBundleV526(date, requestedCatalogSignature, records);
     if (!records.length) throw new Error(`No accessible workflow lists were found for ${date}.`);
     const representative = records.find((record) => scanStagePresetV485(record.payload?.meta || record.list) === "airport_staging")
       || records.find((record) => String(record.list?.id || "") === String(preferredListId || "")) || records[0];
@@ -8606,7 +8824,7 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     state.scanDateWideDateV485 = date;
     state.scanDateWidePayloadsV485 = new Map(records.map((record) => [String(record.list?.id || record.payload?.meta?.id || ""), record.payload]));
     state.scanDateWideCatalogSignatureV486 = requestedCatalogSignature;
-    state.scanDateWideLastLoadMsV486 = Math.round((performance.now() - startedAt) * 10) / 10;
+    state.scanDateWideLastLoadMsV486 = bundle.cachedV526 ? 0 : Math.round((performance.now() - startedAt) * 10) / 10;
     let selected = wantedSelectionKey ? projectedItems.find((item) => item.workflowLogicalKeyV485 === wantedSelectionKey) : null;
     if (!selected && selectionFallbackId) selected = projectedItems.find((item) => (item.workflowStageCopiesV485 || []).some((copy) => String(copy.id || "") === String(selectionFallbackId)));
     state.selectedId = selected?.id || null;
@@ -8622,11 +8840,12 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     // successful load and starts the same date request for a second time.
     state.scanDateWideLoadingV485 = false;
     state.scanDateWideAbortControllerV512 = null;
+    // Claim the date-wide warm before Scan renders. This prevents the visible
+    // page hydrator and the full-date hydrator from queuing the same pieces.
+    if (typeof warmFabricationDeliveryV521 === "function") void warmFabricationDeliveryV521(date, projectedItems).catch(() => {});
     if (navigate) showPage("scan"); else if (state.page === "scan") renderScanPage();
     if (typeof ensureMachineConfigurationV521 === "function") void ensureMachineConfigurationV521().catch(() => {});
-    if (typeof warmFabricationDeliveryV521 === "function") void warmFabricationDeliveryV521(date, projectedItems).catch(() => {});
-    renderDeliveryDateSelect();
-    if (els.deliveryDateSelect?.dataset.customSelectEnhanced === "true") syncCustomSelect(els.deliveryDateSelect);
+    scheduleScanDatePrefetchV527(date);
     return { meta, items: projectedItems };
   } catch (error) {
     if (controllerV512.signal.aborted) {
@@ -8658,6 +8877,9 @@ async function refreshDateWideAfterScanV485(payload = {}, target = null, selecti
   const matchedListId = String(payload.matchedListId || payload.meta?.id || target?.listId || state.activeListId || "");
   const date = String(payload.meta?.deliveryDate || deliveryDateForListV485(matchedListId, state.meta?.deliveryDate || "")).trim();
   if (!date) return false;
+  // A successful scanner mutation changes quantities before the next compact
+  // heartbeat can publish a new signature. Never restore a pre-scan bundle.
+  invalidateScanDateBundleV526(date);
   await activateScanDateV485(date, false, { preferredListId: matchedListId, selectionFallbackId, selectionKey: target?.logicalKey || "" });
   return true;
 }
@@ -8791,7 +9013,9 @@ function itemText(item) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function isRemakeItem(item) {
-  return /\b(REMAKE|RM)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
+  const productionStatus = state.fabricationStatusCacheV474?.get?.(fabricationStatusItemKeyV521(item)) || item?.productionFiles?.fabrication || {};
+  return Boolean(item?.remake || productionStatus?.sketchRemake)
+    || /\b(REMAKE|RM)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`);
 }
 
 function isExternalRemakeItem(item) {
@@ -9452,6 +9676,32 @@ function syncScanFilterButtons() {
   renderActiveScanFilters();
 }
 
+function cuttingStateForItemV527(item = {}) {
+  const key = fabricationStatusItemKeyV521(item);
+  return state.cuttingStatusCacheV522.get(key) || (item.cutting && typeof item.cutting === "object" ? item.cutting : {});
+}
+
+/** Return the current A+W warning when a completed cut lacks expected generation data. */
+function cuttingIrregularityV527(item = {}) {
+  const cutting = cuttingStateForItemV527(item);
+  if (!cuttingProgressPresentationV498(cutting).complete) return null;
+  const supplied = Array.isArray(cutting.irregularities) ? cutting.irregularities.find(Boolean) : null;
+  if (supplied) return supplied;
+  const batch = String(cutting.batch || "").trim();
+  const optimization = Number(cutting.optimization || 0);
+  if (!batch && !optimization) return {
+    code: "cut_without_batch_or_optimization",
+    label: "Cut with no Batch or Optimization",
+    detail: "A+W says this piece is cut, but no Batch or Optimization is attached to its current production generation.",
+  };
+  if (batch && !optimization) return {
+    code: "cut_in_batch_without_optimization",
+    label: "Cut in Batch with no Optimization",
+    detail: `A+W says this piece is cut in Batch ${batch}, but the current production generation has no Optimization.`,
+  };
+  return null;
+}
+
 /** Return the visible markers owned by the Scan table Flag column. */
 function scanFlagLabels(item) {
   if (!item) return [];
@@ -9460,6 +9710,7 @@ function scanFlagLabels(item) {
     isRushItem(item) ? "Rush" : "",
     Number(item.internalRejectCount || 0) > 0 ? "Internal Reject" : "",
     item.manualOnly ? "Manual scan only" : "",
+    cuttingIrregularityV527(item) ? "A+W Irregular" : "",
   ].filter(Boolean);
 }
 
@@ -10034,9 +10285,8 @@ function scanProgressMarkupV475(item = {}) {
     const left = dateWide.previous || dateWide.next || { label: "Progress" };
     const right = dateWide.next || dateWide.previous || left;
     const style = `--progress-left:${progressStepColorV480(left)};--progress-right:${progressStepColorV480(right)}`;
-    const note = !dateWide.fabricationStatus ? '<small class="scan-no-fab-note-v480 is-loading-v485">Checking Fab</small>' : "";
     const flow = `${progressStepHtmlV475(dateWide.previous, "previous")}${dateWide.previous && dateWide.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(dateWide.next, "next")}`;
-    return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486 ${note ? "has-context-note-v485" : ""}" style="${escapeHtml(style)}">${note}<span class="scan-progress-flow-line-v485">${flow}</span></span>`;
+    return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
   }
   const pair = scanProgressPairV475(item);
   const left = pair.previous || pair.next || { label: "Progress" };
@@ -10886,6 +11136,7 @@ function buildGlassVisualColorMap(extraLabels = []) {
 
   const used = new Set([...overrides.values()]);
   const effectiveColors = new Map();
+  const configuredColorOwnersV527 = new Map();
   const result = new Map();
   [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([key, label]) => {
     const targetLabel = glassAliasTargetV360(label) || label;
@@ -10893,7 +11144,20 @@ function buildGlassVisualColorMap(extraLabels = []) {
     const canonicalLabel = glassProfileCanonicalLabelV350(targetLabel) || targetLabel;
     const canonicalKey = glassVisualLookupKeyV349(canonicalLabel);
     const configured = overrides.get(targetKey) || overrides.get(`canonical:${canonicalKey}`);
-    let color = effectiveColors.get(targetKey) || effectiveColors.get(`canonical:${canonicalKey}`) || configured;
+    let color = effectiveColors.get(targetKey) || effectiveColors.get(`canonical:${canonicalKey}`);
+    if (!color && configured) {
+      const owner = configuredColorOwnersV527.get(configured);
+      if (!owner || owner === canonicalKey) {
+        color = configured;
+        configuredColorOwnersV527.set(configured, canonicalKey);
+      } else {
+        // Two distinct glass types in one library must remain distinguishable.
+        // Keep the saved override intact and derive a deterministic collision-free
+        // display color for the later profile.
+        color = glassVisualFallbackColor(canonicalLabel, used);
+        used.add(color);
+      }
+    }
     if (!color) {
       color = glassVisualFallbackColor(canonicalLabel, used);
       used.add(color);
@@ -11172,12 +11436,14 @@ function renderItemRow(item) {
   const location = locationLabel(item);
   const locationHtml = rackLocationDropdown(item, location);
   const rejectPieceCount = Number(item.internalRejectCount || 0);
+  const cuttingIrregularity = cuttingIrregularityV527(item);
 
   const priorityRail = scanPriorityRailV481(item);
   const priorityKindV480 = scanPriorityKindV480(item);
   const inlineMarkers = [
     rejectPieceCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
     item.manualOnly ? '<span class="row-marker manual-only-marker">Manual</span>' : "",
+    cuttingIrregularity ? `<span class="row-marker aw-irregular-marker-v527" title="${escapeHtml(cuttingIrregularity.detail || cuttingIrregularity.label)}">A+W</span>` : "",
   ].filter(Boolean).join("");
 
   const rowError = hasScanError(item);
@@ -11190,14 +11456,16 @@ function renderItemRow(item) {
   const rejectReason = item.lastRejectReason || "Internal reject";
   const rejectLocation = item.lastRejectLocation || "Unknown process location";
   const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
+  const rejectAgeMs = Date.now() - Date.parse(item.lastRejectedAt || "");
+  const recentRejectV527 = Number.isFinite(rejectAgeMs) && rejectAgeMs >= 0 && rejectAgeMs <= 72 * 60 * 60 * 1000;
   const rejectQty = Number(item.lastRejectQty || rejectPieceCount || 0);
   const rejectedBy = item.lastRejectedBy || "System";
   const rejectIncidentRow = rejectPieceCount > 0
     ? `<tr class="internal-reject-detail-row-v154" data-reject-detail-for="${escapeHtml(item.id)}" data-line-detail-ribbon="reject">
         <td colspan="8">
           <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
-            <span class="internal-reject-incident-badge-v154">IR</span>
-            <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
+            <span class="internal-reject-incident-badge-v154 ${recentRejectV527 ? "is-new-v527" : "is-history-v527"}">${recentRejectV527 ? "NEW" : "IR"}</span>
+            <strong class="internal-reject-incident-title-v154">${recentRejectV527 ? "New Internal Reject" : "Internal Reject History"}</strong>
             <span><small>Reason</small><b>${escapeHtml(rejectReason)}</b></span>
             <span><small>Machine / location</small><b>${escapeHtml(rejectLocation)}</b></span>
             <span><small>Qty</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
@@ -11250,6 +11518,7 @@ function scanOrderGroupHeaderV477(group = {}, { mobile = false } = {}) {
   const customer = String(first.customer || "").trim();
   const job = String(first.job || "").trim();
   const pieces = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
+  const irregularItemsV527 = items.filter((item) => Boolean(cuttingIrregularityV527(item)));
   const priorityKinds = items.map((entry) => scanPriorityKindV480(entry)).filter(Boolean);
   const hasRush = priorityKinds.some((kind) => kind === "rush" || kind === "both");
   const hasRemake = priorityKinds.some((kind) => kind === "remake" || kind === "both");
@@ -11258,7 +11527,10 @@ function scanOrderGroupHeaderV477(group = {}, { mobile = false } = {}) {
   const priorityIcon = priorityKind ? `<span class="scan-order-group-priority-icon-v485" aria-label="${escapeHtml(priorityKind === "both" ? "Rush and Remake order" : `${priorityKind} order`)}">${globalSearchIconV433("flag")}</span>` : "";
   const fields = [["Job Nr.", job || "-"], ["Customer", customer || "-"]]
     .map(([label, value]) => `<span class="scan-order-group-field-v479"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`).join("");
-  const content = `${priorityIcon}<span class="scan-order-group-copy-v477 scan-order-group-fields-v479">${fields}</span><span class="scan-order-group-count-v477">${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"} · ${escapeHtml(pieces)} pc${pieces === 1 ? "" : "s"}</span>${order ? `<button type="button" class="scan-order-detail-button-v477" data-open-order-detail-v474="${escapeHtml(order)}">${globalSearchIconV433("cube")}<span>View order details</span></button>` : ""}`;
+  const irregularFlagV527 = irregularItemsV527.length
+    ? `<span class="scan-order-group-irregular-v527" title="${escapeHtml(cuttingIrregularityV527(irregularItemsV527[0])?.detail || "A+W production record needs review")}">${globalSearchIconV433("flag")}<b>A+W REVIEW</b><small>${escapeHtml(irregularItemsV527.length)} item${irregularItemsV527.length === 1 ? "" : "s"}</small></span>`
+    : "";
+  const content = `${priorityIcon}<span class="scan-order-group-copy-v477 scan-order-group-fields-v479">${fields}</span><span class="scan-order-group-count-v477">${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"} · ${escapeHtml(pieces)} pc${pieces === 1 ? "" : "s"}</span>${irregularFlagV527}${order ? `<button type="button" class="scan-order-detail-button-v477" data-open-order-detail-v474="${escapeHtml(order)}">${globalSearchIconV433("cube")}<span>View order details</span></button>` : ""}`;
   if (mobile) return `<header class="mobile-order-group-header-v477${priorityClass}">${content}</header>`;
   return `<tr class="scan-order-group-v477${priorityClass}" data-order-group-v477="${escapeHtml(order)}"><td colspan="8"><div>${content}</div></td></tr>`;
 }
@@ -12648,7 +12920,7 @@ async function chooseRackDestination(rack) {
           </select>
         </label>
         <div class="rack-destination-actions">
-          <button type="button" class="app-cancel-action-v343" data-rack-destination-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="app-cancel-button app-cancel-action-v343" data-rack-destination-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="button" data-rack-destination-confirm>Complete Rack</button>
         </div>
       </section>
@@ -13297,6 +13569,7 @@ function renderMobileItemCardV477(item = {}) {
   const mobilePriorityRibbon = mobilePriorityMeta
     ? `<div class="mobile-priority-ribbon-v441 is-${escapeHtml(mobilePriorityMeta.kind || "rush")}"><strong>${escapeHtml(mobilePriorityMeta.label || "Priority")}</strong><span>${escapeHtml(String(mobilePriorityMeta.reason || "Priority handling").replace(/^\s*(?:Rush|Remake|SDI)\s*-\s*/i, ""))}</span>${movedOutByPriorityDate ? `<em>Moved to ${escapeHtml(formatDisplayDate(item.priorityDeliveryDate))}</em>` : ""}</div>`
     : "";
+  const cuttingIrregularity = cuttingIrregularityV527(item);
   const identity = movedOutByPriorityDate
     ? `aria-disabled="true" data-priority-moved-source="${escapeHtml(item.id || "")}"`
     : `data-id="${escapeHtml(item.id)}" data-order-v470="${escapeHtml(item.order || "")}" data-item-v477="${escapeHtml(item.item || "")}"`;
@@ -13315,6 +13588,7 @@ function renderMobileItemCardV477(item = {}) {
         <span><small>Quantity</small><b>${escapeHtml(quantity)}</b></span>
         <span class="dims"><small>Dimensions</small><b>${escapeHtml(item.dimensions || "-")}</b></span>
       </div>
+      ${cuttingIrregularity ? `<div class="mobile-aw-irregular-v527">${globalSearchIconV433("flag")}<span><b>A+W REVIEW</b><small>${escapeHtml(cuttingIrregularity.label)}</small></span></div>` : ""}
       <footer class="mobile-card-footer">
         <span class="card-customer">${escapeHtml(item.customer || "No customer")}</span>
         <span class="card-route">${escapeHtml(route)}</span>
@@ -13759,8 +14033,24 @@ function scanEventLocationPresentation(entry) {
   return { ...fallback, rackColor: "" };
 }
 
+function dedupeRecentEventsV527(entries = []) {
+  const seenRejects = new Set();
+  return (entries || []).filter((entry) => {
+    const eventType = String(entry?.eventType || "").toLowerCase();
+    if (!eventType.includes("reject")) return true;
+    const item = scanEntryDisplayItem(entry) || {};
+    const exactId = entry?.rejectId || entry?.details?.rejectId || item?.lastRejectId || "";
+    const key = exactId
+      ? `id:${exactId}`
+      : [eventType, item.order || "", item.item || "", entry.reason || item.lastRejectReason || "", entry.time || ""].join("|").toLowerCase();
+    if (seenRejects.has(key)) return false;
+    seenRejects.add(key);
+    return true;
+  });
+}
+
 function recentScansModalHtml() {
-  const rows = state.recent || [];
+  const rows = dedupeRecentEventsV527(state.recent || []);
   // v0.354: size Location from the actual longest rendered location instead
   // of allowing one narrow-column override to distort neighboring columns.
   const locationColumnCh = Math.min(22, Math.max(9, ...rows.map((entry) => {
@@ -14104,7 +14394,15 @@ function renderScanPage() {
   // v0.474: paint the delivery list first, then hydrate only this page's
   // fabrication metadata in one background request. Repaints are cache-backed.
   const visibleItemsV474 = getPagedItems().pageRows || [];
-  hydrateFabricationStatusesV474(visibleItemsV474, { context: "scan" }).catch(() => {});
+  const activeDateV527 = String(state.meta?.deliveryDate || "");
+  const dateWideReadyV527 = !state.backend || Boolean(
+    state.meta?.dateWideScanV485
+    && state.scanDateWideDateV485 === activeDateV527
+    && state.scanDateWideCatalogSignatureV486 === scanDateWideCatalogSignatureV486(activeDateV527)
+  );
+  if (dateWideReadyV527 && !state.fabricationWarmByDateV526.get(activeDateV527)) {
+    hydrateFabricationStatusesV474(visibleItemsV474, { context: "scan" }).catch(() => {});
+  }
 }
 
 /** Coalesce rapid search and filter input into one Scan-page paint per frame. */
@@ -15066,6 +15364,22 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
     };
   }
 
+  if (metric === "sheet-usage") {
+    const usage = report.sheetUsage || {};
+    return {
+      metric,
+      icon: "glass",
+      title: "Stock sheets used by glass type",
+      subtitle: "A+W sheet count, counted once for each optimization in the selected range.",
+      suffix: " sheets",
+      allowDonut: false,
+      entries: (usage.byGlass || []).map((row) => ({
+        label: `${row.glassType || "Other Glass"} - ${row.sheetSize || "Size not configured"}`,
+        value: Number(row.sheets || 0),
+        detail: `${Number(row.sheets || 0)} sheets - ${row.sheetSize || "Stock size not configured"}${(row.emails || []).length ? ` - ${(row.emails || []).join(", ")}` : " - no email recipients"}`,
+      })),
+    };
+  }
   if (metric === "delivery") {
     return {
       metric,
@@ -16189,7 +16503,11 @@ async function ensureTodayProductionReportV514({ force = false } = {}) {
     const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
     report.dateKeyV514 = today;
     state.statisticsTodayProductionReportV514 = report;
-    await hydrateProductionActivityMachinesV514(report);
+    // Machine evidence enriches the already visible report. Do not hold the
+    // production count behind network-share fabrication probes.
+    void hydrateProductionActivityMachinesV514(report).then(() => {
+      if (state.page === "statistics") renderStatisticsProductionActivityV506();
+    }).catch(() => {});
     return report;
   } catch (_error) {
     if (force) state.statisticsTodayProductionReportV514 = null;
@@ -16214,7 +16532,9 @@ async function ensureStatisticsProductionReportV514({ force = false } = {}) {
     const report = await fetchJson(`/api/reports/summary${query}`);
     state.statisticsProductionReportV514 = report;
     state.statisticsProductionReportRangeV514 = rangeKey;
-    await hydrateProductionActivityMachinesV514(report);
+    void hydrateProductionActivityMachinesV514(report).then(() => {
+      if (state.page === "statistics" && state.homeChartMetric === "production-count") renderStatisticsAnalytics();
+    }).catch(() => {});
     return report;
   } catch (_error) {
     if (force) {
@@ -16320,6 +16640,7 @@ function renderStatisticsProductionActivityV506() {
   const newWork = activity.newProduction || {};
   const rejects = activity.internalRejects || {};
   const remakes = activity.externalRemakes || {};
+  const sheetUsageV527 = report.sheetUsage || {};
   const glassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
   const glassMarkup = glassRows.length
     ? glassRows.map((row) => `
@@ -16355,6 +16676,7 @@ function renderStatisticsProductionActivityV506() {
         </div>
       </header>
       <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">${glassMarkup}</div>
+      <div class="statistics-sheet-total-v527"><span>Stock sheets used</span><strong>${escapeHtml(Number(sheetUsageV527.totalSheets || 0))}</strong><small>${escapeHtml(Number(sheetUsageV527.optimizationCount || 0))} A+W optimization${Number(sheetUsageV527.optimizationCount || 0) === 1 ? "" : "s"}</small></div>
       <div class="statistics-production-machine-ledger-v514" aria-label="Today’s new production by machine"><header><span>By machine</span><small>New orders only</small></header>${machineMarkupV514}</div>
     </article>
     <div class="statistics-production-side-stack-v506">
@@ -16405,6 +16727,8 @@ function dailyProductionEmailDraftV506(report, dateKey) {
   const rejects = activity.internalRejects || {};
   const remakes = activity.externalRemakes || {};
   const excluded = activity.yieldPercentageExcluded || {};
+  const sheetUsageV527 = report.sheetUsage || {};
+  const sheetRowsV527 = Array.isArray(sheetUsageV527.byGlass) ? sheetUsageV527.byGlass : [];
   const displayDate = formatNumericDeliveryDate(dateKey) || dateKey;
   const newGlassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
   const rejectRows = sortedDailyProductionRowsV506(rejects.rows);
@@ -16443,6 +16767,9 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     const orderItem = `${String(row.order || "—").trim()}-${String(row.item || "—").trim().padStart(3, "0")}`;
     plain.push(`  ${orderItem} | Qty ${Number(row.qty || 0)} | ${row.customer || "—"} | ${row.glassType || row.product || "Other Glass"} | ${row.dimensions || "—"} | DD ${formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—"}`);
   });
+  plain.push("", `STOCK SHEETS USED: ${Number(sheetUsageV527.totalSheets || 0)}`);
+  if (!sheetRowsV527.length) plain.push("  No A+W optimization sheet use was recorded.");
+  sheetRowsV527.forEach((row) => plain.push(`  ${row.glassType || "Other Glass"} | ${row.sheetSize || "Size not configured"} | ${Number(row.sheets || 0)} sheets`));
   plain.push("", "Generated by Delivery List Scanner");
 
   const newRowsHtml = newGlassRows.length ? newGlassRows.map((row) => `<tr>
@@ -16520,7 +16847,8 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     </td></tr></table>
   </div>`;
 
-  return { subject: `Daily Production Count - ${displayDate}`, body: plain.join("\r\n"), html, dateKey };
+  const recipients = [...new Set(sheetRowsV527.flatMap((row) => Array.isArray(row.emails) ? row.emails : []).map((value) => String(value || "").trim()).filter(Boolean))];
+  return { subject: `Daily Production Count - ${displayDate}`, body: plain.join("\r\n"), html, dateKey, recipients };
 }
 
 /** Create a polished HTML review surface before handing the draft to Outlook. */
@@ -16625,10 +16953,81 @@ async function openDailyProductionEmailAppV506() {
       showFloatingNotice("This report is too large for a reliable mail draft. Copy the formatted email, then paste it into Outlook.", "warning");
       return;
     }
-    window.location.href = `mailto:?${mailtoParam("subject", draft.subject)}`;
+    window.location.href = `mailto:${encodeURIComponent((draft.recipients || []).join(";"))}?${mailtoParam("subject", draft.subject)}`;
     return;
   }
-  window.location.href = `mailto:?${fullParams}`;
+  window.location.href = `mailto:${encodeURIComponent((draft.recipients || []).join(";"))}?${fullParams}`;
+}
+
+function closeSheetUsageSettingsV527() {
+  const modal = document.getElementById("sheetUsageSettingsV527");
+  const backdrop = document.getElementById("sheetUsageSettingsBackdropV527");
+  if (modal) modal.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+async function openSheetUsageSettingsV527() {
+  const [settings, report] = await Promise.all([
+    fetchJson("/api/reports/sheet-usage-settings"),
+    ensureTodayProductionReportV514({ force: false }),
+  ]);
+  const profiles = settings?.profiles || {};
+  const names = [...new Set([
+    ...Object.keys(profiles),
+    ...((report?.sheetUsage?.byGlass || []).map((row) => String(row.glassType || "").trim())),
+    ...((report?.productionActivity?.newProduction?.byGlass || []).map((row) => String(row.glassType || "").trim())),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  let backdrop = document.getElementById("sheetUsageSettingsBackdropV527");
+  let modal = document.getElementById("sheetUsageSettingsV527");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "sheetUsageSettingsBackdropV527";
+    backdrop.className = "statistics-email-preview-backdrop-v505";
+    backdrop.addEventListener("click", closeSheetUsageSettingsV527);
+    document.body.appendChild(backdrop);
+  }
+  if (!modal) {
+    modal = document.createElement("section");
+    modal.id = "sheetUsageSettingsV527";
+    modal.className = "sheet-usage-settings-v527";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    document.body.appendChild(modal);
+  }
+  const canEdit = hasPermission("manage_lookup_values");
+  modal.innerHTML = `<header><div><small>STATISTICS SETTINGS</small><h2>Stock sheets and email recipients</h2><p>A+W supplies the sheet count. Maintain the stock size and recipients for each glass type here.</p></div><button type="button" class="gui-close-button" data-sheet-settings-close-v527 aria-label="Close">×</button></header>
+    <div class="sheet-usage-settings-list-v527">${names.length ? names.map((glass) => {
+      const profile = profiles[glass] || {};
+      return `<article data-sheet-profile-v527="${escapeHtml(glass)}"><strong>${escapeHtml(glass)}</strong><label><span>Stock sheet size</span><input data-sheet-size-v527 value="${escapeHtml(profile.sheetSize || "")}" placeholder="96 x 130" ${canEdit ? "" : "disabled"}></label><label><span>Email recipients</span><input data-sheet-emails-v527 value="${escapeHtml((profile.emails || []).join("; "))}" placeholder="name@company.com; another@company.com" ${canEdit ? "" : "disabled"}></label></article>`;
+    }).join("") : `<div class="lookup-empty-state"><strong>No glass types are in today’s report</strong><span>Open this after A+W has supplied an optimization, or retain a previously configured profile.</span></div>`}</div>
+    <footer><span>Recipients are automatically added to the Daily Production email when their glass type used sheets.</span>${canEdit ? '<button type="button" class="app-primary-button" data-sheet-settings-save-v527>Save settings</button>' : ""}</footer>`;
+  modal.querySelector("[data-sheet-settings-close-v527]")?.addEventListener("click", closeSheetUsageSettingsV527);
+  modal.querySelector("[data-sheet-settings-save-v527]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const updated = {};
+      modal.querySelectorAll("[data-sheet-profile-v527]").forEach((row) => {
+        const glass = row.dataset.sheetProfileV527;
+        const sheetSize = String(row.querySelector("[data-sheet-size-v527]")?.value || "").trim();
+        const emails = String(row.querySelector("[data-sheet-emails-v527]")?.value || "").split(/[;,]/).map((value) => value.trim()).filter(Boolean);
+        if (sheetSize || emails.length) updated[glass] = { sheetSize, emails };
+      });
+      await fetchJson("/api/reports/sheet-usage-settings", { method: "POST", body: JSON.stringify({ profiles: updated }) });
+      state.statisticsTodayProductionReportV514 = null;
+      state.homeReportSummary = null;
+      closeSheetUsageSettingsV527();
+      await Promise.all([ensureTodayProductionReportV514({ force: true }), loadHomeReportSummary()]);
+      renderStatisticsPage();
+      showFloatingNotice("Stock sheet settings saved.", "success");
+    } catch (error) {
+      showFloatingNotice(error?.message || "Could not save stock sheet settings.", "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
+  backdrop.hidden = false;
+  modal.hidden = false;
 }
 
 /**
@@ -17500,11 +17899,24 @@ const HELP_PAGE_CONTENT = Object.freeze({
     questions: ["How do I scan a piece?", "How do I choose a rack?", "How do I undo a scan?"],
     steps: Object.freeze([
       { selector: "#deliveryDateSelect", title: "Choose the delivery date", body: "Select the date you are working. The scanner opens the stage allowed for your station and account." },
-      { selector: "#scanRackPanel", title: "Choose transportation", body: "On Staging, choose Truck or an open rack before scanning. Completed racks cannot accept more pieces." },
+      { selector: "#scanFilterDrawer", actionV527: "filters", title: "Filter the active list", body: "Open Filters to combine progress, attention, machine, route, and glass choices. Machine buttons use their maintained colors and a selected button turns blue with white text." },
+      { selector: "#scanRackPanel", actionV527: "racks", title: "Choose transportation", body: "Open the Rack list on Staging and choose Truck or an available rack before scanning. Completed racks cannot accept more pieces." },
       { selector: "#scanForm", title: "Scan a barcode", body: "Keep focus in this box and scan the piece label. A colored notice confirms the result without stopping the next scan." },
-      { selector: "#recentRows", title: "Review recent scans", body: "The latest successful scans, notices, and errors appear here. Use All Scans for complete stage history." },
-      { selector: "#scanFilterDrawer", title: "Find the work you need", body: "Combine status, attention, route, and glass filters. Active filters remain visible beside Filters." },
-      { selector: "#listRows, #mobileListCards", title: "Delivery list items", body: "Rows are grouped by Order and glass type. Double-click an item for Order Details, sketches, cutting data, and progress." },
+      { selector: "#adminModal", actionV527: "all-scans", title: "Review All Scans", body: "All Scans opens the full audit history for the active delivery date. Internal Reject incidents appear once, with the source, user, time, and outcome retained for review." },
+      { selector: "#productionExplorerPanelV470", actionV527: "order-details", title: "Open Order Details", body: "Double-click an item to open this Order Details GUI. Review progress, A+W optimization and cutting evidence, sketches, fabrication status, programs, and the order-level hardware section." },
+      { selector: "#listRows, #mobileListCards", title: "Delivery list items", body: "Rows are grouped by Order and glass type. Progress stays visible immediately while background evidence refreshes only unfinished work." },
+    ]),
+  }),
+  inventory: Object.freeze({
+    name: "Inventory",
+    summary: "Freeze Airport Rd or Indian Trail WIP, physically count it, and reconcile system versus floor inventory.",
+    questions: ["How do I start an inventory?", "What does reconciliation mean?", "How do I count an item not in the system?"],
+    steps: Object.freeze([
+      { selector: "#inventoryStartPanel", title: "Choose the inventory", body: "Select Airport Rd or Indian Trail, then choose a Full or Cycle Inventory. Starting freezes the system-side WIP snapshot." },
+      { selector: "#inventoryScanPanel", title: "Count the physical floor", body: "Scan each piece here. The box stays focused and confirms the Order, Item ID, SQFT, quantity, and total SQFT." },
+      { selector: "#inventoryManualOpenBtn", title: "Handle an unknown piece", body: "Use Manual Entry when a physical item is not in the system snapshot. Order and Item can Smart Fill known production fields, and glass choices infer the maintained Item ID." },
+      { selector: "[data-inventory-tab='reconciliation']", title: "Reconcile side by side", body: "System and physical records appear side by side. Matches receive a check mark; missing, unexpected, and mismatched rows turn red after the count is finished." },
+      { selector: "#adminModal", actionV527: "click:#inventoryHistoryBtn", title: "Review Inventory History", body: "Inventory History opens as its own full workspace. Reopen prior counts with their original frozen data, review reconciliation, and export the Excel workbook again." },
     ]),
   }),
   racks: Object.freeze({
@@ -17515,7 +17927,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
       { selector: "#racksPage .app-page-header-v357", title: "Rack controls", body: "Open rack history or, with permission, manage rack names and rack sets from these controls." },
       { selector: "#rackGrid", title: "Rack groups", body: "Groups and racks expand independently. Status color shows empty, in use, completed, or in transit." },
       { selector: "#rackGrid", title: "Complete and print", body: "Scan pieces into racks from Staging. Complete a rack when loading is finished, then print its packing list." },
-      { selector: "#rackPackingHistoryBtn", title: "Packing history", body: "Reprint a completed snapshot or audit earlier rack activity from Packing History." },
+      { selector: "#adminModal", actionV527: "click:#rackPackingHistoryBtn", title: "Racks History GUI", body: "Racks History opens the retained packing and movement workspace. Reprint a completed snapshot or audit earlier rack activity here." },
     ]),
   }),
   rejects: Object.freeze({
@@ -17523,7 +17935,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
     summary: "Record rejected glass and review the immutable recovery history.",
     questions: ["How do I log a reject?", "How do I filter rejects?", "Does a reject remove scan quantity?"],
     steps: Object.freeze([
-      { selector: "#rejectLogOpenBtn", title: "Log an Internal Reject", body: "Enter the Order and Item, then confirm quantity, reason, location, and notes before submitting." },
+      { selector: "#operationsModal", actionV527: "click:#rejectLogOpenBtn", title: "Log an Internal Reject", body: "This GUI confirms the Order and Item before you submit quantity, reason, location, and notes. Logging a reject resets only the affected broken piece’s progress." },
       { selector: "#rejectSearchInput", title: "Search history", body: "Search by Order, Item, customer, reason, machine, or user. Results update as you type." },
       { selector: "#rejectFiltersBtn", title: "Refine the history", body: "Filter by dates, machine or location, reason, and reporting user." },
       { selector: "#rejectSummaryBar", title: "Review totals", body: "These totals reconcile reject events, affected pieces, locations, and users for the active filters." },
@@ -17535,7 +17947,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
     summary: "Receive Indian Trail work, locate glass, and manage physical bay inventory.",
     questions: ["How do I receive glass into a bay?", "How do I find an order in a bay?", "How do I move bay items?"],
     steps: Object.freeze([
-      { selector: "#bayFlowPanel", title: "Route pulse", body: "Compare Indian Trail Outbound and Received quantities and open the in-transit manifest for traveling pieces." },
+      { selector: "#adminModal", actionV527: "click:[data-open-transit-manifest]", title: "In-transit manifest GUI", body: "Open the manifest from the route pulse to review glass traveling between Airport Road and Indian Trail, including current quantities and locations." },
       { selector: "#bayActionButtons", title: "Bay tools", body: "Review old bays and priority work, manage items, or edit bay rules and layout when permitted." },
       { selector: "#bayMapSearch", title: "Find glass or a bay", body: "Search a bay, Order, Item, customer, glass type, or size. Filters show only matching bays." },
       { selector: "#bayMapCanvas", title: "Physical bay map", body: "Click a bay to open its contents and actions. Status, age, and priority markers stay on the bay card." },
@@ -17552,12 +17964,13 @@ const HELP_PAGE_CONTENT = Object.freeze({
       { selector: ".admin-users-panel", title: "Users and permissions", body: "Create or edit users and station access. Manage role permissions separately for consistency." },
       { selector: ".customer-route-overview-panel-v351", title: "Customer routing", body: "Set default routes. Explicit A+W route data still takes priority when present." },
       { selector: ".production-files-overview-card-v472", title: "Machine and production files", body: "Configure Denver, Waterjet, sketch folders, and production evidence indexing." },
-      { selector: "#adminPage .admin-layout", title: "Additional controls", body: "The remaining cards manage lookups, scan rules, rejects, bays, stations, email, and racks." },
+      { selector: "#adminModal", actionV527: "click:[data-admin-modal='lookups']", title: "Lookup Manager GUI", body: "Lookup Manager uses consistent searchable tabs for glass, routes, processes, machines, stations, and presentation settings. Open an editor only when adding or changing one record." },
+      { selector: "#adminPage .admin-layout", title: "Additional controls", body: "The remaining cards manage scan rules, rejects, bays, stations, email, and racks. Each opens a focused GUI with the same header, close action, and save pattern." },
     ]),
   }),
 });
 
-const helpTutorialState = { page: "home", step: 0, target: null, positionFrame: 0 };
+const helpTutorialState = { page: "home", step: 0, target: null, positionFrame: 0, openedSurfaceV527: "" };
 let helpChatPage = "";
 
 function activeHelpPage() {
@@ -17605,6 +18018,8 @@ function appendHelpMessage(kind, messageText) {
 function helpAssistantAnswer(question) {
   const value = String(question || "").trim().toLowerCase();
   const answers = [
+    { terms: ["inventory", "physical count", "reconciliation", "missing physical", "not in system"], answer: "Open Inventory and choose Airport Road or Indian Trail. Start a Full or Cycle Inventory to freeze the current system WIP, scan the physical pieces, and review Reconciliation. Use Manual Entry for an unknown physical piece. If the system still lists work that is already out the door, select those system orders and use Complete Selected; the correction completes their workflow and clears active rack or bay locations without creating new bay assignments." },
+    { terms: ["sheet", "stock size", "optimization", "sheet email"], answer: "Statistics counts A+W SHEETCOUNT once per optimization. Choose Stock Sheets Used in the Data menu to compare glass types and stock sizes. Sheet Settings maintains each glass type’s stock size and email recipients; the Daily Production draft automatically addresses recipients for glass types that used sheets." },
     { terms: ["scan", "barcode", "manual"], answer: "Open Scan, choose the delivery date, and select Truck or an open rack on Staging. Scan the piece label. Use Manual Scan only when a readable barcode is unavailable; the result notice and Recent Scans confirm what happened." },
     { terms: ["rack", "packing", "transport"], answer: "Choose a rack from Staging before scanning. Complete it when loading is finished, then print its packing list. Scanning that rack barcode on Outbound applies the quantity stored on each packing row." },
     { terms: ["bay", "indian trail", "receive", "preassign"], answer: "Outbound scans preassign Indian Trail glass. On Bay Map, choose Add, select the target bay, and scan to receive it. Choose Remove to scan glass out." },
@@ -17695,10 +18110,60 @@ function positionTutorialCoach() {
   coach.style.top = `${top}px`;
 }
 
+function cleanupPageTutorialSurfaceV527() {
+  if (helpTutorialState.openedSurfaceV527 === "admin") void closeAdminModal();
+  if (helpTutorialState.openedSurfaceV527 === "production") closeProductionExplorerV470();
+  if (helpTutorialState.openedSurfaceV527 === "operations") closeOperationsModal();
+  if (helpTutorialState.openedSurfaceV527 === "filters") {
+    const drawer = document.getElementById("scanFilterDrawer");
+    if (drawer) drawer.open = false;
+  }
+  document.querySelectorAll(".custom-select.is-open").forEach((node) => node.classList.remove("is-open"));
+  helpTutorialState.openedSurfaceV527 = "";
+}
+
+function runPageTutorialActionV527(step) {
+  const action = String(step?.actionV527 || "");
+  if (action === "filters") {
+    const drawer = document.getElementById("scanFilterDrawer");
+    if (drawer) drawer.open = true;
+    helpTutorialState.openedSurfaceV527 = "filters";
+  } else if (action === "racks") {
+    document.querySelector("#scanRackPanel .custom-select-trigger")?.click();
+  } else if (action === "all-scans") {
+    helpTutorialState.openedSurfaceV527 = "admin";
+    void openRecentScansModal().then(() => {
+      helpTutorialState.target = visibleTutorialTarget(step.selector);
+      requestAnimationFrame(positionTutorialCoach);
+    });
+  } else if (action === "order-details") {
+    const row = (state.items || []).find((item) => String(item.order || "").trim());
+    if (row) {
+      helpTutorialState.openedSurfaceV527 = "production";
+      void openOrderDetailV470(row.order, { focusItem: row.item || "" }).then(() => {
+        helpTutorialState.target = visibleTutorialTarget(step.selector);
+        requestAnimationFrame(positionTutorialCoach);
+      });
+    }
+  } else if (action.startsWith("click:")) {
+    const selector = action.slice(6);
+    const trigger = document.querySelector(selector);
+    if (trigger) {
+      trigger.click();
+      helpTutorialState.openedSurfaceV527 = step.selector === "#operationsModal" ? "operations" : "admin";
+      window.setTimeout(() => {
+        helpTutorialState.target = visibleTutorialTarget(step.selector);
+        positionTutorialCoach();
+      }, 120);
+    }
+  }
+}
+
 function renderPageTutorialStep() {
   const content = HELP_PAGE_CONTENT[helpTutorialState.page] || activeHelpPage();
   const step = content.steps[helpTutorialState.step];
   if (!step) return closePageTutorial();
+  runPageTutorialActionV527(step);
   helpTutorialState.target = visibleTutorialTarget(step.selector);
   document.getElementById("pageTutorialCounter").textContent = `Step ${helpTutorialState.step + 1} of ${content.steps.length}`;
   document.getElementById("pageTutorialTitle").textContent = step.title;
@@ -17721,6 +18186,7 @@ function startPageTutorial() {
 
 function closePageTutorial() {
   cancelAnimationFrame(helpTutorialState.positionFrame);
+  cleanupPageTutorialSurfaceV527();
   helpTutorialState.target = null;
   document.getElementById("pageTutorialCoach")?.setAttribute("hidden", "");
   document.getElementById("pageTutorialSpotlight")?.setAttribute("hidden", "");
@@ -17731,8 +18197,756 @@ function movePageTutorial(direction) {
   const content = HELP_PAGE_CONTENT[helpTutorialState.page] || activeHelpPage();
   const nextIndex = helpTutorialState.step + direction;
   if (nextIndex >= content.steps.length) return closePageTutorial();
+  cleanupPageTutorialSurfaceV527();
   helpTutorialState.step = Math.max(nextIndex, 0);
   renderPageTutorialStep();
+}
+
+/* --------------------------------------------------------------------------
+   v0.524 Inventory: frozen WIP snapshots, physical counts, reconciliation.
+   -------------------------------------------------------------------------- */
+function inventorySqftTextV524(value) {
+  const numeric = Number(value || 0);
+  return `${numeric.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SQFT`;
+}
+
+function inventoryLocationRuleTextV524(location) {
+  if (location === "indian_trail") {
+    return "Indian Trail includes IT-route pieces as soon as Airport Outbound is scanned (in transit), then keeps received/bay-held quantity until it is cleared or scanned out.";
+  }
+  return "Airport Rd includes current cut WIP through Staging. Each piece leaves Airport inventory when its Outbound quantity is scanned.";
+}
+
+function inventorySetBusyV524(busy, message = "") {
+  state.inventoryBusyV524 = Boolean(busy);
+  [els.inventoryStartBtn, els.inventoryCompleteBtn, els.inventoryManualOpenBtn].forEach((button) => {
+    if (button) button.disabled = Boolean(busy);
+  });
+  if (els.inventoryScanInput) els.inventoryScanInput.disabled = Boolean(busy) || state.inventorySessionV524?.status !== "open";
+  if (message && els.inventoryScanFeedback) els.inventoryScanFeedback.textContent = message;
+}
+
+function inventoryOptionHtmlV524(value, label, selected = false) {
+  return `<option value="${escapeHtml(value)}" ${selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+}
+
+function renderInventoryCatalogControlsV524() {
+  const catalog = state.inventoryCatalogV524 || {};
+  const locations = Array.isArray(catalog.locations) ? catalog.locations : [];
+  const currentLocation = els.inventoryLocationSelect?.value || state.inventorySessionV524?.location || locations[0]?.value || "";
+  if (els.inventoryLocationSelect) {
+    els.inventoryLocationSelect.innerHTML = locations.map((item) => inventoryOptionHtmlV524(item.value, item.label, item.value === currentLocation)).join("");
+    if (!els.inventoryLocationSelect.value && locations[0]) els.inventoryLocationSelect.value = locations[0].value;
+  }
+  if (els.inventoryCycleFieldSelect) {
+    const currentField = els.inventoryCycleFieldSelect.value || "glass_type";
+    els.inventoryCycleFieldSelect.innerHTML = (catalog.cycleFields || []).map((item) => inventoryOptionHtmlV524(item.value, item.label, item.value === currentField)).join("");
+  }
+  renderInventoryManualChoicesV524();
+  refreshInventoryCycleControlsV524();
+}
+
+function inventoryCycleKnownValuesV524(field) {
+  const catalog = state.inventoryCatalogV524 || {};
+  if (field === "glass_type") return (catalog.itemMappings || []).map((item) => ({ value: item.glassLabel, label: `${item.glassLabel} · ${item.itemId}` }));
+  if (field === "item_id") return (catalog.itemMappings || []).map((item) => ({ value: item.itemId, label: `${item.itemId} · ${item.glassLabel}` }));
+  if (field === "bay") return (catalog.bays || []).map((value) => ({ value, label: value }));
+  return [];
+}
+
+function refreshInventoryCycleControlsV524() {
+  if (!els.inventoryTypeSelect) return;
+  const isCycle = els.inventoryTypeSelect.value === "cycle";
+  if (els.inventoryCycleFieldWrap) els.inventoryCycleFieldWrap.hidden = !isCycle;
+  if (els.inventoryCycleValueWrap) els.inventoryCycleValueWrap.hidden = !isCycle;
+  if (!isCycle) {
+    if (els.inventoryCycleCustomWrap) els.inventoryCycleCustomWrap.hidden = true;
+    return;
+  }
+  const field = els.inventoryCycleFieldSelect?.value || "glass_type";
+  const previous = els.inventoryCycleValueSelect?.value || "";
+  const known = inventoryCycleKnownValuesV524(field);
+  if (els.inventoryCycleValueSelect) {
+    els.inventoryCycleValueSelect.innerHTML = `${known.map((item) => inventoryOptionHtmlV524(item.value, item.label, item.value === previous)).join("")}<option value="__custom__">Other / Custom value...</option>`;
+    if (previous && [...els.inventoryCycleValueSelect.options].some((option) => option.value === previous)) els.inventoryCycleValueSelect.value = previous;
+    else if (!known.length) els.inventoryCycleValueSelect.value = "__custom__";
+  }
+  const custom = els.inventoryCycleValueSelect?.value === "__custom__";
+  if (els.inventoryCycleCustomWrap) els.inventoryCycleCustomWrap.hidden = !custom;
+  if (custom) window.setTimeout(() => els.inventoryCycleCustomInput?.focus(), 0);
+}
+
+function inventoryCycleFilterV524() {
+  if (els.inventoryTypeSelect?.value !== "cycle") return {};
+  const value = els.inventoryCycleValueSelect?.value === "__custom__"
+    ? els.inventoryCycleCustomInput?.value.trim()
+    : els.inventoryCycleValueSelect?.value;
+  return { field: els.inventoryCycleFieldSelect?.value || "glass_type", value: String(value || "").trim() };
+}
+
+function renderInventoryManualChoicesV524() {
+  const mappings = state.inventoryCatalogV524?.itemMappings || [];
+  if (els.inventoryManualGlass) {
+    const current = els.inventoryManualGlass.value;
+    els.inventoryManualGlass.innerHTML = `<option value="">Choose glass type...</option>${mappings.map((item) => inventoryOptionHtmlV524(item.glassLabel, `${item.glassLabel} · ${item.itemId}`, item.glassLabel === current)).join("")}<option value="__custom__">Other / Custom glass...</option>`;
+  }
+  if (els.inventoryManualItemId) {
+    const current = els.inventoryManualItemId.value;
+    els.inventoryManualItemId.innerHTML = `<option value="">Auto / choose Item ID...</option>${mappings.map((item) => inventoryOptionHtmlV524(item.itemId, `${item.itemId} · ${item.glassLabel}`, item.itemId === current)).join("")}<option value="__custom__">Other / Custom Item ID...</option>`;
+  }
+}
+
+function setInventoryMappedSelectV524(select, customWrap, customInput, value) {
+  if (!select) return;
+  const clean = String(value || "").trim();
+  const option = [...select.options].find((item) => item.value === clean);
+  if (option || !clean) {
+    select.value = clean;
+    if (customWrap) customWrap.hidden = true;
+    if (customInput) customInput.value = "";
+  } else {
+    select.value = "__custom__";
+    if (customWrap) customWrap.hidden = false;
+    if (customInput) customInput.value = clean;
+  }
+}
+
+function inventoryManualGlassValueV524() {
+  return els.inventoryManualGlass?.value === "__custom__" ? els.inventoryManualGlassCustom?.value.trim() : els.inventoryManualGlass?.value || "";
+}
+
+function inventoryManualItemIdValueV524() {
+  return els.inventoryManualItemId?.value === "__custom__" ? els.inventoryManualItemIdCustom?.value.trim() : els.inventoryManualItemId?.value || "";
+}
+
+function inventoryDimensionNumberV524(value) {
+  const text = String(value || "").trim().replace(/-/g, " ");
+  const mixed = text.match(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/);
+  if (mixed) return Number(mixed[1]) + (Number(mixed[2]) / Math.max(Number(mixed[3]), 1));
+  const fraction = text.match(/(\d+)\s*\/\s*(\d+)/);
+  if (fraction) return Number(fraction[1]) / Math.max(Number(fraction[2]), 1);
+  const number = text.match(/\d+(?:\.\d+)?/);
+  return number ? Number(number[0]) : 0;
+}
+
+function inventorySqftFromDimensionsV524(value) {
+  const parts = String(value || "").replace("×", "x").split(/\s*[xX]\s*/, 2);
+  if (parts.length < 2) return 0;
+  const width = inventoryDimensionNumberV524(parts[0]);
+  const height = inventoryDimensionNumberV524(parts[1]);
+  return width > 0 && height > 0 ? (width * height) / 144 : 0;
+}
+
+function updateInventoryManualTotalV524({ inferSqft = false } = {}) {
+  let sqft = Number(els.inventoryManualSqft?.value || 0);
+  if (inferSqft && !sqft) {
+    sqft = inventorySqftFromDimensionsV524(els.inventoryManualDimensions?.value || "");
+    if (sqft > 0 && els.inventoryManualSqft) els.inventoryManualSqft.value = sqft.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  }
+  const qty = Math.max(Number.parseInt(els.inventoryManualQty?.value || "1", 10) || 1, 1);
+  if (els.inventoryManualTotalSqft) els.inventoryManualTotalSqft.textContent = (sqft * qty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function loadInventoryCatalogV524(force = false) {
+  if (state.inventoryCatalogV524 && !force) return state.inventoryCatalogV524;
+  state.inventoryCatalogV524 = await fetchJson("/api/inventory/catalog");
+  renderInventoryCatalogControlsV524();
+  return state.inventoryCatalogV524;
+}
+
+async function loadInventoryHistoryV524() {
+  const payload = await fetchJson("/api/inventory/sessions?limit=75");
+  state.inventorySessionsV524 = Array.isArray(payload.sessions) ? payload.sessions : [];
+  renderInventoryHistoryV524();
+  return state.inventorySessionsV524;
+}
+
+async function loadInventorySessionV524(sessionId) {
+  state.inventorySessionV524 = await fetchJson(`/api/inventory/session?id=${encodeURIComponent(sessionId)}`);
+  state.inventorySelectedOrdersV527.clear();
+  state.inventoryViewDataV524 = { scans: [], system: [], reconciliation: [] };
+  state.inventoryViewMetaV524 = { scans: null, system: null, reconciliation: null };
+  renderInventorySessionV524();
+  await loadInventoryTabV524(state.inventoryTabV524, { reset: true });
+  return state.inventorySessionV524;
+}
+
+async function completeInventorySystemOrdersV527({ all = false } = {}) {
+  const session = state.inventorySessionV524;
+  if (!session || !hasPermission("manage_inventory")) return;
+  const orders = [...state.inventorySelectedOrdersV527];
+  if (!all && !orders.length) throw new Error("Select at least one system order.");
+  const countLabel = all ? "every order in the frozen system snapshot" : `${orders.length} selected order${orders.length === 1 ? "" : "s"}`;
+  const confirmed = await confirmWebAppAction({
+    title: "Mark system work complete?",
+    message: `This will advance ${countLabel} through every prior scanner step and out of Indian Trail. Active rack and bay records will be cleared so bay capacity stays accurate.`,
+    confirmLabel: all ? "Complete all orders" : "Complete selected",
+    cancelLabel: "Keep inventory unchanged",
+    danger: true,
+  });
+  if (!confirmed) return;
+  inventorySetBusyV524(true, "Completing confirmed system orders...");
+  try {
+    const payload = await fetchJson("/api/inventory/system-complete", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: session.id, orders, all }),
+    });
+    state.inventorySessionV524 = payload.session || session;
+    state.inventorySelectedOrdersV527.clear();
+    state.inventoryViewDataV524.system = [];
+    state.inventoryViewMetaV524.system = null;
+    await loadInventoryHistoryV524();
+    await loadInventoryTabV524("system", { reset: true });
+    showFloatingNotice(payload.message || "System orders completed.", "success");
+  } finally {
+    inventorySetBusyV524(false);
+    renderInventorySessionV524();
+  }
+
+}
+
+async function refreshInventoryPageV524() {
+  inventorySetBusyV524(true, "Loading inventory workspace...");
+  try {
+    await loadInventoryCatalogV524();
+    await loadInventoryHistoryV524();
+    const currentId = Number(state.inventorySessionV524?.id || 0);
+    const currentStillVisible = currentId && state.inventorySessionsV524.some((item) => Number(item.id) === currentId);
+    const open = state.inventorySessionsV524.find((item) => item.status === "open");
+    if (currentStillVisible) {
+      await loadInventorySessionV524(currentId);
+    } else if (open) {
+      if (els.inventoryLocationSelect) els.inventoryLocationSelect.value = open.location;
+      await loadInventorySessionV524(open.id);
+    } else {
+      state.inventorySessionV524 = null;
+      renderInventorySessionV524();
+    }
+  } finally {
+    inventorySetBusyV524(false);
+    if (state.inventorySessionV524?.status === "open" && els.inventoryScanFeedback) {
+      els.inventoryScanFeedback.className = "inventory-scan-feedback";
+      els.inventoryScanFeedback.textContent = "Ready for the next piece.";
+    }
+    if (state.page === "inventory" && state.inventorySessionV524?.status === "open") window.setTimeout(() => els.inventoryScanInput?.focus(), 40);
+  }
+}
+
+function inventorySetControlHiddenV524(control, hidden) {
+  if (!control) return;
+  const shouldHide = Boolean(hidden);
+  control.hidden = shouldHide;
+  // Shared action buttons intentionally own display with !important. Inventory
+  // has stateful actions, so mirror the hidden attribute with an inline
+  // important display override and remove it as soon as the action is valid.
+  if (shouldHide) control.style.setProperty("display", "none", "important");
+  else control.style.removeProperty("display");
+}
+
+function renderInventorySessionV524() {
+  const session = state.inventorySessionV524;
+  const historyOpen = state.inventoryHistoryOpenV524;
+  if (els.inventoryHistoryPanel) els.inventoryHistoryPanel.hidden = !historyOpen;
+  if (els.inventoryStartPanel) els.inventoryStartPanel.hidden = Boolean(session) || historyOpen;
+  if (els.inventoryWorkspace) els.inventoryWorkspace.hidden = !session || historyOpen;
+  if (!session) {
+    if (els.inventoryStartNote) els.inventoryStartNote.textContent = inventoryLocationRuleTextV524(els.inventoryLocationSelect?.value || "airport_rd");
+    return;
+  }
+  if (els.inventorySessionLocation) els.inventorySessionLocation.textContent = session.locationLabel;
+  if (els.inventorySessionCode) els.inventorySessionCode.textContent = session.sessionCode;
+  const cycle = session.inventoryType === "cycle" && session.cycleFilter?.value
+    ? `Cycle · ${session.cycleFilter.value}` : "Full inventory";
+  if (els.inventorySessionTitle) els.inventorySessionTitle.textContent = `${cycle} physical count`;
+  if (els.inventorySessionMeta) {
+    const end = session.status === "completed" ? ` · Completed ${formatDateTime(session.completedAt)}` : session.status === "cancelled" ? " · Cancelled" : " · Count in progress";
+    els.inventorySessionMeta.textContent = `Started ${formatDateTime(session.startedAt)} by ${session.startedBy || "Unknown"}${end}`;
+  }
+  if (els.inventoryExpectedQty) els.inventoryExpectedQty.textContent = Number(session.expectedQty || 0).toLocaleString();
+  if (els.inventoryExpectedSqft) els.inventoryExpectedSqft.textContent = inventorySqftTextV524(session.expectedTotalSqft);
+  if (els.inventoryScannedQty) els.inventoryScannedQty.textContent = Number(session.scannedQty || 0).toLocaleString();
+  if (els.inventoryScannedSqft) els.inventoryScannedSqft.textContent = inventorySqftTextV524(session.scannedTotalSqft);
+  if (els.inventoryMatchedCount) els.inventoryMatchedCount.textContent = Number(session.statusCounts?.matched || 0).toLocaleString();
+  const issueCount = Number(session.statusCounts?.mismatch || 0) + Number(session.statusCounts?.notInSystem || 0)
+    + (session.status === "completed" ? Number(session.statusCounts?.missingPhysical || 0) : 0);
+  if (els.inventoryIssueCount) els.inventoryIssueCount.textContent = issueCount.toLocaleString();
+  if (els.inventoryReconcileBadge) els.inventoryReconcileBadge.textContent = issueCount.toLocaleString();
+  const open = session.status === "open";
+  if (els.inventoryScanPanel) els.inventoryScanPanel.hidden = !open;
+  inventorySetControlHiddenV524(els.inventoryNewBtn, open);
+  inventorySetControlHiddenV524(els.inventoryCompleteBtn, !open);
+  inventorySetControlHiddenV524(els.inventoryCancelBtn, !open || !hasPermission("manage_inventory"));
+  if (els.inventoryScanInput) els.inventoryScanInput.disabled = !open || state.inventoryBusyV524;
+  document.querySelectorAll("[data-inventory-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.inventoryTab === state.inventoryTabV524));
+  renderInventoryTabV524();
+}
+
+function inventoryRenderScanTableV524(items, meta) {
+  if (!items.length) return `<div class="inventory-empty">No physical pieces have been counted yet.</div>`;
+  const canRemove = state.inventorySessionV524?.status === "open" && hasPermission("manage_inventory");
+  const rows = items.map((item) => `<tr>
+    <td>${escapeHtml(formatDateTime(item.scannedAt))}</td><td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td>
+    <td><strong>${escapeHtml(item.order || "-")}</strong></td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.glassType || "Unmapped")}</td>
+    <td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td>
+    <td><strong>${Number(item.qty || 0).toLocaleString()}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td>
+    <td>${escapeHtml(item.entryType === "manual" ? "Manual" : "Scan")}</td><td>${escapeHtml(item.scannedBy || "-")}</td>
+    ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">Remove</button></td>` : ""}
+  </tr>`).join("");
+  return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Scanned</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Entry</th><th>User</th>${canRemove ? "<th>Action</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
+}
+
+function inventoryRenderSystemTableV524(items, meta) {
+  if (!items.length) return `<div class="inventory-empty">The frozen system snapshot contains no pieces for this count.</div>`;
+  const canComplete = hasPermission("manage_inventory");
+  const selectedCount = state.inventorySelectedOrdersV527.size;
+  const controls = canComplete ? `<div class="inventory-system-complete-v527">
+    <div><strong>System orders already gone</strong><span>Select orders confirmed physically complete. Completion closes their active rack and bay locations.</span></div>
+    <button class="app-secondary-button" type="button" data-inventory-select-visible-v527>Select visible</button>
+    <button class="app-secondary-button" type="button" data-inventory-clear-selected-v527 ${selectedCount ? "" : "disabled"}>Clear</button>
+    <button class="app-primary-button" type="button" data-inventory-complete-selected-v527 ${selectedCount ? "" : "disabled"}><span>Complete selected</span> (${selectedCount})</button>
+    <button class="app-primary-button inventory-complete-all-v527" type="button" data-inventory-complete-all-v527>Complete all system orders</button>
+  </div>` : "";
+  const rows = items.map((item) => {
+    const order = String(item.order || "").trim();
+    const checked = state.inventorySelectedOrdersV527.has(order);
+    return `<tr class="${checked ? "is-selected-v527" : ""}">${canComplete ? `<td><input type="checkbox" data-inventory-select-order-v527="${escapeHtml(order)}" ${checked ? "checked" : ""} aria-label="Select Order ${escapeHtml(order)}"></td>` : ""}<td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td><td><strong>${escapeHtml(order || "-")}</strong></td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.glassType || "Unmapped")}</td><td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td><td><strong>${Number(item.qty || 0)}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td><td>${escapeHtml(item.route || "IT")}</td><td>${escapeHtml(item.bayCode || "-")}</td><td>${escapeHtml(item.sourceReason || "-")}</td></tr>`;
+  }).join("");
+  return `${controls}<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr>${canComplete ? "<th>Select</th>" : ""}<th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Route</th><th>Bay</th><th>System reason</th></tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
+}
+
+function inventoryCompareCardV524(item, side) {
+  if (!item) return `<div><span class="inventory-compare-title">— Missing —</span><div class="inventory-compare-meta"><span>No ${side} record</span></div></div>`;
+  return `<div><span class="inventory-compare-title">${escapeHtml(item.order || "-")} / ${escapeHtml(item.item || "-")} · ${escapeHtml(item.glassType || "Unmapped")}</span><div class="inventory-compare-meta"><span>Job ${escapeHtml(item.jobNr || "-")}</span><span>${escapeHtml(item.customer || "-")}</span><span>${escapeHtml(item.itemId || "Item ID missing")}</span><span>${escapeHtml(item.dimensions || "-")}</span><span>${Number(item.sqftEach || 0).toFixed(2)} SQFT × ${Number(item.qty || 0)} = <strong>${Number(item.totalSqft || 0).toFixed(2)} SQFT</strong></span></div></div>`;
+}
+
+function inventoryRenderReconciliationV524(items, meta) {
+  if (!items.length) return `<div class="inventory-empty">There are no comparison rows in this inventory.</div>`;
+  const finalized = state.inventorySessionV524?.status === "completed";
+  const rows = items.map((row) => {
+    const pending = row.status === "missing_physical" && !finalized;
+    const match = row.status === "matched";
+    const alert = !match && !pending;
+    const icon = match ? "✓" : pending ? "…" : "!";
+    const label = match ? "Matched" : pending ? "Awaiting physical scan" : row.status === "not_in_system" ? "Physical item not in system" : row.status === "missing_physical" ? "System item missing physically" : "Mismatch";
+    return `<div class="inventory-reconcile-row ${match ? "is-match" : alert ? "is-alert" : "is-pending"}">
+      <div class="inventory-reconcile-status"><span class="inventory-result-icon ${match ? "good" : alert ? "bad" : "pending"}">${icon}</span></div>
+      ${inventoryCompareCardV524(row.system, "system")}${inventoryCompareCardV524(row.physical, "physical")}
+      <div class="inventory-difference"><strong>${escapeHtml(label)}</strong><br>${escapeHtml((row.differences || []).join(" · ") || "System and physical values match")}</div>
+    </div>`;
+  }).join("");
+  return `<div class="inventory-reconcile-grid"><div></div><div class="inventory-reconcile-head">System Snapshot</div><div class="inventory-reconcile-head">Physical Count</div><div class="inventory-reconcile-head">Result</div>${rows}</div>${inventoryShowMoreV524(meta)}`;
+}
+
+function inventoryRenderTotalsV524() {
+  const totals = state.inventorySessionV524?.glassTotals || [];
+  if (!totals.length) return `<div class="inventory-empty">No glass totals are available for this inventory.</div>`;
+  const rows = totals.map((item) => {
+    const mismatch = Number(item.varianceQty || 0) !== 0 || Math.abs(Number(item.varianceSqft || 0)) > 0.005;
+    return `<tr class="${mismatch && state.inventorySessionV524?.status === "completed" ? "inventory-row-alert" : ""}"><td><strong>${escapeHtml(item.glassType || "Unmapped")}</strong></td><td>${escapeHtml(item.itemId || "MISSING")}</td><td>${Number(item.expectedQty || 0)}</td><td>${Number(item.scannedQty || 0)}</td><td>${Number(item.varianceQty || 0) > 0 ? "+" : ""}${Number(item.varianceQty || 0)}</td><td>${Number(item.expectedSqft || 0).toFixed(2)}</td><td>${Number(item.scannedSqft || 0).toFixed(2)}</td><td>${Number(item.varianceSqft || 0) > 0 ? "+" : ""}${Number(item.varianceSqft || 0).toFixed(2)}</td></tr>`;
+  }).join("");
+  return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Glass Type</th><th>Item ID</th><th>System Qty</th><th>Physical Qty</th><th>Qty Variance</th><th>System SQFT</th><th>Physical SQFT</th><th>SQFT Variance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function inventoryShowMoreV524(meta) {
+  if (!meta?.hasMore) return "";
+  return `<div class="inventory-show-more"><button class="app-secondary-button" type="button" data-inventory-show-more>Show more (${Number(meta.total || 0).toLocaleString()} total)</button></div>`;
+}
+
+function renderInventoryTabV524() {
+  if (!els.inventoryView || !state.inventorySessionV524) return;
+  const tab = state.inventoryTabV524;
+  if (tab === "totals") {
+    els.inventoryView.innerHTML = inventoryRenderTotalsV524();
+    return;
+  }
+  const data = state.inventoryViewDataV524[tab] || [];
+  const meta = state.inventoryViewMetaV524[tab];
+  if (!meta && state.inventoryBusyV524) {
+    els.inventoryView.innerHTML = `<div class="inventory-empty">Loading ${escapeHtml(tab)}...</div>`;
+    return;
+  }
+  if (tab === "scans") els.inventoryView.innerHTML = inventoryRenderScanTableV524(data, meta);
+  else if (tab === "system") els.inventoryView.innerHTML = inventoryRenderSystemTableV524(data, meta);
+  else els.inventoryView.innerHTML = inventoryRenderReconciliationV524(data, meta);
+}
+
+async function loadInventoryTabV524(tab, { reset = false } = {}) {
+  if (!state.inventorySessionV524) return;
+  state.inventoryTabV524 = ["scans", "reconciliation", "totals", "system"].includes(tab) ? tab : "scans";
+  document.querySelectorAll("[data-inventory-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.inventoryTab === state.inventoryTabV524));
+  if (state.inventoryTabV524 === "totals") return renderInventoryTabV524();
+  const view = state.inventoryTabV524;
+  const previousMeta = state.inventoryViewMetaV524[view];
+  const page = reset || !previousMeta ? 1 : Number(previousMeta.page || 1) + 1;
+  if (reset) {
+    state.inventoryViewDataV524[view] = [];
+    state.inventoryViewMetaV524[view] = null;
+  }
+  inventorySetBusyV524(true);
+  renderInventoryTabV524();
+  try {
+    const payload = await fetchJson(`/api/inventory/items?sessionId=${encodeURIComponent(state.inventorySessionV524.id)}&view=${encodeURIComponent(view)}&page=${page}&pageSize=150`);
+    state.inventoryViewDataV524[view] = reset || page === 1 ? (payload.items || []) : [...state.inventoryViewDataV524[view], ...(payload.items || [])];
+    state.inventoryViewMetaV524[view] = payload;
+  } finally {
+    inventorySetBusyV524(false);
+    renderInventoryTabV524();
+  }
+}
+
+function renderInventoryHistoryV524() {
+  if (!els.inventoryHistoryList) return;
+  const sessions = state.inventorySessionsV524 || [];
+  if (!sessions.length) {
+    els.inventoryHistoryList.innerHTML = `<div class="inventory-empty">No inventory snapshots have been created yet.</div>`;
+    return;
+  }
+  els.inventoryHistoryList.innerHTML = sessions.map((session) => {
+    const issues = Number(session.statusCounts?.mismatch || 0) + Number(session.statusCounts?.missingPhysical || 0) + Number(session.statusCounts?.notInSystem || 0);
+    const type = session.inventoryType === "cycle" ? `Cycle · ${session.cycleFilter?.value || "filtered"}` : "Full Inventory";
+    const status = String(session.status || "open").toLowerCase();
+    const statusLabel = status === "completed" ? "Completed" : status === "cancelled" ? "Cancelled" : "In progress";
+    const expected = Math.max(Number(session.expectedQty || 0), 0);
+    const physical = Math.max(Number(session.scannedQty || 0), 0);
+    const progress = expected ? Math.min(100, Math.round((physical / expected) * 100)) : (physical ? 100 : 0);
+    return `<article class="inventory-history-row is-${escapeHtml(status)}">
+      <div class="inventory-history-identity-v527"><span class="inventory-history-location-v527">${escapeHtml(session.locationLabel)}</span><div><strong>${escapeHtml(session.sessionCode)}</strong><small>${escapeHtml(type)} · ${escapeHtml(formatDateTime(session.startedAt))}</small><small>Started by ${escapeHtml(session.startedBy || "Unknown")}${session.completedAt ? ` · Closed ${escapeHtml(formatDateTime(session.completedAt))}` : ""}</small></div></div>
+      <span class="inventory-history-status-v527 is-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
+      <div class="inventory-history-progress-v527"><span><b>${progress}%</b><small>counted</small></span><i><em style="width:${progress}%"></em></i></div>
+      <div class="inventory-history-metric-v527"><strong>${expected.toLocaleString()}</strong><small>System</small></div>
+      <div class="inventory-history-metric-v527"><strong>${physical.toLocaleString()}</strong><small>Physical</small></div>
+      <div class="inventory-history-metric-v527"><strong class="${issues ? "is-alert" : ""}">${issues.toLocaleString()}</strong><small>Exceptions</small></div>
+      <div class="inventory-history-row-actions"><button class="app-secondary-button" type="button" data-inventory-open-session="${Number(session.id)}">Review</button><button class="app-primary-button" type="button" data-inventory-export-session="${Number(session.id)}">Export Excel</button></div>
+    </article>`;
+  }).join("");
+}
+
+function openInventoryHistoryV524() {
+  state.inventoryHistoryOpenV524 = true;
+  renderInventorySessionV524();
+  loadInventoryHistoryV524().catch((error) => showInlineError(error.message, true));
+}
+
+function closeInventoryHistoryV524() {
+  state.inventoryHistoryOpenV524 = false;
+  renderInventorySessionV524();
+  if (state.inventorySessionV524?.status === "open") window.setTimeout(() => els.inventoryScanInput?.focus(), 40);
+}
+
+function openInventoryManualV524(scanText = "") {
+  if (!els.inventoryManualModal) return;
+  state.inventoryPendingManualScanV524 = String(scanText || "").trim();
+  els.inventoryManualForm?.reset();
+  if (els.inventoryManualQty) els.inventoryManualQty.value = "1";
+  renderInventoryManualChoicesV524();
+  const exact = state.inventoryPendingManualScanV524.match(/^\s*(\d{6})\s*[- /]?\s*(\d{1,3})\s*$/);
+  if (exact) {
+    if (els.inventoryManualOrder) els.inventoryManualOrder.value = exact[1];
+    if (els.inventoryManualItem) els.inventoryManualItem.value = exact[2];
+  }
+  if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = exact ? "Order / Item recognized. Smart Fill can look up current production details." : "Enter an Order / Item to look up known information.";
+  if (els.inventoryManualGlassCustomWrap) els.inventoryManualGlassCustomWrap.hidden = true;
+  if (els.inventoryManualItemIdCustomWrap) els.inventoryManualItemIdCustomWrap.hidden = true;
+  updateInventoryManualTotalV524();
+  els.inventoryManualModal.hidden = false;
+  updateModalScrollLock();
+  window.setTimeout(() => (exact ? els.inventoryManualSmartFillBtn : els.inventoryManualOrder)?.focus(), 40);
+}
+
+function closeInventoryManualV524() {
+  if (!els.inventoryManualModal) return;
+  els.inventoryManualModal.hidden = true;
+  state.inventoryPendingManualScanV524 = "";
+  updateModalScrollLock();
+  if (state.page === "inventory" && state.inventorySessionV524?.status === "open") window.setTimeout(() => els.inventoryScanInput?.focus(), 30);
+}
+
+async function smartFillInventoryManualV524() {
+  const order = els.inventoryManualOrder?.value.trim() || "";
+  const item = els.inventoryManualItem?.value.trim() || "";
+  if (!order) throw new Error("Enter an Order Number before Smart Fill.");
+  if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = "Looking up current production information...";
+  const location = state.inventorySessionV524?.location || "";
+  const payload = await fetchJson(`/api/inventory/smart-fill?order=${encodeURIComponent(order)}&item=${encodeURIComponent(item)}&location=${encodeURIComponent(location)}`);
+  if (!payload.found) {
+    if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = payload.message || "No unique current system item was found. Continue with the physical information you can verify.";
+    return;
+  }
+  if (els.inventoryManualOrder) els.inventoryManualOrder.value = payload.order || order;
+  if (els.inventoryManualItem) els.inventoryManualItem.value = payload.item || item;
+  if (els.inventoryManualJob) els.inventoryManualJob.value = payload.jobNr || "";
+  if (els.inventoryManualCustomer) els.inventoryManualCustomer.value = payload.customer || "";
+  if (els.inventoryManualDimensions) els.inventoryManualDimensions.value = payload.dimensions || "";
+  if (els.inventoryManualSqft) els.inventoryManualSqft.value = Number(payload.sqftEach || 0) ? Number(payload.sqftEach).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "";
+  if (els.inventoryManualQty) els.inventoryManualQty.value = Math.max(Number(payload.qty || 1), 1);
+  setInventoryMappedSelectV524(els.inventoryManualGlass, els.inventoryManualGlassCustomWrap, els.inventoryManualGlassCustom, payload.glassType || "");
+  setInventoryMappedSelectV524(els.inventoryManualItemId, els.inventoryManualItemIdCustomWrap, els.inventoryManualItemIdCustom, payload.itemId || "");
+  updateInventoryManualTotalV524({ inferSqft: true });
+  if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = "Known production values were filled in. Verify them against the physical piece before saving.";
+}
+
+function syncInventoryItemIdFromGlassV524() {
+  const glass = inventoryManualGlassValueV524();
+  const mapping = (state.inventoryCatalogV524?.itemMappings || []).find((item) => String(item.glassLabel || "").toLowerCase() === glass.toLowerCase());
+  if (mapping) setInventoryMappedSelectV524(els.inventoryManualItemId, els.inventoryManualItemIdCustomWrap, els.inventoryManualItemIdCustom, mapping.itemId);
+}
+
+async function startInventoryV524() {
+  const location = els.inventoryLocationSelect?.value || "";
+  const inventoryType = els.inventoryTypeSelect?.value || "full";
+  const cycleFilter = inventoryCycleFilterV524();
+  if (!location) throw new Error("Choose an inventory location.");
+  if (inventoryType === "cycle" && !cycleFilter.value) throw new Error("Choose or enter the Cycle Inventory value.");
+  const confirmed = await confirmWebAppAction({
+    title: `Start ${inventoryType === "cycle" ? "Cycle" : "Full"} Inventory?`,
+    message: `${inventoryLocationRuleTextV524(location)} The system side will be frozen at the moment this count starts.`,
+    confirmLabel: "Start inventory",
+    cancelLabel: "Cancel",
+  });
+  if (!confirmed) return;
+  inventorySetBusyV524(true, "Building the frozen system snapshot...");
+  try {
+    const session = await fetchJson("/api/inventory/sessions", { method: "POST", body: JSON.stringify({ location, inventoryType, cycleFilter }) });
+    state.inventorySessionV524 = session;
+    state.inventoryHistoryOpenV524 = false;
+    state.inventoryTabV524 = "scans";
+    state.inventoryViewDataV524 = { scans: [], system: [], reconciliation: [] };
+    state.inventoryViewMetaV524 = { scans: null, system: null, reconciliation: null };
+    await loadInventoryHistoryV524();
+    renderInventorySessionV524();
+    await loadInventoryTabV524("scans", { reset: true });
+    showFloatingNotice(`${session.locationLabel} inventory started with ${Number(session.expectedQty || 0).toLocaleString()} expected pieces.`, "success");
+  } finally {
+    inventorySetBusyV524(false);
+    if (state.inventorySessionV524?.status === "open" && els.inventoryScanFeedback) {
+      els.inventoryScanFeedback.className = "inventory-scan-feedback";
+      els.inventoryScanFeedback.textContent = "Ready for the first piece.";
+    }
+    window.setTimeout(() => els.inventoryScanInput?.focus(), 40);
+  }
+}
+
+async function submitInventoryScanV524(event) {
+  event?.preventDefault();
+  if (state.inventoryBusyV524 || state.inventorySessionV524?.status !== "open") return;
+  const scan = els.inventoryScanInput?.value.trim() || "";
+  if (!scan) return els.inventoryScanInput?.focus();
+  if (els.inventoryScanInput) els.inventoryScanInput.value = "";
+  inventorySetBusyV524(true, "Checking physical piece...");
+  if (els.inventoryScanFeedback) els.inventoryScanFeedback.className = "inventory-scan-feedback";
+  try {
+    const payload = await fetchJson("/api/inventory/scans", { method: "POST", body: JSON.stringify({ sessionId: state.inventorySessionV524.id, scan }) });
+    if (payload.manualEntryRequired) {
+      if (els.inventoryScanFeedback) {
+        els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
+        els.inventoryScanFeedback.textContent = `${payload.message || "Not found in current system data."} Add the physical piece manually.`;
+      }
+      openInventoryManualV524(scan);
+      return;
+    }
+    if (payload.duplicate) {
+      if (els.inventoryScanFeedback) {
+        els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
+        els.inventoryScanFeedback.textContent = `Already counted: ${payload.existing?.order || ""} / ${payload.existing?.item || ""} · ${payload.message || "Duplicate scan"}`;
+      }
+      return;
+    }
+    state.inventorySessionV524 = payload.session || state.inventorySessionV524;
+    const physical = payload.scan || {};
+    if (els.inventoryScanFeedback) {
+      els.inventoryScanFeedback.className = `inventory-scan-feedback ${payload.matchedExpected ? "is-good" : "is-alert"}`;
+      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓" : "!"} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · ${escapeHtml(physical.glassType || "Unmapped")} · ${escapeHtml(physical.itemId || "Item ID missing")} · ${Number(physical.sqftEach || 0).toFixed(2)} SQFT × ${Number(physical.qty || 0)} = ${Number(physical.totalSqft || 0).toFixed(2)} SQFT`;
+    }
+    state.inventoryViewDataV524.scans = [physical, ...(state.inventoryViewDataV524.scans || []).filter((item) => Number(item.id) !== Number(physical.id))].slice(0, 150);
+    state.inventoryViewMetaV524.scans = { ...(state.inventoryViewMetaV524.scans || {}), page: 1, pageSize: 150, total: state.inventorySessionV524.scannedLineCount, hasMore: Number(state.inventorySessionV524.scannedLineCount || 0) > 150 };
+    state.inventoryViewMetaV524.reconciliation = null;
+    state.inventoryViewDataV524.reconciliation = [];
+    renderInventorySessionV524();
+    if (state.inventoryTabV524 === "reconciliation") await loadInventoryTabV524("reconciliation", { reset: true });
+  } finally {
+    inventorySetBusyV524(false);
+    window.setTimeout(() => els.inventoryScanInput?.focus(), 25);
+  }
+}
+
+async function submitInventoryManualV524(event) {
+  event?.preventDefault();
+  if (!state.inventorySessionV524 || state.inventoryBusyV524) return;
+  updateInventoryManualTotalV524({ inferSqft: true });
+  const payloadData = {
+    sessionId: state.inventorySessionV524.id,
+    barcode: state.inventoryPendingManualScanV524,
+    order: els.inventoryManualOrder?.value.trim() || "",
+    item: els.inventoryManualItem?.value.trim() || "",
+    jobNr: els.inventoryManualJob?.value.trim() || "",
+    customer: els.inventoryManualCustomer?.value.trim() || "",
+    glassType: inventoryManualGlassValueV524(),
+    itemId: inventoryManualItemIdValueV524(),
+    dimensions: els.inventoryManualDimensions?.value.trim() || "",
+    sqftEach: els.inventoryManualSqft?.value || "",
+    qty: els.inventoryManualQty?.value || "1",
+    notes: els.inventoryManualNotes?.value.trim() || "",
+  };
+  inventorySetBusyV524(true);
+  try {
+    const payload = await fetchJson("/api/inventory/manual-entry", { method: "POST", body: JSON.stringify(payloadData) });
+    state.inventorySessionV524 = payload.session || state.inventorySessionV524;
+    const physical = payload.scan || {};
+    closeInventoryManualV524();
+    if (els.inventoryScanFeedback) {
+      els.inventoryScanFeedback.className = `inventory-scan-feedback ${payload.matchedExpected ? "is-good" : "is-alert"}`;
+      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓ Manual entry matched the frozen system item." : "! Manual physical item recorded; it is not in the frozen system snapshot."} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · ${escapeHtml(physical.glassType || "Unmapped")} · Qty ${Number(physical.qty || 0)} · ${Number(physical.totalSqft || 0).toFixed(2)} total SQFT`;
+    }
+    state.inventoryViewMetaV524.scans = null;
+    state.inventoryViewMetaV524.reconciliation = null;
+    renderInventorySessionV524();
+    await loadInventoryTabV524(state.inventoryTabV524 === "totals" || state.inventoryTabV524 === "system" ? "scans" : state.inventoryTabV524, { reset: true });
+  } finally {
+    inventorySetBusyV524(false);
+  }
+}
+
+async function completeInventoryV524() {
+  const session = state.inventorySessionV524;
+  if (!session || session.status !== "open") return;
+  const outstanding = Number(session.statusCounts?.missingPhysical || 0);
+  const currentIssues = Number(session.statusCounts?.mismatch || 0) + Number(session.statusCounts?.notInSystem || 0);
+  const confirmed = await confirmWebAppAction({
+    title: "Finish this inventory?",
+    message: `${outstanding.toLocaleString()} system line${outstanding === 1 ? " is" : "s are"} still not physically scanned and ${currentIssues.toLocaleString()} other exception${currentIssues === 1 ? " is" : "s are"} present. Finishing freezes the physical count and marks unresolved comparison rows in red.`,
+    confirmLabel: "Finish inventory",
+    cancelLabel: "Keep counting",
+  });
+  if (!confirmed) return;
+  inventorySetBusyV524(true, "Finalizing physical inventory...");
+  try {
+    state.inventorySessionV524 = await fetchJson("/api/inventory/complete", { method: "POST", body: JSON.stringify({ sessionId: session.id }) });
+    state.inventoryTabV524 = "reconciliation";
+    await loadInventoryHistoryV524();
+    renderInventorySessionV524();
+    await loadInventoryTabV524("reconciliation", { reset: true });
+    showFloatingNotice("Inventory completed. Missing and mismatched pieces are now highlighted for reconciliation.", "success");
+  } finally {
+    inventorySetBusyV524(false);
+  }
+}
+
+async function cancelInventoryV524() {
+  const session = state.inventorySessionV524;
+  if (!session || session.status !== "open" || !hasPermission("manage_inventory")) return;
+  const confirmed = await confirmWebAppAction({ title: "Cancel this inventory?", message: "The session and audit history will be retained as Cancelled, but no more physical scans can be added.", confirmLabel: "Cancel inventory", cancelLabel: "Keep counting", danger: true });
+  if (!confirmed) return;
+  state.inventorySessionV524 = await fetchJson("/api/inventory/cancel", { method: "POST", body: JSON.stringify({ sessionId: session.id, reason: "Inventory count cancelled by operator" }) });
+  await loadInventoryHistoryV524();
+  renderInventorySessionV524();
+}
+
+async function removeInventoryScanV524(scanId) {
+  if (!state.inventorySessionV524 || !hasPermission("manage_inventory")) return;
+  const confirmed = await confirmWebAppAction({ title: "Remove this physical count?", message: "Use this only to correct a mistaken inventory scan. The removal is recorded in the audit log.", confirmLabel: "Remove scan", cancelLabel: "Keep scan", danger: true });
+  if (!confirmed) return;
+  state.inventorySessionV524 = await fetchJson("/api/inventory/scans/remove", { method: "POST", body: JSON.stringify({ sessionId: state.inventorySessionV524.id, scanId, reason: "Inventory count correction" }) });
+  state.inventoryViewMetaV524.scans = null;
+  state.inventoryViewMetaV524.reconciliation = null;
+  await loadInventoryTabV524(state.inventoryTabV524 === "reconciliation" ? "reconciliation" : "scans", { reset: true });
+  renderInventorySessionV524();
+}
+
+function exportInventoryV524(sessionId = state.inventorySessionV524?.id) {
+  if (!sessionId) return;
+  window.open(`/api/inventory/export.xlsx?id=${encodeURIComponent(sessionId)}`, "_blank", "noopener");
+}
+
+/**
+ * Purpose: Dismiss Inventory-only transient UI when navigating to another page.
+ * Effects: Blurs the Inventory scanner and closes Inventory overlays only.
+ * Isolation: Does not clear the active inventory session and never reads or writes
+ * normal delivery Scan state, scan_events, staged quantities, or delivery-list progress.
+ */
+function suspendInventoryUiV525() {
+  els.inventoryScanInput?.blur();
+  if (els.inventoryManualModal) els.inventoryManualModal.hidden = true;
+  if (els.inventoryHistoryPanel) els.inventoryHistoryPanel.hidden = true;
+  state.inventoryPendingManualScanV524 = "";
+  state.inventoryHistoryOpenV524 = false;
+}
+
+function wireInventoryEventsV524() {
+  addOptionalUiEventListener(els.inventoryTypeSelect, "change", refreshInventoryCycleControlsV524);
+  addOptionalUiEventListener(els.inventoryCycleFieldSelect, "change", refreshInventoryCycleControlsV524);
+  addOptionalUiEventListener(els.inventoryCycleValueSelect, "change", refreshInventoryCycleControlsV524);
+  addOptionalUiEventListener(els.inventoryLocationSelect, "change", () => {
+    if (els.inventoryStartNote) els.inventoryStartNote.textContent = inventoryLocationRuleTextV524(els.inventoryLocationSelect.value);
+  });
+  addOptionalUiEventListener(els.inventoryStartBtn, "click", () => startInventoryV524().catch((error) => showInlineError(error.message, true)));
+  addOptionalUiEventListener(els.inventoryScanForm, "submit", (event) => submitInventoryScanV524(event).catch((error) => showInlineError(error.message, true)));
+  addOptionalUiEventListener(els.inventoryManualOpenBtn, "click", () => openInventoryManualV524());
+  addOptionalUiEventListener(els.inventoryManualCloseBtn, "click", closeInventoryManualV524);
+  addOptionalUiEventListener(els.inventoryManualCancelBtn, "click", closeInventoryManualV524);
+  addOptionalUiEventListener(els.inventoryManualModal, "click", (event) => { if (event.target === els.inventoryManualModal) closeInventoryManualV524(); });
+  addOptionalUiEventListener(els.inventoryManualSmartFillBtn, "click", () => smartFillInventoryManualV524().catch((error) => { if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = error.message; }));
+  addOptionalUiEventListener(els.inventoryManualForm, "submit", (event) => submitInventoryManualV524(event).catch((error) => showInlineError(error.message, true)));
+  addOptionalUiEventListener(els.inventoryManualGlass, "change", () => {
+    const custom = els.inventoryManualGlass.value === "__custom__";
+    if (els.inventoryManualGlassCustomWrap) els.inventoryManualGlassCustomWrap.hidden = !custom;
+    syncInventoryItemIdFromGlassV524();
+  });
+  addOptionalUiEventListener(els.inventoryManualItemId, "change", () => {
+    if (els.inventoryManualItemIdCustomWrap) els.inventoryManualItemIdCustomWrap.hidden = els.inventoryManualItemId.value !== "__custom__";
+  });
+  addOptionalUiEventListener(els.inventoryManualDimensions, "change", () => updateInventoryManualTotalV524({ inferSqft: true }));
+  addOptionalUiEventListener(els.inventoryManualSqft, "input", () => updateInventoryManualTotalV524());
+  addOptionalUiEventListener(els.inventoryManualQty, "input", () => updateInventoryManualTotalV524());
+  addOptionalUiEventListener(els.inventoryHistoryBtn, "click", openInventoryHistoryV524);
+  addOptionalUiEventListener(els.inventoryNewBtn, "click", () => {
+    state.inventorySessionV524 = null;
+    state.inventoryTabV524 = "scans";
+    state.inventoryViewDataV524 = { scans: [], system: [], reconciliation: [] };
+    state.inventoryViewMetaV524 = { scans: null, system: null, reconciliation: null };
+    renderInventorySessionV524();
+  });
+  addOptionalUiEventListener(els.inventoryHistoryCloseBtn, "click", closeInventoryHistoryV524);
+  addOptionalUiEventListener(els.inventoryExportBtn, "click", () => exportInventoryV524());
+  addOptionalUiEventListener(els.inventoryCompleteBtn, "click", () => completeInventoryV524().catch((error) => showInlineError(error.message, true)));
+  addOptionalUiEventListener(els.inventoryCancelBtn, "click", () => cancelInventoryV524().catch((error) => showInlineError(error.message, true)));
+  document.querySelectorAll("[data-inventory-tab]").forEach((button) => button.addEventListener("click", () => loadInventoryTabV524(button.dataset.inventoryTab, { reset: true }).catch((error) => showInlineError(error.message, true))));
+  addOptionalUiEventListener(els.inventoryView, "click", (event) => {
+    const remove = event.target.closest("[data-inventory-remove-scan]");
+    if (remove) removeInventoryScanV524(Number(remove.dataset.inventoryRemoveScan || 0)).catch((error) => showInlineError(error.message, true));
+    const more = event.target.closest("[data-inventory-show-more]");
+    if (more) loadInventoryTabV524(state.inventoryTabV524, { reset: false }).catch((error) => showInlineError(error.message, true));
+    if (event.target.closest("[data-inventory-select-visible-v527]")) {
+      (state.inventoryViewDataV524.system || []).forEach((item) => {
+        const order = String(item.order || "").trim();
+        if (order) state.inventorySelectedOrdersV527.add(order);
+      });
+      renderInventoryTabV524();
+    }
+    if (event.target.closest("[data-inventory-clear-selected-v527]")) {
+      state.inventorySelectedOrdersV527.clear();
+      renderInventoryTabV524();
+    }
+    if (event.target.closest("[data-inventory-complete-selected-v527]")) completeInventorySystemOrdersV527().catch((error) => showInlineError(error.message, true));
+    if (event.target.closest("[data-inventory-complete-all-v527]")) completeInventorySystemOrdersV527({ all: true }).catch((error) => showInlineError(error.message, true));
+  });
+  addOptionalUiEventListener(els.inventoryView, "change", (event) => {
+    const checkbox = event.target.closest("[data-inventory-select-order-v527]");
+    if (!checkbox) return;
+    const order = String(checkbox.dataset.inventorySelectOrderV527 || "").trim();
+    if (checkbox.checked) state.inventorySelectedOrdersV527.add(order);
+    else state.inventorySelectedOrdersV527.delete(order);
+    renderInventoryTabV524();
+  });
+  addOptionalUiEventListener(els.inventoryHistoryList, "click", (event) => {
+    const open = event.target.closest("[data-inventory-open-session]");
+    if (open) {
+      state.inventoryHistoryOpenV524 = false;
+      loadInventorySessionV524(Number(open.dataset.inventoryOpenSession || 0)).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const exportButton = event.target.closest("[data-inventory-export-session]");
+    if (exportButton) exportInventoryV524(Number(exportButton.dataset.inventoryExportSession || 0));
+  });
 }
 
 function showPage(page) {
@@ -17753,11 +18967,14 @@ function showPage(page) {
   ])) page = "home";
   if (page === "bays" && !hasAnyPermission(["view_bays", "view_indian_trail"])) page = "home";
   if (page === "racks" && !hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) page = "home";
+  if (page === "inventory" && !hasAnyPermission(["view_inventory", "scan_inventory", "manage_inventory"])) page = "home";
   if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_delivery_lists"])) page = "home";
   const pageChanged = state.page !== page;
+  const leavingInventoryV525 = state.page === "inventory" && page !== "inventory";
   if (state.page === "scan" && page !== "scan" && state.scanDateWideLoadingV485) cancelScanDateWideLoadV512();
   if (page === "home") state.expandedDeliveryDate = "";
   state.page = page;
+  if (leavingInventoryV525) suspendInventoryUiV525();
   document.body.dataset.page = page;
   syncSidebarState({ closeMobile: true });
   let activePageView = null;
@@ -17812,6 +19029,9 @@ function showPage(page) {
       void activateScanDateV485(scanDateV485, false, { preferredListId: state.activeListId })
         .catch((error) => showInlineError(error.message));
     }
+  }
+  if (page === "inventory") {
+    refreshInventoryPageV524().catch((error) => showInlineError(error.message, true));
   }
   if (page === "racks") {
     refreshRacksPage().catch((error) => showInlineError(error.message, true));
@@ -17898,7 +19118,7 @@ async function showOutboundOverrideDialog(payload, scanText, options = {}) {
           </select>
         </label>
         <div class="outbound-override-actions">
-          <button type="button" class="app-cancel-action-v343" data-outbound-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel scan</span></button>
+          <button type="button" class="app-cancel-button app-cancel-action-v343" data-outbound-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel scan</span></button>
           <button type="button" data-outbound-override-confirm>Override and scan outbound</button>
         </div>
       </section>
@@ -18032,7 +19252,7 @@ async function showIndianTrailOutboundReceiveOverride(payload, scanText, options
               : ""}
         </label>
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-indian-trail-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${spanish ? "Cancelar escaneo" : "Cancel scan"}</span></button>
+          <button type="button" class="action-confirm-cancel app-cancel-button app-cancel-action-v343" data-indian-trail-override-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${spanish ? "Cancelar escaneo" : "Cancel scan"}</span></button>
           <button type="button" class="action-confirm-confirm" data-indian-trail-override-confirm>${spanish ? "Recibir en la bahía seleccionada" : "Receive in selected bay"}</button>
         </div>
       </section>
@@ -18589,7 +19809,7 @@ function showCrossDateScanSelection(payload) {
         </div>
         <footer class="cross-date-scan-footer">
           <span>Only the selected candidate will be scanned. Closing this window leaves the current delivery date unchanged.</span>
-          <button type="button" class="app-cancel-action-v343" data-cross-date-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel Scan</span></button>
+          <button type="button" class="app-cancel-button app-cancel-action-v343" data-cross-date-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel Scan</span></button>
         </footer>
       </section>
     `;
@@ -19737,9 +20957,16 @@ function syncFabricationRevisionV522(revision = "") {
   state.fabricationRevisionV522 = next;
   if (!changed) return;
   state.fabricationStatusEpochV522 = Number(state.fabricationStatusEpochV522 || 0) + 1;
-  state.fabricationStatusCacheV474.clear();
-  // Source changes are uncommon. Server memory reuses unaffected pieces; no
-  // new timer or share walk is attached to the existing catalog heartbeat.
+  // v0.523: a production-share revision can reveal new programs for unfinished
+  // pieces, but it cannot undo physical fabrication that the server has already
+  // proven complete. Retain completed lifecycle-keyed entries and invalidate
+  // only pending/unknown results. Rejects/remakes change the lifecycle key, so
+  // those pieces naturally become eligible for a fresh machine check.
+  for (const [key, status] of state.fabricationStatusCacheV474.entries()) {
+    if (status?.fabricated !== true) state.fabricationStatusCacheV474.delete(key);
+  }
+  // Source changes are uncommon. No new timer or share walk is attached to the
+  // existing catalog heartbeat; only unfinished pieces are warmed again.
   if (state.page === "scan") void warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items);
 }
 
@@ -19769,14 +20996,30 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
     if (!order) continue;
     const key = fabricationStatusKeyV474(order, item, job, lastRejectedAt, fabricationRevisionV521(row));
     const cached = state.fabricationStatusCacheV474.get(key);
-    const retrySeconds = Number(cached?.retryAfterSeconds || 0);
-    const cachedAge = Date.now() - Date.parse(cached?.checkedAt || "");
-    const fabricationDue = !cached || (retrySeconds > 0 && (!Number.isFinite(cachedAge) || cachedAge >= retrySeconds * 1000));
+    const progressCheck = state.productionProgressCheckedV522.get(key) || {};
+    const automaticScanContextV526 = context === "scan" || context === "prewarm";
+    const minimumRetrySecondsV526 = automaticScanContextV526 ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 0;
+    const retrySeconds = Math.max(minimumRetrySecondsV526, Number(cached?.retryAfterSeconds || 0));
+    const checkedAtMs = Date.parse(cached?.checkedAt || "");
+    // Some pending status payloads historically reached Scan without checkedAt.
+    // The successful batch timestamp is authoritative enough to enforce the
+    // automatic retry window instead of treating every repaint as immediately due.
+    const cachedAge = Number.isFinite(checkedAtMs)
+      ? Date.now() - checkedAtMs
+      : progressCheck.at ? Date.now() - Number(progressCheck.at) : Number.POSITIVE_INFINITY;
+    // A missing payload is not permission to retry on every render. Failed or
+    // incomplete share responses still record an attempt below, so Scan waits
+    // for the same bounded retry window before asking again.
+    const fabricationDue = cached
+      ? (retrySeconds > 0 && cachedAge >= retrySeconds * 1000)
+      : (!progressCheck.at || cachedAge >= Math.max(minimumRetrySecondsV526, Number(progressCheck.retryAfterSeconds || 0)) * 1000);
     if (cached && fabricationDue) state.fabricationStatusCacheV474.delete(key);
     const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
     const cuttingComplete = Boolean(cuttingProgressPresentationV498(cutting).complete);
-    const progressCheck = state.productionProgressCheckedV522.get(key) || {};
-    const progressRetrySeconds = Math.max(60, Number(progressCheck.retryAfterSeconds || state.productionFileSettings?.cacheMinutes * 60 || 300));
+    const progressRetrySeconds = Math.max(
+      automaticScanContextV526 ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
+      Number(progressCheck.retryAfterSeconds || state.productionFileSettings?.cacheMinutes * 60 || 300),
+    );
     const cuttingDue = !cuttingComplete && (!progressCheck.at || Date.now() - Number(progressCheck.at) >= progressRetrySeconds * 1000);
     if ((!fabricationDue && !cuttingDue) || state.fabricationStatusPendingV474.has(key)) continue;
     state.fabricationStatusPendingV474.add(key);
@@ -19810,14 +21053,49 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
   // keeping PDF/network-share work bounded. Total work is unchanged and the
   // scanner still paints before any production evidence is requested.
   const chunkSize = context === "prewarm" ? 40 : 10;
+  let scanPublishedV527 = false;
   for (let offset = 0; offset < candidates.length; offset += chunkSize) {
     const chunk = candidates.slice(offset, offset + chunkSize);
+    if ((context === "scan" || context === "prewarm") && (document.hidden || state.page !== "scan")) {
+      candidates.slice(offset).forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
+      break;
+    }
+    // A second renderer may have selected these items while an earlier request
+    // was draining through the shared queue. Recheck freshness immediately
+    // before I/O and discard work that the earlier response already satisfied.
+    const requestedChunkV527 = chunk.filter(({ key }) => {
+      const cached = state.fabricationStatusCacheV474.get(key);
+      if (cached?.fabricated === true) return false;
+      const progress = state.productionProgressCheckedV522.get(key) || {};
+      const retrySeconds = Math.max(
+        context === "scan" || context === "prewarm" ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
+        Number(cached?.retryAfterSeconds || 0),
+        Number(progress.retryAfterSeconds || 0),
+      );
+      const statusCheckedAt = Date.parse(cached?.checkedAt || "");
+      const checkedAt = Number.isFinite(statusCheckedAt) ? statusCheckedAt : Number(progress.at || 0);
+      return !checkedAt || Date.now() - checkedAt >= retrySeconds * 1000;
+    });
+    if (!requestedChunkV527.length) {
+      chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
+      continue;
+    }
+    let chunkPublishedV527 = false;
     try {
       const epoch = Number(state.fabricationStatusEpochV522 || 0);
-      const payload = await requestFabricationBatchV522(chunk);
+      const payload = await requestFabricationBatchV522(requestedChunkV527);
       const currentEpoch = epoch === Number(state.fabricationStatusEpochV522 || 0);
       if (!currentEpoch) window.setTimeout(() => warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items), 50);
-      for (const result of currentEpoch ? payload.results || [] : []) {
+      const resultsV527 = currentEpoch ? payload.results || [] : [];
+      const attemptedAtV527 = Date.now();
+      // Mark every requested piece, including a piece omitted from a partial
+      // response. Otherwise its next Scan repaint would immediately issue the
+      // same production-share request again.
+      if (currentEpoch) requestedChunkV527.forEach(({ key }) => state.productionProgressCheckedV522.set(key, {
+        at: attemptedAtV527,
+        retryAfterSeconds: Math.max(FABRICATION_AUTO_RETRY_MS_V526 / 1000, Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0)),
+      }));
+      for (const result of resultsV527) {
         const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job, result.status?.evidenceAfter));
         state.fabricationStatusCacheV474.set(key, result.status || {});
         if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(key, result.cutting);
@@ -19841,14 +21119,28 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
         updateRows(state.orderDetailRenderedPayloadV507?.items);
         for (const cachedOrder of state.orderDetailProductionCacheV507.values()) updateRows(cachedOrder?.payload?.items);
       }
+      chunkPublishedV527 = resultsV527.length > 0;
     } catch (_error) {
       // Production evidence is supplemental UI state. A temporarily unreachable
       // share must not turn Scan/Search into an error path or block their paint.
+      // Remember the failed attempt so a render cannot become a tight retry loop.
+      const attemptedAtV527 = Date.now();
+      requestedChunkV527.forEach(({ key }) => state.productionProgressCheckedV522.set(key, {
+        at: attemptedAtV527,
+        retryAfterSeconds: Math.max(
+          context === "scan" || context === "prewarm" ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
+          Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0),
+        ),
+      }));
     } finally {
       chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
     }
-    repaint();
+    if (chunkPublishedV527 && context === "scan") scanPublishedV527 = true;
+    else if (chunkPublishedV527) repaint();
   }
+  // Replace Scan rows at most once for the complete visible batch. Repainting
+  // after every ten pieces was removing the hovered row and cancelling clicks.
+  if (scanPublishedV527) repaint();
 }
 
 async function hydrateFabricationFilterCatalogV512() {
@@ -19880,25 +21172,64 @@ function rememberFabricationDeliveryV521(deliveryDate = "", rows = []) {
   }
 }
 
-async function warmFabricationDeliveryV521(deliveryDate = "", rows = []) {
-  const source = Array.isArray(rows) ? rows.slice() : [];
-  rememberFabricationDeliveryV521(deliveryDate, source);
-  for (let offset = 0; offset < source.length; offset += 80) {
-    if (document.hidden || (state.page === "scan" && String(state.meta?.deliveryDate || "") !== String(deliveryDate || ""))) return;
-    await hydrateFabricationStatusesV474(source.slice(offset, offset + 80), { context: "prewarm" });
-    await new Promise((resolve) => window.setTimeout(resolve, 25));
+function fabricationRowsNeedRefreshV527(rows = []) {
+  const now = Date.now();
+  for (const row of rows || []) {
+    const order = String(row?.order || "").trim();
+    if (!order) continue;
+    const key = fabricationStatusItemKeyV521(row);
+    if (!key || state.fabricationStatusPendingV474.has(key)) continue;
+    const cached = state.fabricationStatusCacheV474.get(key);
+    const progress = state.productionProgressCheckedV522.get(key) || {};
+    const retryMs = Math.max(
+      FABRICATION_AUTO_RETRY_MS_V526,
+      Number(cached?.retryAfterSeconds || 0) * 1000,
+      Number(progress.retryAfterSeconds || 0) * 1000,
+    );
+    const cachedAt = Date.parse(cached?.checkedAt || "");
+    const checkedAt = Number.isFinite(cachedAt) ? cachedAt : Number(progress.at || 0);
+    const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= retryMs);
+    const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
+    const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= retryMs);
+    if (fabricationDue || cuttingDue) return true;
   }
-  if (state.page === "scan" && String(state.meta?.deliveryDate || "") === String(deliveryDate || "")) scheduleScanRender();
+  return false;
+}
+
+async function warmFabricationDeliveryV521(deliveryDate = "", rows = []) {
+  const date = String(deliveryDate || "").trim();
+  if (!date) return;
+  const existing = state.fabricationWarmByDateV526.get(date);
+  if (existing) return existing;
+  const source = Array.isArray(rows) ? rows.slice() : [];
+  rememberFabricationDeliveryV521(date, source);
+  // Date navigation is a cache read. Only unfinished pieces whose retry window
+  // actually expired may schedule production-share work.
+  if (!fabricationRowsNeedRefreshV527(source)) return;
+  const run = (async () => {
+    for (let offset = 0; offset < source.length; offset += 80) {
+      if (document.hidden || (state.page === "scan" && String(state.meta?.deliveryDate || "") !== date)) return;
+      await hydrateFabricationStatusesV474(source.slice(offset, offset + 80), { context: "prewarm" });
+      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    }
+    if (state.page === "scan" && String(state.meta?.deliveryDate || "") === date) scheduleScanRender();
+  })();
+  state.fabricationWarmByDateV526.set(date, run);
+  try {
+    return await run;
+  } finally {
+    if (state.fabricationWarmByDateV526.get(date) === run) state.fabricationWarmByDateV526.delete(date);
+  }
 }
 
 function monitorPendingProductionProgressV522() {
   if (!state.backend || document.hidden || appModalUiIsOpen() || !state.meta?.deliveryDate || !Array.isArray(state.items) || !state.items.length) return;
   const now = Date.now();
-  if (now - Number(state.productionProgressMonitorAtV522 || 0) < 30000) return;
+  if (now - Number(state.productionProgressMonitorAtV522 || 0) < FABRICATION_AUTO_RETRY_MS_V526) return;
   state.productionProgressMonitorAtV522 = now;
-  // The normal catalog heartbeat owns the cadence. Hydration checks only panes
-  // whose Cutting or required fabrication result is still incomplete; completed
-  // lifecycle milestones return without another request.
+  // The compact catalog may still refresh every ten seconds for list changes,
+  // but production-share polling is a separate ten-minute concern. The date
+  // warm lock also prevents a large delivery from overlapping itself.
   void warmFabricationDeliveryV521(state.meta.deliveryDate, state.items);
 }
 
@@ -24855,7 +26186,7 @@ function renderPriorityIntakeRequests() {
         <span><small>Responsible</small><strong>${escapeHtml(request.responsible || "-")}</strong></span>
         ${matched ? `<span><small>Delivery</small><strong>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : "-")}</strong></span><span><small>Orders</small><strong>${escapeHtml(matchedOrders || "-")}</strong></span><span><small>Pieces</small><strong>${escapeHtml(request.matchedPieceQty || 0)}</strong></span>` : ""}
       </div>
-      <footer><span>${matched ? `Matched ${escapeHtml(formatDateTime(request.matchedAt))}` : `Queued ${escapeHtml(formatDateTime(request.createdAt))}`}</span><button type="button" class="priority-intake-cancel-v346" data-priority-intake-cancel="${escapeHtml(request.requestId)}">${matched ? "Close tracking" : "Cancel request"}</button></footer>
+      <footer><span>${matched ? `Matched ${escapeHtml(formatDateTime(request.matchedAt))}` : `Queued ${escapeHtml(formatDateTime(request.createdAt))}`}</span><button type="button" class="priority-intake-cancel-v346${matched ? "" : " app-cancel-button app-cancel-action-v343"}" data-priority-intake-cancel="${escapeHtml(request.requestId)}">${matched ? "Close tracking" : "Cancel request"}</button></footer>
     </article>`;
   }).join("");
 }
@@ -25302,7 +26633,7 @@ function renderSdiCurrentList() {
       <div class="priority-work-card-meta-v347"><b>${escapeHtml(priorityIntakeStatusLabel(request))}</b><span>${escapeHtml(request.reason || "No reason")}</span><small>${escapeHtml(request.responsible || "No responsible person")}</small></div>
       <div class="priority-work-request-facts-v348"><span><small>Orders</small><b>${escapeHtml(orders.join(", ") || "Waiting")}</b></span><span><small>Delivery</small><b>${escapeHtml(request.matchedDeliveryDate ? formatDisplayDate(request.matchedDeliveryDate) : request.requestedDeliveryDate ? formatDisplayDate(request.requestedDeliveryDate) : "Keep imported date")}</b></span></div>
       ${itemRows}
-      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="${printKind}">Print</button>${/missing\s*glass/i.test(String(request.reason || "")) ? `<button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="missing">Missing Glass Sheet</button>` : ""}<button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
+      <footer class="priority-work-request-actions-v348"><span>${escapeHtml(formatDateTime(request.updatedAt || request.createdAt) || "")}</span><button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="${printKind}">Print</button>${/missing\s*glass/i.test(String(request.reason || "")) ? `<button type="button" data-priority-print-request="${escapeHtml(request.requestId || "")}" data-priority-print-kind="missing">Missing Glass Sheet</button>` : ""}<button type="button" data-priority-current-edit-request="${escapeHtml(request.requestId || "")}">Edit</button><button type="button" class="is-danger${matched ? "" : " app-cancel-button app-cancel-action-v343"}" data-priority-intake-cancel="${escapeHtml(request.requestId || "")}">${matched ? "Close" : "Cancel"}</button></footer>
     </article>`;
   }).join("");
 
@@ -25569,8 +26900,8 @@ function ensureProductionExplorerModalV470() {
     <header class="production-explorer-header-v470">
       <div class="production-explorer-title-group-v518">
         <small id="productionExplorerEyebrowV470">Production Files</small>
-        <div class="production-explorer-title-row-v518 production-explorer-title-row-v519"><h2 id="productionExplorerTitleV470">Order Details</h2><time id="productionExplorerDeliveryDateV518" hidden></time></div>
-        <p id="productionExplorerDescriptionV470">Hardware, sketches, programs, and fabrication status.</p>
+        <div class="production-explorer-title-row-v518 production-explorer-title-row-v519"><h2 id="productionExplorerTitleV470">Order Details</h2></div>
+        <div class="production-explorer-header-meta-row-v526"><p id="productionExplorerDescriptionV470">Hardware, sketches, programs, and fabrication status.</p><time id="productionExplorerDeliveryDateV518" hidden></time></div>
       </div>
       <button type="button" class="gui-close-button" data-production-explorer-close-v470 aria-label="Close production file window">×</button>
     </header>
@@ -25757,7 +27088,7 @@ function productionSketchVisualV476(sketches = [], itemLabel = "", meta = {}) {
       <button type="button" class="production-sketch-maximize-v478 production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open large sketch viewer" title="Open large sketch viewer">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg>
       </button>
-      <button type="button" class="production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="${escapeHtml(page)}" aria-label="Print this sketch page" title="Print this sketch page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 18h10v2H7zM5 17H3v-6h18v6h-2M17 14H7v6h10z"/></svg></button>
+      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="${escapeHtml(page)}" aria-label="Print this sketch page" title="Print this sketch page"></button>
       <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page))}" title="Sketch ${escapeHtml(label)}" tabindex="-1"></iframe>
     </div>
   </div>`;
@@ -25771,7 +27102,7 @@ function productionOrderOverviewSketchV480(orderFiles = {}, payload = {}, produc
   return `<div class="production-overview-sketch-v480">
     <div class="production-overview-sketch-canvas-v480">
       <button type="button" class="production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="1" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open order sketch large viewer" title="Open order sketch large viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg></button>
-      <button type="button" class="production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="1" aria-label="Print overview sketch page" title="Print overview sketch page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 18h10v2H7zM5 17H3v-6h18v6h-2M17 14H7v6h10z"/></svg></button>
+      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="1" aria-label="Print overview sketch page" title="Print overview sketch page"></button>
       <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, 1))}" title="Order ${escapeHtml(payload.order || "")} sketch overview" tabindex="-1"></iframe>
     </div>
   </div>`;
@@ -25806,23 +27137,34 @@ function hydrateOrderDetailSketchesV507() {
   state.orderDetailSketchObserverV507?.disconnect?.();
   state.orderDetailSketchObserverV507 = null;
   if (!frames.length) return;
-  const loadFrame = (frame) => {
+  const loadFrame = (frame, eager = false) => {
     if (!frame || frame.hasAttribute("src") || !frame.dataset.orderSketchSrcV507) return;
+    if (eager) frame.loading = "eager";
     frame.setAttribute("src", frame.dataset.orderSketchSrcV507);
     delete frame.dataset.orderSketchSrcV507;
   };
-  // Start the overview/first exact sketch immediately. Remaining PDFs stay
-  // virtualized until they approach the scroll viewport.
+  // v0.523: start at most two useful pages immediately: the overview plus the
+  // requested item (or first item when the order was opened without a focus).
+  // This starts the operator's likely sketch request before the smooth-scroll
+  // animation while keeping the rest of a large Order virtualized.
+  const focusedItem = normalizedOrderDetailItemV477(state.orderDetailFocusItemV477);
+  const focusedArticle = focusedItem
+    ? [...document.querySelectorAll("#productionExplorerBodyV470 [data-order-detail-item-v477]")]
+      .find((node) => normalizedOrderDetailItemV477(node.dataset.orderDetailItemV477) === focusedItem)
+    : document.querySelector("#productionExplorerBodyV470 [data-order-detail-item-v477]");
+  const focusedFrame = focusedArticle?.querySelector?.("iframe[data-order-sketch-src-v507]") || null;
+  if (frames[0]) frames[0].loading = "eager";
   loadFrame(frames[0]);
+  if (focusedFrame && focusedFrame !== frames[0]) loadFrame(focusedFrame, true);
   if (!("IntersectionObserver" in window)) return;
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
-      loadFrame(entry.target);
+      loadFrame(entry.target, false);
       observer.unobserve(entry.target);
     });
-  }, { root: document.getElementById("productionExplorerBodyV470"), rootMargin: "400px 0px" });
-  frames.slice(1).forEach((frame) => observer.observe(frame));
+  }, { root: document.getElementById("productionExplorerBodyV470"), rootMargin: "1200px 0px" });
+  frames.slice(1).filter((frame) => frame !== focusedFrame).forEach((frame) => observer.observe(frame));
   state.orderDetailSketchObserverV507 = observer;
 }
 
@@ -26131,7 +27473,7 @@ function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
     : "";
   // v0.507: render one physical label, not hundreds of hidden SVG/barcodes.
   return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v502" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
-    <header><div><small>CUTTING LABEL</small></div><button type="button" class="production-label-print-v521" data-production-print-cutting-label-v521 aria-label="Print Cutting Label" title="Print Cutting Label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 18h10v2H7zM5 17H3v-6h18v6h-2M17 14H7v6h10z"/></svg></button><span>${escapeHtml(sourceNote)}</span>${selector}</header>
+    <header><div><small>CUTTING LABEL</small></div><button type="button" class="icon-print-btn production-label-print-v521" data-production-print-cutting-label-v521 aria-label="Print Cutting Label" title="Print Cutting Label"></button><span>${escapeHtml(sourceNote)}</span>${selector}</header>
     <div class="production-cutting-piece-list-v501" data-cutting-label-piece-body-v507="${escapeHtml(itemKey)}">${cuttingLabelPieceHtmlV507(item, payload, 1)}</div>
   </section>`;
 }
@@ -26241,7 +27583,7 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   const machine = compactMachineLabelV475(fabrication.actualMachine || fabrication.machine || fabrication.assignedMachine || "");
   const fabricationCompletion = fabricationCompletionStateV512(item, fabrication);
   if ((fabrication.sketchMatched || machine) && machine) {
-    steps.push({ label: machine, scanned: fabricationCompletion.scanned, qty: fabricationCompletion.qty, complete: fabricationCompletion.complete, kind: "fabrication", timestamp: fabricationProgressTimestampV511(fabrication), rank: machineProgressRankV521(machine) });
+    steps.push({ label: machine, scanned: fabricationCompletion.scanned, qty: fabricationCompletion.qty, complete: fabricationCompletion.complete, kind: "fabrication", color: productionMachineColorV476(machine), timestamp: fabricationProgressTimestampV511(fabrication), rank: machineProgressRankV521(machine) });
   } else if (fabricationNoFabConfirmedV481(fabrication, { loaded: options.productionLoaded !== false })) {
     steps.push({ ...noFabProgressStepV512(), rank: 0 });
   }
@@ -26258,16 +27600,17 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   return `<div class="production-item-progress-v476">${steps.map((step) => {
     const stateClass = step.kind === "cutting"
       ? `is-pending ${step.className || "is-cutting-pending-v498"}${step.complete ? " is-complete is-complete-v477" : ""}`
-      : step.kind === "no-fab" ? "is-no-fab-v512" : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477" : "is-pending is-stage-pending-v477";
+      : step.kind === "no-fab" ? "is-no-fab-v512" : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477 is-fabrication-pending-v480" : "is-pending is-stage-pending-v477";
     const icon = step.kind === "cutting" && step.active
       ? `<i class="cutting-progress-spinner-v498" aria-hidden="true"></i>`
       : globalSearchIconV433(step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label));
     const value = step.kind === "no-fab" ? "N/A" : `${Math.max(0, Number(step.scanned || 0))}/${Math.max(0, Number(step.qty || 0))}`;
-    const color = step.kind === "cutting" ? "#0f80c4" : progressStageColorV476(step.label);
+    const color = step.kind === "cutting" ? "#0f80c4" : progressStepColorV480(step);
     const timestamp = formatOperationalTimestampV511(step.timestamp);
     const timestampLabel = step.kind === "no-fab" ? "N/A" : timestamp || (step.complete ? "Time unavailable" : "Pending");
     const title = step.kind === "cutting" && step.stateDetail ? ` title="${escapeHtml(step.stateDetail)}"` : "";
-    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(color)}"${title}>${icon}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(value)}</strong><time class="production-progress-time-v511">${escapeHtml(timestampLabel)}</time></span>`;
+    const machineColorStyle = step.kind === "fabrication" ? `;--machine-progress-color:${escapeHtml(color)}` : "";
+    return `<span class="${stateClass}" style="--progress-color:${escapeHtml(color)}${machineColorStyle}"${title}>${icon}<b>${escapeHtml(step.label)}</b><strong>${escapeHtml(value)}</strong><time class="production-progress-time-v511">${escapeHtml(timestampLabel)}</time></span>`;
   }).join('<i aria-hidden="true">→</i>')}</div>`;
 }
 
@@ -26310,22 +27653,30 @@ function productionPriorityDetailV481(item = {}) {
   return `<div class="production-priority-detail-v481 is-${escapeHtml(kind)}"><span>${globalSearchIconV433("flag")}<b>${escapeHtml(label)}</b></span><p><small>Reason</small><strong>${escapeHtml(reason)}</strong></p></div>`;
 }
 
+function formatFabricationCheckedAtV527(value) {
+  const parsed = new Date(value || "");
+  if (!Number.isFinite(parsed.getTime())) return "";
+  return parsed.toLocaleString(appLocale(), {
+    timeZone: PLANT_TIME_ZONE_V516,
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+  });
+}
+
 function productionItemActionsV476(files = {}, orderFiles = {}, item = {}) {
   const sketch = (files.sketches || [])[0];
   const program = (files.programs || [])[0];
-  const hardware = (files.hardware || [])[0] || (orderFiles.hardware || [])[0];
   const actions = [];
-  if (item.order && item.item) {
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-check-fab-v522 data-order="${escapeHtml(item.order)}" data-item="${escapeHtml(item.item)}">${globalSearchIconV433("denver")}<span>Check Fab</span></button>`);
-    const checkedAt = files.fabrication?.checkedAt;
-    if (checkedAt) actions.push(`<small class="production-fab-memory-v522">Last checked ${escapeHtml(new Date(checkedAt).toLocaleString(appLocale(), { timeZone: PLANT_TIME_ZONE_V516 }))}</small>`);
-  }
   if (sketch?.id) {
     const page = Math.max(0, Number(sketch.pageNumber || 0));
     actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(sketch.itemMarker || "Item sketch")}">${globalSearchIconV433("scan")}<span>Open Sketch</span></button>`);
   }
   if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-production-open-asset-v470="${escapeHtml(program.id)}">${globalSearchIconV433("denver")}<span>Program</span></button>`);
-  if (hardware?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480 is-secondary" data-production-preview-asset-v470="${escapeHtml(hardware.id)}">${globalSearchIconV433("cube")}<span>Hardware</span></button>`);
+  if (item.order && item.item) {
+    const checkedAt = formatFabricationCheckedAtV527(files.fabrication?.checkedAt);
+    if (checkedAt) actions.push(`<small class="production-fab-memory-v522">Fab checked ${escapeHtml(checkedAt)}</small>`);
+    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480 is-check-fab-v527" data-check-fab-v522 data-order="${escapeHtml(item.order)}" data-item="${escapeHtml(item.item)}">${globalSearchIconV433("denver")}<span>Check Fab</span></button>`);
+  }
   return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
 }
 
@@ -26364,11 +27715,15 @@ function orderDetailAwInformationV516(item = {}) {
   const optimization = Number(cutting.optimization || 0);
   const status = String(cutting.optimizationStatusLabel || "").trim()
     || (cutting.complete ? "Booked" : cutting.released ? "Released" : optimization ? "Optimized" : "Not Optimized");
-  const generationAt = String(cutting.batchCreatedAt || cutting.optimizationDate || "").trim();
+  const optimizationDate = String(cutting.optimizationDate || "").trim();
+  const generationAt = optimizationDate;
+  const generationTimeLabel = "Optimization created";
+  const irregularity = cuttingIrregularityV527({ ...item, cutting });
   const rejects = Array.isArray(item.awRejects) ? item.awRejects : [];
   if (!batch && !optimization && !rejects.length && String(cutting.state || "") === "unknown") return "";
   return `<section class="production-aw-info-v516" aria-label="A+W production information">
-    <header class="production-aw-info-heading-v516"><div><small>A+W INFORMATION</small><strong>Current production generation</strong></div>${generationAt ? `<time>${escapeHtml(formatOperationalTimestampV511(generationAt))}</time>` : ""}</header>
+    <header class="production-aw-info-heading-v516"><div><small>A+W INFORMATION</small><strong>Current production generation</strong></div>${generationAt ? `<time><small>${escapeHtml(generationTimeLabel)}</small><b>${escapeHtml(formatOperationalTimestampV511(generationAt))}</b></time>` : ""}</header>
+    ${irregularity ? `<div class="production-aw-irregular-v527" role="status">${globalSearchIconV433("flag")}<span><strong>A+W production record needs review</strong><small>${escapeHtml(irregularity.detail || irregularity.label)}</small></span></div>` : ""}
     <div class="production-aw-info-current-v516">
       <span><small>Current Batch</small><b>${escapeHtml(batch || "—")}</b></span>
       <span><small>Current Optimization</small><b>${escapeHtml(optimization || "—")}</b></span>
@@ -26432,12 +27787,13 @@ function renderOrderDetailV470(payload = {}) {
   const descriptionNode = document.getElementById("productionExplorerDescriptionV470");
   const deliveryNode = document.getElementById("productionExplorerDeliveryDateV518");
   const routeColorV519 = globalSearchRouteColorV430(payload.route || "");
-  if (titleNode) titleNode.textContent = String(payload.job || "-");
+  if (titleNode) titleNode.textContent = `Order ${String(payload.order || "-")}`;
   if (descriptionNode) {
-    descriptionNode.innerHTML = `<span class="production-explorer-customer-v519">${escapeHtml(payload.customer || "Customer not listed")}</span>${payload.route ? `<span class="production-explorer-route-v519" style="--order-route-color:${escapeHtml(routeColorV519)}">Route ${escapeHtml(payload.route)}</span>` : ""}`;
+    descriptionNode.innerHTML = `<span class="production-explorer-header-fact-v526 is-job"><small>JOB NR.</small><strong>${escapeHtml(payload.job || "—")}</strong></span><span class="production-explorer-header-fact-v526 is-customer"><small>CUSTOMER</small><strong>${escapeHtml(payload.customer || "Customer not listed")}</strong></span>${payload.route ? `<span class="production-explorer-header-fact-v526 is-route" style="--order-route-color:${escapeHtml(routeColorV519)}"><small>ROUTE</small><strong>${escapeHtml(payload.route)}</strong></span>` : ""}`;
   }
   if (deliveryNode) {
     deliveryNode.hidden = !deliveryDate;
+    deliveryNode.classList.add("production-explorer-header-fact-v526", "is-delivery");
     deliveryNode.innerHTML = deliveryDate ? `<small>DELIVERY DATE</small><strong>${escapeHtml(formatNumericDeliveryDate(deliveryDate) || deliveryDate)}</strong>` : "";
   }
 
@@ -26530,7 +27886,10 @@ function cachedOrderDetailPayloadV507(order) {
 function fetchOrderDetailCoreV507(order, force = false) {
   const cached = state.orderDetailCacheV474.get(order);
   const age = cached ? Date.now() - Number(cached.at || 0) : Infinity;
-  if (!force && cached?.payload && age < 15000) return Promise.resolve(cached.payload);
+  // v0.523: Order Details already paints the cached payload immediately. Keep
+  // the focused SQLite/A+W core fresh for two minutes so normal close/reopen
+  // navigation does not issue a redundant request every 15 seconds.
+  if (!force && cached?.payload && age < 120000) return Promise.resolve(cached.payload);
   if (state.orderDetailCorePendingV507.has(order)) return state.orderDetailCorePendingV507.get(order);
   const request = fetchJson(`/api/orders/detail?order=${encodeURIComponent(order)}&production=0`)
     .then((payload) => {
@@ -26601,7 +27960,10 @@ function fetchOrderDetailProductionV507(order, force = false) {
   const cached = state.orderDetailProductionCacheV507.get(order);
   const age = cached ? Date.now() - Number(cached.at || 0) : Infinity;
   const cachedNeedsSketchRetry = Boolean(cached?.payload && orderDetailProductionNeedsSketchRetryV515(cached.payload));
-  if (!force && cached?.payload && age < 100000 && !cachedNeedsSketchRetry) return Promise.resolve(cached.payload);
+  // Network-share metadata changes far less often than operator navigation.
+  // Reuse a complete production payload for five minutes; missing-sketch
+  // payloads keep the existing bounded retry path and bypass this TTL.
+  if (!force && cached?.payload && age < 300000 && !cachedNeedsSketchRetry) return Promise.resolve(cached.payload);
   if (state.orderDetailProductionPendingV507.has(order)) return state.orderDetailProductionPendingV507.get(order);
   const request = fetchJson(`/api/orders/production-detail?order=${encodeURIComponent(order)}`)
     .then((payload) => {
@@ -29890,8 +31252,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260908-v0.515", window.location.href).href,
-    new URL("static/css/print.css?v=20260909-v0.521", window.location.href).href,
+    new URL("static/css/styles.css?v=20260910-v0.527", window.location.href).href,
+    new URL("static/css/print.css?v=20260910-v0.527", window.location.href).href,
   ];
 }
 
@@ -30847,19 +32209,28 @@ async function refreshAdminDeliveryListModal() {
   await loadAdminDeliveryListCatalogPage(state.adminDeliveryListWeekPage || 1, query);
 }
 
-/** Render one date and all of its stage controls inside Edit Delivery Lists. */
+/** Render one date-level entry for the whole-list editor. Stage records remain
+ * an internal workflow detail and are intentionally not exposed as edit scopes. */
 function adminDeliveryListDateGroupHtml(group, editable = false) {
-  const totalQty = group.lists.reduce((sum, list) => sum + Number(list.totalQty ?? list.itemCount ?? 0), 0);
-  const scannedQty = group.lists.reduce((sum, list) => sum + Number(list.scannedQty || 0), 0);
+  const lists = Array.isArray(group.lists) ? group.lists : [];
+  const preferredList = lists.find((list) => String(list.stagePreset || "") === "airport_staging")
+    || lists.find((list) => String(list.stageCategory || "") === "staged")
+    || lists[0]
+    || {};
+  // The same physical pieces can exist in several workflow records. Summing
+  // those records would multiply the delivery-list quantity, so use the largest
+  // date record as the best catalog-level whole-list count.
+  const totalQty = Math.max(0, ...lists.map((list) => Number(list.totalQty ?? list.itemCount ?? 0)));
+  const scannedQty = Math.max(0, ...lists.map((list) => Number(list.scannedQty || 0)));
   const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
   const compactDate = formatNumericDeliveryDate(group.date);
 
   return `
-    <details class="admin-delivery-date-group">
-      <summary class="admin-delivery-date-summary">
+    <section class="admin-delivery-date-group admin-delivery-whole-list-v527">
+      <div class="admin-delivery-date-summary">
         <span class="admin-delivery-date-main">
           <strong>${escapeHtml(compactDate)}</strong>
-          <small>${escapeHtml(group.lists.length)} stage${group.lists.length === 1 ? "" : "s"} | ${escapeHtml(scannedQty)} / ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}%</small>
+          <small><span>Whole delivery list</span> | ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}% <span>at the furthest recorded step</span></small>
         </span>
 
         <span class="admin-delivery-date-progress">
@@ -30867,68 +32238,29 @@ function adminDeliveryListDateGroupHtml(group, editable = false) {
         </span>
 
         ${editable ? `<span class="admin-date-action-row">
+          ${hasAnyPermission(["edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items"]) && preferredList.id ? `<button
+            type="button"
+            class="app-primary-button admin-delivery-open-whole-v527"
+            data-admin-list-edit="${escapeHtml(preferredList.id)}"
+            title="Open the whole delivery list for ${escapeHtml(compactDate)}"
+          >Open whole list</button>` : ""}
           ${hasPermission("reset_delivery_lists") ? `<button
             type="button"
             class="icon-only icon-reset"
             data-admin-date-reset="${escapeHtml(group.date)}"
-            title="Reset all stages for ${escapeHtml(compactDate)}"
-            aria-label="Reset all stages for ${escapeHtml(compactDate)}"
+            title="Reset the delivery list for ${escapeHtml(compactDate)}"
+            aria-label="Reset the delivery list for ${escapeHtml(compactDate)}"
           ></button>` : ""}
           ${hasPermission("delete_delivery_lists") ? `<button
             type="button"
             class="icon-only icon-trash danger"
             data-admin-date-delete="${escapeHtml(group.date)}"
-            title="Delete all stages for ${escapeHtml(compactDate)}"
-            aria-label="Delete all stages for ${escapeHtml(compactDate)}"
+            title="Delete the delivery list for ${escapeHtml(compactDate)}"
+            aria-label="Delete the delivery list for ${escapeHtml(compactDate)}"
           ></button>` : ""}
         </span>` : ""}
-      </summary>
-
-      <div class="admin-delivery-stage-list">
-        ${group.lists.map((list) => {
-          const listTotalQty = Number(list.totalQty ?? list.itemCount ?? 0);
-          const listScannedQty = Number(list.scannedQty || 0);
-          const listPercent = listTotalQty ? Math.round((listScannedQty / listTotalQty) * 100) : 0;
-
-          return `
-            <article class="admin-delivery-stage-row">
-              <span class="admin-delivery-stage-main">
-                <strong>${escapeHtml(list.stage || list.label || list.id)}</strong>
-                <small>${escapeHtml(list.scanner || "")}</small>
-              </span>
-
-              <span class="admin-delivery-stage-qty">
-                ${escapeHtml(listScannedQty)} / ${escapeHtml(listTotalQty)} pcs
-                <span class="progress-line"><i style="width: ${Math.min(listPercent, 100)}%"></i></span>
-              </span>
-
-              ${editable ? `<span class="admin-action-cell">
-                ${hasAnyPermission(["edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items"]) ? `<button
-                  type="button"
-                  class="icon-only icon-pencil"
-                  data-admin-list-edit="${escapeHtml(list.id)}"
-                  title="Open ${escapeHtml(list.label || list.id)}"
-                  aria-label="Open ${escapeHtml(list.label || list.id)}"
-                ></button>` : ""}
-                ${hasPermission("reset_delivery_lists") ? `<button
-                  type="button"
-                  class="icon-only icon-reset"
-                  data-admin-list-reset="${escapeHtml(list.id)}"
-                  title="Reset scans for ${escapeHtml(list.label || list.id)}"
-                  aria-label="Reset scans for ${escapeHtml(list.label || list.id)}"
-                ></button>` : ""}
-                ${hasPermission("delete_delivery_lists") ? `<button
-                  type="button"
-                  class="icon-only icon-trash danger"
-                  data-admin-list-delete="${escapeHtml(list.id)}"
-                  title="Delete ${escapeHtml(list.label || list.id)}"
-                  aria-label="Delete ${escapeHtml(list.label || list.id)}"
-                ></button>` : ""}
-              </span>` : ""}
-            </article>`;
-        }).join("")}
       </div>
-    </details>`;
+    </section>`;
 }
 
 /** Return the Edit Delivery Lists week label while keeping its wording distinct from Home. */
@@ -32501,7 +33833,7 @@ const ADMIN_MODAL_PROFILES = {
     showStatus: false,
     title: "All Delivery Lists",
     eyebrow: "Delivery List Management",
-    description: "Search active delivery dates, review stage progress, and open the maintained edit, reset, or delete actions.",
+    description: "Search active delivery dates and open whole-list edit, reset, or delete actions.",
     context: "Delivery list workspace",
     status: "",
     group: "records",
@@ -32534,7 +33866,7 @@ const ADMIN_MODAL_PROFILES = {
     showStatus: false,
     title: "Manual Delivery List Edit",
     eyebrow: "Delivery List Management",
-    description: "Locate a list, review its line items, and apply intentional manual corrections without changing unrelated stages.",
+    description: "Review one whole delivery list, correct its line items, and advance item, order, or list progress.",
     context: "Line-item editor",
     status: "",
     group: "records",
@@ -32870,12 +34202,12 @@ function applyAdminModalProfile(kind, options = null) {
  */
 function adminModalLoadingHtmlV507(kind = "") {
   const profile = adminModalProfile(kind);
-  const title = translatedUiValue(profile?.title || "Settings");
+  const title = localizedUiValue(profile?.title || "Settings");
   return `
     <div class="admin-modal-loading-v507" role="status" aria-live="polite" aria-busy="true">
       <span class="admin-modal-loading-spinner-v507" aria-hidden="true"></span>
       <span class="admin-modal-loading-copy-v507">
-        <strong>${escapeHtml(translatedUiValue("Loading settings..."))}</strong>
+        <strong>${escapeHtml(localizedUiValue("Loading settings..."))}</strong>
         <small>${escapeHtml(title)}</small>
       </span>
     </div>
@@ -33696,7 +35028,7 @@ function glassProfileCombinePanelV360(profiles = [], targetValue = "") {
     <section class="glass-combine-panel-v360" aria-label="Combine glass types">
       <header>
         <div><small>Keep this profile</small><strong>${escapeHtml(target.label || target.value)}</strong><p>Select other entries that represent the exact same physical glass. Their original imported names remain valid, but the application will treat them as this profile.</p></div>
-        <button type="button" class="secondary" data-glass-combine-cancel-v360>Cancel</button>
+        <button type="button" class="secondary app-cancel-button app-cancel-action-v343" data-glass-combine-cancel-v360><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
       </header>
       <div class="glass-combine-options-v360">
         ${selectedAliases || candidateRows ? `${selectedAliases}${candidateRows}` : '<div class="lookup-empty-state"><strong>No other glass types available</strong><span>There are no same-family profiles available to combine.</span></div>'}
@@ -33742,7 +35074,7 @@ function glassProfileManagerHtmlV349() {
           </form>
         </section>
         <section class="lookup-manager-list lookup-library glass-profile-library-v349 glass-profile-library-v350">
-          <header>${lookupLibraryIconHtml("product")}<div><h3>Glass type library</h3><p>${state.lookupGlassCombineModeV361 ? "Select two or more matching glass types. The first selection is kept as the canonical profile." : state.lookupGlassUncombineModeV362 ? "Select one or more combined profiles to separate their source glass names." : "Use the family tabs to manage one normalized glass profile at a time."}</p></div><div class="glass-library-header-actions-v361"><strong data-lookup-visible-count>${escapeHtml(visibleProfiles.length)} / ${escapeHtml(profiles.length)}</strong>${state.lookupGlassCombineModeV361 ? `<button type="button" class="secondary" data-glass-combine-cancel-v361>Cancel</button><button type="button" class="app-primary-button" data-glass-combine-apply-v361 ${state.lookupGlassCombineSelectionV361.length < 2 ? "disabled" : ""}><span>Combine selected</span> <b data-glass-combine-count-v361>(${escapeHtml(state.lookupGlassCombineSelectionV361.length)})</b></button>` : state.lookupGlassUncombineModeV362 ? `<button type="button" class="secondary" data-glass-uncombine-cancel-v362>Cancel</button><button type="button" class="app-primary-button glass-library-uncombine-apply-v362" data-glass-uncombine-apply-v362 ${state.lookupGlassUncombineSelectionV362.length < 1 ? "disabled" : ""}><span>Uncombine selected</span> <b data-glass-uncombine-count-v362>(${escapeHtml(state.lookupGlassUncombineSelectionV362.length)})</b></button>` : `<button type="button" class="secondary glass-library-combine-button-v361" data-glass-combine-mode-v361>${lookupActionIconHtmlV346("merge")}<span>Combine Glass Types</span></button><button type="button" class="secondary glass-library-uncombine-button-v362" data-glass-uncombine-mode-v362 ${hasManualCombinationsInFamilyV362 ? "" : "disabled"} title="${hasManualCombinationsInFamilyV362 ? "Separate manually combined glass profiles" : "No combined glass types in this family"}">${lookupActionIconHtmlV346("split")}<span>Uncombine Glass Types</span></button>`}</div></header>
+          <header>${lookupLibraryIconHtml("product")}<div><h3>Glass type library</h3><p>${state.lookupGlassCombineModeV361 ? "Select two or more matching glass types. The first selection is kept as the canonical profile." : state.lookupGlassUncombineModeV362 ? "Select one or more combined profiles to separate their source glass names." : "Use the family tabs to manage one normalized glass profile at a time."}</p></div><div class="glass-library-header-actions-v361"><strong data-lookup-visible-count>${escapeHtml(visibleProfiles.length)} / ${escapeHtml(profiles.length)}</strong>${state.lookupGlassCombineModeV361 ? `<button type="button" class="secondary app-cancel-button app-cancel-action-v343" data-glass-combine-cancel-v361><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button type="button" class="app-primary-button" data-glass-combine-apply-v361 ${state.lookupGlassCombineSelectionV361.length < 2 ? "disabled" : ""}><span>Combine selected</span> <b data-glass-combine-count-v361>(${escapeHtml(state.lookupGlassCombineSelectionV361.length)})</b></button>` : state.lookupGlassUncombineModeV362 ? `<button type="button" class="secondary app-cancel-button app-cancel-action-v343" data-glass-uncombine-cancel-v362><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button type="button" class="app-primary-button glass-library-uncombine-apply-v362" data-glass-uncombine-apply-v362 ${state.lookupGlassUncombineSelectionV362.length < 1 ? "disabled" : ""}><span>Uncombine selected</span> <b data-glass-uncombine-count-v362>(${escapeHtml(state.lookupGlassUncombineSelectionV362.length)})</b></button>` : `<button type="button" class="secondary glass-library-combine-button-v361" data-glass-combine-mode-v361>${lookupActionIconHtmlV346("merge")}<span>Combine Glass Types</span></button><button type="button" class="secondary glass-library-uncombine-button-v362" data-glass-uncombine-mode-v362 ${hasManualCombinationsInFamilyV362 ? "" : "disabled"} title="${hasManualCombinationsInFamilyV362 ? "Separate manually combined glass profiles" : "No combined glass types in this family"}">${lookupActionIconHtmlV346("split")}<span>Uncombine Glass Types</span></button>`}</div></header>
           <div class="glass-profile-family-tabs-v350" role="tablist" aria-label="Glass type family">
             ${families.map((family) => { const count = profiles.filter((profile) => profile.family === family).length; const selected = family === activeFamily; return `<button type="button" role="tab" aria-selected="${selected}" class="${selected ? "is-active" : ""}" data-glass-family-tab-v350="${escapeHtml(family)}"><span>${escapeHtml(family)}</span><b>${escapeHtml(count)}</b></button>`; }).join("")}
           </div>
@@ -34727,7 +36059,7 @@ function rackManagerRackEditHtml() {
       </label>
 
       <div class="rack-manager-set-actions">
-        <button type="button" class="secondary app-cancel-action-v343" data-rack-inline-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+        <button type="button" class="secondary app-cancel-button app-cancel-action-v343" data-rack-inline-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
         <button type="submit">Save Rack</button>
       </div>
     </form>
@@ -34790,7 +36122,7 @@ function rackManagerSetEditHtml() {
       </label>
 
       <div class="rack-manager-set-actions">
-        <button type="button" class="secondary app-cancel-action-v343" data-rack-manager-set-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+        <button type="button" class="secondary app-cancel-button app-cancel-action-v343" data-rack-manager-set-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
         <button type="submit">Save Set</button>
       </div>
     </form>
@@ -35143,7 +36475,7 @@ function rackFormModalHtml() {
       <footer class="modal-actions rack-config-actions-v270">
         <div>${rack.code && rack.code !== "T" ? `<button type="button" class="danger" data-rack-delete="${escapeHtml(rack.code)}">Delete Rack</button>` : ""}</div>
         <div>
-          <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="app-primary-button app-cancel-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="app-primary-button" type="submit">${isEditing ? "Save Rack" : "Create Rack"}</button>
         </div>
       </footer>
@@ -35245,7 +36577,7 @@ function rackSetFormModalHtml() {
       <footer class="modal-actions rack-config-actions-v270">
         <div></div>
         <div>
-          <button type="button" class="app-primary-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="app-primary-button app-cancel-button app-cancel-action-v343" data-rack-form-back><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="app-primary-button" type="submit">Create Rack Set</button>
         </div>
       </footer>
@@ -35643,7 +36975,7 @@ function roleCreateDialogHtml() {
       <footer class="role-create-modal-actions-v340">
         <span id="createRoleStatus">A role may be created with no permissions and configured later.</span>
         <div>
-          <button type="button" class="role-create-cancel-v340 app-cancel-action-v343" data-role-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="role-create-cancel-v340 app-cancel-button app-cancel-action-v343" data-role-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="submit" class="app-primary-button role-create-submit-v340"><span class="role-manager-create-button-icon-v340" aria-hidden="true"></span><span>Create Role</span></button>
         </div>
       </footer>
@@ -35977,7 +37309,7 @@ function manualEditFilterDrawerHtml() {
           </div>
         </section>
         <section class="scan-filter-section scan-filter-glass-section manual-edit-glass-filter-section">
-          <div class="scan-filter-section-heading"><h3>Glass Type</h3><span>Only glass types present in the selected delivery-list stage are shown.</span></div>
+          <div class="scan-filter-section-heading"><h3>Glass Type</h3><span>Only glass types present in the selected delivery list are shown.</span></div>
           <div class="scan-filter-options manual-edit-glass-filter-options">
             ${manualEditFilterButton("glassType", "all", "All glass types")}
             ${glassTypeOptions.length
@@ -35986,7 +37318,7 @@ function manualEditFilterDrawerHtml() {
                   option.label,
                   `${option.label} (${option.pieceQty} pcs)`,
                 )).join("")
-              : '<span class="manual-edit-glass-filter-empty">Load a delivery-list stage to see its glass types.</span>'}
+              : '<span class="manual-edit-glass-filter-empty">Load a delivery list to see its glass types.</span>'}
           </div>
         </section>
         <section class="scan-filter-section manual-edit-attention-filter-section">
@@ -36019,9 +37351,7 @@ function refreshManualEditFilterDrawer(openState = null) {
 
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
-  const stageLists = manualEditStageListsForCurrentDelivery(selected);
   const deliveryDate = manualEditDeliveryDateForList(selected);
-  const selectedScope = manualEditScopeSelectionValueV468();
   return `
     <div class="manual-edit-shell">
       <div class="manual-edit-nav-row">
@@ -36033,19 +37363,12 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
       </div>
 
       <div class="manual-edit-modal-tools">
-        <label class="manual-edit-control stage-control manual-edit-scope-control-v468">
-          <span>Edit scope</span>
-          <select id="manualEditModalStage" aria-label="Manual edit scope">
-            <option value="${MANUAL_EDIT_WHOLE_LIST_VALUE_V468}" ${selectedScope === MANUAL_EDIT_WHOLE_LIST_VALUE_V468 ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(deliveryDate))} - Whole Delivery List</option>
-            ${stageLists
-              .map(
-                (list) =>
-                  `<option value="${escapeHtml(list.id)}" ${selectedScope === list.id ? "selected" : ""}>${escapeHtml(formatNumericDeliveryDate(list.deliveryDate))} - ${escapeHtml(list.stage || "Stage")}</option>`,
-              )
-              .join("")}
-          </select>
-          <small class="manual-edit-scope-help-v468">Whole Delivery List shows each logical Order/Item once. Shared order fields save across every stage copy; scanned progress and physical location remain stage-specific.</small>
-        </label>
+        <section class="manual-edit-control stage-control manual-edit-scope-control-v468 is-fixed-v527">
+          <span>Delivery list</span>
+          <strong>${escapeHtml(formatNumericDeliveryDate(deliveryDate))} · Whole Delivery List</strong>
+          <input id="manualEditModalStage" type="hidden" value="${MANUAL_EDIT_WHOLE_LIST_VALUE_V468}">
+          <small class="manual-edit-scope-help-v468">Each Order/Item appears once. Use Progress to advance the item, order, or complete list through the scanner workflow.</small>
+        </section>
 
         <div class="manual-edit-search-with-filter">
           <label class="manual-edit-control search-control">
@@ -36058,6 +37381,7 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
         <div class="manual-edit-tool-actions">
           <button id="manualEditModalSearchBtn" class="app-primary-button manual-edit-search-button-v334" type="button">Search</button>
           <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
+          ${hasPermission("edit_delivery_list_items") ? `<button class="app-primary-button manual-edit-complete-list-v527" type="button" data-manual-progress-list-v527="${escapeHtml(deliveryDate)}">Complete Delivery List</button>` : ""}
           ${hasPermission("create_delivery_list_orders") ? `<button type="button" class="app-primary-button manual-edit-create-order-button-v338" data-manual-order-toggle><span class="manual-edit-create-order-icon-v338" aria-hidden="true"></span><span>Create New Order</span></button>` : ""}
         </div>
       </div>
@@ -36116,7 +37440,7 @@ async function ensureManualEditLookupsLoaded() {
 async function openManualEditForList(listId) {
   state.manualEditDirty = false;
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
-  state.manualEditScopeV468 = "stage";
+  state.manualEditScopeV468 = "whole";
   state.manualEditQuery = "";
   state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
   state.manualEditResultRows = [];
@@ -36130,7 +37454,7 @@ async function openManualEditForList(listId) {
       <div class="manual-edit-loading">
         <div class="admin-empty loading">
           <strong>Loading editable rows...</strong>
-          <span>Preparing lookups and the selected delivery-list stage.</span>
+          <span>Preparing lookups and the selected delivery list.</span>
           <span class="loading-bar"><i></i></span>
         </div>
       </div>
@@ -37104,12 +38428,12 @@ async function resetAdminScansForDate(deliveryDate) {
   if (!lists.length) return;
 
   const confirmed = await confirmWebAppAction({
-    title: "Reset every stage for this date?",
-    message: `Reset all scan quantities and scan history for every stage on <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
-    details: `${lists.length} stage${lists.length === 1 ? "" : "s"} will be reset. Delivery-list rows will stay in place.`,
-    confirmLabel: "Reset all stages",
+    title: "Reset this delivery list?",
+    message: `Reset all scan quantities and scan history for the delivery list on <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+    details: "The delivery-list rows will stay in place and all recorded progress will return to zero.",
+    confirmLabel: "Reset delivery list",
     requiredText: "RESET",
-    requiredTextLabel: "Type RESET to reset every stage for this date",
+    requiredTextLabel: "Type RESET to reset this delivery list",
   });
 
   if (!confirmed) {
@@ -37158,12 +38482,12 @@ async function deleteAdminDeliveryDateByDate(deliveryDate) {
 
   const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
   const confirmed = await confirmWebAppAction({
-    title: "Delete every stage for this date?",
-    message: `Delete every delivery-list stage for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+    title: "Delete this delivery list?",
+    message: `Delete the whole delivery list for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
     details: `${lists.length || "All matching"} stage${lists.length === 1 ? "" : "s"} will be removed. This cannot be undone from the web app.`,
     confirmLabel: "Delete date",
     requiredText: "DELETE",
-    requiredTextLabel: "Type DELETE to remove every stage for this date",
+    requiredTextLabel: "Type DELETE to remove this delivery list",
   });
 
   if (!confirmed) return;
@@ -37223,12 +38547,12 @@ async function deleteSelectedDeliveryList(deleteDate = false) {
 
     const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
     const confirmed = await confirmWebAppAction({
-      title: "Delete every stage for this date?",
-      message: `Delete every delivery-list stage for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
+      title: "Delete this delivery list?",
+      message: `Delete the whole delivery list for <strong>${escapeHtml(formatDisplayDate(deliveryDate))}</strong>.`,
       details: `${lists.length || "All matching"} stage${lists.length === 1 ? "" : "s"} will be removed. This cannot be undone from the web app.`,
       confirmLabel: "Delete date",
       requiredText: "DELETE",
-      requiredTextLabel: "Type DELETE to remove every stage for this date",
+      requiredTextLabel: "Type DELETE to remove this delivery list",
     });
 
     if (!confirmed) return;
@@ -37588,7 +38912,7 @@ function userCreateDialogHtml() {
       <footer class="user-create-modal-actions-v340">
         <span id="createUserModalStatus">Required: username or Email, plus a password and starting role.</span>
         <div>
-          <button type="button" class="user-create-cancel-v340 app-cancel-action-v343" data-user-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="user-create-cancel-v340 app-cancel-button app-cancel-action-v343" data-user-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="submit" class="app-primary-button user-manager-create-button-v340"><span class="user-action-icon icon-user-add" aria-hidden="true"></span><span>Create User</span></button>
         </div>
       </footer>
@@ -37788,7 +39112,7 @@ function confirmWebAppAction({
         ` : ""}
 
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-action-confirm-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
+          <button type="button" class="action-confirm-cancel app-cancel-button app-cancel-action-v343" data-action-confirm-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
           <button type="button" class="action-confirm-confirm" data-action-confirm-confirm ${requiresTypedConfirmation ? "disabled" : ""}>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
@@ -37895,7 +39219,7 @@ function promptWebAppAction({
           <input type="text" data-action-prompt-input value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
         </label>
         <div class="action-confirm-actions">
-          <button type="button" class="action-confirm-cancel app-cancel-action-v343" data-action-prompt-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
+          <button type="button" class="action-confirm-cancel app-cancel-button app-cancel-action-v343" data-action-prompt-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
           <button type="button" class="action-confirm-confirm" data-action-prompt-confirm>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
@@ -37975,7 +39299,7 @@ function confirmDeactivateUser(username) {
         </div>
 
         <div class="user-deactivate-actions">
-          <button type="button" class="user-deactivate-cancel app-cancel-action-v343" data-user-deactivate-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="user-deactivate-cancel app-cancel-button app-cancel-action-v343" data-user-deactivate-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="button" class="user-deactivate-confirm" data-user-deactivate-confirm>Deactivate User</button>
         </div>
       </section>
@@ -38667,7 +39991,7 @@ function customerRouteCreateDialogHtml() {
         <div><strong>Import behavior</strong><p>The new rule affects future route resolution. Existing delivery-list rows are not silently reassigned by creating a rule.</p></div>
       </section>
       <footer class="customer-route-create-actions-v344">
-        <button type="button" class="customer-route-create-cancel-v344 app-cancel-action-v343" data-customer-route-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+        <button type="button" class="customer-route-create-cancel-v344 app-cancel-button app-cancel-action-v343" data-customer-route-create-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
         <button id="customerRouteSubmitBtnModal" type="submit" class="app-primary-button customer-route-create-submit-v344"><span class="customer-route-create-plus-v344" aria-hidden="true"></span><span>Create Customer Route</span></button>
       </footer>
     </form>`;
@@ -40686,6 +42010,34 @@ function manualEditChangedFields(row, data) {
   ));
 }
 
+function manualEditProgressSummaryV527(item = {}) {
+  const rank = { staged: 10, outbound: 20, received: 30, pickup: 30, greenville: 30, dtc: 30 };
+  const rows = (Array.isArray(item.progressStages) ? item.progressStages : [])
+    .slice()
+    .sort((a, b) => (rank[a.category] || 99) - (rank[b.category] || 99));
+  const completed = rows.filter((row) => row.complete);
+  const next = rows.find((row) => !row.complete);
+  const previous = completed.at(-1);
+  if (!next && rows.length) return { current: previous?.stage || "Final stage", next: "Complete / out of system", complete: true };
+  return {
+    current: previous?.stage || "Cutting / fabrication",
+    next: next?.stage || "Staging",
+    complete: false,
+  };
+}
+
+function manualEditProgressControlV527(item = {}) {
+  if (!hasPermission("edit_delivery_list_items")) return "";
+  return `<section class="manual-edit-progress-control-v527">
+    <div><small>ADVANCE PROGRESS</small><strong>Choose the stage this piece has reached</strong><span>Every earlier scanner stage will be completed automatically.</span></div>
+    <select data-manual-progress-target-v527 aria-label="Progress stage for ${escapeHtml(item.order)}-${escapeHtml(item.item)}">
+      <option value="staging">Staging</option><option value="outbound">Outbound</option><option value="indian_trail">Indian Trail / destination received</option><option value="complete">Complete · out of system</option>
+    </select>
+    <button class="app-secondary-button" type="button" data-manual-progress-item-v527="${escapeHtml(item.lineItemId)}">Advance Item</button>
+    <button class="app-primary-button" type="button" data-manual-progress-order-v527="${escapeHtml(item.lineItemId)}" data-order="${escapeHtml(item.order)}">Complete Order</button>
+  </section>`;
+}
+
 /**
  * Purpose: Run the manual edit results HTML workflow for the browser application.
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
@@ -40710,13 +42062,14 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
     ? `
       <div class="manual-edit-result-summary${wholeListMode ? " is-whole-list-v468" : ""}">
         <span>${totalRows ? `Showing ${escapeHtml(firstRow)}-${escapeHtml(lastRow)} of ${escapeHtml(totalRows)} matching ${wholeListMode ? "logical order lines" : "rows"}` : "No matching rows"}${pinnedRows ? ` + ${escapeHtml(pinnedRows)} recently updated` : ""}</span>
-        <small>${wholeListMode ? "Whole-list mode shows each Order/Item once. Shared edits save across every stage copy; scan progress and physical location stay stage-specific." : (pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it.")}</small>
+        <small>${wholeListMode ? "Whole-list mode shows each Order/Item once. Shared edits save across the workflow; each progress checkpoint keeps its own scan and location record." : (pinnedRows ? "The saved row remains visible until the next search or filter change." : "Rows start collapsed. Expand one to edit it.")}</small>
       </div>
 
       <div class="manual-edit-card-list">
         ${visibleRows
           .map((item) => {
             const rowLabel = `${item.order || ""}-${item.item || ""}`;
+            const progressSummaryV527 = manualEditProgressSummaryV527(item);
             const stageText = wholeListMode
               ? `${Math.max(Number(item.stageCopyCount || 1), 1)} stage cop${Number(item.stageCopyCount || 1) === 1 ? "y" : "ies"}`
               : (item.stage || item.deliveryLabel || "");
@@ -40755,15 +42108,15 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                   <div class="manual-edit-card-title">
                     <div class="manual-edit-card-title-line">
                       <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
-                      <span class="manual-edit-scan-status ${scannedValue > 0 ? "is-scanned" : "is-unscanned"}">${scannedValue > 0 ? "Scanned" : "Not scanned"}</span>
+                      <span class="manual-edit-scan-status ${progressSummaryV527.complete ? "is-scanned" : "is-unscanned"}">${progressSummaryV527.complete ? "Final stage scanned" : "In progress"}</span>
                     </div>
                     <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
                     ${item._manualEditFilterMismatch ? `<small class="manual-edit-saved-filter-note">Saved successfully — this item no longer matches the active filters.</small>` : ""}
                   </div>
 
-                  <div class="manual-edit-card-stage" title="${escapeHtml(stageText)}">
-                    <span>Stage</span>
-                    <strong>${escapeHtml(stageText || "No stage")}</strong>
+                  <div class="manual-edit-card-stage manual-edit-card-progress-v527" title="${escapeHtml(progressSummaryV527.current)} completed; ${escapeHtml(progressSummaryV527.next)} next">
+                    <span>Progress</span>
+                    <strong>${escapeHtml(progressSummaryV527.current)} <i>→</i> ${escapeHtml(progressSummaryV527.next)}</strong>
                   </div>
 
                   <div class="manual-edit-card-quantity">
@@ -40873,6 +42226,8 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                   ` : `<input data-edit-field="protectFromAwImport" type="hidden" value="">`}
                   </div>
 
+                  ${manualEditProgressControlV527(item)}
+
                   <div class="manual-edit-row-error" hidden aria-live="polite"></div>
                 </div>
               </details>
@@ -40883,6 +42238,37 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
       ${pagerHtml}
     `
     : `<div class="admin-empty">No editable rows found.</div>`;
+}
+
+async function advanceManualDeliveryProgressV527(button, scope) {
+  const row = button?.closest?.("[data-edit-row]");
+  const lineItemId = String(button?.dataset?.manualProgressItemV527 || button?.dataset?.manualProgressOrderV527 || row?.dataset?.editRow || "");
+  const deliveryDate = String(button?.dataset?.manualProgressListV527 || manualEditDeliveryDateForList(state.manualEditListId));
+  const order = String(button?.dataset?.order || row?.querySelector('[data-edit-field="order"]')?.value || "").trim();
+  const target = scope === "list" || scope === "order" ? "complete" : String(row?.querySelector("[data-manual-progress-target-v527]")?.value || "staging");
+  const targetLabel = target === "complete" ? "Complete / out of system" : target === "indian_trail" ? "Indian Trail / destination received" : target[0].toUpperCase() + target.slice(1);
+  const scopeLabel = scope === "list" ? `the complete ${formatNumericDeliveryDate(deliveryDate)} delivery list` : scope === "order" ? `every item in Order ${order}` : `Order ${order} Item ${row?.querySelector('[data-edit-field="item"]')?.value || ""}`;
+  const confirmed = await confirmWebAppAction({
+    title: `Advance ${scope === "list" ? "delivery list" : scope} progress?`,
+    message: `${scopeLabel} will advance to <strong>${escapeHtml(targetLabel)}</strong>. Every earlier scanner stage will be marked complete.`,
+    details: target === "complete" ? "Active rack and bay locations will be cleared so completed work does not occupy bay capacity." : "This only advances progress; it never reduces a completed step.",
+    confirmLabel: target === "complete" ? `Complete ${scope}` : "Advance progress",
+    cancelLabel: "Keep current progress",
+    danger: target === "complete",
+  });
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    const payload = await fetchJson("/api/admin/delivery-progress", {
+      method: "POST",
+      body: JSON.stringify({ scope, target, lineItemId, order, deliveryDate }),
+    });
+    await loadDeliveryLists(state.manualEditListId || state.activeListId);
+    await runManualEditModalSearch(false, state.manualEditPage || 1);
+    showFloatingNotice(payload.message || "Delivery progress updated.", "success");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /**
@@ -41041,8 +42427,8 @@ async function deleteManualLineItem(lineItemId) {
   const item = state.manualEditResultRows.find((row) => String(row.lineItemId || "") === String(lineItemId || ""));
   const itemLabel = item ? `Order ${item.order || "?"} / Item ${item.item || "?"}` : "this order item";
   const confirmed = await confirmWebAppAction({
-    title: "Delete order item from every stage?",
-    message: `Delete ${itemLabel} from every stage on this delivery date?`,
+    title: "Delete this order item from the delivery list?",
+    message: `Delete ${itemLabel} from the entire delivery-list workflow?`,
     details: "The same logical order/item is kept synchronized across Staging, Outbound, Indian Trail, CPU, Greenville, DTC, and any other stage copies. This removes all matching stage rows together.",
     confirmLabel: "Delete From All Stages",
   });
@@ -41456,7 +42842,7 @@ function chooseRackTransferDestination(sourceRackCode, options = {}) {
           </select>
         </label>
         <div class="rack-transfer-dialog-actions rack-transfer-dialog-actions-v347">
-          <button type="button" class="secondary rack-transfer-cancel-v347" data-rack-transfer-cancel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg><span>Cancel</span></button>
+          <button type="button" class="secondary rack-transfer-cancel-v347 app-cancel-button app-cancel-action-v343" data-rack-transfer-cancel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg><span>Cancel</span></button>
           <button type="button" class="app-primary-button rack-transfer-continue-v347" data-rack-transfer-confirm disabled><span>Continue</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
         </div>
       </section>`;
@@ -42294,7 +43680,7 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
 
       <footer class="reject-log-actions reject-log-actions-v182">
         <span id="rejectLogStatus" class="${catalogError || (!catalogReady && !catalogLoading) ? "is-warning" : catalogLoading ? "is-loading" : ""}">${escapeHtml(catalogMessage)}</span>
-        <div class="reject-log-action-buttons"><button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
+        <div class="reject-log-action-buttons"><button class="secondary app-cancel-button app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="primary reject-log-submit-v182" type="submit" ${submitDisabled ? "disabled" : ""}><span aria-hidden="true"></span><span>Submit Reject</span></button></div>
         <small>This action cannot be undone.</small>
       </footer>
     </form>`;
@@ -42552,7 +43938,7 @@ function rejectEditModalHtml(row) {
       <footer class="reject-edit-actions-v154">
         <span id="rejectEditStatus" role="status" aria-live="polite"></span>
         <div>
-          <button class="secondary app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+          <button class="secondary app-cancel-button app-cancel-action-v343" type="button" data-operations-close><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           <button class="primary" type="submit">Save Reject Changes</button>
         </div>
       </footer>
@@ -43052,7 +44438,7 @@ function manualOrderCreateDialogHtml() {
       <footer class="manual-order-modal-actions-v338">
         <span id="manualOrderCreateStatus">Complete the required fields, then create the workflow copies.</span>
         <div>
-          <button type="button" class="manual-order-cancel-button-v339" data-manual-order-close><span class="manual-order-cancel-icon-v339" aria-hidden="true"></span><span>Cancel</span></button>
+          <button type="button" class="manual-order-cancel-button-v339 app-cancel-button app-cancel-action-v343" data-manual-order-close><span class="manual-order-cancel-icon-v339" aria-hidden="true"></span><span>Cancel</span></button>
           <button type="submit" class="app-primary-button manual-order-create-submit-v337"><span class="manual-order-create-submit-icon-v337" aria-hidden="true"></span><span>Create Order</span></button>
         </div>
       </footer>
@@ -44461,6 +45847,7 @@ function wirePrintPresetEvents() {
  */
 function wireEvents() {
   if (state.eventsWired) return;
+  wireInventoryEventsV524();
 
   const scrollScanFiltersIntoViewV520 = () => {
     const drawer = els.scanFilterDrawer;
@@ -44655,6 +46042,7 @@ function wireEvents() {
   });
   els.appSidebar?.addEventListener("mouseleave", () => {
     if (isMobileSidebarLayout()) return;
+    els.appSidebar.classList.remove("is-hover-suppressed-v527");
     els.userMenu?.removeAttribute("open");
   });
   els.languageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
@@ -44798,6 +46186,9 @@ function wireEvents() {
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
   els.statisticsDailyProductionEmailBtn?.addEventListener("click", () => {
     draftDailyProductionEmailV506().catch((error) => showFloatingNotice(error?.message || "Could not build the daily production email.", "error"));
+  });
+  els.statisticsSheetSettingsBtnV527?.addEventListener("click", () => {
+    openSheetUsageSettingsV527().catch((error) => showFloatingNotice(error?.message || "Could not load stock sheet settings.", "error"));
   });
   els.statisticsRefreshBtn?.addEventListener("click", async () => {
     const button = els.statisticsRefreshBtn;
@@ -46845,6 +48236,10 @@ function wireEvents() {
 
       state.manualEditDirty = false;
       showPage(pageButton.dataset.pageTarget);
+      if (!isMobileSidebarLayout() && els.appSidebar?.contains(pageButton)) {
+        els.appSidebar.classList.add("is-hover-suppressed-v527");
+        pageButton.blur();
+      }
       return;
     }
     const supersededFilterButton = event.target.closest("[data-superseded-filter]");
@@ -47667,6 +49062,24 @@ function wireEvents() {
       event.preventDefault();
       event.stopPropagation();
       saveManualLineItem(saveLineItemButton.dataset.saveLineItem, saveLineItemButton).catch((error) => showInlineError(error.message));
+      return;
+    }
+    const progressItemButtonV527 = event.target.closest("[data-manual-progress-item-v527]");
+    if (progressItemButtonV527) {
+      event.preventDefault(); event.stopPropagation();
+      advanceManualDeliveryProgressV527(progressItemButtonV527, "item").catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const progressOrderButtonV527 = event.target.closest("[data-manual-progress-order-v527]");
+    if (progressOrderButtonV527) {
+      event.preventDefault(); event.stopPropagation();
+      advanceManualDeliveryProgressV527(progressOrderButtonV527, "order").catch((error) => showInlineError(error.message, true));
+      return;
+    }
+    const progressListButtonV527 = event.target.closest("[data-manual-progress-list-v527]");
+    if (progressListButtonV527) {
+      event.preventDefault(); event.stopPropagation();
+      advanceManualDeliveryProgressV527(progressListButtonV527, "list").catch((error) => showInlineError(error.message, true));
       return;
     }
     const deleteLineItemButton = event.target.closest("[data-delete-line-item]");

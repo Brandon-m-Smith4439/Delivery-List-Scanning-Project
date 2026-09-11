@@ -938,11 +938,101 @@ ORDER BY pb.BREAKAGEDATE, pb.AUFNR, pb.POSNR, pb.KEYINDEX, pb.BOM_ID;
     }
 }
 
+function Get-ScannerCuttingSkipPlan {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$DirectPayloads,
+        $RejectSyncPayload = $null
+    )
+
+    # v0.523: keep scanner database rules in backend/store.py. The SQL reader
+    # receives only completed Order/Item exclusions and never reads SQLite/Azure
+    # tables itself. This preflight is read-only and failure-safe: any error
+    # causes the caller to run the normal full bounded A+W production query.
+    $projectRoot = ([string](Get-OptionalProperty -Object $Config -Name "ProjectRoot" -DefaultValue "")).Trim()
+    if ([string]::IsNullOrWhiteSpace($projectRoot)) {
+        throw "ProjectRoot is not configured; Cutting skip planning cannot resolve the scanner store."
+    }
+    $scannerStore = Get-OptionalProperty -Object $Config -Name "ScannerStore" -DefaultValue $null
+    $expectedStoreMode = ""
+    $expectedStoreDatabase = ""
+    $expectedStoreServer = ""
+    if ($null -ne $scannerStore) {
+        $expectedStoreMode = ([string](Get-OptionalProperty -Object $scannerStore -Name "Mode" -DefaultValue "")).Trim().ToLowerInvariant()
+        $expectedStoreDatabase = ([string](Get-OptionalProperty -Object $scannerStore -Name "Database" -DefaultValue "")).Trim()
+        $expectedStoreServer = ([string](Get-OptionalProperty -Object $scannerStore -Name "Server" -DefaultValue "")).Trim()
+    }
+    if ($expectedStoreMode -eq "sqlite") {
+        if ([string]::IsNullOrWhiteSpace($expectedStoreDatabase)) {
+            throw "ScannerStore.Database is required when ScannerStore.Mode is sqlite."
+        }
+        $expectedStoreDatabase = [System.IO.Path]::GetFullPath($expectedStoreDatabase)
+        $env:DLS_DATABASE_PATH = $expectedStoreDatabase
+    }
+
+    $settings = Get-OptionalProperty -Object $Config -Name "ProductionSync" -DefaultValue $null
+    $orderLookbackDays = [int](Get-OptionalProperty -Object $settings -Name "OrderLookbackDays" -DefaultValue 14)
+    $orderLookbackDays = [Math]::Max(1, [Math]::Min(90, $orderLookbackDays))
+    $requestPath = Join-Path $Config.WorkingRoot ("State\cutting-plan-request-{0}.json" -f [guid]::NewGuid().ToString("N"))
+    $resultPath = Join-Path $Config.WorkingRoot ("State\cutting-plan-result-{0}.json" -f [guid]::NewGuid().ToString("N"))
+    $importerPath = Join-Path $PSScriptRoot "import_delivery_folder.py"
+    $directPayloadSnapshot = @($DirectPayloads | ForEach-Object { $_ })
+    $request = [ordered]@{
+        version = "v523-cutting-sync-plan-1"
+        deliveryDateFrom = (Get-Date).Date.AddDays(-$orderLookbackDays).ToString("yyyy-MM-dd")
+        payloads = @($directPayloadSnapshot)
+        rejectSync = $RejectSyncPayload
+    }
+
+    try {
+        $request | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $requestPath -Encoding UTF8
+        $arguments = @(
+            $importerPath,
+            "--project-root", $projectRoot,
+            "--folder", [string]$Config.DestinationFolder,
+            "--initialize-store", "false",
+            "--production-plan-only", "true",
+            "--direct-payload-path", $requestPath,
+            "--result-path", $resultPath
+        )
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreMode)) {
+            $arguments += @("--expected-store-mode", $expectedStoreMode)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreDatabase)) {
+            $arguments += @("--expected-store-database", $expectedStoreDatabase)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedStoreServer)) {
+            $arguments += @("--expected-store-server", $expectedStoreServer)
+        }
+        [void](Invoke-ConfiguredPython -Config $Config -Arguments $arguments)
+        if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            throw "Cutting skip planner did not write its result file."
+        }
+        $plan = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+        if (-not [bool](Get-OptionalProperty -Object $plan -Name "ok" -DefaultValue $false)) {
+            throw "Cutting skip planner returned an unsuccessful result."
+        }
+        Write-AutomationLog -Message (
+            "Scanner Cutting completion plan: candidates={0}, completedSkipped={1}, refreshRequired={2}, lifecycleResets={3}." -f
+            [int](Get-OptionalProperty -Object $plan -Name "candidateItemCount" -DefaultValue 0),
+            [int](Get-OptionalProperty -Object $plan -Name "completedItemCount" -DefaultValue 0),
+            [int](Get-OptionalProperty -Object $plan -Name "refreshItemCount" -DefaultValue 0),
+            [int](Get-OptionalProperty -Object $plan -Name "resetItemCount" -DefaultValue 0)
+        )
+        return $plan
+    }
+    finally {
+        Remove-Item -LiteralPath $requestPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-AwCuttingSyncPayload {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$DirectPayloads,
-        [bool]$ForceEnabled = $false
+        [bool]$ForceEnabled = $false,
+        $SkipPlan = $null
     )
 
     $settings = Get-OptionalProperty -Object $Config -Name "ProductionSync" -DefaultValue $null
@@ -988,6 +1078,35 @@ function Get-AwCuttingSyncPayload {
     $generationHistoryDepth = [Math]::Max(1, [Math]::Min(12, $generationHistoryDepth))
     $orderLookbackDays = [int](Get-OptionalProperty -Object $settings -Name "OrderLookbackDays" -DefaultValue 14)
     $orderLookbackDays = [Math]::Max(1, [Math]::Min(90, $orderLookbackDays))
+
+    # v0.523: completed Cutting generations remain authoritative until a reject
+    # or a newer A+W KEYINDEX creates a new physical lifecycle. Normal scheduled
+    # sync therefore passes the remembered completed KEYINDEX into SQL so the
+    # expensive Batch/Optimization/plate/process enrichment does not re-read the
+    # already-finished generation. The PROD_JOBITEM predicate intentionally lets
+    # KEYINDEX values above the remembered generation through, which detects an
+    # external remake even when its original delivery date is outside this run's
+    # direct-delivery payload. Manual/forced synchronization remains a full read.
+    $completedCuttingByOrder = @{}
+    if (-not $ForceEnabled -and $null -ne $SkipPlan) {
+        foreach ($entry in @(Get-OptionalProperty -Object $SkipPlan -Name "skipItems" -DefaultValue @())) {
+            $skipOrder = ([string](Get-OptionalProperty -Object $entry -Name "order" -DefaultValue "")).Trim()
+            $skipItem = ([string](Get-OptionalProperty -Object $entry -Name "item" -DefaultValue "")).Trim()
+            $skipKeyIndex = [int](Get-OptionalProperty -Object $entry -Name "keyIndex" -DefaultValue 0)
+            if ($skipOrder -notmatch '^\d+$' -or $skipItem -notmatch '^\d+$') { continue }
+            if (-not $completedCuttingByOrder.ContainsKey($skipOrder)) {
+                $completedCuttingByOrder[$skipOrder] = @{}
+            }
+            $normalizedSkipItem = ([string][int]$skipItem)
+            if (-not $completedCuttingByOrder[$skipOrder].ContainsKey($normalizedSkipItem) -or
+                [int]$completedCuttingByOrder[$skipOrder][$normalizedSkipItem] -lt $skipKeyIndex) {
+                $completedCuttingByOrder[$skipOrder][$normalizedSkipItem] = $skipKeyIndex
+            }
+        }
+    }
+    elseif ($ForceEnabled) {
+        Write-AutomationDebug -Message "Manual/forced A+W production synchronization is bypassing the completed-Cutting skip plan."
+    }
 
     # v0.504: Cutting/label enrichment cannot be limited only to the delivery dates
     # selected for this particular run. Order Details can remain active after its
@@ -1048,6 +1167,13 @@ WHERE coverage.OrderNr IS NOT NULL;
         return $null
     }
 
+    $completedSkippedItemCount = 0
+    foreach ($coveredOrder in $orders) {
+        if ($completedCuttingByOrder.ContainsKey([string]$coveredOrder)) {
+            $completedSkippedItemCount += [int]$completedCuttingByOrder[[string]$coveredOrder].Count
+        }
+    }
+
     $rows = New-Object System.Collections.Generic.List[object]
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     $totalBatches = [int][Math]::Ceiling($orders.Count / [double]$batchSize)
@@ -1069,6 +1195,48 @@ WHERE coverage.OrderNr IS NOT NULL;
         $processTable = New-Object System.Data.DataTable
         try {
             $connection.Open()
+            $batchSkipRows = New-Object System.Collections.Generic.List[object]
+            foreach ($batchOrder in $batchOrders) {
+                $batchOrderKey = [string]$batchOrder
+                if (-not $completedCuttingByOrder.ContainsKey($batchOrderKey)) { continue }
+                foreach ($batchSkipItem in $completedCuttingByOrder[$batchOrderKey].Keys) {
+                    $batchSkipRows.Add([pscustomobject]@{
+                        OrderNr = [int64]$batchOrderKey
+                        ItemNr = [int]$batchSkipItem
+                        KeyIndex = [int]$completedCuttingByOrder[$batchOrderKey][$batchSkipItem]
+                    })
+                }
+            }
+            if ($batchSkipRows.Count -gt 0) {
+                $skipCreate = $connection.CreateCommand()
+                $skipCreate.CommandTimeout = $queryTimeout
+                $skipCreate.CommandText = @"
+CREATE TABLE #SkipItems (
+    OrderNr bigint NOT NULL,
+    ItemNr int NOT NULL,
+    KeyIndex int NOT NULL,
+    PRIMARY KEY (OrderNr, ItemNr)
+);
+"@
+                [void]$skipCreate.ExecuteNonQuery()
+                $skipCreate.Dispose()
+                $skipData = New-Object System.Data.DataTable
+                [void]$skipData.Columns.Add("OrderNr", [int64])
+                [void]$skipData.Columns.Add("ItemNr", [int])
+                [void]$skipData.Columns.Add("KeyIndex", [int])
+                foreach ($skipRow in $batchSkipRows) {
+                    $dataRow = $skipData.NewRow()
+                    $dataRow.OrderNr = [int64]$skipRow.OrderNr
+                    $dataRow.ItemNr = [int]$skipRow.ItemNr
+                    $dataRow.KeyIndex = [int]$skipRow.KeyIndex
+                    [void]$skipData.Rows.Add($dataRow)
+                }
+                $skipBulk = New-Object System.Data.SqlClient.SqlBulkCopy($connection)
+                $skipBulk.DestinationTableName = "#SkipItems"
+                $skipBulk.BulkCopyTimeout = $queryTimeout
+                $skipBulk.WriteToServer($skipData)
+                $skipBulk.Close(); $skipBulk.Dispose(); $skipData.Dispose()
+            }
             $command = $connection.CreateCommand()
             $command.CommandTimeout = $queryTimeout
             $placeholders = New-Object System.Collections.Generic.List[string]
@@ -1083,6 +1251,27 @@ WHERE coverage.OrderNr IS NOT NULL;
             $historyDepthParameter = $command.Parameters.Add("@GenerationHistoryDepth", [System.Data.SqlDbType]::Int)
             $historyDepthParameter.Value = $generationHistoryDepth
             $orderSql = [string]::Join(",", $placeholders.ToArray())
+            $jobItemSkipSql = if ($batchSkipRows.Count -gt 0) { @"
+      AND NOT EXISTS (
+          SELECT 1 FROM #SkipItems skip
+          WHERE skip.OrderNr=ji.AUFNR AND skip.ItemNr=ji.POSNR
+            AND ISNULL(ji.KEYINDEX,0) <= skip.KeyIndex
+      )
+"@ } else { "" }
+            $sequenceSkipSql = if ($batchSkipRows.Count -gt 0) { @"
+      AND NOT EXISTS (
+          SELECT 1 FROM #SkipItems skip
+          WHERE skip.OrderNr=os.AUFNR AND skip.ItemNr=os.POSNR
+            AND ISNULL(os.KEYINDEX,0) <= skip.KeyIndex
+      )
+"@ } else { "" }
+            $shapeSkipSql = if ($batchSkipRows.Count -gt 0) { @"
+      AND NOT EXISTS (
+          SELECT 1 FROM #SkipItems skip
+          WHERE skip.OrderNr=sh.AUFNR AND skip.ItemNr=sh.POSNR
+            AND ISNULL(sh.KEYINDEX,0) <= skip.KeyIndex
+      )
+"@ } else { "" }
             $cuttingJoin = if ($includeCutting) { @"
 LEFT JOIN CuttingBookingRanked cut
   ON cut.ID=ji.AUFNR AND cut.POSNR=ji.POSNR AND cut.BOMID=ji.BOM_ID AND cut.RN=1
@@ -1096,6 +1285,10 @@ LEFT JOIN CuttingBookingRanked cut
     WHERE b.ID IN ($orderSql)
       AND b.BOOK_TYPE = 0 AND b.WORK_TYPE = 10 AND b.REG_POINT = 1000 AND b.AMOUNT > 0
       AND b.SCANTIME >= DATEADD(day,-@CutLookbackDays,GETDATE())
+      AND EXISTS (
+          SELECT 1 FROM JobItems pending
+          WHERE pending.AUFNR=b.ID AND pending.POSNR=b.POSNR AND ISNULL(pending.BOM_ID,0)=ISNULL(b.BOMID,0)
+      )
 )
 "@ } else { "" }
             $cuttingSelect = if ($includeCutting) {
@@ -1110,6 +1303,7 @@ SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
            DENSE_RANK() OVER (PARTITION BY ji.AUFNR,ji.POSNR ORDER BY ISNULL(ji.KEYINDEX,0) DESC,ISNULL(ji.JOBNUMBER,0) DESC) AS GenerationRank
     FROM SYSADM.PROD_JOBITEM ji
     WHERE ji.AUFNR IN ($orderSql)
+$jobItemSkipSql
 ),
 JobItems AS (
     SELECT * FROM JobItemsRanked WHERE GenerationRank <= @GenerationHistoryDepth
@@ -1119,6 +1313,7 @@ SeqCurrentOptimization AS (
            MAX(ISNULL(os.OPTIMIZATION,0)) AS SequenceOptimization
     FROM SYSADM.PROD_OPTI_SEQUENCE os
     WHERE os.AUFNR IN ($orderSql)
+$sequenceSkipSql
     GROUP BY os.AUFNR,os.POSNR,ISNULL(os.BOM_ID,0),ISNULL(os.KEYINDEX,0)
 ),
 ResolvedJobItems AS (
@@ -1158,6 +1353,7 @@ ShapeDisplayRanked AS (
            ) AS RN
     FROM SYSADM.PROD_JOBITEMSHAPE sh
     WHERE sh.AUFNR IN ($orderSql) AND ISNULL(sh.TYPE,0)=0
+$shapeSkipSql
 )
 $cuttingCte
 SELECT
@@ -1239,7 +1435,39 @@ OPTION (RECOMPILE);
             # join, preserve Batch/Optimization/Cutting synchronization.
             try {
                 $processBatchOrders = @($batchOrders | Where-Object { $directOrderSet.Contains([string]$_) })
-                if ($processBatchOrders.Count -gt 0) {
+                $processPairs = @(
+                    $table.Rows |
+                        ForEach-Object { "{0}|{1}" -f ([string][int64]$_.OrderNr),([string][int]$_.ItemNr) } |
+                        Sort-Object -Unique
+                )
+                if ($processBatchOrders.Count -gt 0 -and $processPairs.Count -gt 0) {
+                    $processItemsCreate = $connection.CreateCommand()
+                    $processItemsCreate.CommandTimeout = $queryTimeout
+                    $processItemsCreate.CommandText = @"
+CREATE TABLE #ProcessItems (
+    OrderNr bigint NOT NULL,
+    ItemNr int NOT NULL,
+    PRIMARY KEY (OrderNr, ItemNr)
+);
+"@
+                    [void]$processItemsCreate.ExecuteNonQuery()
+                    $processItemsCreate.Dispose()
+                    $processItemsData = New-Object System.Data.DataTable
+                    [void]$processItemsData.Columns.Add("OrderNr", [int64])
+                    [void]$processItemsData.Columns.Add("ItemNr", [int])
+                    foreach ($processPair in $processPairs) {
+                        $parts = [string]$processPair -split '\|', 2
+                        if ($parts.Count -ne 2) { continue }
+                        $processDataRow = $processItemsData.NewRow()
+                        $processDataRow.OrderNr = [int64]$parts[0]
+                        $processDataRow.ItemNr = [int]$parts[1]
+                        [void]$processItemsData.Rows.Add($processDataRow)
+                    }
+                    $processItemsBulk = New-Object System.Data.SqlClient.SqlBulkCopy($connection)
+                    $processItemsBulk.DestinationTableName = "#ProcessItems"
+                    $processItemsBulk.BulkCopyTimeout = $queryTimeout
+                    $processItemsBulk.WriteToServer($processItemsData)
+                    $processItemsBulk.Close(); $processItemsBulk.Dispose(); $processItemsData.Dispose()
                     $processCommand = $connection.CreateCommand()
                     $processCommand.CommandTimeout = $queryTimeout
                     $processPlaceholders = New-Object System.Collections.Generic.List[string]
@@ -1273,6 +1501,7 @@ OUTER APPLY (
     ) candidate
 ) machine
 WHERE z.AUFNR IN ($processOrderSql)
+  AND EXISTS (SELECT 1 FROM #ProcessItems pending WHERE pending.OrderNr=z.AUFNR AND pending.ItemNr=z.POSNR)
   AND ISNULL(z.KZ_SELECTED,0)=1
   AND ISNULL(z.KZ_NOP,0)=0
 ORDER BY z.AUFNR,z.POSNR,z.ARBFOLGE,z.BOM_ID,z.ARBART,z.AGG
@@ -1379,26 +1608,47 @@ OPTION (RECOMPILE);
         $matchedOrder = ([string](Get-OptionalProperty -Object $productionRow -Name "orderNr" -DefaultValue "")).Trim()
         if (-not [string]::IsNullOrWhiteSpace($matchedOrder)) { [void]$matchedOrderSet.Add($matchedOrder) }
     }
-    $missingOrders = @($orders | Where-Object { -not $matchedOrderSet.Contains([string]$_) })
+    # A covered order can now legitimately return zero production rows when all
+    # known physical generations are already complete. Count those as covered,
+    # not missing, while still querying PROD_JOBITEM cheaply enough to discover a
+    # newer KEYINDEX/remake generation.
+    $completedOnlyOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not $ForceEnabled -and $null -ne $SkipPlan) {
+        foreach ($completeOrder in @(Get-OptionalProperty -Object $SkipPlan -Name "fullyCompletedOrders" -DefaultValue @())) {
+            $completeOrderKey = ([string]$completeOrder).Trim()
+            if ($completeOrderKey -and $orderSet.Contains($completeOrderKey)) {
+                [void]$completedOnlyOrderSet.Add($completeOrderKey)
+            }
+        }
+    }
+    $coveredOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($matchedOrder in $matchedOrderSet) { [void]$coveredOrderSet.Add([string]$matchedOrder) }
+    foreach ($completedOrder in $completedOnlyOrderSet) { [void]$coveredOrderSet.Add([string]$completedOrder) }
+    $missingOrders = @($orders | Where-Object { -not $coveredOrderSet.Contains([string]$_) })
     $missingSample = @($missingOrders | Select-Object -First 20)
     $coverage = [ordered]@{
         requestedOrderCount = [int]$orders.Count
+        queriedOrderCount = [int]$orders.Count
         directDeliveryOrderCount = [int]$directOrderSet.Count
-        matchedOrderCount = [int]$matchedOrderSet.Count
+        matchedOrderCount = [int]$coveredOrderSet.Count
         missingOrderCount = [int]$missingOrders.Count
         missingOrderSample = @($missingSample)
         orderLookbackDays = [int]$orderLookbackDays
+        completedSkippedItemCount = [int]$completedSkippedItemCount
+        completedSkipOrderCount = [int]$completedOnlyOrderSet.Count
     }
-    Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1}/{2} covered order(s) in {3} ms. MissingOrders={4}." -f [int]$rows.Count,[int]$matchedOrderSet.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds),[int]$missingOrders.Count)
+    Write-AutomationLog -Message ("A+W production sync returned {0} PROD_JOBITEM row(s) across {1}/{2} covered order(s) in {3} ms. CompletedItemsSkipped={4} MissingOrders={5}." -f [int]$rows.Count,[int]$coveredOrderSet.Count,[int]$orders.Count,[Math]::Round($timer.Elapsed.TotalMilliseconds),[int]$completedSkippedItemCount,[int]$missingOrders.Count)
     if ($missingSample.Count -gt 0) {
         Write-AutomationLog -Message ("A+W production coverage missing Order sample: {0}" -f ([string]::Join(", ", @($missingSample)))) -Level "WARN"
     }
     # Compatibility markers retained for historical regression contracts:
     # v499-aw-production-1 / version="v501-aw-production-2" / version="v502-aw-production-3".
+    # Historical payload marker retained for regression/upgrade readers:
+    # version="v507-aw-production-5".
     # Historical SQL spelling retained for contract search only:
     # COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION)
     return [ordered]@{
-        version="v507-aw-production-5"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
+        version="v523-aw-production-6"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
         orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; orderLookbackDays=$orderLookbackDays; generationHistoryDepth=$generationHistoryDepth; coverage=$coverage; rows=@($rows.ToArray())
     }
 }
@@ -2950,7 +3200,23 @@ try {
             }
             Write-AutomationStep -Message "Querying A+W production batch/optimization state for Cutting progress."
             try {
-                $script:AwCuttingSyncPayload = Get-AwCuttingSyncPayload -Config $script:Config -DirectPayloads $script:DirectImportPayloads -ForceEnabled (-not [string]::IsNullOrWhiteSpace([string]$RequestId))
+                $forceProductionRefresh = -not [string]::IsNullOrWhiteSpace([string]$RequestId)
+                $cuttingSkipPlan = $null
+                if (-not $forceProductionRefresh) {
+                    try {
+                        $cuttingSkipPlan = Get-ScannerCuttingSkipPlan -Config $script:Config -DirectPayloads $script:DirectImportPayloads -RejectSyncPayload $script:AwRejectSyncPayload
+                    }
+                    catch {
+                        # The planner is an optimization only. Never trade lifecycle
+                        # correctness for speed: a planner/store failure falls back to
+                        # the established bounded A+W query for every covered piece.
+                        $cuttingSkipPlan = $null
+                        Write-AutomationLog -Message (
+                            "Completed-Cutting skip planning was unavailable; running the full bounded A+W production query: {0}" -f $_.Exception.Message
+                        ) -Level "WARN"
+                    }
+                }
+                $script:AwCuttingSyncPayload = Get-AwCuttingSyncPayload -Config $script:Config -DirectPayloads $script:DirectImportPayloads -ForceEnabled $forceProductionRefresh -SkipPlan $cuttingSkipPlan
             }
             catch {
                 $script:AwCuttingSyncPayload = $null

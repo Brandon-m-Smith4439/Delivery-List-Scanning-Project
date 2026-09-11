@@ -14,17 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260908-v0.515">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260910-v0.527">
     <link rel="stylesheet" href="static/css/rejects.css?v=20260908-v0.510">
     <link rel="stylesheet" href="static/css/home.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260908-v0.514">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260909-v0.521">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260910-v0.527">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260910-v0.527">
+    <link rel="stylesheet" href="static/css/inventory.css?v=20260910-v0.527">
     <link rel="stylesheet" href="static/css/racks.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260908-v0.513">
-    <link rel="stylesheet" href="static/css/print.css?v=20260909-v0.521">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260910-v0.527">
+    <link rel="stylesheet" href="static/css/print.css?v=20260910-v0.527">
     <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.513">
     <link rel="stylesheet" href="static/css/shell.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260910-v0.522">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260910-v0.527">
     <link rel="stylesheet" href="static/css/mobile.css?v=20260909-v0.517">
 </head>
 <body data-page="home">
@@ -125,6 +126,7 @@
         <button data-page-target="racks" data-permission-any="view_racks,scan_racks,manage_racks" type="button" title="Racks"><span class="top-nav-icon racks"></span><span>Racks</span></button>
         <button data-page-target="bays" data-permission-any="view_bays,view_indian_trail" type="button" title="Bay Map"><span class="top-nav-icon bays"></span><span>Bay Map</span></button>
         <button data-page-target="rejects" data-permission-any="view_delivery_lists" type="button" title="Reject Tracking"><span class="top-nav-icon rejects"></span><span>Rejects</span></button>
+        <button data-page-target="inventory" data-permission-any="view_inventory,scan_inventory,manage_inventory" type="button" title="Inventory"><span class="top-nav-icon inventory"></span><span>Inventory</span></button>
         <button data-page-target="admin" data-permission-any="view_admin,reset_delivery_lists,import_delivery_lists,edit_delivery_list_items,create_delivery_list_orders,delete_delivery_list_items,delete_delivery_lists,review_superseded_orders,manage_users,manage_user_access,manage_user_assignments,manage_roles,view_sessions,manage_stations,manage_route_rules,manage_customer_emails,manage_lookup_values,manage_automation,manage_cross_date_scanning,manage_reject_settings,manage_bay_layout,manage_bay_scanner_rules,manage_bay_auto_assigner,manage_racks" type="button" title="Settings"><span class="top-nav-icon admin"></span><span>Settings</span></button>
       </nav>
 
@@ -331,10 +333,15 @@
               <h2 id="statisticsProductionCountTitle">Today’s Production Count</h2>
               <p>Actual new-piece counts by glass type and machine for today. The chart workspace below provides range reporting, machine totals, optional Remake/Internal Reject/Rush inclusion, and detailed piece reports.</p>
             </div>
-            <button id="statisticsDailyProductionEmailBtn" class="statistics-production-email-v505 app-primary-button" type="button" title="Draft today's formatted production count email">
-              <span class="statistics-production-email-icon-v505" aria-hidden="true"></span>
-              <span>Draft daily email</span>
-            </button>
+            <div class="statistics-production-heading-actions-v527">
+              <button id="statisticsSheetSettingsBtnV527" class="statistics-production-email-v505" type="button" title="Configure stock sheet sizes and recipients">
+                <span>Sheet settings</span>
+              </button>
+              <button id="statisticsDailyProductionEmailBtn" class="statistics-production-email-v505 app-primary-button" type="button" title="Draft today's formatted production count email">
+                <span class="statistics-production-email-icon-v505" aria-hidden="true"></span>
+                <span>Draft daily email</span>
+              </button>
+            </div>
           </header>
           <div id="statisticsProductionActivity" class="statistics-production-count-grid-v505" aria-live="polite"></div>
         </section>
@@ -378,6 +385,7 @@
                   <option value="glass" selected>Glass type quantity</option>
                   <option value="glass-sizes">Common glass sizes</option>
                   <option value="production-count">Production count by machine</option>
+                  <option value="sheet-usage">Stock sheets used</option>
                 </optgroup>
                 <optgroup label="Breakage &amp; rejects">
                   <option value="breakage-machines">Machine breakage overview</option>
@@ -434,7 +442,7 @@
                   <button id="statisticsCalendarReset" type="button">Clear Selection</button>
                   <span id="statisticsCalendarSelectionText">Choose the Date From.</span>
                   <div>
-                    <button id="statisticsCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+                    <button id="statisticsCalendarCancel" class="app-cancel-button app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
                     <button id="statisticsCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
                   </div>
                 </footer>
@@ -895,6 +903,111 @@
         </main>
       </section>
 
+      <!-- SECTION: Physical WIP inventory, reconciliation, cycle counts, and history -->
+      <section class="page-view inventory-page" id="inventoryPage" hidden>
+        <div class="page-heading app-page-header-v357 inventory-page-heading">
+          <div>
+            <span class="page-eyebrow app-page-eyebrow-v357">Physical WIP control</span>
+            <h1>Inventory</h1>
+            <p>Count Airport Rd or Indian Trail work in progress, reconcile the physical floor against a frozen system snapshot, and retain every completed count.</p>
+          </div>
+          <div class="page-heading-actions inventory-heading-actions">
+            <button id="inventoryHistoryBtn" class="app-primary-button" type="button"><span class="inventory-button-icon history" aria-hidden="true"></span><span>Inventory History</span></button>
+          </div>
+        </div>
+
+        <section class="inventory-start-card panel" id="inventoryStartPanel">
+          <div class="inventory-start-copy">
+            <span class="inventory-kicker">Start a frozen count</span>
+            <h2>Choose the floor and count type</h2>
+            <p>The expected system inventory is frozen when you start, so production changes during the physical count cannot move the target underneath the operator.</p>
+          </div>
+          <div class="inventory-start-controls">
+            <label><span>Location</span><select id="inventoryLocationSelect"></select></label>
+            <label><span>Count type</span><select id="inventoryTypeSelect"><option value="full">Full Inventory</option><option value="cycle">Cycle Inventory</option></select></label>
+            <label id="inventoryCycleFieldWrap" hidden><span>Cycle by</span><select id="inventoryCycleFieldSelect"></select></label>
+            <label id="inventoryCycleValueWrap" hidden><span>Cycle value</span><select id="inventoryCycleValueSelect"></select></label>
+            <label id="inventoryCycleCustomWrap" hidden><span>Custom cycle value</span><input id="inventoryCycleCustomInput" type="text" autocomplete="off" placeholder="Enter value..."></label>
+            <button id="inventoryStartBtn" class="app-primary-button inventory-start-button" type="button">Start Inventory</button>
+          </div>
+          <p class="inventory-start-note" id="inventoryStartNote">Airport Rd includes cut/current WIP through Staging and removes pieces when Outbound is scanned. Indian Trail includes IT-route pieces from Airport Outbound/in-transit through active bay-held inventory.</p>
+        </section>
+
+        <section class="inventory-workspace" id="inventoryWorkspace" hidden>
+          <header class="inventory-session-header panel">
+            <div class="inventory-session-title">
+              <span id="inventorySessionLocation" class="inventory-location-badge">Airport Rd</span>
+              <div><small id="inventorySessionCode">Inventory</small><h2 id="inventorySessionTitle">Current physical count</h2><p id="inventorySessionMeta"></p></div>
+            </div>
+            <div class="inventory-session-actions">
+              <button id="inventoryNewBtn" class="app-secondary-button" type="button" hidden>New Inventory</button>
+              <button id="inventoryExportBtn" class="app-secondary-button" type="button">Export Excel</button>
+              <button id="inventoryCompleteBtn" class="app-primary-button" type="button">Finish Inventory</button>
+              <button id="inventoryCancelBtn" class="app-cancel-button app-cancel-action-v343" data-permission-any="manage_inventory" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+            </div>
+          </header>
+
+          <section class="inventory-kpis" aria-label="Inventory progress">
+            <article><small>System Qty</small><strong id="inventoryExpectedQty">0</strong><span id="inventoryExpectedSqft">0 SQFT</span></article>
+            <article><small>Physical Qty</small><strong id="inventoryScannedQty">0</strong><span id="inventoryScannedSqft">0 SQFT</span></article>
+            <article class="is-good"><small>Matched</small><strong id="inventoryMatchedCount">0</strong><span>system + physical</span></article>
+            <article class="is-alert"><small>Needs Review</small><strong id="inventoryIssueCount">0</strong><span>missing / mismatch</span></article>
+          </section>
+
+          <section class="inventory-scan-panel panel" id="inventoryScanPanel">
+            <div class="inventory-scan-heading">
+              <div><span class="inventory-kicker">Physical count</span><h2>Scan the next piece</h2><p>The scanner stays focused after each result so large floor counts remain fast.</p></div>
+              <button id="inventoryManualOpenBtn" class="app-secondary-button" type="button">Manual Entry</button>
+            </div>
+            <form id="inventoryScanForm" class="inventory-scan-form">
+              <label for="inventoryScanInput" class="visually-hidden">Inventory piece barcode</label>
+              <input id="inventoryScanInput" type="text" autocomplete="off" inputmode="text" placeholder="Scan barcode or enter exact Order / Item...">
+              <button class="app-primary-button" type="submit">Count Piece</button>
+            </form>
+            <div id="inventoryScanFeedback" class="inventory-scan-feedback" aria-live="polite">Ready for the first piece.</div>
+          </section>
+
+          <nav class="inventory-tabs panel" aria-label="Inventory views">
+            <button class="is-active" type="button" data-inventory-tab="scans">Physical Scans</button>
+            <button type="button" data-inventory-tab="reconciliation">Reconciliation <span id="inventoryReconcileBadge">0</span></button>
+            <button type="button" data-inventory-tab="totals">Glass Totals</button>
+            <button type="button" data-inventory-tab="system">System Snapshot</button>
+          </nav>
+          <section class="inventory-view panel" id="inventoryView"></section>
+        </section>
+
+        <section class="inventory-history panel" id="inventoryHistoryPanel" hidden>
+          <header><div><span class="inventory-kicker">Audit history</span><h2>Inventory History</h2><p>Reopen any prior frozen count, review its original comparison, and export the Excel workbook again.</p></div><button id="inventoryHistoryCloseBtn" class="gui-close-button" type="button" aria-label="Close inventory history">&times;</button></header>
+          <div class="inventory-history-list" id="inventoryHistoryList"></div>
+        </section>
+      </section>
+
+      <div class="inventory-modal-backdrop" id="inventoryManualModal" hidden>
+        <section class="inventory-manual-modal" role="dialog" aria-modal="true" aria-labelledby="inventoryManualTitle">
+          <button id="inventoryManualCloseBtn" class="gui-close-button inventory-manual-close" type="button" aria-label="Close manual inventory entry">&times;</button>
+          <header><span class="inventory-kicker">Physical item not in the snapshot</span><h2 id="inventoryManualTitle">Manual Inventory Entry</h2><p>Enter what is physically on the floor. Order / Item can smart-fill known production information without adding anything to the system snapshot.</p></header>
+          <form id="inventoryManualForm" class="inventory-manual-form">
+            <div class="inventory-manual-grid">
+              <label><span>Order Number</span><input id="inventoryManualOrder" name="order" type="text" inputmode="numeric" autocomplete="off"></label>
+              <label><span>Item Number</span><input id="inventoryManualItem" name="item" type="text" inputmode="numeric" autocomplete="off"></label>
+              <label><span>Job Nr.</span><input id="inventoryManualJob" name="jobNr" type="text" autocomplete="off"></label>
+              <label class="inventory-field-wide"><span>Customer</span><input id="inventoryManualCustomer" name="customer" type="text" autocomplete="off"></label>
+              <label><span>Glass Type</span><select id="inventoryManualGlass" name="glassType"></select></label>
+              <label id="inventoryManualGlassCustomWrap" hidden><span>Custom Glass Type</span><input id="inventoryManualGlassCustom" type="text" autocomplete="off"></label>
+              <label><span>Item ID</span><select id="inventoryManualItemId" name="itemId"></select></label>
+              <label id="inventoryManualItemIdCustomWrap" hidden><span>Custom Item ID</span><input id="inventoryManualItemIdCustom" type="text" autocomplete="off"></label>
+              <label><span>Size</span><input id="inventoryManualDimensions" name="dimensions" type="text" autocomplete="off" placeholder='36 x 72'></label>
+              <label><span>SQFT / piece</span><input id="inventoryManualSqft" name="sqftEach" type="number" min="0" step="0.0001" inputmode="decimal"></label>
+              <label><span>Qty</span><input id="inventoryManualQty" name="qty" type="number" min="1" step="1" value="1" inputmode="numeric"></label>
+              <label class="inventory-field-wide"><span>Notes</span><input id="inventoryManualNotes" name="notes" type="text" autocomplete="off" placeholder="Optional count note"></label>
+            </div>
+            <div class="inventory-smart-fill-row"><button id="inventoryManualSmartFillBtn" class="app-secondary-button" type="button">Smart Fill from Order / Item</button><span id="inventoryManualSmartFillStatus">Enter an Order / Item to look up known information.</span></div>
+            <div class="inventory-manual-total"><span>Total SQFT</span><strong id="inventoryManualTotalSqft">0.00</strong></div>
+            <footer><button id="inventoryManualCancelBtn" class="app-cancel-button app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button><button class="app-primary-button" type="submit">Add Physical Item</button></footer>
+          </form>
+        </section>
+      </div>
+
       <!-- SECTION: Rack status and rack-management workflow -->
       <section class="page-view racks-page" id="racksPage" hidden>
         <div class="page-heading app-page-header-v357">
@@ -1045,7 +1158,7 @@
             <button class="icon-button undo-redo-icon redo-icon-button app-primary-button app-icon-primary" id="bayLayoutRedoBtn" type="button" title="Redo layout change" aria-label="Redo layout change"><span class="redo-icon"></span><small>Redo</small></button>
             <button id="bayCollapseAllBtn" type="button">Collapse All</button>
             <button id="bayExpandAllBtn" type="button">Expand All</button>
-            <button id="bayLayoutCancelBtn" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+            <button id="bayLayoutCancelBtn" class="app-cancel-button app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
             <button id="bayLayoutConfirmBtn" type="button">Save Layout</button>
           </div>
         </section>
@@ -1662,9 +1775,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.522">
+        <span class="footer-version-v0163" aria-label="Application version 0.527">
           <small>Version</small>
-          <strong>0.522</strong>
+          <strong>0.527</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -1726,7 +1839,7 @@
                     <button id="printCalendarReset" type="button">Reset Range</button>
                     <span id="printCalendarSelectionText">Choose the Date From.</span>
                     <div>
-                      <button id="printCalendarCancel" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+                      <button id="printCalendarCancel" class="app-cancel-button app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
                       <button id="printCalendarApply" class="primary app-primary-button" type="button" disabled>Apply Dates</button>
                     </div>
                   </footer>
@@ -1909,7 +2022,7 @@
             </header>
             <button id="printPresetSaveOnlyBtn" class="primary app-primary-button" type="button">Save Preset</button>
             <button id="printPresetConfirmBtn" type="button">Save &amp; Apply</button>
-            <button id="printPresetCancelBtn" class="app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
+            <button id="printPresetCancelBtn" class="app-cancel-button app-cancel-action-v343" type="button"><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>Cancel</span></button>
           </section>
         </aside>
 
@@ -2049,6 +2162,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260910-v0.522"></script>
+  <script src="static/js/app.js?v=20260910-v0.527"></script>
 </body>
 </html>

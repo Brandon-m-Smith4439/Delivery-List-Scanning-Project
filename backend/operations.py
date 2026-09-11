@@ -95,25 +95,58 @@ class OperationsFeatureService:
         )
 
     def line_flags(self, list_id: str, username: str) -> dict[str, Any]:
-        """Return current per-user update flags plus reject details for one list.
+        """Return current per-user update/reject flags for one list."""
+        clean_list_id = clean_text(list_id, 255)
+        result = self.line_flags_many([clean_list_id], username)
+        return dict(result.get("results", {}).get(clean_list_id) or {
+            "ok": True,
+            "listId": clean_list_id,
+            "pendingLineCount": 0,
+            "newLineCount": 0,
+            "updatedLineCount": 0,
+            "totalLineCount": 0,
+            "listRevision": 1,
+            "isNewStage": False,
+            "noticeIds": [],
+            "items": [],
+        })
 
-        Only the newest import/update batch for the selected stage is eligible for
-        New/Updated review. Automatic imports share source-hash/timestamp batch
-        identity across changed lines; manual entries additionally use their shared
-        change token. Older unreviewed notices are superseded by the current state.
+    def line_flags_many(self, list_ids: list[str], username: str) -> dict[str, Any]:
+        """Return full line flags for many delivery-list stages in one SQLite query.
+
+        Scan's date-wide payload needs the same reject/update metadata for every
+        accessible stage copy. Historically the HTTP route called ``line_flags``
+        once per stage, reopening SQLite and rerunning the reject ranking for each
+        call. Keep the exact per-list contract while ranking the requested date(s)
+        once and using one connection/query for the entire date bundle.
         """
         self._require_sqlite()
-        clean_list_id = clean_text(list_id, 255)
+        clean_ids = list(dict.fromkeys(
+            clean_text(value, 255)
+            for value in (list_ids or [])
+            if clean_text(value, 255)
+        ))[:100]
+        if not clean_ids:
+            return {"ok": True, "results": {}}
+
+        placeholders = ",".join("?" for _ in clean_ids)
         with self.store.connect() as con:
             user_id = self._user_id(con, username)
             rows = con.execute(
-                """
-                WITH latest_update_batch AS (
-                    SELECT source_hash, created_at, change_token
-                    FROM line_update_notices
-                    WHERE list_id = ?
-                    ORDER BY id DESC
-                    LIMIT 1
+                f"""
+                WITH requested_lists AS (
+                    SELECT id, delivery_date, stage, scanner, revision
+                    FROM delivery_lists
+                    WHERE id IN ({placeholders})
+                ), latest_notice_ids AS (
+                    SELECT n.list_id, MAX(n.id) AS notice_id
+                    FROM line_update_notices n
+                    WHERE n.list_id IN (SELECT id FROM requested_lists)
+                    GROUP BY n.list_id
+                ), latest_update_batch AS (
+                    SELECT n.list_id, n.source_hash, n.created_at, n.change_token
+                    FROM line_update_notices n
+                    JOIN latest_notice_ids latest ON latest.notice_id = n.id
                 ), reject_ranked AS (
                     SELECT re.*,
                            ROW_NUMBER() OVER (
@@ -127,14 +160,16 @@ class OperationsFeatureService:
                                PARTITION BY re.delivery_date, re.order_no, re.item_no
                            ) AS reject_piece_count
                     FROM reject_events re
+                    WHERE re.delivery_date IN (SELECT DISTINCT delivery_date FROM requested_lists)
                 )
-                SELECT li.id,
-                       li.order_no,
-                       li.item_no,
+                SELECT dl.id AS list_id,
                        dl.delivery_date,
                        dl.stage,
                        dl.scanner,
                        dl.revision AS list_revision,
+                       li.id AS line_item_id,
+                       li.order_no,
+                       li.item_no,
                        COALESCE(li.manual_only, 0) AS manual_only,
                        COALESCE(li.manual_source, '') AS manual_source,
                        COALESCE(rr.reject_piece_count, li.internal_reject_count, 0) AS internal_reject_count,
@@ -149,19 +184,20 @@ class OperationsFeatureService:
                        COALESCE(rr.delivery_date, dl.delivery_date, '') AS last_reject_delivery_date,
                        n.id AS notice_id,
                        n.change_type AS change_type,
-                       n.created_at AS notice_created_at,
                        r.notice_id AS receipt_notice_id
-                FROM line_items li
-                JOIN delivery_lists dl ON dl.id = li.list_id
+                FROM requested_lists dl
+                LEFT JOIN line_items li
+                  ON li.list_id = dl.id
+                 AND COALESCE(li.is_deleted, 0) = 0
                 LEFT JOIN reject_ranked rr
                   ON rr.delivery_date = dl.delivery_date
                  AND rr.order_no = li.order_no
                  AND rr.item_no = li.item_no
                  AND rr.reject_rank = 1
-                LEFT JOIN latest_update_batch lub ON 1 = 1
+                LEFT JOIN latest_update_batch lub ON lub.list_id = dl.id
                 LEFT JOIN line_update_notices n
                   ON n.line_item_id = li.id
-                 AND n.list_id = li.list_id
+                 AND n.list_id = dl.id
                  AND n.source_hash = lub.source_hash
                  AND n.created_at = lub.created_at
                  AND (
@@ -171,21 +207,42 @@ class OperationsFeatureService:
                 LEFT JOIN line_update_receipts r
                   ON r.notice_id = n.id
                  AND r.user_id = ?
-                WHERE li.list_id = ?
-                  AND COALESCE(li.is_deleted, 0) = 0
-                ORDER BY li.id, n.id
+                ORDER BY dl.id, li.id, n.id
                 """,
-                (clean_list_id, user_id, clean_list_id),
+                (*clean_ids, user_id),
             ).fetchall()
 
-        items: dict[str, dict[str, Any]] = {}
-        notice_ids: list[int] = []
+        results: dict[str, dict[str, Any]] = {
+            list_id: {
+                "ok": True,
+                "listId": list_id,
+                "pendingLineCount": 0,
+                "newLineCount": 0,
+                "updatedLineCount": 0,
+                "totalLineCount": 0,
+                "listRevision": 1,
+                "isNewStage": False,
+                "noticeIds": [],
+                "items": [],
+            }
+            for list_id in clean_ids
+        }
+        items_by_list: dict[str, dict[str, dict[str, Any]]] = {list_id: {} for list_id in clean_ids}
         for row in rows:
-            item_id = str(row["id"])
-            target = items.setdefault(
-                item_id,
+            list_id = str(row["list_id"] or "")
+            if list_id not in results:
+                continue
+            result = results[list_id]
+            line_item_id = str(row["line_item_id"] or "")
+            if not line_item_id:
+                # Preserve the historical single-list contract: an empty stage
+                # reports revision 1 because no line payload exists to carry it.
+                continue
+            result["listRevision"] = int(row["list_revision"] or 1)
+            target = items_by_list[list_id].setdefault(
+                line_item_id,
                 {
-                    "lineItemId": item_id,
+                    "lineItemId": line_item_id,
                     "order": str(row["order_no"] or ""),
                     "item": str(row["item_no"] or ""),
                     "deliveryDate": str(row["delivery_date"] or ""),
@@ -214,38 +271,27 @@ class OperationsFeatureService:
             if notice_id > 0 and receipt_notice_id <= 0:
                 target["hasUnseenUpdate"] = True
                 target["userUpdateNoticeIds"].append(notice_id)
-                notice_ids.append(notice_id)
+                result["noticeIds"].append(notice_id)
                 change_type = str(row["change_type"] or "updated").lower()
                 if change_type == "new" or not target["userUpdateState"]:
                     target["userUpdateState"] = change_type
 
-        values = list(items.values())
-        pending_line_count = sum(1 for item in values if item["hasUnseenUpdate"])
-        new_line_count = sum(1 for item in values if item["userUpdateState"] == "new")
-        updated_line_count = sum(1 for item in values if item["userUpdateState"] == "updated")
-        list_revision = int(values[0].get("listRevision") or 1) if values else 1
-        # A newly created stage presents its entire first-revision line population as
-        # new. Existing stages that receive additional orders remain delivery-list
-        # updates; this distinction keeps operator wording accurate and concise.
-        is_new_stage = bool(
-            values
-            and pending_line_count > 0
-            and updated_line_count == 0
-            and new_line_count == len(values)
-            and list_revision <= 1
-        )
-        return {
-            "ok": True,
-            "listId": clean_list_id,
-            "pendingLineCount": pending_line_count,
-            "newLineCount": new_line_count,
-            "updatedLineCount": updated_line_count,
-            "totalLineCount": len(values),
-            "listRevision": list_revision,
-            "isNewStage": is_new_stage,
-            "noticeIds": sorted(set(notice_ids)),
-            "items": values,
-        }
+        for list_id, result in results.items():
+            values = list(items_by_list[list_id].values())
+            result["items"] = values
+            result["totalLineCount"] = len(values)
+            result["pendingLineCount"] = sum(1 for item in values if item["hasUnseenUpdate"])
+            result["newLineCount"] = sum(1 for item in values if item["userUpdateState"] == "new")
+            result["updatedLineCount"] = sum(1 for item in values if item["userUpdateState"] == "updated")
+            result["noticeIds"] = sorted(set(result["noticeIds"]))
+            result["isNewStage"] = bool(
+                values
+                and result["pendingLineCount"] > 0
+                and result["updatedLineCount"] == 0
+                and result["newLineCount"] == len(values)
+                and result["listRevision"] <= 1
+            )
+        return {"ok": True, "results": results}
 
     def line_flag_markers(self, list_ids: list[str], username: str) -> dict[str, Any]:
         """Return lightweight per-user update markers for many lists at once.

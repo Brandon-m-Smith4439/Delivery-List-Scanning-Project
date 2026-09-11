@@ -1,17 +1,52 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.522**. SQLite remains the active/default backend; schema stays **19**.
+Current maintained release: **v0.527**. SQLite remains the active/default backend and schema remains **20**. This release stabilizes background production checks, identifies irregular A+W cutting records, and speeds Scan navigation without changing production data.
+
+## Install v0.527
+
+1. Stop the server and back up the current project folder, preserving the live `data/` folder separately.
+2. Inspect `Delivery_List_Scanner_v0.527_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.526** project root with overwrite enabled. Schema remains **20** and no migration runs.
+4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.527** in the footer.
+5. Open a busy Scan date, hover rows, open Order Details, move to another page and back, and switch repeatedly among nearby delivery dates.
+6. Confirm A+W warnings appear for cut pieces that have no batch/optimization or have a batch without an optimization. Review the explicit **Batch created** or **Optimization dated** timestamp in Order Details.
+7. Review Inventory tabs, scan and manual-entry feedback, history, reconciliation, and responsive layouts.
+
+### v0.527 behavior
+
+- **Stable production checks.** Scan records every bounded fabrication attempt, coalesces competing foreground/background work, retries unfinished cut/fabrication status on a ten-minute cadence, and stops checking completed physical progress until reject/remake lifecycle evidence resets it. One completed date hydration causes at most one Scan repaint, so hover and Order Details clicks remain stable.
+- **Faster date and sidebar navigation.** Scan claims date-wide warm ownership before rendering, reuses valid cached bundles, and prefetches only the two neighboring dates with a bounded coalesced request. The desktop navigation rail uses lighter containment, shadow, and transition work.
+- **A+W production review flags.** Completed Cutting records are flagged when they contain neither a batch nor optimization, or contain a batch without optimization. Scan shows item/order warnings and Order Details explains the irregularity without altering the piece's accumulated progress.
+- **Unambiguous A+W time.** Order Details labels the time as **Batch created** when A+W supplied a batch creation timestamp. Only the fallback optimization timestamp is labeled **Optimization dated**.
+- **Sketch file lifecycle.** PDF readers now close production files deterministically. Local index/preview work completes inline while mapped production shares retain background processing, preventing shutdown/cleanup races without moving network I/O onto Scan.
+- **No schema change.** Application advances exactly one step to v0.527 while `CURRENT_SCHEMA_VERSION` stays at 20.
+
+### v0.527 validation
+
+- Browser reproduction on a 117-piece date fell from **132** fabrication-status requests in about 11 seconds to **3** bounded requests with no further requests over the next nine seconds. Hover caused zero extra fabrication calls and Order Details opened normally.
+- Three measured delivery-date changes completed in **250 ms, 322 ms, and 273 ms**. Repeated desktop sidebar hover stayed within a **16.8 ms** maximum animation frame.
+- Inventory tabs, manual entry/history, reconciliation/totals, one actual isolated count update, and six responsive widths from 390 to 1440 pixels passed with no horizontal overflow.
+- JavaScript syntax, focused regression contracts, and the complete maintained suite pass. The release package is checked as a v0.526 overlay and contains no runtime data.
+
+## Previous release: v0.526
+
+v0.526 added the five-date Scan bundle cache, a ten-minute automatic fabrication cadence, shared Cancel/Print controls, machine-color corrections, and the revised Order Details header while keeping schema 20 unchanged.
+
+## Previous release: v0.525
+
+v0.525 placed Inventory between Rejects and Settings and strengthened Inventory/normal-Scan UI isolation while keeping schema 20 unchanged.
+
+## Previous release: v0.524
+
+v0.524 added the dedicated Airport Rd / Indian Trail Inventory subsystem with full/cycle counts, frozen expected snapshots, physical scanning/manual entry, side-by-side reconciliation, Qty/SQFT totals, history, repeatable Excel exports, and schema 20 inventory persistence.
+
+## Previous release: v0.523
+
+v0.523 stops repeating expensive Cutting and fabrication work after a physical piece is proven complete, while keeping reject/remake lifecycle resets authoritative. Order Details also reuses recent focused payloads longer and prioritizes the sketch page the operator is opening. SQLite remains schema **19**.
+
+## Previous release: v0.522
 
 v0.522 remembers fabrication results on the server, checks the complete selected delivery date in bounded background batches, and adds **Check Fab** to each item in Order Details. A matching new production file, changed piece/label data, or reject cutoff invalidates the affected result. SQLite remains schema **19**.
-
-## Install v0.522
-
-1. Stop the server and back up the project, preserving `data/` separately.
-2. Extract `Delivery_List_Scanner_v0.522_Changed_Files.zip` into the existing **v0.521** project root with overwrite enabled. The overlay excludes production data, logs, credentials and exports.
-3. Restart the maintained launcher, hard-refresh browsers (`Ctrl+F5`), and confirm **0.522**. No migration is added.
-4. Open a delivery date. Its full item set warms after Scan paints, using one queued background status request at a time. Results are remembered in the existing `data/production-file-index.json` and reused across browsers/restarts.
-5. Open Order Details and use **Check Fab** beside the piece's other actions to bypass its remembered result. The button shows Checking while the request runs; the last-check time and result update on completion. An unavailable share shows a notice rather than inventing completion.
-6. Verify a controlled floor scan/reject/recut plus the new Check Fab action before rollout. Detailed tests and performance evidence are in [v0.522 validation](docs/V0522_VALIDATION.md).
 
 ### v0.522 behavior
 

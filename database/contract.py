@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "522"
-# Schema version 19 establishes the A+W plant-time contract: offset-free SQL
-# datetime values are America/New_York wall clocks normalized to canonical UTC.
-CURRENT_SCHEMA_VERSION = 19
+APPLICATION_VERSION = "527"
+# Schema version 20 adds durable physical-inventory sessions/snapshots/scans and
+# the maintained glass-to-Item-ID mapping used by Airport Rd and Indian Trail.
+CURRENT_SCHEMA_VERSION = 20
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -57,6 +57,10 @@ TABLE_DESCRIPTIONS = {
     "packing_list_prints": "Immutable snapshots of rack packing lists when printed.",
     "manual_delivery_entries": "Audit inventory of orders manually added to delivery lists.",
     "superseded_order_reviews": "Admin-reviewed A+W order replacement candidates and exact removal decisions.",
+    "inventory_sessions": "Durable Airport Rd and Indian Trail full/cycle inventory count sessions.",
+    "inventory_expected_items": "Frozen system WIP snapshot captured when an inventory session starts.",
+    "inventory_scans": "Audited physical inventory scans and manual count entries.",
+    "inventory_item_mappings": "Maintained glass-description to inventory Item ID reference mapping.",
 }
 
 REQUIRED_COLUMNS = {
@@ -94,6 +98,26 @@ REQUIRED_COLUMNS = {
         "source_fingerprint", "detected_at", "last_seen_at", "decided_at", "decided_by",
         "decision_reason", "approved_remove_order_no", "active", "created_at_utc", "updated_at_utc",
     },
+    "inventory_sessions": {
+        "id", "session_code", "location", "inventory_type", "status", "cycle_filter_json",
+        "started_by", "started_at", "completed_by", "completed_at", "expected_line_count",
+        "expected_qty", "expected_total_sqft", "notes", "created_at", "updated_at",
+    },
+    "inventory_expected_items": {
+        "id", "session_id", "snapshot_key", "source_line_item_id", "source_list_id", "delivery_date",
+        "job_no", "customer", "order_no", "item_no", "glass_type", "item_id", "dimensions",
+        "sqft_each", "qty", "total_sqft", "route", "bay_code", "cutting_key_index",
+        "cutting_state", "source_reason", "source_payload_json",
+    },
+    "inventory_scans": {
+        "id", "session_id", "expected_item_id", "source_line_item_id", "barcode", "entry_type",
+        "scanned_at", "scanned_by", "job_no", "customer", "order_no", "item_no", "glass_type",
+        "item_id", "dimensions", "sqft_each", "qty", "total_sqft", "notes", "manual_fields_json",
+    },
+    "inventory_item_mappings": {
+        "id", "item_id", "glass_label", "description", "match_terms_json", "sort_order",
+        "active", "created_at", "updated_at",
+    },
 }
 
 TEXT_BUSINESS_IDENTIFIERS = {
@@ -111,6 +135,10 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "manual_delivery_entries": {"order_no", "item_no", "delivery_date", "route"},
     "superseded_order_reviews": {"candidate_key", "delivery_date", "original_order_no", "replacement_order_no", "status", "source_fingerprint"},
     "machine_events": {"barcode", "order_no", "item_no"},
+    "inventory_sessions": {"session_code", "location"},
+    "inventory_expected_items": {"snapshot_key", "source_line_item_id", "source_list_id", "delivery_date", "job_no", "order_no", "item_no", "item_id", "bay_code"},
+    "inventory_scans": {"source_line_item_id", "barcode", "job_no", "order_no", "item_no", "item_id"},
+    "inventory_item_mappings": {"item_id"},
 }
 
 SQLITE_TO_SQLSERVER_TYPES = {
@@ -160,6 +188,11 @@ INDEX_DESCRIPTIONS = {
     "idx_machine_events_order_item": "Production lookup by order and item.",
     "idx_superseded_order_reviews_status_date": "Pending superseded-order review queue by status and delivery date.",
     "idx_superseded_order_reviews_orders": "Superseded-order review lookup by original and replacement order.",
+    "idx_inventory_sessions_location_time": "Inventory history/open-session lookup by location and start time.",
+    "idx_inventory_expected_session_order_item": "Frozen inventory snapshot lookup by session and order/item.",
+    "idx_inventory_scans_session_time": "Physical inventory count history by session and scan time.",
+    "idx_inventory_scans_expected_once": "One physical count per frozen expected row within a session.",
+    "idx_inventory_scans_source_once": "One physical count per production source identity within a session.",
 }
 
 JSON_COLUMNS = {
@@ -177,6 +210,10 @@ JSON_COLUMNS = {
     "manual_delivery_entries": {"target_list_ids_json"},
     "line_update_notices": {"snapshot_json"},
     "superseded_order_reviews": {"evidence_json", "original_items_json", "replacement_items_json"},
+    "inventory_sessions": {"cycle_filter_json"},
+    "inventory_expected_items": {"source_payload_json"},
+    "inventory_scans": {"manual_fields_json"},
+    "inventory_item_mappings": {"match_terms_json"},
 }
 
 TIMESTAMP_COLUMNS = {
@@ -199,4 +236,7 @@ TIMESTAMP_COLUMNS = {
     "manual_delivery_entries": {"created_at"},
     "machine_events": {"created_at_utc"},
     "superseded_order_reviews": {"detected_at", "last_seen_at", "decided_at", "created_at_utc", "updated_at_utc"},
+    "inventory_sessions": {"started_at", "completed_at", "created_at", "updated_at"},
+    "inventory_scans": {"scanned_at"},
+    "inventory_item_mappings": {"created_at", "updated_at"},
 }

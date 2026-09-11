@@ -135,6 +135,7 @@ class ProductionFileService:
         # PDF from the production share every time Order Details is reopened.
         self._sketch_preview_cache_dir = Path(config.data_dir) / "production-sketch-page-cache"
         self._sketch_preview_lock = threading.Lock()
+        self._sketch_preview_pending: set[str] = set()
         self._lock = threading.RLock()
         self._persist_write_lock = threading.Lock()
         self._persist_pending = False
@@ -522,6 +523,12 @@ class ProductionFileService:
     def _schedule_persist_index(self, source_root: Path) -> None:
         """Persist newly discovered PDF page matches away from request threads."""
         if not self._background_refresh_enabled:
+            return
+        # Local/test roots are cheap to persist and doing so inline prevents a
+        # delayed daemon write from racing application shutdown or folder cleanup.
+        # Production shares still use the coalesced background path below.
+        if not self._is_network_root(source_root):
+            self._persist_index()
             return
         with self._lock:
             if self._persist_pending:
@@ -938,28 +945,85 @@ class ProductionFileService:
             try:
                 from pypdf import PdfReader, PdfWriter  # type: ignore
 
-                reader = PdfReader(str(asset.path))
-                page_index = page - 1
-                if page_index < 0 or page_index >= len(reader.pages):
-                    return None
-                writer = PdfWriter()
-                writer.add_page(reader.pages[page_index])
-                target.parent.mkdir(parents=True, exist_ok=True)
-                temporary = target.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-                try:
-                    with temporary.open("wb") as handle:
-                        writer.write(handle)
-                    temporary.replace(target)
-                finally:
+                with asset.path.open("rb") as source:
+                    reader = PdfReader(source)
+                    page_index = page - 1
+                    if page_index < 0 or page_index >= len(reader.pages):
+                        return None
+                    writer = PdfWriter()
+                    writer.add_page(reader.pages[page_index])
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = target.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
                     try:
-                        temporary.unlink()
-                    except FileNotFoundError:
-                        pass
-                    except OSError:
-                        pass
+                        with temporary.open("wb") as handle:
+                            writer.write(handle)
+                        temporary.replace(target)
+                    finally:
+                        try:
+                            temporary.unlink()
+                        except FileNotFoundError:
+                            pass
+                        except OSError:
+                            pass
             except Exception:
                 return None
         return (target, asset) if target.exists() and target.stat().st_size > 0 else None
+
+    def _prime_sketch_preview_pages_async(self, asset: ProductionAsset, assignments: list[dict[str, Any]]) -> None:
+        """Warm all known item pages from one PDF in one background read.
+
+        Order Details already parses the PDF once to identify Order.Item pages.
+        Priming those exact pages as a batch avoids reopening the network PDF once
+        per iframe while keeping the JSON response path free of PDF writing work.
+        """
+        pages = sorted({int(row.get("pageNumber") or 0) for row in assignments if int(row.get("pageNumber") or 0) > 0})
+        if not pages or not self._background_refresh_enabled:
+            return
+        signature = f"{asset.asset_id}|{float(asset.modified_at or 0):.6f}"
+        with self._sketch_preview_lock:
+            if signature in self._sketch_preview_pending:
+                return
+            missing = [page for page in pages if not self._sketch_preview_cache_path(asset, page).is_file()]
+            if not missing:
+                return
+            self._sketch_preview_pending.add(signature)
+
+        def worker() -> None:
+            try:
+                from pypdf import PdfReader, PdfWriter  # type: ignore
+                with asset.path.open("rb") as source:
+                    reader = PdfReader(source)
+                    for page in missing:
+                        page_index = page - 1
+                        if page_index < 0 or page_index >= len(reader.pages):
+                            continue
+                        target = self._sketch_preview_cache_path(asset, page)
+                        with self._sketch_preview_lock:
+                            if target.is_file() and target.stat().st_size > 0:
+                                continue
+                            writer = PdfWriter()
+                            writer.add_page(reader.pages[page_index])
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            temporary = target.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+                            try:
+                                with temporary.open("wb") as handle:
+                                    writer.write(handle)
+                                temporary.replace(target)
+                            finally:
+                                try:
+                                    temporary.unlink()
+                                except (FileNotFoundError, OSError):
+                                    pass
+            except Exception:
+                pass
+            finally:
+                with self._sketch_preview_lock:
+                    self._sketch_preview_pending.discard(signature)
+
+        if self._is_network_root(asset.root):
+            threading.Thread(target=worker, name="sketch-preview-prime", daemon=True).start()
+        else:
+            worker()
 
 
     def _asset_mentions_item(self, asset: ProductionAsset, order: Any, item: Any) -> bool:
@@ -1111,13 +1175,14 @@ class ProductionFileService:
             try:
                 from pypdf import PdfReader  # type: ignore
 
-                reader = PdfReader(str(asset.path))
-                chunks: list[str] = []
-                for page in reader.pages[:8]:
-                    chunks.append(page.extract_text() or "")
-                    if sum(len(chunk) for chunk in chunks) >= max_bytes:
-                        break
-                text = "\n".join(chunks)[:max_bytes]
+                with asset.path.open("rb") as source:
+                    reader = PdfReader(source)
+                    chunks: list[str] = []
+                    for page in reader.pages[:8]:
+                        chunks.append(page.extract_text() or "")
+                        if sum(len(chunk) for chunk in chunks) >= max_bytes:
+                            break
+                    text = "\n".join(chunks)[:max_bytes]
             except Exception:
                 text = ""
 
@@ -1139,14 +1204,18 @@ class ProductionFileService:
 
     def _matches_machine_terms(self, signals: str, machine: str) -> bool:
         normalized = str(signals or "").upper()
+        normalized_words = re.sub(r"[^A-Z0-9]+", " ", normalized).strip()
+        normalized_compact = re.sub(r"[^A-Z0-9]+", "", normalized)
         for term in self.machine_terms.get(machine, []):
             clean = str(term or "").strip().upper()
             if not clean:
                 continue
-            if len(clean) <= 3:
-                if re.search(rf"(?<![A-Z0-9]){re.escape(clean)}(?![A-Z0-9])", normalized):
+            clean_words = re.sub(r"[^A-Z0-9]+", " ", clean).strip()
+            clean_compact = re.sub(r"[^A-Z0-9]+", "", clean)
+            if len(clean_compact) <= 3:
+                if re.search(rf"(?<![A-Z0-9]){re.escape(clean_words)}(?![A-Z0-9])", normalized_words):
                     return True
-            elif clean in normalized:
+            elif clean_words in normalized_words or clean_compact in normalized_compact:
                 return True
         return False
 
@@ -1328,40 +1397,43 @@ class ProductionFileService:
         try:
             from pypdf import PdfReader  # type: ignore
 
-            reader = PdfReader(str(asset.path))
-            # Canonical shop pages use ``Order.Item``. Manual markups sometimes
-            # rewrite that identity as ``Order / Item`` or ``Order ITEM n``; accept
-            # those explicit separators without treating arbitrary nearby numbers
-            # (dimensions/page counts) as item identities. Annotation text is also
-            # included because Bluebeam/Acrobat machine notes may not be flattened.
-            marker_patterns = [
-                re.compile(rf"(?<!\d){re.escape(order_token)}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
-                re.compile(rf"(?<!\d)(?:ORDER\s*)?{re.escape(order_token)}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
-            ]
-            for page_index, page in enumerate(reader.pages):
-                try:
-                    text = page.extract_text() or ""
-                except Exception:
-                    text = ""
-                annotation_text = self._pdf_annotation_text(page)
-                if annotation_text:
-                    text = "\n".join(part for part in (text, annotation_text) if part)
-                if not text:
-                    continue
-                machine = self._detect_machine(text)
-                page_items: set[str] = set()
-                for marker in marker_patterns:
-                    for match in marker.finditer(text):
-                        item_number = self._normalized_item_number(match.group(1))
-                        if not item_number or item_number in page_items:
-                            continue
-                        page_items.add(item_number)
-                        assignments.append({
-                            "item": item_number,
-                            "marker": f"{order_token}.{item_number}",
-                            "pageNumber": page_index + 1,
-                            "machine": machine,
-                        })
+            with asset.path.open("rb") as source:
+                reader = PdfReader(source)
+                # Canonical shop pages use ``Order.Item``. Manual markups sometimes
+                # rewrite that identity as ``Order / Item`` or ``Order ITEM n``; accept
+                # those explicit separators without treating arbitrary nearby numbers
+                # (dimensions/page counts) as item identities. Annotation text is also
+                # included because Bluebeam/Acrobat machine notes may not be flattened.
+                marker_patterns = [
+                    re.compile(rf"(?<!\d){re.escape(order_token)}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                    re.compile(rf"(?<!\d)(?:ORDER\s*)?{re.escape(order_token)}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                ]
+                for page_index, page in enumerate(reader.pages):
+                    try:
+                        text = page.extract_text() or ""
+                    except Exception:
+                        text = ""
+                    annotation_text = self._pdf_annotation_text(page)
+                    if annotation_text:
+                        text = "\n".join(part for part in (text, annotation_text) if part)
+                    if not text:
+                        continue
+                    machine = self._detect_machine(text)
+                    sketch_remake = bool(re.search(r"(?<![A-Z0-9])REMAKE(?![A-Z0-9])", text, flags=re.IGNORECASE))
+                    page_items: set[str] = set()
+                    for marker in marker_patterns:
+                        for match in marker.finditer(text):
+                            item_number = self._normalized_item_number(match.group(1))
+                            if not item_number or item_number in page_items:
+                                continue
+                            page_items.add(item_number)
+                            assignments.append({
+                                "item": item_number,
+                                "marker": f"{order_token}.{item_number}",
+                                "pageNumber": page_index + 1,
+                                "machine": machine,
+                                "sketchRemake": sketch_remake,
+                            })
             parse_succeeded = True
         except Exception:
             # A locked/partially copied network PDF is not authoritative evidence
@@ -1380,6 +1452,7 @@ class ProductionFileService:
             if result:
                 self._sketch_empty_cache_at.pop(asset.asset_id, None)
                 self._schedule_persist_index(asset.root)
+                self._prime_sketch_preview_pages_async(asset, result)
             else:
                 self._sketch_empty_cache_at[asset.asset_id] = time.time()
         return result
@@ -1391,6 +1464,7 @@ class ProductionFileService:
         page_number: int = 0,
         item_marker: str = "",
         machine_hint: str = "",
+        sketch_remake: bool = False,
     ) -> dict[str, Any]:
         row = asset.public()
         if page_number:
@@ -1399,6 +1473,8 @@ class ProductionFileService:
             row["itemMarker"] = str(item_marker)
         if machine_hint:
             row["machineHint"] = str(machine_hint)
+        if sketch_remake:
+            row["sketchRemake"] = True
         return row
 
     @staticmethod
@@ -1560,6 +1636,7 @@ class ProductionFileService:
                         page_number=page_number,
                         item_marker=str(assignment.get("marker") or ""),
                         machine_hint=str(assignment.get("machine") or ""),
+                        sketch_remake=bool(assignment.get("sketchRemake")),
                     ))
             elif self._asset_mentions_item(sketch, order, item):
                 # Backward-compatible support for older item-named TXT/image
@@ -1628,7 +1705,11 @@ class ProductionFileService:
         # source when it identifies an exact machine (including the Mirror+cutout
         # Waterjet rule). Resolve it before any deferred network PDF probe so Scan
         # status batches do not add one share lookup per visible order.
-        if label_assignment.get("required") and self._machine_code(label_assignment.get("machine")) in {"denver", "waterjet"}:
+        if (
+            not allow_content_read
+            and label_assignment.get("required")
+            and self._machine_code(label_assignment.get("machine")) in {"denver", "waterjet"}
+        ):
             return {
                 "machine": str(label_assignment.get("machine") or ""),
                 "machineCode": self._machine_code(label_assignment.get("machine")),
@@ -1668,6 +1749,7 @@ class ProductionFileService:
                         page_number=int(assignment.get("pageNumber") or 0),
                         item_marker=str(assignment.get("marker") or ""),
                         machine_hint=str(assignment.get("machine") or ""),
+                        sketch_remake=bool(assignment.get("sketchRemake")),
                     )
                     machine = str(assignment.get("machine") or "")
                     if machine:
@@ -1678,6 +1760,7 @@ class ProductionFileService:
                             "confidence": "high",
                             "source": source,
                             "sketchMatched": True,
+                            "sketchRemake": bool(assignment.get("sketchRemake")),
                             "assignmentReason": "Exact sketch page identifies the fabrication machine",
                         }
                     matched_source = source
@@ -1713,6 +1796,7 @@ class ProductionFileService:
                     "reason": str(label_assignment.get("reason") or ""),
                 },
                 "sketchMatched": bool(matched_without_machine),
+                "sketchRemake": bool(matched_source and matched_source.get("sketchRemake")),
                 "assignmentReason": str(label_assignment.get("reason") or "A+W Cutting Label requires fabrication"),
                 "labelFabricationSignal": str(label_assignment.get("signal") or ""),
             }
@@ -1721,6 +1805,7 @@ class ProductionFileService:
             return {
                 "machine": "", "required": False, "confidence": "item-matched",
                 "source": matched_source, "sketchMatched": True,
+                "sketchRemake": bool(matched_source and matched_source.get("sketchRemake")),
                 "assignmentReason": "Exact sketch page matched the item but did not identify a fabrication machine",
             }
         return {
@@ -1729,6 +1814,7 @@ class ProductionFileService:
             "confidence": "unknown",
             "source": sketches[0].public() if sketches else None,
             "sketchMatched": False,
+            "sketchRemake": False,
             "assignmentReason": "",
         }
 
@@ -2003,6 +2089,7 @@ class ProductionFileService:
             "machineAssignmentReason": str(assignment.get("assignmentReason") or ""),
             "labelFabricationSignal": str(assignment.get("labelFabricationSignal") or ""),
             "sketchMatched": bool(assignment.get("sketchMatched")),
+            "sketchRemake": bool(assignment.get("sketchRemake")),
             "required": required,
             "enforceable": bool(assigned_code in {"denver", "waterjet"} and enforceable),
             "fabricated": fabricated,
@@ -2026,7 +2113,11 @@ class ProductionFileService:
                 else ({**stale_waterjet.public(), "reason": "Predates latest Internal Reject"} if stale_waterjet else None)
             ),
         }
-        result["retryAfterSeconds"] = 0 if fabricated is True else self.cache_seconds
+        # Completed fabrication and confirmed no-fabrication assignments are terminal
+        # for this physical lifecycle. The lifecycle key changes on reject/remake,
+        # while production-index revision changes make the browser request a fresh
+        # classification if new source evidence appears.
+        result["retryAfterSeconds"] = 0 if fabricated is True or not required else self.cache_seconds
         with self._lock:
             self._fabrication_cache[cache_key] = (now, result)
             while len(self._fabrication_cache) > 10000:

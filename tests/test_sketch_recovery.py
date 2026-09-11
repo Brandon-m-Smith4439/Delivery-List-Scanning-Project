@@ -251,3 +251,16 @@ def test_v521_configurable_machine_definition_controls_detection_color_and_rank(
     assert machines['edge-polisher']['color'] == '#118855'
     assert machines['edge-polisher']['progressRank'] == -15
     assert s._detect_machine('Route note: KODIAK POLISHER required') == 'Edge Polisher'
+
+
+def test_sketch_assignment_primes_exact_pages_in_one_background_batch(tmp_path):
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '238001.pdf'
+    write_pdf(pdf, ['238001.1 DENVER', '238001.2 WATERJET'])
+    views = s.sketch_item_views('238001', '001')
+    assert views and views[0]['pageNumber'] == 1
+    targets = [s._sketch_preview_cache_path(s._asset_lookup[views[0]['id']], page) for page in (1, 2)]
+    deadline = time.time() + 2
+    while time.time() < deadline and not all(path.is_file() and path.stat().st_size > 0 for path in targets):
+        time.sleep(0.02)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in targets)

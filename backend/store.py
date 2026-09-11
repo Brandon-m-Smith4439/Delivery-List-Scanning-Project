@@ -146,6 +146,11 @@ PERMISSIONS = [
     "manage_automation",
     "manage_cross_date_scanning",
 
+    # Physical inventory counts and reconciliation.
+    "view_inventory",
+    "scan_inventory",
+    "manage_inventory",
+
     # Indian Trail and physical bay operations.
     "view_indian_trail",
     "receive_indian_trail",
@@ -223,6 +228,11 @@ PERMISSION_BACKFILL_SOURCES = {
     "manage_production_files": ("manage_lookup_values",),
     "manage_bay_scanner_rules": ("manage_bay_layout",),
     "manage_bay_auto_assigner": ("manage_bay_layout",),
+    # v0.524 inventory inherits existing floor visibility/scanning authority only
+    # on upgrade. Location access is still constrained by stageAccess.
+    "view_inventory": ("view_delivery_lists", "view_indian_trail"),
+    "scan_inventory": ("scan_delivery_lists", "receive_indian_trail"),
+    "manage_inventory": ("correct_scans",),
 }
 
 
@@ -252,20 +262,20 @@ ROLE_PERMISSIONS = {
     "Operator": [
         "view_delivery_lists", "scan_delivery_lists", "use_assigned_stations",
         "view_scan_history", "print_export", "global_search", "view_racks", "scan_racks",
-        "view_rejects", "log_rejects",
+        "view_rejects", "log_rejects", "view_inventory", "scan_inventory",
     ],
     "Supervisor": [
         "view_delivery_lists", "scan_delivery_lists", "use_assigned_stations",
         "view_scan_history", "correct_scans", "manage_scan_exceptions",
         "print_export", "global_search", "view_reports", "view_sessions",
         "view_racks", "scan_racks", "manage_racks", "transfer_rack_contents",
-        "view_rejects", "log_rejects",
+        "view_rejects", "log_rejects", "view_inventory", "scan_inventory", "manage_inventory",
     ],
     "Admin": PERMISSIONS,
     "Indian Trail Operator": [
         "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
         "receive_indian_trail", "view_bays", "global_search", "print_export", "view_racks",
-        "view_rejects",
+        "view_rejects", "view_inventory", "scan_inventory",
     ],
     "Indian Trail Lead": [
         "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
@@ -273,6 +283,7 @@ ROLE_PERMISSIONS = {
         "correct_scans", "manage_scan_exceptions", "assign_bay_items",
         "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks",
         "view_racks", "scan_racks", "view_rejects", "log_rejects",
+        "view_inventory", "scan_inventory", "manage_inventory",
     ],
     "Indian Trail Manager": [
         "view_delivery_lists", "use_assigned_stations", "view_indian_trail",
@@ -281,6 +292,7 @@ ROLE_PERMISSIONS = {
         "move_bay_items", "clear_bay_items", "manage_rush_work", "run_bay_checks",
         "view_reports", "view_sessions", "view_racks",
         "scan_racks", "manage_racks", "transfer_rack_contents", "view_rejects", "log_rejects",
+        "view_inventory", "scan_inventory", "manage_inventory",
     ],
 }
 
@@ -6222,6 +6234,30 @@ class BaseDeliveryStore:
             "user": str(user or ""),
         }
 
+    @staticmethod
+    def aw_cutting_irregularities(cutting: dict[str, Any] | None) -> list[dict[str, str]]:
+        """Describe a completed Cutting state whose A+W generation is incomplete."""
+        value = cutting if isinstance(cutting, dict) else {}
+        if not bool(value.get("complete")):
+            return []
+        batch = str(value.get("batch") or "").strip()
+        optimization = int(value.get("optimization") or 0)
+        if not batch and not optimization:
+            return [{
+                "code": "cut_without_batch_or_optimization",
+                "severity": "warning",
+                "label": "Cut with no Batch or Optimization",
+                "detail": "A+W says this piece is cut, but no Batch or Optimization is attached to its current production generation.",
+            }]
+        if batch and not optimization:
+            return [{
+                "code": "cut_in_batch_without_optimization",
+                "severity": "warning",
+                "label": "Cut in Batch with no Optimization",
+                "detail": f"A+W says this piece is cut in Batch {batch}, but the current production generation has no Optimization.",
+            }]
+        return []
+
     def aw_cutting_state(self, order_no: str, item_no: str, last_rejected_at: str = "", rows: Iterable[Any] | None = None) -> dict[str, Any]:
         clean_order = str(order_no or "").strip()
         clean_item = str(item_no or "").strip()
@@ -6335,7 +6371,214 @@ class BaseDeliveryStore:
             "rememberedCutting": bool(cut_evidence_row is not None and cut_evidence_row is not history[0]),
             "cutEvidenceBatch": str((cut_evidence_row or {}).get("batch") or ""),
         })
+        current["irregularities"] = self.aw_cutting_irregularities(current)
+        current["irregular"] = bool(current["irregularities"])
         return current
+
+    def aw_cutting_sync_plan(
+        self,
+        payload_envelopes: Iterable[dict[str, Any]] | None = None,
+        reject_rows: Iterable[dict[str, Any]] | None = None,
+        *,
+        delivery_date_from: str = "",
+    ) -> dict[str, Any]:
+        """Return complete Order/Item pairs that normal A+W Cutting sync can skip.
+
+        Cutting completion is durable within one physical lifecycle. Scheduled
+        production synchronization therefore does not need to re-read a piece
+        after ``aw_cutting_state`` proves it complete. Incoming direct-delivery
+        rows and the current run's reject payload are folded into this read-only
+        plan *before* A+W production SQL runs, so a changed Job/remake marker or
+        a newer reject immediately removes that piece from the exclusion set.
+
+        This method is deliberately database-owned. The PowerShell A+W reader
+        receives only an optimization hint and never learns SQLite/Azure schema
+        details. A caller can always ignore the plan (manual/forced refresh does).
+        """
+
+        def normalize_item(value: Any) -> str:
+            clean = str(value or "").strip()
+            return clean.zfill(3) if clean.isdigit() else clean
+
+        def newest_timestamp(*values: Any) -> str:
+            cleaned = [str(value or "").strip() for value in values if str(value or "").strip()]
+            return max(cleaned, key=self._aw_cutting_timestamp_epoch) if cleaned else ""
+
+        incoming: dict[tuple[str, str], dict[str, Any]] = {}
+        for envelope in payload_envelopes or []:
+            if not isinstance(envelope, dict):
+                continue
+            payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+            for raw in payload.get("rows") or []:
+                if not isinstance(raw, dict):
+                    continue
+                order_no = str(raw.get("order") or raw.get("orderNr") or "").strip()
+                item_no = normalize_item(raw.get("item") or raw.get("itemNr"))
+                if not order_no or not item_no:
+                    continue
+                facts = incoming.setdefault((order_no, item_no), {"jobs": set(), "remake": False})
+                job = str(raw.get("job") or raw.get("jobNumber") or "").strip()
+                if job:
+                    facts["jobs"].add(job)
+                facts["remake"] = bool(facts["remake"] or is_remake_item(raw))
+
+        incoming_rejects: dict[tuple[str, str], str] = {}
+        for raw in reject_rows or []:
+            if not isinstance(raw, dict):
+                continue
+            order_no = str(raw.get("orderNr") or raw.get("order") or "").strip()
+            item_no = normalize_item(raw.get("itemNr") or raw.get("item"))
+            rejected_at = normalize_aw_plant_timestamp(raw.get("breakageDate") or raw.get("breakageAt"))
+            if not order_no or not item_no or not rejected_at:
+                continue
+            key = (order_no, item_no)
+            incoming_rejects[key] = newest_timestamp(incoming_rejects.get(key), rejected_at)
+
+        incoming_orders = sorted({order for order, _item in incoming})
+        clauses = ["dl.status = 'active'", "COALESCE(li.is_deleted, 0) = 0"]
+        parameters: list[Any] = []
+        coverage_clauses: list[str] = []
+        if str(delivery_date_from or "").strip():
+            coverage_clauses.append("dl.delivery_date >= ?")
+            parameters.append(str(delivery_date_from).strip())
+        if incoming_orders:
+            placeholders = ",".join("?" for _ in incoming_orders)
+            coverage_clauses.append(f"li.order_no IN ({placeholders})")
+            parameters.extend(incoming_orders)
+        if coverage_clauses:
+            clauses.append("(" + " OR ".join(coverage_clauses) + ")")
+
+        local: dict[tuple[str, str], dict[str, Any]] = {}
+        with self.connect() as con:
+            local_rows = con.execute(
+                f"""
+                SELECT li.order_no, li.item_no, li.job, li.process_state, li.queue_state,
+                       li.last_rejected_at, dl.delivery_date
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE {' AND '.join(clauses)}
+                """,
+                tuple(parameters),
+            ).fetchall()
+            for row in local_rows:
+                order_no = str(row_value(row, "order_no", "") or "").strip()
+                item_no = normalize_item(row_value(row, "item_no", ""))
+                if not order_no or not item_no:
+                    continue
+                facts = local.setdefault(
+                    (order_no, item_no),
+                    {"jobs": set(), "remake": False, "lastRejectedAt": "", "deliveryDates": set()},
+                )
+                job = str(row_value(row, "job", "") or "").strip()
+                if job:
+                    facts["jobs"].add(job)
+                facts["remake"] = bool(
+                    facts["remake"]
+                    or is_remake_item({
+                        "processState": row_value(row, "process_state", ""),
+                        "queueState": row_value(row, "queue_state", ""),
+                    })
+                )
+                facts["lastRejectedAt"] = newest_timestamp(
+                    facts.get("lastRejectedAt"), row_value(row, "last_rejected_at", "")
+                )
+                delivery_date = str(row_value(row, "delivery_date", "") or "").strip()
+                if delivery_date:
+                    facts["deliveryDates"].add(delivery_date)
+
+            candidate_orders = sorted({order for order, _item in set(local) | set(incoming)})
+            cutting_rows: list[Any] = []
+            for offset in range(0, len(candidate_orders), 400):
+                batch = candidate_orders[offset:offset + 400]
+                if not batch:
+                    continue
+                placeholders = ",".join("?" for _ in batch)
+                cutting_rows.extend(
+                    con.execute(
+                        f"""
+                        SELECT * FROM aw_cutting_generations
+                        WHERE order_no IN ({placeholders})
+                        ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
+                        """,
+                        tuple(batch),
+                    ).fetchall()
+                )
+
+        cutting_by_pair: dict[tuple[str, str], list[Any]] = {}
+        for row in cutting_rows:
+            key = (
+                str(row_value(row, "order_no", "") or "").strip(),
+                normalize_item(row_value(row, "item_no", "")),
+            )
+            if key[0] and key[1]:
+                cutting_by_pair.setdefault(key, []).append(row)
+
+        candidate_pairs = set(local) | set(incoming)
+        skipped: list[dict[str, Any]] = []
+        reset_pairs: list[dict[str, Any]] = []
+        skipped_keys: set[tuple[str, str]] = set()
+        for key in sorted(candidate_pairs):
+            order_no, item_no = key
+            local_facts = local.get(key)
+            incoming_facts = incoming.get(key)
+            if local_facts is None:
+                reset_pairs.append({"order": order_no, "item": item_no, "reason": "new_direct_item"})
+                continue
+
+            local_reject = str(local_facts.get("lastRejectedAt") or "")
+            incoming_reject = str(incoming_rejects.get(key) or "")
+            effective_reject = newest_timestamp(local_reject, incoming_reject)
+            lifecycle_changed = bool(
+                incoming_reject
+                and self._aw_cutting_timestamp_epoch(incoming_reject)
+                > self._aw_cutting_timestamp_epoch(local_reject)
+            )
+            lifecycle_reason = "new_reject" if lifecycle_changed else ""
+
+            if incoming_facts is not None and not lifecycle_changed:
+                local_jobs = {str(value) for value in local_facts.get("jobs") or set() if str(value).strip()}
+                source_jobs = {str(value) for value in incoming_facts.get("jobs") or set() if str(value).strip()}
+                if source_jobs and local_jobs and source_jobs != local_jobs:
+                    lifecycle_changed = True
+                    lifecycle_reason = "job_changed"
+                elif bool(incoming_facts.get("remake")) != bool(local_facts.get("remake")):
+                    lifecycle_changed = True
+                    lifecycle_reason = "remake_changed"
+
+            if lifecycle_changed:
+                reset_pairs.append({"order": order_no, "item": item_no, "reason": lifecycle_reason})
+                continue
+
+            cutting = self.aw_cutting_state(
+                order_no, item_no, effective_reject, cutting_by_pair.get(key, [])
+            )
+            if bool(cutting.get("complete")):
+                skipped.append({
+                    "order": order_no,
+                    "item": item_no,
+                    "keyIndex": int(cutting.get("keyIndex") or 0),
+                    "cutFirstConfirmedAt": str(cutting.get("cutFirstConfirmedAt") or cutting.get("cutCompletedAt") or ""),
+                })
+                skipped_keys.add(key)
+
+        order_pairs: dict[str, set[tuple[str, str]]] = {}
+        for pair in candidate_pairs:
+            order_pairs.setdefault(pair[0], set()).add(pair)
+        fully_completed_orders = sorted(
+            order for order, pairs in order_pairs.items() if pairs and pairs.issubset(skipped_keys)
+        )
+        return {
+            "ok": True,
+            "version": "v523-cutting-sync-plan-1",
+            "deliveryDateFrom": str(delivery_date_from or ""),
+            "candidateItemCount": len(candidate_pairs),
+            "completedItemCount": len(skipped),
+            "refreshItemCount": len(candidate_pairs) - len(skipped),
+            "resetItemCount": len(reset_pairs),
+            "skipItems": skipped,
+            "fullyCompletedOrders": fully_completed_orders,
+            "resetItems": reset_pairs[:100],
+        }
 
     def aw_fabrication_hints_for_requests(self, requests: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Return current A+W label evidence for a bounded Order/Item request set.
@@ -6566,6 +6809,8 @@ class BaseDeliveryStore:
                         "evidenceSource": "downstream_fabrication",
                         "fabricationMachine": str(fabrication.get("actualMachine") or fabrication.get("machine") or ""),
                     })
+                    cutting["irregularities"] = self.aw_cutting_irregularities(cutting)
+                    cutting["irregular"] = bool(cutting["irregularities"])
                     item["cutting"] = cutting
         return {
             "order": clean_order,
@@ -7749,6 +7994,46 @@ class BaseDeliveryStore:
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
         raise NotImplementedError
+
+    def get_sheet_usage_settings(self) -> dict[str, Any]:
+        """Return maintained stock-sheet sizes and notification recipients."""
+        with self.connect() as con:
+            raw = self.system_metadata_value(con, "statistics_sheet_usage_settings_v527")
+        try:
+            value = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = {}
+        profiles = value.get("profiles") if isinstance(value, dict) else {}
+        return {"profiles": profiles if isinstance(profiles, dict) else {}}
+
+    def save_sheet_usage_settings(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Persist per-glass stock sizes and email recipients without a schema change."""
+        raw_profiles = data.get("profiles") if isinstance(data.get("profiles"), dict) else {}
+        profiles: dict[str, dict[str, Any]] = {}
+        for raw_glass, raw_profile in raw_profiles.items():
+            glass = " ".join(str(raw_glass or "").split())[:255]
+            if not glass or not isinstance(raw_profile, dict):
+                continue
+            sheet_size = " ".join(str(raw_profile.get("sheetSize") or "").split())[:80]
+            raw_emails = raw_profile.get("emails") if isinstance(raw_profile.get("emails"), list) else []
+            emails: list[str] = []
+            for raw_email in raw_emails:
+                email = str(raw_email or "").strip().lower()
+                if not email:
+                    continue
+                if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+                    raise ValueError(f"Invalid sheet-usage email address: {email}")
+                if email not in emails:
+                    emails.append(email)
+            if sheet_size or emails:
+                profiles[glass] = {"sheetSize": sheet_size, "emails": emails}
+        payload = {"profiles": profiles, "updatedAt": now_iso(), "updatedBy": str(user or "")}
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            self.set_system_metadata_value(con, "statistics_sheet_usage_settings_v527", json.dumps(payload, separators=(",", ":")))
+            self.insert_audit(con, "statistics", "sheet_usage", "update_sheet_usage_settings", user, "", "", {"profileCount": len(profiles)})
+            con.commit()
+        return payload
 
     def reports_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         """Purpose: Run the reports summary workflow for the delivery-list scanner.
@@ -13480,6 +13765,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         now = now_iso()
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+
+            if color:
+                collision = con.execute(
+                    """SELECT value, label FROM admin_lookup_values
+                       WHERE type='glass_color' AND is_active=1
+                         AND UPPER(category)=UPPER(?) AND LOWER(value)<>LOWER(?)
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (color, value),
+                ).fetchone()
+                if collision:
+                    used_by = str(collision["label"] or collision["value"] or "another glass type").strip()
+                    raise ValueError(f"That glass color is already used by {used_by}. Choose a unique color.")
 
             def upsert(kind: str, row_label: str, category: str = "") -> None:
                 con.execute(
@@ -19855,6 +20152,103 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             payload["updatedItem"] = updated_item or {}
             return payload
 
+    def advance_delivery_progress(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        """Advance an item, order, or complete delivery date without creating locations."""
+        scope = str(data.get("scope") or "item").strip().lower()
+        target = str(data.get("target") or "").strip().lower()
+        if scope not in {"item", "order", "list"}:
+            raise ValueError("Progress scope must be item, order, or list")
+        if target not in {"staging", "outbound", "indian_trail", "complete"}:
+            raise ValueError("Choose Staging, Outbound, Indian Trail, or Complete")
+        line_item_id = str(data.get("lineItemId") or "").strip()
+        requested_date = str(data.get("deliveryDate") or "").strip()
+        actor = str(user or "").strip()
+        changed_at = now_iso()
+        stage_rank = {"staged": 10, "outbound": 20, "received": 30, "pickup": 30, "greenville": 30, "dtc": 30}
+        target_rank = {"staging": 10, "outbound": 20, "indian_trail": 30, "complete": 999}[target]
+
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            anchor = None
+            if line_item_id:
+                anchor = con.execute(
+                    """SELECT li.*, dl.delivery_date FROM line_items li
+                       JOIN delivery_lists dl ON dl.id=li.list_id WHERE li.id=?""",
+                    (line_item_id,),
+                ).fetchone()
+            delivery_date = requested_date or str(row_value(anchor, "delivery_date", "") or "")
+            if not delivery_date:
+                raise ValueError("Delivery date is required")
+            params: list[Any] = [delivery_date]
+            identity_sql = ""
+            if scope == "item":
+                if not anchor:
+                    raise ValueError("Line item not found")
+                source_id = str(row_value(anchor, "source_id", "") or "").strip()
+                if source_id:
+                    identity_sql = " AND li.source_id=?"
+                    params.append(source_id)
+                else:
+                    identity_sql = " AND li.order_no=? AND li.item_no=?"
+                    params.extend([str(anchor["order_no"] or ""), str(anchor["item_no"] or "")])
+            elif scope == "order":
+                order_no = str(data.get("order") or row_value(anchor, "order_no", "") or "").strip()
+                if not order_no:
+                    raise ValueError("Order number is required")
+                identity_sql = " AND li.order_no=?"
+                params.append(order_no)
+            rows = con.execute(
+                f"""SELECT li.*, dl.stage, dl.scanner, dl.delivery_date
+                    FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id
+                    WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
+                      AND dl.delivery_date=?{identity_sql}""",
+                tuple(params),
+            ).fetchall()
+            if not rows:
+                raise ValueError("No active delivery-list items matched this progress change")
+            changed_ids: list[str] = []
+            for row in rows:
+                category = scan_stage_category(row["stage"], row["scanner"])
+                if target != "complete" and stage_rank.get(category, 999) > target_rank:
+                    continue
+                before = max(int(row["scanned_qty"] or 0), 0)
+                qty = max(int(row["qty"] or 0), 0)
+                if before >= qty:
+                    continue
+                con.execute("UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id=?", (changed_at, row["id"]))
+                changed_ids.append(str(row["id"]))
+
+            location_ids = [str(row["id"]) for row in rows] if target == "complete" else []
+            rack_ids: list[int] = []
+            if location_ids:
+                marks = ",".join("?" for _ in location_ids)
+                rack_ids = [int(row[0]) for row in con.execute(
+                    f"SELECT DISTINCT rack_id FROM rack_items WHERE status='Active' AND line_item_id IN ({marks})",
+                    tuple(location_ids),
+                ).fetchall()]
+                con.execute(
+                    f"UPDATE rack_items SET status='Removed', removed_by=?, removed_at=?, reason='Manual progress completed' WHERE status='Active' AND line_item_id IN ({marks})",
+                    (actor, changed_at, *location_ids),
+                )
+                con.execute(
+                    f"UPDATE bay_assignments SET status='Cleared', cleared_by=?, cleared_at=?, reason='Manual progress completed' WHERE status NOT IN ('Cleared','Cancelled') AND line_item_id IN ({marks})",
+                    (actor, changed_at, *location_ids),
+                )
+                for rack_id in rack_ids:
+                    self.refresh_rack_destination(con, rack_id)
+            reference = line_item_id or delivery_date
+            self.insert_audit(con, "delivery_progress", reference, "manual_progress_advance", actor, "", "", {
+                "scope": scope, "target": target, "deliveryDate": delivery_date,
+                "changedLineItemCount": len(changed_ids), "matchedLineItemCount": len(rows),
+                "locationsCleared": bool(location_ids),
+            })
+            con.commit()
+        return {
+            "ok": True, "scope": scope, "target": target, "deliveryDate": delivery_date,
+            "changedLineItemCount": len(changed_ids), "matchedLineItemCount": len(rows),
+            "message": f"Advanced {scope} progress to {target.replace('_', ' ').title()}.",
+        }
+
     def update_line_item_location(self, con: sqlite3.Connection, row: sqlite3.Row, location: str, user: str) -> None:
         """Purpose: Update line item location for the delivery-list scanner workflow.
 
@@ -20339,6 +20733,36 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 list_date_params,
             ).fetchall()
+
+            # Older schema copies do not expose the sheet count as a column; it
+            # lives in the retained A+W source payload. Keep the date predicate
+            # on the indexed optimization timestamp and extract the count below.
+            sheet_parts = ["optimization_number > 0"]
+            sheet_args: list[str] = []
+            if date_from:
+                sheet_parts.append("optimization_date >= ?")
+                sheet_args.append(f"{date_from}T00:00:00")
+            if date_to:
+                try:
+                    sheet_exclusive_to = (datetime.fromisoformat(date_to).date() + timedelta(days=1)).isoformat()
+                except ValueError:
+                    sheet_exclusive_to = date_to
+                sheet_parts.append("optimization_date < ?")
+                sheet_args.append(f"{sheet_exclusive_to}T00:00:00")
+            aw_sheet_rows = con.execute(
+                f"""SELECT optimization_number, optimization_date, source_payload_json
+                    FROM aw_cutting_generations
+                    WHERE {' AND '.join(sheet_parts)}
+                    ORDER BY optimization_number""",
+                sheet_args,
+            ).fetchall()
+            try:
+                raw_sheet_settings = json.loads(self.system_metadata_value(con, "statistics_sheet_usage_settings_v527") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raw_sheet_settings = {}
+            sheet_profiles = raw_sheet_settings.get("profiles") if isinstance(raw_sheet_settings, dict) else {}
+            if not isinstance(sheet_profiles, dict):
+                sheet_profiles = {}
 
             reject_rows = con.execute(
                 f"""
@@ -20935,6 +21359,60 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "sizes": size_rows,
             })
 
+        profile_by_glass = {str(key).strip().lower(): value for key, value in sheet_profiles.items() if isinstance(value, dict)}
+        optimization_sheets: dict[int, dict[str, Any]] = {}
+        for aw_row in aw_sheet_rows:
+            optimization = int(row_value(aw_row, "optimization_number", 0) or 0)
+            if optimization <= 0:
+                continue
+            try:
+                source_payload = json.loads(str(row_value(aw_row, "source_payload_json", "") or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                source_payload = {}
+            cut_evidence = source_payload.get("cutEvidence") if isinstance(source_payload, dict) else {}
+            label_context = source_payload.get("labelContext") if isinstance(source_payload, dict) else {}
+            if not isinstance(cut_evidence, dict):
+                cut_evidence = {}
+            if not isinstance(label_context, dict):
+                label_context = {}
+            sheet_count = max(int(cut_evidence.get("optimizationSheetCount") or 0), 0)
+            if sheet_count <= 0:
+                continue
+            raw_glass = str(label_context.get("productDescription") or "Other Glass").strip() or "Other Glass"
+            glass_type, _unused_rate = glass_cost_profile(raw_glass, effective_glass_costs, effective_glass_aliases)
+            bucket = optimization_sheets.setdefault(optimization, {
+                "optimization": optimization,
+                "createdAt": str(row_value(aw_row, "optimization_date", "") or ""),
+                "sheets": 0,
+                "glassCounts": {},
+            })
+            bucket["sheets"] = max(int(bucket.get("sheets") or 0), sheet_count)
+            bucket["glassCounts"][glass_type] = int(bucket["glassCounts"].get(glass_type) or 0) + 1
+
+        sheet_usage_rows: list[dict[str, Any]] = []
+        for optimization, bucket in optimization_sheets.items():
+            glass_counts = bucket.pop("glassCounts", {})
+            glass_type = sorted(glass_counts, key=lambda name: (-int(glass_counts[name]), name.lower()))[0] if glass_counts else "Other Glass"
+            profile = profile_by_glass.get(glass_type.lower()) or {}
+            emails = profile.get("emails") if isinstance(profile.get("emails"), list) else []
+            sheet_usage_rows.append({
+                **bucket,
+                "glassType": glass_type,
+                "sheetSize": str(profile.get("sheetSize") or "Size not configured").strip(),
+                "emails": [str(value).strip() for value in emails if str(value).strip()],
+                "mixedGlass": len(glass_counts) > 1,
+            })
+        sheet_usage_rows.sort(key=lambda row: (str(row.get("createdAt") or ""), int(row.get("optimization") or 0)), reverse=True)
+        sheet_usage_by_glass: dict[tuple[str, str], int] = {}
+        for row in sheet_usage_rows:
+            key = (str(row["glassType"]), str(row["sheetSize"]))
+            sheet_usage_by_glass[key] = sheet_usage_by_glass.get(key, 0) + int(row["sheets"])
+        sheet_usage_summary = [
+            {"glassType": glass, "sheetSize": size, "sheets": sheets,
+             "emails": list((profile_by_glass.get(glass.lower()) or {}).get("emails") or [])}
+            for (glass, size), sheets in sorted(sheet_usage_by_glass.items(), key=lambda entry: (-entry[1], entry[0][0].lower(), entry[0][1]))
+        ]
+
         return {
             "dateFrom": date_from,
             "dateTo": date_to,
@@ -20954,6 +21432,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "sdiCount": sdi_count,
             "glassQuantityByType": glass_quantity_by_type,
             "glassSizeFrequencyByType": glass_size_frequency_by_type,
+            "sheetUsage": {
+                "totalSheets": sum(int(row.get("sheets") or 0) for row in sheet_usage_rows),
+                "optimizationCount": len(sheet_usage_rows),
+                "byGlass": sheet_usage_summary,
+                "rows": sheet_usage_rows if include_activity_rows else [],
+                "basis": "A+W optimization SHEETCOUNT, counted once per optimization",
+            },
             "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
             "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
             "monthlyRemakeMonth": current_month.strftime("%B %Y"),
@@ -24724,6 +25209,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return f"order:{self.logical_order_item_key(row_value(row, 'order_no', ''), row_value(row, 'item_no', ''))}"
 
         whole_stage_counts: dict[str, int] = {}
+        whole_progress: dict[str, list[dict[str, Any]]] = {}
         whole_glass_options: list[dict[str, Any]] | None = None
         with self.connect() as con:
             if whole_list:
@@ -24733,7 +25219,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 scope_rows = con.execute(
                     f"""
                     SELECT li.id, li.list_id, li.source_id, li.order_no, li.item_no,
-                           li.qty, li.product, li.job
+                           li.qty, li.scanned_qty, li.product, li.job, dl.stage, dl.scanner
                     FROM line_items li
                     JOIN delivery_lists dl ON dl.id = li.list_id
                     WHERE dl.status = 'active'
@@ -24750,6 +25236,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     logical_scope_rows.setdefault(key, scope_row)
                     logical_stage_sets.setdefault(key, set()).add(str(scope_row["list_id"] or ""))
                 whole_stage_counts = {key: len(values) for key, values in logical_stage_sets.items()}
+                for scope_row in scope_rows:
+                    key = logical_identity(scope_row)
+                    qty = max(int(scope_row["qty"] or 0), 0)
+                    scanned = min(max(int(scope_row["scanned_qty"] or 0), 0), qty)
+                    category = scan_stage_category(scope_row["stage"], scope_row["scanner"])
+                    whole_progress.setdefault(key, []).append({
+                        "stage": str(scope_row["stage"] or scope_row["scanner"] or "Progress"),
+                        "category": category,
+                        "scanned": scanned,
+                        "qty": qty,
+                        "complete": bool(qty > 0 and scanned >= qty),
+                    })
                 glass_counts: dict[str, dict[str, Any]] = {}
                 for scope_row in logical_scope_rows.values():
                     label = str(scope_row["product"] or scope_row["job"] or "Other Glass").strip() or "Other Glass"
@@ -24859,6 +25357,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "stage": row["stage"],
                     "scanner": row["scanner"],
                     "stageCopyCount": whole_stage_counts.get(logical_identity(row), 1) if whole_list else 1,
+                    "progressStages": whole_progress.get(logical_identity(row), []) if whole_list else [{
+                        "stage": str(row["stage"] or row["scanner"] or "Progress"),
+                        "category": scan_stage_category(row["stage"], row["scanner"]),
+                        "scanned": int(row["scanned_qty"] or 0),
+                        "qty": int(row["qty"] or 0),
+                        "complete": bool(int(row["qty"] or 0) > 0 and int(row["scanned_qty"] or 0) >= int(row["qty"] or 0)),
+                    }],
                     "wholeListEdit": whole_list,
                     "location": row["bay_code"] or row["rack_code"] or "",
                     "locationDisplay": (
@@ -26951,6 +27456,1173 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             )
             con.commit()
         return {"ok": True, "bayCode": bay_code, "action": action}
+
+    # ---------------------------------------------------------------------
+    # v0.524 physical inventory
+    # ---------------------------------------------------------------------
+    def _inventory_location_allowed(self, user: dict[str, Any] | None, location: str) -> bool:
+        """Return whether the signed-in user's maintained stage access includes one inventory floor."""
+        clean = str(location or "").strip().lower()
+        if clean == "airport_rd":
+            return user_can_access_stage(user, "Staging", "Airport Rd") or user_can_access_stage(user, "Outbound", "Airport Rd")
+        if clean == "indian_trail":
+            return user_can_access_stage(user, "Inbound", "Indian Trail")
+        return False
+
+    def _require_inventory_location(self, user: dict[str, Any] | None, location: str) -> str:
+        clean = str(location or "").strip().lower()
+        if clean not in {"airport_rd", "indian_trail"}:
+            raise ValueError("Inventory location must be Airport Rd or Indian Trail")
+        if not self._inventory_location_allowed(user, clean):
+            raise PermissionError("Your assigned stage access does not include this inventory location")
+        return clean
+
+    @staticmethod
+    def _inventory_physical_key(row: Any) -> str:
+        source_id = str(row_value(row, "source_id") or "").strip()
+        if source_id:
+            return f"source:{source_id}"
+        order_no = str(row_value(row, "order_no") or "").strip()
+        item_no = str(row_value(row, "item_no") or "").strip()
+        job_no = str(row_value(row, "job") or "").strip()
+        return f"oi:{order_no}|{item_no}|{job_no}"
+
+    @staticmethod
+    def _inventory_clean_item_no(value: Any) -> str:
+        text = str(value or "").strip()
+        return text.zfill(3) if text.isdigit() else text
+
+    @staticmethod
+    def _inventory_round_sqft(value: Any) -> float:
+        try:
+            return round(max(float(value or 0), 0.0), 4)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _inventory_mapping_rows(self, con: Any) -> list[Any]:
+        return con.execute(
+            """
+            SELECT item_id, glass_label, description, match_terms_json, sort_order
+            FROM inventory_item_mappings
+            WHERE active = 1
+            ORDER BY sort_order, item_id
+            """
+        ).fetchall()
+
+    def _inventory_item_mapping(self, con: Any, glass_value: Any) -> dict[str, Any]:
+        """Resolve a scanner/A+W glass label to the maintained inventory Item ID map."""
+        raw = " ".join(str(glass_value or "").split()).strip()
+        if not raw:
+            return {"itemId": "", "glassLabel": "", "description": "", "matchedBy": ""}
+        upper = raw.upper()
+        compact = re.sub(r"[^A-Z0-9/]+", " ", upper)
+        compact = " ".join(compact.split())
+        rows = self._inventory_mapping_rows(con)
+
+        # Exact Item ID and exact canonical-label matches win before aliases.
+        for row in rows:
+            item_id = str(row_value(row, "item_id") or "").strip()
+            label = str(row_value(row, "glass_label") or "").strip()
+            if upper == item_id.upper() or upper == label.upper():
+                return {"itemId": item_id, "glassLabel": label, "description": str(row_value(row, "description") or ""), "matchedBy": "exact"}
+
+        best: tuple[int, Any, str] | None = None
+        for row in rows:
+            terms = []
+            try:
+                terms = json.loads(str(row_value(row, "match_terms_json") or "[]"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                terms = []
+            candidates = [str(row_value(row, "glass_label") or ""), str(row_value(row, "description") or ""), *[str(value or "") for value in terms]]
+            for term in candidates:
+                normalized = " ".join(re.sub(r"[^A-Z0-9/]+", " ", term.upper()).split())
+                if not normalized:
+                    continue
+                if normalized in compact:
+                    score = len(normalized)
+                    if best is None or score > best[0]:
+                        best = (score, row, term)
+        if best:
+            row = best[1]
+            return {
+                "itemId": str(row_value(row, "item_id") or ""),
+                "glassLabel": str(row_value(row, "glass_label") or ""),
+                "description": str(row_value(row, "description") or ""),
+                "matchedBy": "alias",
+            }
+        return {"itemId": "", "glassLabel": raw, "description": "", "matchedBy": ""}
+
+    def _inventory_group_rows(self, rows: Iterable[Any]) -> dict[str, dict[str, Any]]:
+        """Group stage copies by physical source identity and retain one stable representative."""
+        groups: dict[str, dict[str, Any]] = {}
+        preset_priority = {"airport_staging": 5, "indian_trail": 4, "airport_outbound": 3, "greenville": 2, "cpu": 2, "dtc": 2}
+        for row in rows:
+            key = self._inventory_physical_key(row)
+            preset = stage_logic_preset(row_value(row, "stage"), row_value(row, "scanner"))
+            group = groups.setdefault(key, {"rows": [], "stageQty": {}, "representative": row, "representativePreset": preset})
+            group["rows"].append(row)
+            qty = max(int(row_value(row, "scanned_qty", 0) or 0), 0)
+            group["stageQty"][preset] = max(int(group["stageQty"].get(preset, 0) or 0), qty)
+            current = group["representative"]
+            current_preset = str(group.get("representativePreset") or "")
+            row_rank = (
+                preset_priority.get(preset, 0),
+                str(row_value(row, "delivery_date") or ""),
+                int(row_value(row, "list_revision", 0) or 0),
+                str(row_value(row, "list_created_at") or ""),
+            )
+            current_rank = (
+                preset_priority.get(current_preset, 0),
+                str(row_value(current, "delivery_date") or ""),
+                int(row_value(current, "list_revision", 0) or 0),
+                str(row_value(current, "list_created_at") or ""),
+            )
+            if row_rank > current_rank:
+                group["representative"] = row
+                group["representativePreset"] = preset
+        return groups
+
+    def _inventory_active_groups(self, con: Any) -> dict[str, dict[str, Any]]:
+        """Load active delivery-list rows once for the deliberate snapshot-building path."""
+        rows = con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner, dl.revision AS list_revision,
+                   dl.created_at AS list_created_at
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+              AND COALESCE(li.is_deleted, 0) = 0
+            """
+        ).fetchall()
+        return self._inventory_group_rows(rows)
+
+    def _inventory_scan_candidate_groups_con(self, con: Any, scan_text: str) -> dict[str, dict[str, Any]]:
+        """Resolve one inventory scan from a bounded Order/barcode candidate set, never a full catalog read."""
+        clean = clean_barcode(scan_text)
+        numbers = digits_only(clean)
+        order_candidates: list[str] = []
+        strict = bool(re.fullmatch(r"\s*\d{6}\s*[- /]?\s*\d{1,3}\s*", str(scan_text or "")))
+        if strict:
+            manual_digits = digits_only(scan_text)
+            if len(manual_digits) >= 7:
+                order_candidates.append(manual_digits[:6])
+        if clean.startswith("T200"):
+            label_digits = digits_only(clean[4:])
+            if len(label_digits) >= 6:
+                order_candidates.append(label_digits[:6])
+            if len(label_digits) >= 7 and label_digits.startswith("0"):
+                order_candidates.append(label_digits[1:7])
+        if len(numbers) >= 12:
+            for start in range(0, len(numbers) - 11):
+                order_candidates.append(numbers[start:start + 6])
+        order_candidates = list(dict.fromkeys(value for value in order_candidates if value))[:24]
+
+        clauses = ["li.barcode=?"]
+        params: list[Any] = [clean]
+        if order_candidates:
+            placeholders = ",".join("?" for _ in order_candidates)
+            clauses.append(f"li.order_no IN ({placeholders})")
+            params.extend(order_candidates)
+        rows = con.execute(
+            f"""
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner, dl.revision AS list_revision,
+                   dl.created_at AS list_created_at
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id=li.list_id
+            WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
+              AND ({' OR '.join(clauses)})
+            """,
+            tuple(params),
+        ).fetchall()
+        return self._inventory_group_rows(rows)
+
+    def _inventory_latest_bays(self, con: Any) -> dict[str, dict[str, Any]]:
+        rows = con.execute(
+            """
+            SELECT ba.id, ba.line_item_id, ba.assigned_qty, ba.status, ba.assigned_at,
+                   ba.cleared_at, b.bay_code, li.source_id, li.order_no, li.item_no, li.job
+            FROM bay_assignments ba
+            JOIN line_items li ON li.id = ba.line_item_id
+            LEFT JOIN bays b ON b.id = ba.bay_id
+            ORDER BY ba.id
+            """
+        ).fetchall()
+        latest: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = self._inventory_physical_key(row)
+            latest[key] = {
+                "id": int(row_value(row, "id", 0) or 0),
+                "qty": max(int(row_value(row, "assigned_qty", 0) or 0), 0),
+                "status": str(row_value(row, "status") or ""),
+                "bayCode": str(row_value(row, "bay_code") or ""),
+                "assignedAt": str(row_value(row, "assigned_at") or ""),
+                "clearedAt": str(row_value(row, "cleared_at") or ""),
+            }
+        return latest
+
+    @staticmethod
+    def _inventory_cycle_match(item: dict[str, Any], cycle_filter: dict[str, Any]) -> bool:
+        if not cycle_filter:
+            return True
+        field = str(cycle_filter.get("field") or "").strip()
+        value = " ".join(str(cycle_filter.get("value") or "").split()).strip()
+        if not field or not value:
+            return True
+        field_map = {
+            "glass_type": "glassType", "item_id": "itemId", "bay": "bayCode",
+            "order": "order", "job": "jobNr", "customer": "customer",
+        }
+        key = field_map.get(field, field)
+        actual = " ".join(str(item.get(key) or "").split()).strip()
+        if field in {"order", "job", "bay", "item_id"}:
+            return actual.casefold() == value.casefold()
+        return value.casefold() in actual.casefold()
+
+    def _inventory_expected_rows_con(self, con: Any, location: str, cycle_filter: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Build one physical WIP snapshot from maintained production/stage/bay evidence."""
+        groups = self._inventory_active_groups(con)
+        latest_bays = self._inventory_latest_bays(con) if location == "indian_trail" else {}
+        cutting_rows = con.execute(
+            "SELECT * FROM aw_cutting_generations ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC"
+        ).fetchall()
+        cutting_by_item: dict[tuple[str, str], list[Any]] = {}
+        for row in cutting_rows:
+            order_no = str(row_value(row, "order_no") or "").strip()
+            item_no = self._inventory_clean_item_no(row_value(row, "item_no"))
+            cutting_by_item.setdefault((order_no, item_no), []).append(row)
+
+        expected: list[dict[str, Any]] = []
+        for key, group in groups.items():
+            row = group["representative"]
+            qty = max(int(row_value(row, "qty", 0) or 0), 0)
+            if qty <= 0:
+                continue
+            stage_qty = group.get("stageQty") or {}
+            staging_qty = min(max(int(stage_qty.get("airport_staging", 0) or 0), 0), qty)
+            outbound_qty = min(max(int(stage_qty.get("airport_outbound", 0) or 0), 0), qty)
+            inbound_qty = min(max(int(stage_qty.get("indian_trail", 0) or 0), 0), qty)
+            order_no = str(row_value(row, "order_no") or "").strip()
+            item_no = self._inventory_clean_item_no(row_value(row, "item_no"))
+            product = str(row_value(row, "product") or "").strip()
+            route = str(row_value(row, "route") or row_value(row, "source_route") or "").strip()
+            cutting_state = self.aw_cutting_state(
+                order_no,
+                item_no,
+                str(row_value(row, "last_rejected_at") or ""),
+                cutting_by_item.get((order_no, item_no), []),
+            )
+            location_qty = 0
+            bay_code = ""
+            reason = ""
+            source_payload: dict[str, Any] = {
+                "baseQty": qty,
+                "stagingQty": staging_qty,
+                "outboundQty": outbound_qty,
+                "inboundQty": inbound_qty,
+            }
+
+            if location == "airport_rd":
+                # Staging is still Airport WIP. Outbound is the definitive floor exit.
+                # Positive Staging quantity is also downstream proof that the pane exists
+                # even when the latest A+W Cutting synchronization is temporarily absent.
+                cut_complete = bool(cutting_state.get("complete"))
+                cut_quantity = min(max(int(round(float(cutting_state.get("cutQuantity") or 0))), 0), qty)
+                if not cut_complete and staging_qty <= 0 and cut_quantity <= 0:
+                    continue
+                # A reject rolls downstream scanner quantities back one-for-one.
+                # When the replacement has not yet been cut, Staging therefore
+                # preserves the still-physical quantity instead of restoring the
+                # rejected pane merely because the order line's base Qty is unchanged.
+                if cut_complete:
+                    available_qty = max(staging_qty, cut_quantity, qty if cut_quantity <= 0 else 0)
+                else:
+                    available_qty = max(staging_qty, cut_quantity)
+                location_qty = max(min(available_qty, qty) - outbound_qty, 0)
+                if location_qty <= 0:
+                    continue
+                reason = "Cut/current WIP; not yet scanned Outbound"
+                source_payload.update({"cutComplete": cut_complete, "cutQuantity": cut_quantity, "availableAirportQty": available_qty})
+            else:
+                route_item = {
+                    "route": route,
+                    "job": str(row_value(row, "job") or ""),
+                    "customer": str(row_value(row, "customer") or ""),
+                }
+                if route_category(route_item) != "indian_trail":
+                    continue
+                # Airport Outbound transfers ownership to Indian Trail immediately,
+                # including transit time. Once received, an active physical bay keeps
+                # that quantity in IT inventory until the assignment is cleared.
+                in_transit = max(outbound_qty - inbound_qty, 0)
+                assignment = latest_bays.get(key) or {}
+                assignment_status = str(assignment.get("status") or "")
+                bay_code = str(assignment.get("bayCode") or "")
+                received_on_floor = 0
+                if inbound_qty > 0:
+                    if assignment_status in {"Cleared", "Cancelled"}:
+                        received_on_floor = 0
+                    elif assignment_status == "PreAssigned":
+                        # A preassignment proves destination, not physical receipt.
+                        received_on_floor = inbound_qty
+                    elif assignment_status:
+                        assigned_qty = max(int(assignment.get("qty") or 0), 0)
+                        received_on_floor = min(inbound_qty, assigned_qty or inbound_qty)
+                    else:
+                        # Received scan without a bay is an exception, but it is still
+                        # physically at Indian Trail and must not disappear from inventory.
+                        received_on_floor = inbound_qty
+                location_qty = min(max(in_transit + received_on_floor, 0), qty)
+                if location_qty <= 0:
+                    continue
+                if in_transit and received_on_floor:
+                    reason = "Part in transit / part received at Indian Trail"
+                elif in_transit:
+                    reason = "Airport Outbound; in transit to Indian Trail"
+                elif bay_code:
+                    reason = f"Indian Trail bay {bay_code}"
+                else:
+                    reason = "Received at Indian Trail"
+                source_payload.update({
+                    "inTransitQty": in_transit,
+                    "receivedOnFloorQty": received_on_floor,
+                    "bayStatus": assignment_status,
+                    "bayQty": int(assignment.get("qty") or 0),
+                    "bayCode": bay_code,
+                })
+
+            dimensions = str(row_value(row, "dimensions") or "").strip()
+            sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
+            mapping = self._inventory_item_mapping(con, product)
+            glass_type = str(mapping.get("glassLabel") or canonical_clear_glass_label(product) or product).strip()
+            total_sqft = self._inventory_round_sqft(sqft_each * location_qty)
+            item = {
+                "snapshotKey": key,
+                "sourceLineItemId": str(row_value(row, "id") or ""),
+                "sourceListId": str(row_value(row, "list_id") or ""),
+                "deliveryDate": str(row_value(row, "delivery_date") or ""),
+                "jobNr": str(row_value(row, "job") or ""),
+                "customer": str(row_value(row, "customer") or ""),
+                "order": order_no,
+                "item": item_no,
+                "glassType": glass_type,
+                "itemId": str(mapping.get("itemId") or ""),
+                "dimensions": dimensions,
+                "sqftEach": sqft_each,
+                "qty": location_qty,
+                "totalSqft": total_sqft,
+                "route": route,
+                "bayCode": bay_code,
+                "cuttingKeyIndex": int(cutting_state.get("keyIndex") or 0),
+                "cuttingState": str(cutting_state.get("state") or ""),
+                "sourceReason": reason,
+                "sourcePayload": source_payload,
+            }
+            if self._inventory_cycle_match(item, cycle_filter or {}):
+                expected.append(item)
+
+        expected.sort(key=lambda value: (str(value.get("glassType") or ""), str(value.get("order") or ""), str(value.get("item") or "")))
+        return expected
+
+    def inventory_catalog(self, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        allowed_locations = []
+        if self._inventory_location_allowed(user, "airport_rd"):
+            allowed_locations.append({"value": "airport_rd", "label": "Airport Rd"})
+        if self._inventory_location_allowed(user, "indian_trail"):
+            allowed_locations.append({"value": "indian_trail", "label": "Indian Trail"})
+        with self.connect() as con:
+            mappings = [
+                {
+                    "itemId": str(row_value(row, "item_id") or ""),
+                    "glassLabel": str(row_value(row, "glass_label") or ""),
+                    "description": str(row_value(row, "description") or ""),
+                }
+                for row in self._inventory_mapping_rows(con)
+            ]
+            bays = [str(row[0] or "") for row in con.execute("SELECT bay_code FROM bays WHERE active=1 ORDER BY sort_order, bay_code").fetchall()]
+        return {
+            "locations": allowed_locations,
+            "itemMappings": mappings,
+            "cycleFields": [
+                {"value": "glass_type", "label": "Glass Type"},
+                {"value": "item_id", "label": "Item ID"},
+                {"value": "bay", "label": "Bay"},
+                {"value": "order", "label": "Order Number"},
+                {"value": "job", "label": "Job Nr."},
+                {"value": "customer", "label": "Customer"},
+            ],
+            "bays": bays,
+        }
+
+    def start_inventory_session(self, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        location = self._require_inventory_location(user, str(data.get("location") or ""))
+        inventory_type = str(data.get("inventoryType") or "full").strip().lower()
+        if inventory_type not in {"full", "cycle"}:
+            raise ValueError("Inventory type must be full or cycle")
+        cycle_filter = data.get("cycleFilter") if isinstance(data.get("cycleFilter"), dict) else {}
+        if inventory_type == "cycle":
+            if not str(cycle_filter.get("field") or "").strip() or not str(cycle_filter.get("value") or "").strip():
+                raise ValueError("Cycle inventory requires a filter and value")
+        else:
+            cycle_filter = {}
+        started_by = str(user.get("displayName") or user.get("username") or "").strip()
+        now = now_iso()
+        code_prefix = "AIR" if location == "airport_rd" else "IT"
+
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            open_row = con.execute(
+                "SELECT id, session_code FROM inventory_sessions WHERE location=? AND status='open' ORDER BY id DESC LIMIT 1",
+                (location,),
+            ).fetchone()
+            if open_row:
+                raise ValueError(f"{('Airport Rd' if location == 'airport_rd' else 'Indian Trail')} already has an open inventory: {open_row['session_code']}")
+            expected = self._inventory_expected_rows_con(con, location, cycle_filter)
+            base_code = f"{code_prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            session_code = base_code
+            suffix = 1
+            while con.execute("SELECT 1 FROM inventory_sessions WHERE session_code=?", (session_code,)).fetchone():
+                suffix += 1
+                session_code = f"{base_code}-{suffix}"
+            expected_qty = sum(int(item.get("qty") or 0) for item in expected)
+            expected_total_sqft = self._inventory_round_sqft(sum(float(item.get("totalSqft") or 0) for item in expected))
+            cursor = con.execute(
+                """
+                INSERT INTO inventory_sessions
+                    (session_code, location, inventory_type, status, cycle_filter_json, started_by,
+                     started_at, expected_line_count, expected_qty, expected_total_sqft, notes, created_at, updated_at)
+                VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_code, location, inventory_type, json.dumps(cycle_filter, separators=(",", ":")),
+                    started_by, now, len(expected), expected_qty, expected_total_sqft,
+                    str(data.get("notes") or "").strip(), now, now,
+                ),
+            )
+            session_id = int(cursor.lastrowid)
+            for item in expected:
+                con.execute(
+                    """
+                    INSERT INTO inventory_expected_items
+                        (session_id, snapshot_key, source_line_item_id, source_list_id, delivery_date,
+                         job_no, customer, order_no, item_no, glass_type, item_id, dimensions,
+                         sqft_each, qty, total_sqft, route, bay_code, cutting_key_index,
+                         cutting_state, source_reason, source_payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id, item["snapshotKey"], item["sourceLineItemId"], item["sourceListId"], item["deliveryDate"],
+                        item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"], item["dimensions"],
+                        item["sqftEach"], item["qty"], item["totalSqft"], item["route"], item["bayCode"], item["cuttingKeyIndex"],
+                        item["cuttingState"], item["sourceReason"], json.dumps(item["sourcePayload"], separators=(",", ":")),
+                    ),
+                )
+            self.insert_audit(
+                con, "inventory_session", str(session_id), "inventory_started", started_by, "", "",
+                {"sessionCode": session_code, "location": location, "inventoryType": inventory_type, "cycleFilter": cycle_filter,
+                 "expectedLines": len(expected), "expectedQty": expected_qty, "expectedTotalSqft": expected_total_sqft},
+            )
+            con.commit()
+        return self.get_inventory_session(session_id, user)
+
+    def _inventory_session_row_con(self, con: Any, session_id: int) -> Any:
+        row = con.execute("SELECT * FROM inventory_sessions WHERE id=?", (int(session_id),)).fetchone()
+        if not row:
+            raise ValueError("Inventory session not found")
+        return row
+
+    def _inventory_public_expected(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": int(row_value(row, "id", 0) or 0), "snapshotKey": str(row_value(row, "snapshot_key") or ""),
+            "sourceLineItemId": str(row_value(row, "source_line_item_id") or ""), "deliveryDate": str(row_value(row, "delivery_date") or ""),
+            "jobNr": str(row_value(row, "job_no") or ""), "customer": str(row_value(row, "customer") or ""),
+            "order": str(row_value(row, "order_no") or ""), "item": str(row_value(row, "item_no") or ""),
+            "glassType": str(row_value(row, "glass_type") or ""), "itemId": str(row_value(row, "item_id") or ""),
+            "dimensions": str(row_value(row, "dimensions") or ""), "sqftEach": self._inventory_round_sqft(row_value(row, "sqft_each", 0)),
+            "qty": int(row_value(row, "qty", 0) or 0), "totalSqft": self._inventory_round_sqft(row_value(row, "total_sqft", 0)),
+            "route": str(row_value(row, "route") or ""), "bayCode": str(row_value(row, "bay_code") or ""),
+            "cuttingKeyIndex": int(row_value(row, "cutting_key_index", 0) or 0), "cuttingState": str(row_value(row, "cutting_state") or ""),
+            "sourceReason": str(row_value(row, "source_reason") or ""),
+        }
+
+    def _inventory_public_scan(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": int(row_value(row, "id", 0) or 0), "expectedItemId": int(row_value(row, "expected_item_id", 0) or 0),
+            "sourceLineItemId": str(row_value(row, "source_line_item_id") or ""), "barcode": str(row_value(row, "barcode") or ""),
+            "entryType": str(row_value(row, "entry_type") or "scan"), "scannedAt": str(row_value(row, "scanned_at") or ""),
+            "scannedBy": str(row_value(row, "scanned_by") or ""), "jobNr": str(row_value(row, "job_no") or ""),
+            "customer": str(row_value(row, "customer") or ""), "order": str(row_value(row, "order_no") or ""),
+            "item": str(row_value(row, "item_no") or ""), "glassType": str(row_value(row, "glass_type") or ""),
+            "itemId": str(row_value(row, "item_id") or ""), "dimensions": str(row_value(row, "dimensions") or ""),
+            "sqftEach": self._inventory_round_sqft(row_value(row, "sqft_each", 0)), "qty": int(row_value(row, "qty", 0) or 0),
+            "totalSqft": self._inventory_round_sqft(row_value(row, "total_sqft", 0)), "notes": str(row_value(row, "notes") or ""),
+        }
+
+    def _inventory_session_detail_con(self, con: Any, session_row: Any) -> dict[str, Any]:
+        session_id = int(row_value(session_row, "id", 0) or 0)
+        expected_rows = con.execute("SELECT * FROM inventory_expected_items WHERE session_id=? ORDER BY glass_type, order_no, item_no, id", (session_id,)).fetchall()
+        scan_rows = con.execute("SELECT * FROM inventory_scans WHERE session_id=? ORDER BY scanned_at, id", (session_id,)).fetchall()
+        expected = [self._inventory_public_expected(row) for row in expected_rows]
+        scans = [self._inventory_public_scan(row) for row in scan_rows]
+        scan_by_expected = {int(item.get("expectedItemId") or 0): item for item in scans if int(item.get("expectedItemId") or 0)}
+        reconciliation: list[dict[str, Any]] = []
+        matched_scan_ids: set[int] = set()
+        status_counts = {"matched": 0, "mismatch": 0, "missingPhysical": 0, "notInSystem": 0}
+        for system_item in expected:
+            physical = scan_by_expected.get(int(system_item["id"]))
+            if not physical:
+                status = "missing_physical"
+                differences = ["Physical piece was not scanned"]
+                status_counts["missingPhysical"] += 1
+            else:
+                matched_scan_ids.add(int(physical["id"]))
+                differences = []
+                comparisons = (
+                    ("jobNr", "Job Nr."), ("customer", "Customer"), ("qty", "Quantity"),
+                    ("glassType", "Glass type"), ("itemId", "Item ID"), ("dimensions", "Size"),
+                    ("sqftEach", "SQFT"),
+                )
+                for field, label in comparisons:
+                    left = system_item.get(field)
+                    right = physical.get(field)
+                    if field == "qty":
+                        same = int(left or 0) == int(right or 0)
+                    elif field == "sqftEach":
+                        same = abs(float(left or 0) - float(right or 0)) <= 0.01
+                    else:
+                        same = " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
+                    if not same:
+                        differences.append(f"{label} differs")
+                status = "matched" if not differences else "mismatch"
+                status_counts["matched" if status == "matched" else "mismatch"] += 1
+            reconciliation.append({"status": status, "system": system_item, "physical": physical, "differences": differences})
+        for physical in scans:
+            if int(physical["id"]) in matched_scan_ids:
+                continue
+            status_counts["notInSystem"] += 1
+            reconciliation.append({"status": "not_in_system", "system": None, "physical": physical, "differences": ["Physical scan is not in the frozen system snapshot"]})
+
+        totals: dict[tuple[str, str], dict[str, Any]] = {}
+        for source_name, items in (("expected", expected), ("scanned", scans)):
+            for item in items:
+                key = (str(item.get("glassType") or "Unmapped"), str(item.get("itemId") or ""))
+                target = totals.setdefault(key, {
+                    "glassType": key[0], "itemId": key[1], "expectedQty": 0, "expectedSqft": 0.0,
+                    "scannedQty": 0, "scannedSqft": 0.0,
+                })
+                target[f"{source_name}Qty"] += int(item.get("qty") or 0)
+                target[f"{source_name}Sqft"] += float(item.get("totalSqft") or 0)
+        glass_totals = []
+        for target in totals.values():
+            target["expectedSqft"] = self._inventory_round_sqft(target["expectedSqft"])
+            target["scannedSqft"] = self._inventory_round_sqft(target["scannedSqft"])
+            target["varianceQty"] = target["scannedQty"] - target["expectedQty"]
+            target["varianceSqft"] = self._inventory_round_sqft(target["scannedSqft"] - target["expectedSqft"])
+            glass_totals.append(target)
+        glass_totals.sort(key=lambda value: (str(value["glassType"]), str(value["itemId"])))
+
+        try:
+            cycle_filter = json.loads(str(row_value(session_row, "cycle_filter_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cycle_filter = {}
+        scanned_qty = sum(int(item.get("qty") or 0) for item in scans)
+        scanned_sqft = self._inventory_round_sqft(sum(float(item.get("totalSqft") or 0) for item in scans))
+        return {
+            "id": session_id,
+            "sessionCode": str(row_value(session_row, "session_code") or ""),
+            "location": str(row_value(session_row, "location") or ""),
+            "locationLabel": "Airport Rd" if str(row_value(session_row, "location") or "") == "airport_rd" else "Indian Trail",
+            "inventoryType": str(row_value(session_row, "inventory_type") or "full"),
+            "status": str(row_value(session_row, "status") or "open"),
+            "cycleFilter": cycle_filter,
+            "startedBy": str(row_value(session_row, "started_by") or ""), "startedAt": str(row_value(session_row, "started_at") or ""),
+            "completedBy": str(row_value(session_row, "completed_by") or ""), "completedAt": str(row_value(session_row, "completed_at") or ""),
+            "notes": str(row_value(session_row, "notes") or ""),
+            "expectedLineCount": int(row_value(session_row, "expected_line_count", 0) or 0),
+            "expectedQty": int(row_value(session_row, "expected_qty", 0) or 0),
+            "expectedTotalSqft": self._inventory_round_sqft(row_value(session_row, "expected_total_sqft", 0)),
+            "scannedLineCount": len(scans), "scannedQty": scanned_qty, "scannedTotalSqft": scanned_sqft,
+            "statusCounts": status_counts,
+            "expectedItems": expected, "scans": list(reversed(scans)), "reconciliation": reconciliation, "glassTotals": glass_totals,
+        }
+
+    def _inventory_session_summary_con(self, con: Any, session_row: Any, *, include_glass_totals: bool = True) -> dict[str, Any]:
+        """Return bounded session metadata/aggregates for scan hot paths and history cards."""
+        session_id = int(row_value(session_row, "id", 0) or 0)
+        aggregate = con.execute(
+            """
+            SELECT COUNT(*) AS scan_lines, COALESCE(SUM(qty), 0) AS scan_qty, COALESCE(SUM(total_sqft), 0) AS scan_sqft
+            FROM inventory_scans WHERE session_id=?
+            """,
+            (session_id,),
+        ).fetchone()
+        compare = con.execute(
+            """
+            SELECT
+                SUM(CASE WHEN s.id IS NULL THEN 1 ELSE 0 END) AS missing_physical,
+                SUM(CASE WHEN s.id IS NOT NULL AND e.qty=s.qty
+                              AND LOWER(TRIM(e.glass_type))=LOWER(TRIM(s.glass_type))
+                              AND LOWER(TRIM(e.item_id))=LOWER(TRIM(s.item_id))
+                              AND LOWER(TRIM(e.dimensions))=LOWER(TRIM(s.dimensions)) THEN 1 ELSE 0 END) AS matched,
+                SUM(CASE WHEN s.id IS NOT NULL AND NOT (e.qty=s.qty
+                              AND LOWER(TRIM(e.glass_type))=LOWER(TRIM(s.glass_type))
+                              AND LOWER(TRIM(e.item_id))=LOWER(TRIM(s.item_id))
+                              AND LOWER(TRIM(e.dimensions))=LOWER(TRIM(s.dimensions))) THEN 1 ELSE 0 END) AS mismatch
+            FROM inventory_expected_items e
+            LEFT JOIN inventory_scans s ON s.session_id=e.session_id AND s.expected_item_id=e.id
+            WHERE e.session_id=?
+            """,
+            (session_id,),
+        ).fetchone()
+        extra = con.execute(
+            "SELECT COUNT(*) AS not_in_system FROM inventory_scans WHERE session_id=? AND expected_item_id IS NULL",
+            (session_id,),
+        ).fetchone()
+        try:
+            cycle_filter = json.loads(str(row_value(session_row, "cycle_filter_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cycle_filter = {}
+        status_counts = {
+            "matched": int(row_value(compare, "matched", 0) or 0),
+            "mismatch": int(row_value(compare, "mismatch", 0) or 0),
+            "missingPhysical": int(row_value(compare, "missing_physical", 0) or 0),
+            "notInSystem": int(row_value(extra, "not_in_system", 0) or 0),
+        }
+        result = {
+            "id": session_id, "sessionCode": str(row_value(session_row, "session_code") or ""),
+            "location": str(row_value(session_row, "location") or ""),
+            "locationLabel": "Airport Rd" if str(row_value(session_row, "location") or "") == "airport_rd" else "Indian Trail",
+            "inventoryType": str(row_value(session_row, "inventory_type") or "full"), "status": str(row_value(session_row, "status") or "open"),
+            "cycleFilter": cycle_filter, "startedBy": str(row_value(session_row, "started_by") or ""),
+            "startedAt": str(row_value(session_row, "started_at") or ""), "completedBy": str(row_value(session_row, "completed_by") or ""),
+            "completedAt": str(row_value(session_row, "completed_at") or ""), "notes": str(row_value(session_row, "notes") or ""),
+            "expectedLineCount": int(row_value(session_row, "expected_line_count", 0) or 0),
+            "expectedQty": int(row_value(session_row, "expected_qty", 0) or 0),
+            "expectedTotalSqft": self._inventory_round_sqft(row_value(session_row, "expected_total_sqft", 0)),
+            "scannedLineCount": int(row_value(aggregate, "scan_lines", 0) or 0),
+            "scannedQty": int(row_value(aggregate, "scan_qty", 0) or 0),
+            "scannedTotalSqft": self._inventory_round_sqft(row_value(aggregate, "scan_sqft", 0)),
+            "statusCounts": status_counts,
+        }
+        if include_glass_totals:
+            totals: dict[tuple[str, str], dict[str, Any]] = {}
+            for source_name, table in (("expected", "inventory_expected_items"), ("scanned", "inventory_scans")):
+                rows = con.execute(
+                    f"SELECT glass_type, item_id, COALESCE(SUM(qty),0) AS qty, COALESCE(SUM(total_sqft),0) AS sqft FROM {table} WHERE session_id=? GROUP BY glass_type, item_id",
+                    (session_id,),
+                ).fetchall()
+                for row in rows:
+                    key = (str(row_value(row, "glass_type") or "Unmapped"), str(row_value(row, "item_id") or ""))
+                    target = totals.setdefault(key, {"glassType": key[0], "itemId": key[1], "expectedQty": 0, "expectedSqft": 0.0, "scannedQty": 0, "scannedSqft": 0.0})
+                    target[f"{source_name}Qty"] = int(row_value(row, "qty", 0) or 0)
+                    target[f"{source_name}Sqft"] = self._inventory_round_sqft(row_value(row, "sqft", 0))
+            result["glassTotals"] = []
+            for target in totals.values():
+                target["varianceQty"] = target["scannedQty"] - target["expectedQty"]
+                target["varianceSqft"] = self._inventory_round_sqft(target["scannedSqft"] - target["expectedSqft"])
+                result["glassTotals"].append(target)
+            result["glassTotals"].sort(key=lambda value: (str(value["glassType"]), str(value["itemId"])))
+        return result
+
+    def get_inventory_session(self, session_id: int, user: dict[str, Any] | None = None) -> dict[str, Any]:
+        with self.connect() as con:
+            row = self._inventory_session_row_con(con, int(session_id))
+            self._require_inventory_location(user, str(row_value(row, "location") or ""))
+            return self._inventory_session_summary_con(con, row, include_glass_totals=True)
+
+    def get_inventory_session_items(
+        self, session_id: int, view: str, user: dict[str, Any] | None = None, *, page: int = 1, page_size: int = 150
+    ) -> dict[str, Any]:
+        """Return one bounded page of physical, system, or reconciliation rows."""
+        clean_view = str(view or "scans").strip().lower()
+        if clean_view not in {"scans", "system", "reconciliation"}:
+            raise ValueError("Inventory view must be scans, system, or reconciliation")
+        page = max(int(page or 1), 1)
+        page_size = min(max(int(page_size or 150), 25), 250)
+        with self.connect() as con:
+            session = self._inventory_session_row_con(con, session_id)
+            self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if clean_view == "scans":
+                total = int(con.execute("SELECT COUNT(*) FROM inventory_scans WHERE session_id=?", (session_id,)).fetchone()[0])
+                rows = con.execute(
+                    "SELECT * FROM inventory_scans WHERE session_id=? ORDER BY scanned_at DESC, id DESC LIMIT ? OFFSET ?",
+                    (session_id, page_size, (page - 1) * page_size),
+                ).fetchall()
+                items = [self._inventory_public_scan(row) for row in rows]
+            elif clean_view == "system":
+                total = int(con.execute("SELECT COUNT(*) FROM inventory_expected_items WHERE session_id=?", (session_id,)).fetchone()[0])
+                rows = con.execute(
+                    "SELECT * FROM inventory_expected_items WHERE session_id=? ORDER BY glass_type, order_no, item_no, id LIMIT ? OFFSET ?",
+                    (session_id, page_size, (page - 1) * page_size),
+                ).fetchall()
+                items = [self._inventory_public_expected(row) for row in rows]
+            else:
+                # Comparison is assembled in memory from the frozen session only,
+                # then sliced before leaving the backend. This avoids vendor-specific
+                # UNION paging while keeping the browser DOM/network response bounded.
+                detail = self._inventory_session_detail_con(con, session)
+                all_items = detail["reconciliation"]
+                total = len(all_items)
+                start = (page - 1) * page_size
+                items = all_items[start:start + page_size]
+        return {"view": clean_view, "items": items, "total": total, "page": page, "pageSize": page_size, "hasMore": page * page_size < total}
+
+    def list_inventory_sessions(self, user: dict[str, Any] | None = None, location: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        clean_location = str(location or "").strip().lower()
+        if clean_location:
+            self._require_inventory_location(user, clean_location)
+        allowed = [value for value in ("airport_rd", "indian_trail") if self._inventory_location_allowed(user, value)]
+        if not allowed:
+            return []
+        limit = min(max(int(limit or 50), 1), 100)
+        with self.connect() as con:
+            placeholders = ",".join("?" for _ in allowed)
+            params: list[Any] = list(allowed)
+            sql = f"SELECT * FROM inventory_sessions WHERE location IN ({placeholders})"
+            if clean_location:
+                sql += " AND location=?"
+                params.append(clean_location)
+            sql += " ORDER BY started_at DESC, id DESC LIMIT ?"
+            params.append(limit)
+            rows = con.execute(sql, tuple(params)).fetchall()
+            return [self._inventory_session_summary_con(con, row, include_glass_totals=False) for row in rows]
+
+    def _inventory_smart_fill_con(self, con: Any, order_no: str, item_no: str = "") -> dict[str, Any]:
+        order = str(order_no or "").strip()
+        item = self._inventory_clean_item_no(item_no)
+        if not order:
+            return {"found": False}
+        rows = con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+            FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id
+            WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0 AND li.order_no=?
+            ORDER BY dl.delivery_date DESC, dl.revision DESC
+            """,
+            (order,),
+        ).fetchall()
+        if item:
+            rows = [row for row in rows if self._inventory_clean_item_no(row_value(row, "item_no")) == item]
+        if not rows:
+            return {"found": False}
+        groups: dict[str, Any] = {}
+        for row in rows:
+            groups.setdefault(self._inventory_physical_key(row), row)
+        if len(groups) != 1 and not item:
+            return {"found": False, "ambiguous": True, "message": "Enter the item number to uniquely identify this order."}
+        row = next(iter(groups.values()))
+        mapping = self._inventory_item_mapping(con, row_value(row, "product"))
+        dimensions = str(row_value(row, "dimensions") or "")
+        sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
+        return {
+            "found": True, "sourceLineItemId": str(row_value(row, "id") or ""), "barcode": str(row_value(row, "barcode") or ""),
+            "jobNr": str(row_value(row, "job") or ""), "customer": str(row_value(row, "customer") or ""),
+            "order": str(row_value(row, "order_no") or ""), "item": self._inventory_clean_item_no(row_value(row, "item_no")),
+            "glassType": str(mapping.get("glassLabel") or canonical_clear_glass_label(row_value(row, "product")) or row_value(row, "product") or ""),
+            "itemId": str(mapping.get("itemId") or ""), "dimensions": dimensions, "sqftEach": sqft_each,
+            "qty": max(int(row_value(row, "qty", 1) or 1), 1), "route": str(row_value(row, "route") or ""),
+        }
+
+    def inventory_smart_fill(self, order_no: str, item_no: str, user: dict[str, Any] | None = None, location: str = "") -> dict[str, Any]:
+        if location:
+            self._require_inventory_location(user, location)
+        with self.connect() as con:
+            return self._inventory_smart_fill_con(con, order_no, item_no)
+
+    def record_inventory_scan(self, session_id: int, raw_scan: str, user: dict[str, Any]) -> dict[str, Any]:
+        scan_text = str(raw_scan or "").strip()
+        if not scan_text:
+            raise ValueError("Scan a piece barcode or enter an exact Order/Item value")
+        actor = str(user.get("displayName") or user.get("username") or "").strip()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            location = self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if str(row_value(session, "status") or "") != "open":
+                raise ValueError("This inventory is complete and cannot accept more scans")
+            groups = self._inventory_scan_candidate_groups_con(con, scan_text)
+            rows = [value["representative"] for value in groups.values()]
+            strict = bool(re.fullmatch(r"\s*\d{6}\s*[- /]?\s*\d{1,3}\s*", scan_text))
+            matched, canonical, message = self.recover_scan(scan_text, rows, strict_order_item=strict)
+            if not matched:
+                con.rollback()
+                return {"ok": False, "manualEntryRequired": True, "scan": scan_text, "canonical": canonical, "message": message}
+            key = self._inventory_physical_key(matched)
+            expected = con.execute(
+                "SELECT * FROM inventory_expected_items WHERE session_id=? AND snapshot_key=?",
+                (session_id, key),
+            ).fetchone()
+            duplicate = con.execute(
+                "SELECT * FROM inventory_scans WHERE session_id=? AND (expected_item_id=? OR source_line_item_id=?) ORDER BY id DESC LIMIT 1",
+                (session_id, int(row_value(expected, "id", 0) or 0) if expected else -1, str(row_value(matched, "id") or "")),
+            ).fetchone()
+            if duplicate:
+                con.rollback()
+                existing = self._inventory_public_scan(duplicate)
+                return {"ok": False, "duplicate": True, "message": f"Already scanned at {existing['scannedAt']} by {existing['scannedBy']}.", "existing": existing}
+
+            if expected:
+                fields = self._inventory_public_expected(expected)
+                qty = int(fields["qty"])
+            else:
+                dimensions = str(row_value(matched, "dimensions") or "")
+                sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
+                mapping = self._inventory_item_mapping(con, row_value(matched, "product"))
+                qty = max(int(row_value(matched, "qty", 1) or 1), 1)
+                fields = {
+                    "jobNr": str(row_value(matched, "job") or ""), "customer": str(row_value(matched, "customer") or ""),
+                    "order": str(row_value(matched, "order_no") or ""), "item": self._inventory_clean_item_no(row_value(matched, "item_no")),
+                    "glassType": str(mapping.get("glassLabel") or canonical_clear_glass_label(row_value(matched, "product")) or row_value(matched, "product") or ""),
+                    "itemId": str(mapping.get("itemId") or ""), "dimensions": dimensions, "sqftEach": sqft_each,
+                }
+            total_sqft = self._inventory_round_sqft(float(fields.get("sqftEach") or 0) * qty)
+            now = now_iso()
+            cursor = con.execute(
+                """
+                INSERT INTO inventory_scans
+                    (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
+                     job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft)
+                VALUES (?, ?, ?, ?, 'scan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, str(row_value(matched, "id") or ""), canonical or scan_text,
+                 now, actor, fields.get("jobNr", ""), fields.get("customer", ""), fields.get("order", ""), fields.get("item", ""),
+                 fields.get("glassType", ""), fields.get("itemId", ""), fields.get("dimensions", ""), fields.get("sqftEach", 0), qty, total_sqft),
+            )
+            scan_id = int(cursor.lastrowid)
+            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_piece_scanned", actor, "", "",
+                              {"sessionId": session_id, "location": location, "matchedExpected": bool(expected), "barcode": canonical or scan_text,
+                               "order": fields.get("order", ""), "item": fields.get("item", ""), "qty": qty})
+            inserted = con.execute("SELECT * FROM inventory_scans WHERE id=?", (scan_id,)).fetchone()
+            scan = self._inventory_public_scan(inserted)
+            con.commit()
+        return {"ok": True, "matchedExpected": bool(expected), "message": "Inventory piece matched." if expected else "Piece scanned but it was not in the frozen system snapshot.", "scan": scan, "session": self.get_inventory_session(session_id, user)}
+
+    def record_inventory_manual_entry(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        actor = str(user.get("displayName") or user.get("username") or "").strip()
+        order_no = str(data.get("order") or "").strip()
+        item_no = self._inventory_clean_item_no(data.get("item"))
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            location = self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if str(row_value(session, "status") or "") != "open":
+                raise ValueError("This inventory is complete and cannot accept manual entries")
+            expected_candidates = []
+            if order_no and item_no:
+                expected_candidates = con.execute(
+                    "SELECT * FROM inventory_expected_items WHERE session_id=? AND order_no=?",
+                    (session_id, order_no),
+                ).fetchall()
+                expected_candidates = [
+                    row for row in expected_candidates
+                    if self._inventory_clean_item_no(row_value(row, "item_no")) == item_no
+                ]
+            expected = expected_candidates[0] if len(expected_candidates) == 1 else None
+            if expected and con.execute("SELECT 1 FROM inventory_scans WHERE session_id=? AND expected_item_id=?", (session_id, int(expected["id"]))).fetchone():
+                raise ValueError("That system item has already been physically counted")
+            smart = self._inventory_smart_fill_con(con, order_no, item_no) if order_no else {"found": False}
+            expected_public = self._inventory_public_expected(expected) if expected else {}
+
+            def choose(field: str, smart_field: str = "") -> str:
+                incoming = " ".join(str(data.get(field) or "").split()).strip()
+                if incoming:
+                    return incoming
+                if expected_public.get(field):
+                    return str(expected_public.get(field) or "")
+                return str(smart.get(smart_field or field) or "") if smart.get("found") else ""
+
+            job_no = choose("jobNr")
+            customer = choose("customer")
+            order_no = choose("order")
+            item_no = self._inventory_clean_item_no(choose("item"))
+            glass_type = choose("glassType")
+            dimensions = choose("dimensions")
+            item_id = choose("itemId")
+            if not item_id and glass_type:
+                item_id = str(self._inventory_item_mapping(con, glass_type).get("itemId") or "")
+            try:
+                qty = max(int(data.get("qty") or expected_public.get("qty") or smart.get("qty") or 1), 1)
+            except (TypeError, ValueError):
+                raise ValueError("Quantity must be a whole number greater than zero")
+            sqft_each = self._inventory_round_sqft(data.get("sqftEach"))
+            if sqft_each <= 0:
+                sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
+            if not glass_type:
+                raise ValueError("Glass Type is required for a manual inventory entry")
+            if not dimensions and sqft_each <= 0:
+                raise ValueError("Enter the piece size or SQFT for a manual inventory entry")
+            total_sqft = self._inventory_round_sqft(sqft_each * qty)
+            source_line_item_id = str(row_value(expected, "source_line_item_id") or smart.get("sourceLineItemId") or "") if (expected or smart.get("found")) else ""
+            if source_line_item_id and con.execute("SELECT 1 FROM inventory_scans WHERE session_id=? AND source_line_item_id=?", (session_id, source_line_item_id)).fetchone():
+                raise ValueError("That physical system item has already been counted")
+            now = now_iso()
+            manual_fields = {key: value for key, value in data.items() if key not in {"sessionId"}}
+            cursor = con.execute(
+                """
+                INSERT INTO inventory_scans
+                    (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
+                     job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft,
+                     notes, manual_fields_json)
+                VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, source_line_item_id,
+                 str(data.get("barcode") or "").strip(), now, actor, job_no, customer, order_no, item_no,
+                 glass_type, item_id, dimensions, sqft_each, qty, total_sqft, str(data.get("notes") or "").strip(),
+                 json.dumps(manual_fields, separators=(",", ":"), default=str)),
+            )
+            scan_id = int(cursor.lastrowid)
+            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_manual_entry", actor, "", str(data.get("notes") or "").strip(),
+                              {"sessionId": session_id, "location": location, "matchedExpected": bool(expected), "order": order_no,
+                               "item": item_no, "glassType": glass_type, "itemId": item_id, "qty": qty, "smartFilled": bool(smart.get("found"))})
+            inserted = con.execute("SELECT * FROM inventory_scans WHERE id=?", (scan_id,)).fetchone()
+            scan = self._inventory_public_scan(inserted)
+            con.commit()
+        return {"ok": True, "matchedExpected": bool(expected), "scan": scan, "session": self.get_inventory_session(session_id, user)}
+
+    def complete_inventory_session(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        actor = str(user.get("displayName") or user.get("username") or "").strip()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            location = self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if str(row_value(session, "status") or "") != "open":
+                raise ValueError("Inventory session is already closed")
+            now = now_iso()
+            notes = str(data.get("notes") or row_value(session, "notes") or "").strip()
+            con.execute("UPDATE inventory_sessions SET status='completed', completed_by=?, completed_at=?, notes=?, updated_at=? WHERE id=?",
+                        (actor, now, notes, now, session_id))
+            self.insert_audit(con, "inventory_session", str(session_id), "inventory_completed", actor, "", notes,
+                              {"sessionCode": str(row_value(session, "session_code") or ""), "location": location})
+            con.commit()
+        return self.get_inventory_session(session_id, user)
+
+    def complete_inventory_system_orders(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        """Mark inventory-confirmed orders out of every active workflow stage.
+
+        This is an explicit reconciliation correction. It never creates a rack
+        or bay assignment; active location records are closed so completed work
+        cannot remain visible in, or consume capacity from, a physical bay.
+        """
+        requested = {
+            str(value or "").strip()
+            for value in (data.get("orders") if isinstance(data.get("orders"), list) else [])
+            if str(value or "").strip()
+        }
+        complete_all = bool(data.get("all"))
+        actor = str(user.get("username") or user.get("displayName") or "").strip()
+        completed_at = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            snapshot_rows = con.execute(
+                """SELECT DISTINCT order_no, delivery_date
+                   FROM inventory_expected_items
+                   WHERE session_id=? AND TRIM(order_no)<>'' AND TRIM(delivery_date)<>''""",
+                (session_id,),
+            ).fetchall()
+            snapshot_orders = {str(row["order_no"] or "").strip() for row in snapshot_rows}
+            selected = snapshot_orders if complete_all else requested.intersection(snapshot_orders)
+            if not selected:
+                raise ValueError("Select at least one system order from this inventory")
+            selected_pairs = sorted({
+                (str(row["order_no"] or "").strip(), str(row["delivery_date"] or "").strip())
+                for row in snapshot_rows
+                if str(row["order_no"] or "").strip() in selected
+            })
+            pair_clause = " OR ".join("(li.order_no=? AND dl.delivery_date=?)" for _ in selected_pairs)
+            pair_args = tuple(value for pair in selected_pairs for value in pair)
+            lines = con.execute(
+                f"""
+                SELECT li.id, li.order_no, li.item_no, li.qty, li.scanned_qty, li.list_id
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id=li.list_id
+                WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
+                  AND ({pair_clause})
+                """,
+                pair_args,
+            ).fetchall()
+            line_ids = [str(row["id"]) for row in lines]
+            rack_ids: list[int] = []
+            if line_ids:
+                line_placeholders = ",".join("?" for _ in line_ids)
+                rack_ids = [
+                    int(row[0]) for row in con.execute(
+                        f"SELECT DISTINCT rack_id FROM rack_items WHERE status='Active' AND line_item_id IN ({line_placeholders})",
+                        tuple(line_ids),
+                    ).fetchall()
+                ]
+                con.execute(
+                    f"UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id IN ({line_placeholders})",
+                    (completed_at, *line_ids),
+                )
+                con.execute(
+                    f"""UPDATE rack_items SET status='Removed', removed_by=?, removed_at=?,
+                        reason='Inventory confirmed physically complete'
+                        WHERE status='Active' AND line_item_id IN ({line_placeholders})""",
+                    (actor, completed_at, *line_ids),
+                )
+                con.execute(
+                    f"""UPDATE bay_assignments SET status='Cleared', cleared_by=?, cleared_at=?,
+                        reason='Inventory confirmed physically complete'
+                        WHERE status NOT IN ('Cleared','Cancelled') AND line_item_id IN ({line_placeholders})""",
+                    (actor, completed_at, *line_ids),
+                )
+                for rack_id in rack_ids:
+                    self.refresh_rack_destination(con, rack_id)
+            self.insert_audit(
+                con, "inventory_session", str(session_id), "inventory_orders_completed", actor, "", "",
+                {"orders": sorted(selected), "lineItemCount": len(line_ids), "completedAt": completed_at,
+                 "locationRecordsCleared": True},
+            )
+            con.commit()
+        return {
+            "ok": True,
+            "completedOrders": sorted(selected),
+            "lineItemCount": len(line_ids),
+            "session": self.get_inventory_session(session_id, user),
+            "message": f"Completed {len(selected)} system order{'s' if len(selected) != 1 else ''} and cleared active rack/bay locations.",
+        }
+
+    def cancel_inventory_session(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        actor = str(user.get("displayName") or user.get("username") or "").strip()
+        reason = str(data.get("reason") or "Inventory count cancelled").strip()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if str(row_value(session, "status") or "") != "open":
+                raise ValueError("Only an open inventory can be cancelled")
+            now = now_iso()
+            con.execute("UPDATE inventory_sessions SET status='cancelled', completed_by=?, completed_at=?, notes=?, updated_at=? WHERE id=?",
+                        (actor, now, reason, now, session_id))
+            self.insert_audit(con, "inventory_session", str(session_id), "inventory_cancelled", actor, "", reason,
+                              {"sessionCode": str(row_value(session, "session_code") or "")})
+            con.commit()
+        return self.get_inventory_session(session_id, user)
+
+    def remove_inventory_scan(self, session_id: int, scan_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        actor = str(user.get("displayName") or user.get("username") or "").strip()
+        reason = str(data.get("reason") or "Inventory scan correction").strip()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            session = self._inventory_session_row_con(con, session_id)
+            self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            if str(row_value(session, "status") or "") != "open":
+                raise ValueError("Completed inventory history is immutable")
+            scan = con.execute("SELECT * FROM inventory_scans WHERE id=? AND session_id=?", (scan_id, session_id)).fetchone()
+            if not scan:
+                raise ValueError("Inventory scan not found")
+            payload = self._inventory_public_scan(scan)
+            con.execute("DELETE FROM inventory_scans WHERE id=?", (scan_id,))
+            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_scan_removed", actor, "", reason,
+                              {"sessionId": session_id, "removed": payload})
+            con.commit()
+        return self.get_inventory_session(session_id, user)
+
+    @staticmethod
+    def _inventory_xlsx_column_name(index: int) -> str:
+        result = ""
+        value = index
+        while value:
+            value, remainder = divmod(value - 1, 26)
+            result = chr(65 + remainder) + result
+        return result or "A"
+
+    def export_inventory_xlsx(self, session_id: int, user: dict[str, Any] | None = None) -> bytes:
+        """Export a durable inventory snapshot with summary, scans, system side, and reconciliation sheets."""
+        with self.connect() as con:
+            session_row = self._inventory_session_row_con(con, session_id)
+            self._require_inventory_location(user, str(row_value(session_row, "location") or ""))
+            detail = self._inventory_session_detail_con(con, session_row)
+        summary_rows: list[list[Any]] = [
+            ["Inventory Session", detail["sessionCode"]], ["Location", detail["locationLabel"]],
+            ["Type", "Cycle Inventory" if detail["inventoryType"] == "cycle" else "Full Inventory"],
+            ["Status", detail["status"].title()], ["Started", detail["startedAt"]], ["Started By", detail["startedBy"]],
+            ["Completed", detail["completedAt"]], ["Completed By", detail["completedBy"]], [],
+            ["System Qty", detail["expectedQty"]], ["Physical Qty", detail["scannedQty"]],
+            ["System SQFT", detail["expectedTotalSqft"]], ["Physical SQFT", detail["scannedTotalSqft"]],
+            ["Matched", detail["statusCounts"]["matched"]], ["Mismatched", detail["statusCounts"]["mismatch"]],
+            ["Missing Physical", detail["statusCounts"]["missingPhysical"]], ["Not In System", detail["statusCounts"]["notInSystem"]], [],
+            ["Glass Type", "Item ID", "System Qty", "Physical Qty", "Qty Variance", "System SQFT", "Physical SQFT", "SQFT Variance"],
+        ]
+        for item in detail["glassTotals"]:
+            summary_rows.append([item["glassType"], item["itemId"], item["expectedQty"], item["scannedQty"], item["varianceQty"],
+                                 item["expectedSqft"], item["scannedSqft"], item["varianceSqft"]])
+
+        physical_rows = [["Scanned Date/Time", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
+        for item in reversed(detail["scans"]):
+            physical_rows.append([item["scannedAt"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
+                                  item["dimensions"], item["sqftEach"], item["qty"], item["totalSqft"], item["entryType"].title(), item["scannedBy"], item["notes"]])
+
+        system_rows = [["Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Route", "Bay", "Reason"]]
+        for item in detail["expectedItems"]:
+            system_rows.append([item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"], item["dimensions"],
+                                item["sqftEach"], item["qty"], item["totalSqft"], item["route"], item["bayCode"], item["sourceReason"]])
+
+        reconcile_rows = [["Result", "System Job", "Physical Job", "System Customer", "Physical Customer", "System Order", "Physical Order", "System Item", "Physical Item",
+                           "System Glass", "Physical Glass", "System Item ID", "Physical Item ID", "System Size", "Physical Size", "System SQFT", "Physical SQFT",
+                           "System Qty", "Physical Qty", "System Total SQFT", "Physical Total SQFT", "Difference"]]
+        labels = {"matched": "MATCH", "mismatch": "MISMATCH", "missing_physical": "MISSING PHYSICAL", "not_in_system": "NOT IN SYSTEM"}
+        for row in detail["reconciliation"]:
+            system_item = row.get("system") or {}
+            physical = row.get("physical") or {}
+            reconcile_rows.append([
+                labels.get(row["status"], row["status"].upper()), system_item.get("jobNr", ""), physical.get("jobNr", ""),
+                system_item.get("customer", ""), physical.get("customer", ""), system_item.get("order", ""), physical.get("order", ""),
+                system_item.get("item", ""), physical.get("item", ""), system_item.get("glassType", ""), physical.get("glassType", ""),
+                system_item.get("itemId", ""), physical.get("itemId", ""), system_item.get("dimensions", ""), physical.get("dimensions", ""),
+                system_item.get("sqftEach", ""), physical.get("sqftEach", ""), system_item.get("qty", ""), physical.get("qty", ""),
+                system_item.get("totalSqft", ""), physical.get("totalSqft", ""), "; ".join(row.get("differences") or []),
+            ])
+
+        sheets = [("Summary", summary_rows), ("Physical Scans", physical_rows), ("System Snapshot", system_rows), ("Reconciliation", reconcile_rows)]
+
+        def cell_xml(row_index: int, col_index: int, value: Any, style: int = 0) -> str:
+            ref = f"{self._inventory_xlsx_column_name(col_index)}{row_index}"
+            style_attr = f' s="{style}"' if style else ""
+            if isinstance(value, bool):
+                return f'<c r="{ref}" t="b"{style_attr}><v>{1 if value else 0}</v></c>'
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return f'<c r="{ref}"{style_attr}><v>{value}</v></c>'
+            text = xml_escape(str(value or ""))
+            return f'<c r="{ref}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{text}</t></is></c>'
+
+        def sheet_xml(name: str, rows: list[list[Any]]) -> str:
+            row_xml = []
+            for row_index, values in enumerate(rows, start=1):
+                cells = []
+                for col_index, value in enumerate(values, start=1):
+                    style = 0
+                    if name in {"Physical Scans", "System Snapshot", "Reconciliation"} and row_index == 1:
+                        style = 1
+                    elif name == "Summary" and (row_index == 19):
+                        style = 1
+                    elif name == "Reconciliation" and row_index > 1:
+                        result = str(values[0] or "")
+                        style = 2 if result == "MATCH" else 3
+                    cells.append(cell_xml(row_index, col_index, value, style))
+                row_xml.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+            max_cols = max((len(row) for row in rows), default=1)
+            widths = ''.join(f'<col min="{i}" max="{i}" width="{18 if i > 1 else 22}" customWidth="1"/>' for i in range(1, max_cols + 1))
+            return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>{widths}</cols><sheetData>{''.join(row_xml)}</sheetData><autoFilter ref="A1:{self._inventory_xlsx_column_name(max_cols)}{max(len(rows),1)}"/></worksheet>'''
+
+        workbook_sheets = ''.join(f'<sheet name="{xml_escape(name)}" sheetId="{index}" r:id="rId{index}"/>' for index, (name, _rows) in enumerate(sheets, start=1))
+        workbook_rels = ''.join(f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>' for index in range(1, len(sheets) + 1))
+        content_sheets = ''.join(f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for index in range(1, len(sheets) + 1))
+        styles = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF195C9C"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8F5E9"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFE8E8"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'''
+        output = BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("[Content_Types].xml", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>{content_sheets}</Types>''')
+            archive.writestr("_rels/.rels", '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>''')
+            archive.writestr("xl/workbook.xml", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{workbook_sheets}</sheets></workbook>''')
+            archive.writestr("xl/_rels/workbook.xml.rels", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{workbook_rels}<Relationship Id="rId{len(sheets)+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>''')
+            archive.writestr("xl/styles.xml", styles)
+            for index, (name, rows) in enumerate(sheets, start=1):
+                archive.writestr(f"xl/worksheets/sheet{index}.xml", sheet_xml(name, rows))
+        return output.getvalue()
+
 
     def export_csv(self, list_id: str) -> str:
         """Purpose: Export CSV for the delivery-list scanner workflow.

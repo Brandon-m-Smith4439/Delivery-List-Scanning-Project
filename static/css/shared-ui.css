@@ -4915,6 +4915,32 @@ body button.app-primary-button.production-detail-action-v480:hover {
 .machine-lookup-position-v521 { color: #59758a; font-size: 10px; font-weight: 750; }
 .machine-lookup-library-v521 .lookup-row-actions-v346 { align-items: center; }
 
+/* v0.527: machine rows use the same compact rhythm as the other lookup tabs. */
+.machine-lookup-library-v521 .lookup-row-list {
+  gap: 7px !important;
+  align-content: start !important;
+  grid-auto-rows: max-content !important;
+}
+.machine-lookup-library-v521 .machine-lookup-row-v521 {
+  min-height: 56px !important;
+  padding: 8px 10px !important;
+  grid-template-columns: 6px minmax(0, 1fr) auto !important;
+  gap: 9px !important;
+}
+.machine-lookup-library-v521 .machine-lookup-swatch-v521 {
+  width: 6px !important;
+  min-height: 38px !important;
+  max-height: 46px;
+  align-self: center !important;
+}
+.machine-lookup-library-v521 .lookup-row-main { gap: 2px !important; }
+.machine-lookup-library-v521 .lookup-row-heading strong { line-height: 1.15 !important; }
+.machine-lookup-library-v521 .lookup-row-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1450px) and (min-width: 1181px) {
   .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
     grid-template-columns: minmax(325px, 345px) 304px minmax(0, 1fr) !important;
@@ -4937,4 +4963,279 @@ body button.app-primary-button.production-detail-action-v480:hover {
   .machine-lookup-form-v521 > label.wide,
   .machine-lookup-form-v521 > aside.wide,
   .machine-lookup-form-v521 > footer { grid-column: 1; }
+}
+
+/* ========================================================================== */
+/* v0.526 shared Cancel / Print controls + Order Details machine/header polish */
+/* ========================================================================== */
+:root {
+  --shared-cancel-top: #fffdfd;
+  --shared-cancel-bottom: #f8eaea;
+  --shared-cancel-border: #cf8f94;
+  --shared-cancel-text: #8a2830;
+  --shared-cancel-shadow: rgba(119, 34, 43, .15);
+}
+
+/* Cancel is a shared application control just like the primary blue action.
+   Page-specific classes may own placement/width, but not its visual language. */
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *) {
+  --app-primary-min-height: var(--app-cancel-min-height, 38px);
+  --app-primary-padding: var(--app-cancel-padding, 7px 14px);
+  --app-primary-radius: var(--app-cancel-radius, 10px);
+  position: relative !important;
+  min-width: 0 !important;
+  min-height: var(--app-cancel-min-height, 38px) !important;
+  height: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  padding: var(--app-cancel-padding, 7px 14px) !important;
+  border: 1px solid var(--shared-cancel-border) !important;
+  border-bottom-color: #b96f77 !important;
+  border-radius: var(--app-cancel-radius, 10px) !important;
+  background: linear-gradient(180deg, var(--shared-cancel-top), var(--shared-cancel-bottom)) !important;
+  color: var(--shared-cancel-text) !important;
+  font-family: inherit !important;
+  font-size: var(--app-cancel-font-size, 13px) !important;
+  font-weight: 850 !important;
+  line-height: 1.1 !important;
+  text-shadow: none !important;
+  box-shadow: inset 0 1px 0 #fff, 0 2px 0 #c37c83, 0 6px 12px var(--shared-cancel-shadow) !important;
+  cursor: pointer !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  transition: transform 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease !important;
+}
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *) > * {
+  color: inherit !important;
+  pointer-events: none !important;
+}
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *):hover:not(:disabled),
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *):focus-visible:not(:disabled) {
+  border-color: #b86670 !important;
+  background: linear-gradient(180deg, #fff 0%, #f6dddd 100%) !important;
+  color: #7b1f28 !important;
+  outline: none !important;
+  transform: translateY(-1px) !important;
+  box-shadow: inset 0 1px 0 #fff, 0 3px 0 #b96f77, 0 9px 16px rgba(119,34,43,.18), 0 0 0 3px rgba(183,75,86,.11) !important;
+}
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *):active:not(:disabled) {
+  transform: translateY(1px) !important;
+  background: linear-gradient(180deg, #f7e4e5, #f2d6d8) !important;
+  box-shadow: inset 0 1px 2px rgba(104,31,39,.12), 0 1px 0 #b96f77, 0 4px 8px rgba(119,34,43,.12) !important;
+}
+body button.app-cancel-button:is(#_sharedCancelA, *):is(#_sharedCancelB, *):is(#_sharedCancelC, *):disabled {
+  border-color: #d4c6c8 !important;
+  background: #f2eeee !important;
+  color: #9b8588 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+/* One printer glyph/shape across page toolbars, Print/Export, and Order Details.
+   Placement remains page-specific; the icon button itself is shared. */
+body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_sharedPrintC, *) {
+  width: var(--shared-print-button-size, 34px) !important;
+  min-width: var(--shared-print-button-size, 34px) !important;
+  max-width: var(--shared-print-button-size, 34px) !important;
+  height: var(--shared-print-button-size, 34px) !important;
+  min-height: var(--shared-print-button-size, 34px) !important;
+  max-height: var(--shared-print-button-size, 34px) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border: 1px solid #8fb1cf !important;
+  border-radius: 8px !important;
+  background: linear-gradient(180deg, #fff, #edf5fb) !important;
+  color: #174f85 !important;
+  box-shadow: inset 0 1px 0 #fff, 0 2px 5px rgba(22,73,111,.10) !important;
+  cursor: pointer !important;
+}
+body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_sharedPrintC, *)::before {
+  content: "" !important;
+  width: 18px !important;
+  height: 18px !important;
+  display: block !important;
+  flex: 0 0 18px !important;
+  background: currentColor !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 2h12v5h1a3 3 0 0 1 3 3v7h-4v5H6v-5H2v-7a3 3 0 0 1 3-3h1V2Zm2 2v4h8V4H8Zm0 11v5h8v-5H8Zm10-6H6a2 2 0 0 0-2 2v4h2v-2h12v2h2v-4a2 2 0 0 0-2-2Zm0 1.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 2h12v5h1a3 3 0 0 1 3 3v7h-4v5H6v-5H2v-7a3 3 0 0 1 3-3h1V2Zm2 2v4h8V4H8Zm0 11v5h8v-5H8Zm10-6H6a2 2 0 0 0-2 2v4h2v-2h12v2h2v-4a2 2 0 0 0-2-2Zm0 1.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+}
+body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_sharedPrintC, *):hover,
+body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_sharedPrintC, *):focus-visible {
+  border-color: #3979ad !important;
+  background: #e8f3fb !important;
+  color: #0d477a !important;
+  outline: none !important;
+  box-shadow: inset 0 1px 0 #fff, 0 0 0 3px rgba(42,112,167,.12), 0 3px 7px rgba(22,73,111,.14) !important;
+}
+
+/* Order Details title is separate; metadata forms one larger, readable row in
+   the requested Job -> Customer -> Route -> Delivery order. */
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-title-row-v518 h2 {
+  font-size: clamp(32px, 2.4vw, 39px) !important;
+}
+.production-explorer-header-meta-row-v526 {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  min-width: 0;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.production-explorer-header-meta-row-v526 > p {
+  display: contents !important;
+}
+.production-explorer-header-fact-v526 {
+  min-width: 0;
+  min-height: 46px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  padding: 5px 11px;
+  border: 1px solid #ccdbe7;
+  border-radius: 8px;
+  background: rgba(255,255,255,.76);
+  color: #284b68;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+}
+.production-explorer-header-fact-v526 small {
+  color: #66819a !important;
+  font-size: 9.5px !important;
+  letter-spacing: .09em !important;
+  line-height: 1 !important;
+}
+.production-explorer-header-fact-v526 strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #173f62;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-explorer-header-fact-v526.is-job { flex: 0 0 auto; min-width: 108px; }
+.production-explorer-header-fact-v526.is-customer { flex: 1 1 220px; max-width: 420px; }
+.production-explorer-header-fact-v526.is-route {
+  flex: 0 0 auto;
+  min-width: 86px;
+  border-color: color-mix(in srgb, var(--order-route-color, #3979ad) 38%, #ccdbe7);
+  background: color-mix(in srgb, var(--order-route-color, #3979ad) 7%, white);
+}
+.production-explorer-header-fact-v526.is-route strong { color: color-mix(in srgb, var(--order-route-color, #3979ad) 78%, #173f62); }
+.production-explorer-header-fact-v526.is-delivery { flex: 0 0 auto; min-width: 122px; }
+.production-explorer-header-meta-row-v526 > time[hidden] { display: none !important; }
+
+/* Machine-specific pending fabrication must use the configured machine color;
+   completed stages remain the application's standard completion green. */
+.production-item-progress-v476 > span.is-fabrication-pending-v477.is-fabrication-pending-v480 {
+  --progress-color: var(--machine-progress-color, #64748b) !important;
+  border-color: color-mix(in srgb, var(--machine-progress-color, #64748b) 48%, #d7e0e7) !important;
+  background: color-mix(in srgb, var(--machine-progress-color, #64748b) 11%, white) !important;
+  color: color-mix(in srgb, var(--machine-progress-color, #64748b) 82%, #18364f) !important;
+}
+
+@media (max-width: 760px) {
+  .production-explorer-panel-v470[data-mode="order"] .production-explorer-title-row-v518 h2 { font-size: 29px !important; }
+  .production-explorer-header-meta-row-v526 { gap: 6px !important; }
+  .production-explorer-header-fact-v526 { min-height: 43px; padding: 5px 8px; }
+  .production-explorer-header-fact-v526 strong { font-size: 14px; }
+  .production-explorer-header-fact-v526.is-customer { flex-basis: 170px; }
+}
+/* v0.527 A+W generation timestamp and irregular production warning. */
+.production-aw-info-heading-v516 time { display: grid; justify-items: end; gap: 2px; }
+.production-aw-info-heading-v516 time small {
+  color: #71869a;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.production-aw-info-heading-v516 time b { color: #45637d; font-size: 10px; }
+.production-aw-irregular-v527 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+  border: 1px solid #e1ac40;
+  border-radius: 9px;
+  background: #fff4d7;
+  color: #754800;
+  padding: 8px 10px;
+}
+.production-aw-irregular-v527 .global-result-chip-icon-v433 { flex: 0 0 18px; width: 18px; height: 18px; color: #b56f00; }
+.production-aw-irregular-v527 > span { display: grid; gap: 2px; }
+.production-aw-irregular-v527 strong { font-size: 11px; }
+.production-aw-irregular-v527 small { color: #77591e; font-size: 10px; line-height: 1.3; }
+
+/* v0.527 Order Details alignment and controls. */
+.production-item-cutting-label-v518,
+.production-item-cutting-label-v518 .production-cutting-label-set-v501,
+.production-item-cutting-label-v518 .production-cutting-label-frame-v502 {
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+@media (min-width: 1451px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 {
+    grid-template-columns: minmax(340px, 360px) 324px minmax(0, 1fr) !important;
+  }
+  .production-item-cutting-label-v518 { width: 324px !important; min-width: 324px !important; max-width: 324px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-set-v501,
+  .production-item-cutting-label-v518 .production-cutting-label-frame-v502 { width: 314px !important; max-width: 314px !important; }
+  .production-item-cutting-label-v518 .production-cutting-label-scale-v502 { transform: scale(.718) !important; }
+}
+.production-item-sketch-v518 .production-sketch-canvas-v480,
+.production-overview-sketch-canvas-v480 {
+  overflow: hidden !important;
+  background: #fff !important;
+}
+.production-item-sketch-v518 .production-sketch-canvas-v480 iframe,
+.production-overview-sketch-canvas-v480 iframe {
+  width: calc(100% + 16px) !important;
+  max-width: none !important;
+  background: #fff !important;
+}
+.production-item-sketch-v518 .production-sketch-maximize-v479,
+.production-item-sketch-v518 .production-sketch-maximize-v480,
+.production-overview-sketch-v480 .production-sketch-maximize-v479,
+.production-overview-sketch-v480 .production-sketch-maximize-v480 {
+  position: absolute !important;
+  top: 8px !important;
+  left: 8px !important;
+  width: 32px !important;
+  height: 32px !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border: 1px solid #9fbcd2 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #0e568a !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  box-shadow: 0 3px 10px rgb(16 67 105 / 18%) !important;
+}
+.production-sketch-maximize-v479 svg,
+.production-sketch-maximize-v480 svg {
+  width: 17px !important;
+  height: 17px !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 1.8 !important;
+}
+.production-item-actions-v521 { align-items: center !important; }
+.production-item-actions-v521 .production-fab-memory-v522 {
+  margin-left: auto;
+  color: #637d91;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.production-item-actions-v521 .is-check-fab-v527 { margin-left: 0 !important; }
+@media (max-width: 760px) {
+  .production-item-actions-v521 .production-fab-memory-v522 { width: 100%; margin-left: 0; }
+  .production-item-actions-v521 .is-check-fab-v527 { margin-left: auto !important; }
 }

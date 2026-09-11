@@ -81,6 +81,15 @@ def parse_args() -> argparse.Namespace:
         help="Synchronize the supplied A+W reject payload without reconciling delivery-list workbooks.",
     )
     parser.add_argument(
+        "--production-plan-only",
+        choices=("true", "false"),
+        default="false",
+        help=(
+            "Read the scanner store and return completed Cutting Order/Item exclusions for the "
+            "next scheduled A+W production query. No delivery/reject/cutting writes are performed."
+        ),
+    )
+    parser.add_argument(
         "--expected-store-mode",
         default="",
         help="Expected live scanner-store mode supplied by the web control plane.",
@@ -1660,6 +1669,42 @@ def main() -> int:
         progress("Scanner store initialization completed.")
     else:
         progress("Scanner store initialization skipped by request.")
+
+    if args.production_plan_only == "true":
+        # Scheduled production sync uses this read-only preflight to avoid
+        # re-querying pieces whose Cutting completion is already durable. The
+        # current direct payload and reject rows are included so a newly changed
+        # remake/reject lifecycle becomes queryable before any scanner write.
+        direct_request = read_direct_payload_request(args.direct_payload_path)
+        payloads = [
+            dict(value) for value in (direct_request.get("payloads") or []) if isinstance(value, dict)
+        ]
+        reject_request = direct_request.get("rejectSync")
+        reject_rows = [
+            dict(value) for value in ((reject_request or {}).get("rows") or []) if isinstance(value, dict)
+        ] if isinstance(reject_request, dict) else []
+        plan = store.aw_cutting_sync_plan(
+            payloads,
+            reject_rows,
+            delivery_date_from=str(direct_request.get("deliveryDateFrom") or ""),
+        )
+        write_result(args.result_path, plan)
+        progress(
+            "A+W Cutting query plan complete: "
+            f"candidates={int_value(plan.get('candidateItemCount'))}, "
+            f"completedSkipped={int_value(plan.get('completedItemCount'))}, "
+            f"refreshRequired={int_value(plan.get('refreshItemCount'))}, "
+            f"resetRequired={int_value(plan.get('resetItemCount'))}."
+        )
+        print(json.dumps({
+            "ok": bool(plan.get("ok", True)),
+            "candidateItemCount": int_value(plan.get("candidateItemCount")),
+            "completedItemCount": int_value(plan.get("completedItemCount")),
+            "refreshItemCount": int_value(plan.get("refreshItemCount")),
+            "resultPath": args.result_path,
+        }, separators=(",", ":"), sort_keys=True))
+        return 0
+
     install_safe_delivery_import(store)
     progress("Safe delivery-import protection hooks installed.")
     schema_repair_applied = bool(

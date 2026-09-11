@@ -148,6 +148,12 @@ MIGRATIONS = (
         "Interpret offset-free A+W SQL datetime values as America/New_York plant time, repair legacy A+W reject/cutting evidence, and preserve stable event identities; v516-r1",
         "_migration_019_v516_aw_eastern_timestamp_contract",
     ),
+    Migration(
+        20,
+        "v524_inventory_snapshots",
+        "Frozen Airport Rd and Indian Trail physical inventory sessions, expected snapshots, audited physical scans/manual entries, reconciliation, cycle counts, and maintained glass Item ID mapping; v524-r1",
+        "_migration_020_v524_inventory_snapshots",
+    ),
 )
 
 
@@ -1125,6 +1131,132 @@ def _migration_019_v516_aw_eastern_timestamp_contract(connection: Any) -> None:
             """
         )
 
+
+
+def _migration_020_v524_inventory_snapshots(connection: Any) -> None:
+    """Add durable physical-inventory sessions without altering production rows."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS inventory_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_code TEXT NOT NULL UNIQUE,
+            location TEXT NOT NULL CHECK (location IN ('airport_rd', 'indian_trail')),
+            inventory_type TEXT NOT NULL DEFAULT 'full' CHECK (inventory_type IN ('full', 'cycle')),
+            status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'completed', 'cancelled')),
+            cycle_filter_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(cycle_filter_json)),
+            started_by TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL,
+            completed_by TEXT NOT NULL DEFAULT '',
+            completed_at TEXT NOT NULL DEFAULT '',
+            expected_line_count INTEGER NOT NULL DEFAULT 0 CHECK (expected_line_count >= 0),
+            expected_qty INTEGER NOT NULL DEFAULT 0 CHECK (expected_qty >= 0),
+            expected_total_sqft REAL NOT NULL DEFAULT 0 CHECK (expected_total_sqft >= 0),
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_expected_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES inventory_sessions(id) ON DELETE CASCADE,
+            snapshot_key TEXT NOT NULL,
+            source_line_item_id TEXT NOT NULL DEFAULT '',
+            source_list_id TEXT NOT NULL DEFAULT '',
+            delivery_date TEXT NOT NULL DEFAULT '',
+            job_no TEXT NOT NULL DEFAULT '',
+            customer TEXT NOT NULL DEFAULT '',
+            order_no TEXT NOT NULL DEFAULT '',
+            item_no TEXT NOT NULL DEFAULT '',
+            glass_type TEXT NOT NULL DEFAULT '',
+            item_id TEXT NOT NULL DEFAULT '',
+            dimensions TEXT NOT NULL DEFAULT '',
+            sqft_each REAL NOT NULL DEFAULT 0 CHECK (sqft_each >= 0),
+            qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+            total_sqft REAL NOT NULL DEFAULT 0 CHECK (total_sqft >= 0),
+            route TEXT NOT NULL DEFAULT '',
+            bay_code TEXT NOT NULL DEFAULT '',
+            cutting_key_index INTEGER NOT NULL DEFAULT 0,
+            cutting_state TEXT NOT NULL DEFAULT '',
+            source_reason TEXT NOT NULL DEFAULT '',
+            source_payload_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_payload_json)),
+            UNIQUE(session_id, snapshot_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES inventory_sessions(id) ON DELETE CASCADE,
+            expected_item_id INTEGER REFERENCES inventory_expected_items(id) ON DELETE SET NULL,
+            source_line_item_id TEXT NOT NULL DEFAULT '',
+            barcode TEXT NOT NULL DEFAULT '',
+            entry_type TEXT NOT NULL DEFAULT 'scan' CHECK (entry_type IN ('scan', 'manual')),
+            scanned_at TEXT NOT NULL,
+            scanned_by TEXT NOT NULL DEFAULT '',
+            job_no TEXT NOT NULL DEFAULT '',
+            customer TEXT NOT NULL DEFAULT '',
+            order_no TEXT NOT NULL DEFAULT '',
+            item_no TEXT NOT NULL DEFAULT '',
+            glass_type TEXT NOT NULL DEFAULT '',
+            item_id TEXT NOT NULL DEFAULT '',
+            dimensions TEXT NOT NULL DEFAULT '',
+            sqft_each REAL NOT NULL DEFAULT 0 CHECK (sqft_each >= 0),
+            qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+            total_sqft REAL NOT NULL DEFAULT 0 CHECK (total_sqft >= 0),
+            notes TEXT NOT NULL DEFAULT '',
+            manual_fields_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(manual_fields_json))
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_item_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id TEXT NOT NULL UNIQUE,
+            glass_label TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            match_terms_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(match_terms_json)),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_inventory_sessions_location_time
+            ON inventory_sessions(location, started_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_inventory_expected_session_order_item
+            ON inventory_expected_items(session_id, order_no, item_no);
+        CREATE INDEX IF NOT EXISTS idx_inventory_scans_session_time
+            ON inventory_scans(session_id, scanned_at DESC, id DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_scans_expected_once
+            ON inventory_scans(session_id, expected_item_id) WHERE expected_item_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_scans_source_once
+            ON inventory_scans(session_id, source_line_item_id) WHERE TRIM(source_line_item_id) <> '';
+        """
+    )
+
+    created = utc_now()
+    mappings = (
+        ('14M4896FA', '1/4 French Antique Mirror', '1/4"X48"X96" FRNCH ANTQ MIRROR', ['FRENCH ANTIQUE MIRROR', 'FRNCH ANTQ MIRROR', '14M4896FA']),
+        ('14M4896HA', '1/4 Hollywood Antique Mirror', '1/4"X48"X96" HLYWD ANTQ MIRROR', ['HOLLYWOOD ANTIQUE MIRROR', 'HLYWD ANTQ MIRROR', '14M4896HA']),
+        ('14M4896DCA', '1/4 Dark Cloud Antique Mirror', '1/4"X48"X96" DKCLD ANTQ MIRROR', ['DARK CLOUD ANTIQUE MIRROR', 'DKCLD ANTQ MIRROR', '14M4896DCA']),
+        ('14M4896SCA', '1/4 Summer Cloud Antique Mirror', '1/4"X48"X96" SMCLD ANTQ MIRROR', ['SUMMER CLOUD ANTIQUE MIRROR', 'SMALL CLOUD ANTIQUE MIRROR', 'SMCLD ANTQ MIRROR', '14M4896SCA']),
+        ('14M4896RCA', '1/4 Rainbow Antique Mirror', '1/4"X48"X96" RNBWC ANTQ MIRROR', ['RAINBOW ANTIQUE MIRROR', 'RNBWC ANTQ MIRROR', '14M4896RCA']),
+        ('18MIRRORBULK', '1/8 Mirror', 'BULK 1/8" MIRROR', ['1/8 MIRROR', 'BULK 1/8 MIRROR', '18MIRRORBULK']),
+        ('14MIRROR', '1/4 Mirror', '1/4" MIRROR CLEAR SF', ['1/4 MIRROR', 'MIRROR CLEAR', '14MIRROR']),
+        ('G14CLR', '1/4 Clear', '1/4" CLEAR GLASS 6MM SF', ['1/4 CLEAR', '6MM CLEAR', 'G14CLR']),
+        ('G38CLR', '3/8 Clear', '3/8" CLEAR GLASS 10MM SF', ['3/8 CLEAR', '10MM CLEAR', 'G38CLR']),
+        ('G12CLR', '1/2 Clear', '1/2" CLEAR GLASS 12MM SF', ['1/2 CLEAR', '12MM CLEAR', 'G12CLR']),
+        ('G38UCLR', '3/8 Ultra Clear', '3/8" ULTRA CLEAR GLASS 10MM SF', ['3/8 ULTRA CLEAR', 'ULTRACLEAR', 'ULTRA CLEAR', 'G38UCLR']),
+        ('G38SATINCLR', '3/8 Clear Satin', '3/8" CLEAR SATIN GLASS 10MM SF', ['3/8 CLEAR SATIN', 'SATIN CLEAR', 'CLEAR SATIN', 'G38SATINCLR']),
+        ('14CWG', '1/4 Clear Window Glass', '1/4" CLEAR WINDOW GLASS', ['1/4 CLEAR WINDOW GLASS', '14CWG']),
+        ('18CDSWG', '1/8 Clear DS B-Grade Glass', '1/8" CLEAR DS B-GRADE GLASS', ['1/8 CLEAR DS', 'B-GRADE GLASS', 'B GRADE GLASS', '18CDSWG']),
+        ('38CWG', '3/8 Clear Window Glass', '3/8" CLEAR WINDOW GLASS', ['3/8 CLEAR WINDOW GLASS', '38CWG']),
+    )
+    for sort_order, (item_id, glass_label, description, terms) in enumerate(mappings, start=1):
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO inventory_item_mappings
+                (item_id, glass_label, description, match_terms_json, sort_order, active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (item_id, glass_label, description, json.dumps(terms, separators=(',', ':')), sort_order, created, created),
+        )
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""

@@ -9996,3 +9996,53 @@
 /* All Machines intentionally uses the exact shared chip treatment used by the
    other All filters; no machine-specific accent is applied to it. */
 .print-machine-section-v520 .print-filter-chip-v197.is-machine-all { box-shadow: none !important; }
+
+/* ========================================================================== */
+/* v0.526 machine filter polish                                               */
+/* ========================================================================== */
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521 {
+  position: relative;
+  border-color: color-mix(in srgb, var(--print-machine-color, #64748b) 34%, #cbd7df) !important;
+  background: color-mix(in srgb, var(--print-machine-color, #64748b) 5%, #fff) !important;
+  box-shadow: none !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 999px;
+  background: var(--print-machine-color, #64748b);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--print-machine-color, #64748b) 15%, white);
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521 > span,
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521 > b {
+  color: color-mix(in srgb, var(--print-machine-color, #64748b) 78%, #173b56) !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) {
+  border-color: color-mix(in srgb, var(--print-machine-color, #64748b) 72%, #9fb3c2) !important;
+  background: color-mix(in srgb, var(--print-machine-color, #64748b) 14%, #fff) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--print-machine-color, #64748b) 7%, transparent) !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > span,
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > b {
+  color: color-mix(in srgb, var(--print-machine-color, #64748b) 88%, #102f49) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+/* v0.527: Machine filters now use the same selected treatment as every other
+   Print / Export chip while retaining one useful machine-color dot. */
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) {
+  border-color: #17689d !important;
+  background: linear-gradient(180deg, #2b82b7, #17689d) !important;
+  box-shadow: 0 2px 5px rgb(19 82 124 / 18%) !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > span,
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > b {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked)::before {
+  border: 1px solid rgb(255 255 255 / 80%);
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 15%) !important;
+}

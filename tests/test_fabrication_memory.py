@@ -100,3 +100,19 @@ def test_cached_bulk_reads_do_not_touch_the_share(tmp_path):
         start=time.perf_counter()
         for _ in range(1000): assert s.fabrication_status('238001','001')['fabricated'] is True
         assert time.perf_counter()-start < 1.0
+
+
+def test_no_fabrication_piece_is_terminal_for_current_lifecycle(tmp_path):
+    s = service(tmp_path)
+    no_fab = {'machine': '', 'machineCode': '', 'required': False, 'confidence': 'label'}
+    with mock.patch.object(s, 'machine_assignment', return_value=no_fab) as classify:
+        first = s.fabrication_status('238001', '001', label_hint={'lifecycleRevision': 'original'})
+        assert first['required'] is False
+        assert first['retryAfterSeconds'] == 0
+        # Server cache still permits source-revision invalidation, while the browser
+        # receives a terminal retry value and stops polling this unchanged pane.
+        second = s.fabrication_status('238001', '001', label_hint={'lifecycleRevision': 'original'})
+        assert second['remembered'] is True
+        assert classify.call_count == 1
+        s.fabrication_status('238001', '001', label_hint={'lifecycleRevision': 'remake-1'})
+        assert classify.call_count == 2

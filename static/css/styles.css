@@ -30392,3 +30392,76 @@ body button.app-primary-button.global-result-action-v475 {
     justify-self: start !important;
   }
 }
+/* v0.527: Keep the desktop hover rail responsive while large Scan dates are
+   present. Layout containment prevents each width frame from reflowing the
+   application workspace; decorative child transitions are resolved once. */
+@media (min-width: 861px) {
+  .app-sidebar {
+    contain: layout style;
+    will-change: auto;
+    transition: box-shadow 90ms ease;
+  }
+  .app-sidebar:hover { box-shadow: 14px 0 30px rgba(4, 24, 60, .22); }
+  .app-sidebar::after,
+  .app-sidebar .brand-icon,
+  .app-sidebar .brand-logo-svg,
+  .app-sidebar .brand-icon-collapsed,
+  .app-sidebar .brand-combined-logo,
+  .app-sidebar .sidebar-backend-status,
+  .app-sidebar .sidebar-user-menu > summary,
+  .app-sidebar .sidebar-user-menu .user-menu-summary-copy,
+  .app-sidebar .sidebar-profile-chevron,
+  .app-sidebar .app-nav button,
+  .app-sidebar .app-nav button > span:last-child {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+  .app-sidebar .app-nav button {
+    transition: border-color 90ms ease, background-color 90ms ease, color 90ms ease !important;
+  }
+
+  /* Once a page is chosen, keep the rail collapsed until the pointer exits it.
+     This prevents the expanded rail from sitting over the first controls on the
+     destination page while the pointer is still on the selected nav button. */
+  .app-sidebar.is-hover-suppressed-v527,
+  .app-sidebar.is-hover-suppressed-v527:hover {
+    width: var(--app-sidebar-collapsed-width);
+    padding-inline: 9px;
+    box-shadow: 10px 0 30px rgba(4, 24, 60, .16);
+  }
+  .app-sidebar.is-hover-suppressed-v527 .brand-icon-collapsed {
+    display: block;
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  .app-sidebar.is-hover-suppressed-v527 .brand-combined-logo {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(.9);
+  }
+  .app-sidebar.is-hover-suppressed-v527 .app-nav button,
+  body[data-language="es"] .app-sidebar.is-hover-suppressed-v527 .app-nav button {
+    justify-content: center;
+    gap: 0;
+    padding: 0 !important;
+  }
+  .app-sidebar.is-hover-suppressed-v527 .app-nav button > span:last-child,
+  .app-sidebar.is-hover-suppressed-v527 .sidebar-backend-status,
+  .app-sidebar.is-hover-suppressed-v527 .sidebar-user-menu .user-menu-summary-copy {
+    display: none;
+    opacity: 0;
+  }
+  .app-sidebar.is-hover-suppressed-v527 .sidebar-user-menu > summary {
+    width: 46px;
+    min-width: 46px;
+    min-height: 46px !important;
+    display: flex;
+    gap: 0;
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+  .app-sidebar.is-hover-suppressed-v527 .sidebar-profile-chevron {
+    opacity: 0;
+    visibility: hidden;
+  }
+}

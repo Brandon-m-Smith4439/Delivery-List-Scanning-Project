@@ -22167,6 +22167,25 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   .admin-modal-loading-spinner-v507 { animation: none; border-top-color: #1d67ae; }
 }
 
+/* v0.527 Manual Edit uses one logical delivery list with explicit progress. */
+.manual-edit-progress-control-v527 {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #dce6ef;
+  background: #f7fafc;
+}
+.manual-edit-progress-control-v527 > strong { color: #173f68; font-size: 11px; text-transform: uppercase; letter-spacing: .045em; }
+.manual-edit-progress-control-v527 select { min-height: 36px; border: 1px solid #bfd0dd; border-radius: 8px; background: #fff; padding: 6px 9px; }
+.manual-edit-card-progress-v527 { min-width: 180px; }
+.manual-edit-complete-list-v527 { margin-left: auto; }
+@media (max-width: 780px) {
+  .manual-edit-progress-control-v527 { grid-template-columns: 1fr; }
+  .manual-edit-progress-control-v527 button { width: 100%; }
+}
+
 
 /* ========================================================================== */
 /* v0.513 Superseded-review count badge visibility                           */
@@ -22178,4 +22197,23 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   top: -9px !important;
   right: -9px !important;
   z-index: 6 !important;
+}
+.admin-delivery-whole-list-v527 .admin-delivery-date-summary {
+  cursor: default;
+  grid-template-columns: minmax(230px, 1fr) minmax(140px, .55fr) auto;
+}
+.admin-delivery-open-whole-v527 {
+  min-height: 38px;
+  padding: 7px 13px;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .admin-delivery-whole-list-v527 .admin-delivery-date-summary {
+    grid-template-columns: 1fr;
+  }
+  .admin-delivery-whole-list-v527 .admin-date-action-row {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .admin-delivery-open-whole-v527 { flex: 1; }
 }

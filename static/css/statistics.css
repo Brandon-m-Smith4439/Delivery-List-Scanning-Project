@@ -3065,6 +3065,43 @@
   font-size: 11px;
   font-weight: 700;
 }
+
+.statistics-production-heading-actions-v527 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.statistics-sheet-total-v527 {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:2px 12px;
+  margin:10px 0;
+  padding:10px 12px;
+  border:1px solid #cde0ed;
+  border-radius:10px;
+  background:linear-gradient(135deg,#f3f9fd,#e9f5fb);
+}
+.statistics-sheet-total-v527 span { color:#456579; font-size:11px; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
+.statistics-sheet-total-v527 strong { grid-row:1 / 3; grid-column:2; color:#0c5b87; font-size:26px; }
+.statistics-sheet-total-v527 small { color:#688094; font-size:10px; }
+.sheet-usage-settings-v527 {
+  position:fixed; z-index:10091; inset:50% auto auto 50%; transform:translate(-50%,-50%);
+  width:min(920px,calc(100vw - 28px)); max-height:min(82vh,760px); overflow:hidden;
+  display:grid; grid-template-rows:auto minmax(0,1fr) auto;
+  border:1px solid #bfd1df; border-radius:16px; background:#fff; box-shadow:0 24px 70px rgba(7,33,61,.3);
+}
+.sheet-usage-settings-v527[hidden] { display:none !important; }
+.sheet-usage-settings-v527 > header { display:flex; justify-content:space-between; gap:16px; padding:18px 20px; border-bottom:1px solid #dce6ee; background:#f7fafc; }
+.sheet-usage-settings-v527 h2 { margin:2px 0 3px; color:#153f67; }
+.sheet-usage-settings-v527 p,.sheet-usage-settings-v527 small { margin:0; color:#657d91; }
+.sheet-usage-settings-list-v527 { overflow:auto; padding:12px 18px; display:grid; gap:8px; }
+.sheet-usage-settings-list-v527 article { display:grid; grid-template-columns:minmax(190px,1fr) minmax(160px,.7fr) minmax(280px,1.4fr); align-items:end; gap:10px; padding:10px 12px; border:1px solid #dce6ee; border-radius:10px; }
+.sheet-usage-settings-list-v527 article > strong { align-self:center; color:#173f68; }
+.sheet-usage-settings-list-v527 label { display:grid; gap:4px; }
+.sheet-usage-settings-list-v527 label span { color:#5e7588; font-size:9px; font-weight:850; text-transform:uppercase; }
+.sheet-usage-settings-list-v527 input { width:100%; min-height:36px; border:1px solid #bfd0dd; border-radius:8px; padding:7px 9px; }
+.sheet-usage-settings-v527 > footer { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:12px 18px; border-top:1px solid #dce6ee; background:#f7fafc; color:#61788b; font-size:11px; }
+@media (max-width:760px) {
+  .sheet-usage-settings-list-v527 article { grid-template-columns:1fr; }
+  .sheet-usage-settings-v527 > footer { align-items:stretch; flex-direction:column; }
+}
 .statistics-production-email-v505 {
   min-height: 38px;
   flex: 0 0 auto;

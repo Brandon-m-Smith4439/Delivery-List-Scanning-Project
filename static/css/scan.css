@@ -7523,3 +7523,122 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   border-color: var(--machine-filter-color, #64748b) !important;
   background: color-mix(in srgb, var(--machine-filter-color, #64748b) 12%, #fff) !important;
 }
+
+/* ========================================================================== */
+/* v0.526 machine filter polish                                               */
+/* ========================================================================== */
+.scan-filter-machine-section-v512 .scan-machine-filter-v521 {
+  border-color: color-mix(in srgb, var(--machine-filter-color, #64748b) 34%, #cbd9e4) !important;
+  background: color-mix(in srgb, var(--machine-filter-color, #64748b) 5%, #fff) !important;
+  box-shadow: none !important;
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521 > i {
+  width: 10px !important;
+  min-width: 10px !important;
+  height: 10px !important;
+  align-self: center !important;
+  border-radius: 999px !important;
+  background: var(--machine-filter-color, #64748b) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--machine-filter-color, #64748b) 15%, white) !important;
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active,
+.scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] {
+  border-color: color-mix(in srgb, var(--machine-filter-color, #64748b) 72%, #9fb3c2) !important;
+  background: color-mix(in srgb, var(--machine-filter-color, #64748b) 13%, #fff) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--machine-filter-color, #64748b) 7%, transparent) !important;
+}
+/* v0.527: Surface incomplete A+W production generations without changing the
+   pane's durable Cutting milestone. */
+.scan-row-inline-markers-v481 .aw-irregular-marker-v527 {
+  border-color: #e8b34d !important;
+  background: #fff4d4 !important;
+  color: #855100 !important;
+}
+.scan-order-group-irregular-v527,
+.mobile-aw-irregular-v527 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2ad42;
+  border-radius: 999px;
+  background: #fff5d9;
+  color: #754800;
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 1.1;
+  font-weight: 850;
+}
+.scan-order-group-irregular-v527 .global-result-chip-icon-v433,
+.mobile-aw-irregular-v527 .global-result-chip-icon-v433 { width: 14px; height: 14px; color: #b56f00; }
+.scan-order-group-irregular-v527 small { color: #8d641f; font-size: 9px; }
+.mobile-aw-irregular-v527 {
+  margin: 8px 10px 0;
+  border-radius: 9px;
+  justify-content: flex-start;
+}
+.mobile-aw-irregular-v527 > span { display: grid; gap: 2px; }
+.mobile-aw-irregular-v527 small { color: #79591e; font-size: 9px; }
+@media (max-width: 700px) {
+  .scan-order-group-irregular-v527 { order: 8; }
+}
+
+/* v0.527: priority/reject rows and machine choices share the application's
+   quieter selected state. */
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 > td,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-both-v480 > td {
+  border-color: #454c55 !important;
+  background: linear-gradient(96deg, #171a1e 0%, #292e35 58%, #464d56 100%) !important;
+  color: #fff !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 td strong,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 td b,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 .scan-glass-type-copy-v484,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-both-v480 td strong,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-both-v480 td b {
+  color: #fff !important;
+}
+.internal-reject-incident-strip-v154 {
+  min-height: 29px !important;
+  grid-template-columns: auto auto minmax(82px,1.3fr) minmax(92px,1.1fr) auto minmax(82px,.85fr) minmax(112px,1.05fr) !important;
+  gap: 6px !important;
+  overflow: visible !important;
+  padding: 3px 8px 3px 5px !important;
+  border-color: #8d6870 !important;
+  background: linear-gradient(100deg, #57343b 0%, #684149 56%, #7a555c 100%) !important;
+  box-shadow: 0 2px 5px rgb(65 37 43 / 12%) !important;
+}
+.internal-reject-incident-strip-v154::after {
+  inset: auto 0 -8px !important;
+  height: 9px !important;
+  background: linear-gradient(to bottom, rgb(105 66 74 / 24%), transparent) !important;
+  pointer-events: none;
+}
+.internal-reject-incident-badge-v154 {
+  width: auto !important;
+  min-width: 22px;
+  height: 21px !important;
+  padding: 0 5px;
+  border-radius: 5px !important;
+  font-size: 7.5px !important;
+}
+.internal-reject-incident-badge-v154.is-new-v527 { background: #f7e6b3 !important; color: #583e13 !important; border-color: #f1d887 !important; }
+.internal-reject-incident-badge-v154.is-history-v527 { background: rgb(255 255 255 / 10%) !important; }
+.internal-reject-incident-title-v154 { font-size: 9px !important; letter-spacing: .02em !important; }
+.internal-reject-incident-strip-v154 small { color: #e9dadd !important; font-size: 6.8px !important; }
+.internal-reject-incident-strip-v154 b { font-size: 9px !important; line-height: 1.05 !important; }
+
+.scan-filter-machine-section-v512 .scan-machine-filter-v521::before { display: none !important; content: none !important; }
+.scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active,
+.scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] {
+  border-color: #17689d !important;
+  background: linear-gradient(180deg, #2b82b7, #17689d) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 5px rgb(19 82 124 / 18%) !important;
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active > i,
+.scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] > i {
+  border: 1px solid rgb(255 255 255 / 78%);
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 15%) !important;
+}
+.scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active span,
+.scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] span { color: #fff !important; }
