@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "527"
-# Schema version 20 adds durable physical-inventory sessions/snapshots/scans and
-# the maintained glass-to-Item-ID mapping used by Airport Rd and Indian Trail.
-CURRENT_SCHEMA_VERSION = 20
+APPLICATION_VERSION = "529"
+# Schema version 21 adds per-user Internal Reject review receipts, durable manual
+# production-progress overrides, and delivery-date identity on physical Inventory scans.
+CURRENT_SCHEMA_VERSION = 21
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -61,6 +61,8 @@ TABLE_DESCRIPTIONS = {
     "inventory_expected_items": "Frozen system WIP snapshot captured when an inventory session starts.",
     "inventory_scans": "Audited physical inventory scans and manual count entries.",
     "inventory_item_mappings": "Maintained glass-description to inventory Item ID reference mapping.",
+    "internal_reject_review_receipts": "Per-user acknowledgement of Internal Reject incidents shown on delivery lists.",
+    "manual_production_progress_overrides": "Audited manual Cutting/fabrication completion overrides keyed to one physical lifecycle.",
 }
 
 REQUIRED_COLUMNS = {
@@ -111,8 +113,13 @@ REQUIRED_COLUMNS = {
     },
     "inventory_scans": {
         "id", "session_id", "expected_item_id", "source_line_item_id", "barcode", "entry_type",
-        "scanned_at", "scanned_by", "job_no", "customer", "order_no", "item_no", "glass_type",
+        "scanned_at", "scanned_by", "delivery_date", "job_no", "customer", "order_no", "item_no", "glass_type",
         "item_id", "dimensions", "sqft_each", "qty", "total_sqft", "notes", "manual_fields_json",
+    },
+    "internal_reject_review_receipts": {"reject_event_id", "user_id", "reviewed_at"},
+    "manual_production_progress_overrides": {
+        "delivery_date", "order_no", "item_no", "cutting_complete", "machine_code",
+        "machine_complete", "cutting_key_index", "reject_cutoff", "updated_by", "updated_at",
     },
     "inventory_item_mappings": {
         "id", "item_id", "glass_label", "description", "match_terms_json", "sort_order",
@@ -137,7 +144,8 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "machine_events": {"barcode", "order_no", "item_no"},
     "inventory_sessions": {"session_code", "location"},
     "inventory_expected_items": {"snapshot_key", "source_line_item_id", "source_list_id", "delivery_date", "job_no", "order_no", "item_no", "item_id", "bay_code"},
-    "inventory_scans": {"source_line_item_id", "barcode", "job_no", "order_no", "item_no", "item_id"},
+    "inventory_scans": {"source_line_item_id", "barcode", "delivery_date", "job_no", "order_no", "item_no", "item_id"},
+    "manual_production_progress_overrides": {"delivery_date", "order_no", "item_no", "machine_code"},
     "inventory_item_mappings": {"item_id"},
 }
 
@@ -193,6 +201,8 @@ INDEX_DESCRIPTIONS = {
     "idx_inventory_scans_session_time": "Physical inventory count history by session and scan time.",
     "idx_inventory_scans_expected_once": "One physical count per frozen expected row within a session.",
     "idx_inventory_scans_source_once": "One physical count per production source identity within a session.",
+    "idx_internal_reject_review_receipts_user": "Per-user Internal Reject review marker lookup.",
+    "idx_manual_production_progress_identity": "Manual production progress lookup by delivery date and Order/Item.",
 }
 
 JSON_COLUMNS = {
@@ -238,5 +248,7 @@ TIMESTAMP_COLUMNS = {
     "superseded_order_reviews": {"detected_at", "last_seen_at", "decided_at", "created_at_utc", "updated_at_utc"},
     "inventory_sessions": {"started_at", "completed_at", "created_at", "updated_at"},
     "inventory_scans": {"scanned_at"},
+    "internal_reject_review_receipts": {"reviewed_at"},
+    "manual_production_progress_overrides": {"updated_at", "reject_cutoff"},
     "inventory_item_mappings": {"created_at", "updated_at"},
 }

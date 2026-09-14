@@ -154,6 +154,12 @@ MIGRATIONS = (
         "Frozen Airport Rd and Indian Trail physical inventory sessions, expected snapshots, audited physical scans/manual entries, reconciliation, cycle counts, and maintained glass Item ID mapping; v524-r1",
         "_migration_020_v524_inventory_snapshots",
     ),
+    Migration(
+        21,
+        "v529_internal_reject_review_and_manual_production_progress",
+        "Per-user Internal Reject review receipts, lifecycle-safe manual Cutting/fabrication progress overrides, and Inventory scan delivery date; v529-r1",
+        "_migration_021_v529_internal_reject_review_and_manual_production_progress",
+    ),
 )
 
 
@@ -1257,6 +1263,41 @@ def _migration_020_v524_inventory_snapshots(connection: Any) -> None:
             """,
             (item_id, glass_label, description, json.dumps(terms, separators=(',', ':')), sort_order, created, created),
         )
+
+
+def _migration_021_v529_internal_reject_review_and_manual_production_progress(connection: Any) -> None:
+    """Add durable review/progress state without changing production history rows."""
+    _ensure_column(connection, "inventory_scans", "delivery_date", "TEXT NOT NULL DEFAULT ''")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS internal_reject_review_receipts (
+            reject_event_id INTEGER NOT NULL REFERENCES reject_events(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            reviewed_at TEXT NOT NULL,
+            PRIMARY KEY (reject_event_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_internal_reject_review_receipts_user
+            ON internal_reject_review_receipts(user_id, reject_event_id);
+
+        CREATE TABLE IF NOT EXISTS manual_production_progress_overrides (
+            delivery_date TEXT NOT NULL,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            job TEXT NOT NULL DEFAULT '',
+            remake_marker INTEGER NOT NULL DEFAULT 0 CHECK (remake_marker IN (0, 1)),
+            cutting_complete INTEGER NOT NULL DEFAULT 0 CHECK (cutting_complete IN (0, 1)),
+            machine_code TEXT NOT NULL DEFAULT '',
+            machine_complete INTEGER NOT NULL DEFAULT 0 CHECK (machine_complete IN (0, 1)),
+            cutting_key_index INTEGER NOT NULL DEFAULT 0,
+            reject_cutoff TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (delivery_date, order_no, item_no)
+        );
+        CREATE INDEX IF NOT EXISTS idx_manual_production_progress_identity
+            ON manual_production_progress_overrides(delivery_date, order_no, item_no);
+        """
+    )
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""

@@ -264,3 +264,20 @@ def test_sketch_assignment_primes_exact_pages_in_one_background_batch(tmp_path):
     while time.time() < deadline and not all(path.is_file() and path.stat().st_size > 0 for path in targets):
         time.sleep(0.02)
     assert all(path.is_file() and path.stat().st_size > 0 for path in targets)
+
+
+def test_v528_sketch_remake_and_punctuated_machine_terms_are_detected(tmp_path):
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '728555.pdf'
+    write_pdf(pdf, ['REMAKE 728555.1 WATER-JET'])
+    views = s.sketch_item_views('728555', '001')
+    assert views and views[0]['sketchRemake'] is True
+
+    # Lookup Manager terms may be written with spaces while A+W/shop output uses
+    # punctuation or compact forms. The maintained matcher normalizes all three.
+    s.machine_terms['waterjet'] = ['WATER JET', 'WJ']
+    assert s._matches_machine_terms('PROCESS: WATER-JET / HOLE', 'waterjet')
+    assert s._matches_machine_terms('PROCESS: WATER_JET / HOLE', 'waterjet')
+    assert s._matches_machine_terms('PROCESS: WATERJET / HOLE', 'waterjet')
+    assert s._matches_machine_terms('MACHINE WJ', 'waterjet')
+    assert not s._matches_machine_terms('MACHINE WJUNK', 'waterjet')

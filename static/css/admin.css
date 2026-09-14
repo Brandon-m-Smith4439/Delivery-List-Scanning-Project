@@ -22217,3 +22217,189 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   }
   .admin-delivery-open-whole-v527 { flex: 1; }
 }
+
+/* ========================================================================== */
+/* v0.529 Lookup Manager + stage-less manual progress polish                  */
+/* ========================================================================== */
+.lookup-manager-v345 .lookup-save-button-v529 {
+  min-width: 104px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding-inline: 14px;
+}
+.lookup-manager-v345 .lookup-save-button-v529 .lookup-action-svg-v346 {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lookup-manager-v345 .lookup-form-actions,
+.lookup-manager-v345 .machine-lookup-form-v521 > footer,
+.lookup-manager-v345 .lookup-config-editor-v346 form > footer {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+/* Machine rows should read like the other lookup libraries rather than cards. */
+.lookup-manager-v345 .machine-lookup-row-v521 {
+  min-height: 48px !important;
+  padding: 7px 10px !important;
+  gap: 9px !important;
+  align-items: center !important;
+}
+.lookup-manager-v345 .machine-lookup-row-v521 .machine-lookup-swatch-v521 {
+  width: 10px !important;
+  min-width: 10px !important;
+  height: 30px !important;
+  border-radius: 5px !important;
+}
+.lookup-manager-v345 .machine-lookup-row-v521 .lookup-row-main {
+  gap: 1px !important;
+  min-width: 0;
+}
+.lookup-manager-v345 .machine-lookup-row-v521 .lookup-row-heading strong {
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+}
+.lookup-manager-v345 .machine-lookup-row-v521 small,
+.lookup-manager-v345 .machine-lookup-row-v521 .machine-lookup-position-v521 {
+  font-size: 9.5px !important;
+  line-height: 1.2 !important;
+}
+.lookup-manager-v345 .machine-lookup-row-v521 .lookup-row-actions-v346 {
+  min-width: max-content;
+}
+
+/* Manual Edit reuses the Scan filter component rather than maintaining a
+   second visual system. Only the content differs. */
+.manual-edit-filter-drawer {
+  width: auto !important;
+  max-width: 100% !important;
+}
+.manual-edit-filter-drawer > summary {
+  min-height: 38px !important;
+  padding: 0 11px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  border: 1px solid #bfd0df !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  color: #123b63 !important;
+  box-shadow: none !important;
+}
+.manual-edit-filter-drawer > summary > b {
+  min-width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #eef4fb;
+  color: #385875;
+  font-size: 10px;
+}
+.manual-edit-filter-panel {
+  width: min(760px, calc(100vw - 50px)) !important;
+}
+.manual-edit-filter-panel .scan-filter-options .tab {
+  min-height: 36px !important;
+  padding: 0 11px !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+.manual-edit-progress-control-v529 {
+  grid-column: 1 / -1;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 2px 0 0;
+  padding: 11px 12px !important;
+  border: 1px solid #c9d9e7 !important;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f1f6fb 100%) !important;
+}
+.manual-edit-progress-copy-v529 {
+  min-width: 0;
+}
+.manual-edit-progress-copy-v529 > small {
+  display: block;
+  margin-bottom: 3px;
+  color: #5c7690;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.manual-edit-progress-copy-v529 > strong {
+  display: block;
+  color: #123d68;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.manual-edit-progress-copy-v529 > span {
+  display: block;
+  margin-top: 3px;
+  color: #657c92;
+  font-size: 10px;
+  line-height: 1.3;
+}
+.manual-edit-progress-actions-v529 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.manual-edit-progress-field-v529 {
+  grid-column: span 2;
+  max-width: 360px;
+}
+.manual-edit-progress-field-v529 select {
+  width: 100% !important;
+  min-height: 38px !important;
+}
+.manual-edit-progress-actions-v529.wide {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  padding-top: 2px;
+}
+.manual-edit-progress-actions-v529 select {
+  width: 220px !important;
+  min-width: 180px !important;
+  max-width: 240px !important;
+  min-height: 38px !important;
+}
+.manual-edit-progress-actions-v529 .app-primary-button,
+.manual-edit-progress-actions-v529 .app-secondary-button {
+  min-height: 38px;
+}
+.manual-edit-card-progress-v527 {
+  min-width: 210px !important;
+  white-space: nowrap;
+}
+.admin-edit-delivery-lists-launch-v529 {
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  padding: 0 !important;
+}
+@media (max-width: 760px) {
+  .manual-edit-progress-control-v529 { grid-template-columns: 1fr !important; }
+  .manual-edit-progress-actions-v529 { justify-content: stretch; }
+  .manual-edit-progress-actions-v529 select { width: 100% !important; max-width: none !important; }
+  .manual-edit-progress-actions-v529 button { flex: 1 1 140px; }
+  .manual-edit-filter-panel { width: calc(100vw - 24px) !important; }
+  .manual-edit-progress-field-v529 { grid-column: 1 / -1; max-width: none; }
+}

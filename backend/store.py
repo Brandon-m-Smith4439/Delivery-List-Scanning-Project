@@ -6602,6 +6602,16 @@ class BaseDeliveryStore:
                 """,
                 tuple(orders),
             ).fetchall()
+            override_rows = con.execute(
+                f"""
+                SELECT delivery_date, order_no, item_no, job, remake_marker,
+                       cutting_complete, machine_code, machine_complete,
+                       cutting_key_index, reject_cutoff, updated_by, updated_at
+                FROM manual_production_progress_overrides
+                WHERE order_no IN ({placeholders})
+                """,
+                tuple(orders),
+            ).fetchall()
         grouped: dict[tuple[str, str], list[Any]] = {}
         for cutting_row in cutting_rows:
             order = str(row_value(cutting_row, "order_no", "") or "").strip()
@@ -6609,6 +6619,16 @@ class BaseDeliveryStore:
             if item.isdigit():
                 item = item.zfill(3)
             grouped.setdefault((order, item), []).append(cutting_row)
+
+        overrides: dict[tuple[str, str, str], Any] = {}
+        for override_row in override_rows:
+            order = str(row_value(override_row, "order_no", "") or "").strip()
+            item = str(row_value(override_row, "item_no", "") or "").strip()
+            if item.isdigit():
+                item = item.zfill(3)
+            delivery_date = str(row_value(override_row, "delivery_date", "") or "").strip()
+            if order and item and delivery_date:
+                overrides[(delivery_date, order, item)] = override_row
 
         hints: dict[str, dict[str, Any]] = {}
         for request in requested:
@@ -6624,6 +6644,39 @@ class BaseDeliveryStore:
                 grouped.get((order, item), []),
             )
             hint = dict(state) if isinstance(state, dict) else {}
+            delivery_date = str(request.get("deliveryDate") or "").strip()
+            override = overrides.get((delivery_date, order, item)) if delivery_date else None
+            if override is not None:
+                request_job = str(request.get("job") or "").strip()
+                override_job = str(row_value(override, "job", "") or "").strip()
+                request_remake = bool(request.get("remake") or is_remake_item(request))
+                override_remake = bool(int(row_value(override, "remake_marker", 0) or 0))
+                current_key_index = int(hint.get("keyIndex") or 0)
+                override_key_index = int(row_value(override, "cutting_key_index", 0) or 0)
+                request_reject = str(request.get("lastRejectedAt") or "").strip()
+                override_reject = str(row_value(override, "reject_cutoff", "") or "").strip()
+                job_matches = not override_job or not request_job or override_job == request_job
+                generation_matches = not override_key_index or not current_key_index or current_key_index <= override_key_index
+                reject_matches = self._aw_cutting_timestamp_epoch(request_reject) <= self._aw_cutting_timestamp_epoch(override_reject)
+                lifecycle_matches = job_matches and generation_matches and reject_matches and request_remake == override_remake
+                if lifecycle_matches:
+                    if bool(int(row_value(override, "cutting_complete", 0) or 0)):
+                        hint.update({
+                            "state": "cut",
+                            "label": "Cut",
+                            "complete": True,
+                            "released": False,
+                            "needsRecutting": False,
+                            "manualProgressOverride": True,
+                            "manualProgressUpdatedAt": str(row_value(override, "updated_at", "") or ""),
+                            "manualProgressUpdatedBy": str(row_value(override, "updated_by", "") or ""),
+                        })
+                    if bool(int(row_value(override, "machine_complete", 0) or 0)) and str(row_value(override, "machine_code", "") or "").strip():
+                        hint["manualMachineComplete"] = True
+                        hint["manualMachineCode"] = str(row_value(override, "machine_code", "") or "").strip().lower()
+                        hint["manualProgressOverride"] = True
+                        hint["manualProgressUpdatedAt"] = str(row_value(override, "updated_at", "") or "")
+                        hint["manualProgressUpdatedBy"] = str(row_value(override, "updated_by", "") or "")
             lifecycle_facts = {
                 "lastRejectedAt": str(request.get("lastRejectedAt") or "").strip(),
                 "remake": bool(request.get("remake")),
@@ -6632,6 +6685,7 @@ class BaseDeliveryStore:
                 # optimization, status, and other mutable label facts do not
                 # reset physical progress inside that generation.
                 "keyIndex": int(hint.get("keyIndex") or 0),
+                "manualProgressUpdatedAt": str(hint.get("manualProgressUpdatedAt") or ""),
             }
             hint["lifecycleRevision"] = hashlib.sha256(
                 json.dumps(lifecycle_facts, sort_keys=True, separators=(",", ":")).encode()
@@ -8589,7 +8643,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         default_by_code = {str(row.get("code") or "").strip().lower(): dict(row) for row in default_machines if isinstance(row, dict)}
 
         def clean_machine_code(value: Any) -> str:
-            return re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().lower()).strip("-")[:40]
+            raw = str(value or "").strip().lower()
+            compact = re.sub(r"[^a-z0-9]+", "", raw)
+            if compact in {"wj", "waterjet"}:
+                return "waterjet"
+            if compact in {"denver", "denvercnc"}:
+                return "denver"
+            return re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-")[:40]
 
         def clean_machine_terms(raw: Any, fallback: list[str]) -> list[str]:
             if isinstance(raw, str):
@@ -8634,7 +8694,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "terms": machine_terms,
                 "color": machine_color,
                 "progressRank": progress_rank,
-                "active": bool(raw.get("active", fallback.get("active", True))),
+                # Denver and Waterjet own maintained completion-evidence paths.
+                # Keeping either one inactive makes real files disappear from
+                # filters and progress even though the integration still runs.
+                "active": True if code in {"denver", "waterjet"} else bool(raw.get("active", fallback.get("active", True))),
                 "completionKind": completion_kind,
             })
             seen_codes.add(code)
@@ -19243,57 +19306,25 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {"ok": True, "id": exception_id, "status": status}
 
     def attach_cutting_search_states_v513(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Attach one current A+W Cutting state to each final Smart Search row.
+        """Attach current Cutting/manual-production state to a bounded search result set.
 
-        Search itself remains SQLite/SQL metadata only. This runs after the final
-        20-row match set is known, then loads those Orders in bounded batches so
-        Cutting can render without one query per result or a catalog-wide scan.
+        v0.529 routes this through the same fabrication-hint resolver used by Scan
+        so Edit Delivery Lists, Smart Search, and Order Details cannot disagree
+        about lifecycle-safe manual progress overrides. The result set is already
+        bounded before this helper runs, keeping the database work small.
         """
         if not results:
             return results
-        contexts: dict[tuple[str, str], str] = {}
-        for result in results:
-            order_no = str(result.get("order") or "").strip()
-            item_no = str(result.get("item") or "").strip()
-            if item_no.isdigit():
-                item_no = item_no.zfill(3)
-            if order_no and item_no:
-                contexts[(order_no, item_no)] = str(result.get("lastRejectedAt") or "")
-        if not contexts:
-            return results
-
-        rows: list[Any] = []
-        orders = sorted({order_no for order_no, _item_no in contexts})
-        with self.connect() as con:
-            for start in range(0, len(orders), 300):
-                batch = orders[start:start + 300]
-                placeholders = ",".join("?" for _ in batch)
-                rows.extend(con.execute(
-                    f"""
-                    SELECT * FROM aw_cutting_generations
-                    WHERE order_no IN ({placeholders})
-                    ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
-                    """,
-                    tuple(batch),
-                ).fetchall())
-
-        grouped: dict[tuple[str, str], list[Any]] = {}
-        for row in rows:
-            order_no = str(row_value(row, "order_no", "") or "").strip()
-            item_no = str(row_value(row, "item_no", "") or "").strip()
-            if item_no.isdigit():
-                item_no = item_no.zfill(3)
-            grouped.setdefault((order_no, item_no), []).append(row)
-
-        for result in results:
-            order_no = str(result.get("order") or "").strip()
-            item_no = str(result.get("item") or "").strip()
-            if item_no.isdigit():
-                item_no = item_no.zfill(3)
-            key = (order_no, item_no)
-            result["cutting"] = self.aw_cutting_state(
-                order_no, item_no, contexts.get(key, ""), grouped.get(key, []),
-            )
+        requests: list[dict[str, Any]] = []
+        for index, result in enumerate(results):
+            request = dict(result)
+            request["key"] = f"search:{index}:{result.get('order','')}:{result.get('item','')}:{result.get('deliveryDate','')}"
+            request["remake"] = bool(result.get("remake") or is_remake_item(result))
+            requests.append(request)
+        hints = self.aw_fabrication_hints_for_requests(requests)
+        for index, result in enumerate(results):
+            key = f"search:{index}:{result.get('order','')}:{result.get('item','')}:{result.get('deliveryDate','')}"
+            result["cutting"] = dict(hints.get(key) or {})
         return results
 
     def global_search(self, query: str, user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -20153,19 +20184,51 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return payload
 
     def advance_delivery_progress(self, data: dict[str, Any], user: str) -> dict[str, Any]:
-        """Advance an item, order, or complete delivery date without creating locations."""
+        """Advance production/scanner progress without manufacturing new history rows.
+
+        v0.529 extends the stage-less editor upstream through Cutting and the
+        configured fabrication machines. Production progress is stored as one
+        lifecycle-bound override per physical Order/Item; scanner checkpoints
+        continue to advance only the already-synchronized line_items. Final
+        completion clears active locations and never creates a rack or bay.
+        """
         scope = str(data.get("scope") or "item").strip().lower()
         target = str(data.get("target") or "").strip().lower()
+        machine_target = target.split(":", 1)[1].strip() if target.startswith("machine:") else ""
+        scanner_targets = {"staging", "outbound", "indian_trail", "complete"}
+        production_target = target == "cutting" or bool(machine_target)
         if scope not in {"item", "order", "list"}:
             raise ValueError("Progress scope must be item, order, or list")
-        if target not in {"staging", "outbound", "indian_trail", "complete"}:
-            raise ValueError("Choose Staging, Outbound, Indian Trail, or Complete")
+        if not production_target and target not in scanner_targets:
+            raise ValueError("Choose Cutting, a fabrication machine, Staging, Outbound, Indian Trail, or Complete")
+        if production_target and scope != "item":
+            raise ValueError("Cutting and fabrication progress can be advanced one item at a time")
+
+        def canonical_machine_code(value: Any) -> str:
+            raw = str(value or "").strip().lower()
+            compact = re.sub(r"[^a-z0-9]+", "", raw)
+            if compact in {"wj", "waterjet"}:
+                return "waterjet"
+            if compact in {"denver", "denvercnc"}:
+                return "denver"
+            return re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-")[:40]
+
+        machine_target = canonical_machine_code(machine_target)
+        if machine_target:
+            active_codes = {
+                canonical_machine_code(row.get("code") or row.get("name"))
+                for row in self.get_machine_configuration().get("machines", [])
+                if isinstance(row, dict) and row.get("active") is not False
+            }
+            if machine_target not in active_codes:
+                raise ValueError("Choose an active production machine")
+
         line_item_id = str(data.get("lineItemId") or "").strip()
         requested_date = str(data.get("deliveryDate") or "").strip()
         actor = str(user or "").strip()
         changed_at = now_iso()
         stage_rank = {"staged": 10, "outbound": 20, "received": 30, "pickup": 30, "greenville": 30, "dtc": 30}
-        target_rank = {"staging": 10, "outbound": 20, "indian_trail": 30, "complete": 999}[target]
+        target_rank = {"staging": 10, "outbound": 20, "indian_trail": 30, "complete": 999}.get(target, -1)
 
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -20206,17 +20269,113 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ).fetchall()
             if not rows:
                 raise ValueError("No active delivery-list items matched this progress change")
-            changed_ids: list[str] = []
+
+            # Current A+W generation/reject facts bind a manual production
+            # override to this physical lifecycle. A newer generation, changed
+            # Job, remake state, or later reject causes normal status resolution
+            # to ignore the override automatically.
+            physical: dict[tuple[str, str], dict[str, Any]] = {}
             for row in rows:
-                category = scan_stage_category(row["stage"], row["scanner"])
-                if target != "complete" and stage_rank.get(category, 999) > target_rank:
-                    continue
-                before = max(int(row["scanned_qty"] or 0), 0)
-                qty = max(int(row["qty"] or 0), 0)
-                if before >= qty:
-                    continue
-                con.execute("UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id=?", (changed_at, row["id"]))
-                changed_ids.append(str(row["id"]))
+                order_no = str(row_value(row, "order_no", "") or "").strip()
+                item_no = str(row_value(row, "item_no", "") or "").strip()
+                normalized_item = item_no.zfill(3) if item_no.isdigit() else item_no
+                facts = physical.setdefault((order_no, normalized_item), {
+                    "order": order_no,
+                    "item": normalized_item,
+                    "job": "",
+                    "lastRejectedAt": "",
+                    "remake": False,
+                })
+                job = str(row_value(row, "job", "") or "").strip()
+                if job and not facts["job"]:
+                    facts["job"] = job
+                rejected = str(row_value(row, "last_rejected_at", "") or "").strip()
+                if self._aw_cutting_timestamp_epoch(rejected) > self._aw_cutting_timestamp_epoch(facts["lastRejectedAt"]):
+                    facts["lastRejectedAt"] = rejected
+                facts["remake"] = bool(facts["remake"] or is_remake_item({
+                    "processState": row_value(row, "process_state", ""),
+                    "queueState": row_value(row, "queue_state", ""),
+                }))
+
+            orders = sorted({key[0] for key in physical if key[0]})
+            cutting_rows: list[Any] = []
+            if orders:
+                placeholders = ",".join("?" for _ in orders)
+                cutting_rows = con.execute(
+                    f"""SELECT * FROM aw_cutting_generations
+                        WHERE order_no IN ({placeholders})
+                        ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC""",
+                    tuple(orders),
+                ).fetchall()
+            cutting_grouped: dict[tuple[str, str], list[Any]] = {}
+            for cutting_row in cutting_rows:
+                key_order = str(row_value(cutting_row, "order_no", "") or "").strip()
+                key_item = str(row_value(cutting_row, "item_no", "") or "").strip()
+                if key_item.isdigit():
+                    key_item = key_item.zfill(3)
+                cutting_grouped.setdefault((key_order, key_item), []).append(cutting_row)
+
+            existing_overrides = {
+                (str(row_value(row, "order_no", "") or ""), str(row_value(row, "item_no", "") or "")): row
+                for row in con.execute(
+                    "SELECT * FROM manual_production_progress_overrides WHERE delivery_date=?",
+                    (delivery_date,),
+                ).fetchall()
+            }
+            production_override_count = 0
+            if production_target or target in scanner_targets - {"complete"}:
+                requested_machine = canonical_machine_code(data.get("machineCode") or "")
+                for key, facts in physical.items():
+                    if scope == "item" and anchor is not None:
+                        anchor_order = str(row_value(anchor, "order_no", "") or "").strip()
+                        anchor_item = str(row_value(anchor, "item_no", "") or "").strip()
+                        if anchor_item.isdigit():
+                            anchor_item = anchor_item.zfill(3)
+                        if key != (anchor_order, anchor_item):
+                            continue
+                    current_cutting = self.aw_cutting_state(
+                        facts["order"], facts["item"], facts["lastRejectedAt"], cutting_grouped.get(key, []),
+                    )
+                    existing = existing_overrides.get(key)
+                    existing_cut = bool(int(row_value(existing, "cutting_complete", 0) or 0)) if existing else False
+                    existing_machine = canonical_machine_code(row_value(existing, "machine_code", "")) if existing else ""
+                    existing_machine_done = bool(int(row_value(existing, "machine_complete", 0) or 0)) if existing else False
+                    next_machine = machine_target or requested_machine or existing_machine
+                    next_machine_done = existing_machine_done or bool(machine_target) or bool(requested_machine and target in scanner_targets)
+                    next_cut_done = existing_cut or production_target or target in scanner_targets
+                    con.execute(
+                        """INSERT INTO manual_production_progress_overrides
+                           (delivery_date, order_no, item_no, job, remake_marker, cutting_complete,
+                            machine_code, machine_complete, cutting_key_index, reject_cutoff, updated_by, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(delivery_date, order_no, item_no) DO UPDATE SET
+                             job=excluded.job, remake_marker=excluded.remake_marker,
+                             cutting_complete=CASE WHEN manual_production_progress_overrides.cutting_complete=1 OR excluded.cutting_complete=1 THEN 1 ELSE 0 END,
+                             machine_code=CASE WHEN excluded.machine_code<>'' THEN excluded.machine_code ELSE manual_production_progress_overrides.machine_code END,
+                             machine_complete=CASE WHEN manual_production_progress_overrides.machine_complete=1 OR excluded.machine_complete=1 THEN 1 ELSE 0 END,
+                             cutting_key_index=excluded.cutting_key_index,
+                             reject_cutoff=excluded.reject_cutoff,
+                             updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                        (
+                            delivery_date, facts["order"], facts["item"], facts["job"], 1 if facts["remake"] else 0,
+                            1 if next_cut_done else 0, next_machine, 1 if next_machine_done else 0,
+                            int(current_cutting.get("keyIndex") or 0), facts["lastRejectedAt"], actor, changed_at,
+                        ),
+                    )
+                    production_override_count += 1
+
+            changed_ids: list[str] = []
+            if target in scanner_targets:
+                for row in rows:
+                    category = scan_stage_category(row["stage"], row["scanner"])
+                    if target != "complete" and stage_rank.get(category, 999) > target_rank:
+                        continue
+                    before = max(int(row["scanned_qty"] or 0), 0)
+                    qty = max(int(row["qty"] or 0), 0)
+                    if before >= qty:
+                        continue
+                    con.execute("UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id=?", (changed_at, row["id"]))
+                    changed_ids.append(str(row["id"]))
 
             location_ids = [str(row["id"]) for row in rows] if target == "complete" else []
             rack_ids: list[int] = []
@@ -20240,13 +20399,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             self.insert_audit(con, "delivery_progress", reference, "manual_progress_advance", actor, "", "", {
                 "scope": scope, "target": target, "deliveryDate": delivery_date,
                 "changedLineItemCount": len(changed_ids), "matchedLineItemCount": len(rows),
+                "manualProductionOverrideCount": production_override_count,
+                "machineCode": machine_target or str(data.get("machineCode") or ""),
                 "locationsCleared": bool(location_ids),
             })
             con.commit()
+
+        label = machine_target.replace("-", " ").title() if machine_target else target.replace("_", " ").title()
         return {
             "ok": True, "scope": scope, "target": target, "deliveryDate": delivery_date,
             "changedLineItemCount": len(changed_ids), "matchedLineItemCount": len(rows),
-            "message": f"Advanced {scope} progress to {target.replace('_', ' ').title()}.",
+            "manualProductionOverrideCount": production_override_count,
+            "message": f"Advanced {scope} progress to {label}.",
         }
 
     def update_line_item_location(self, con: sqlite3.Connection, row: sqlite3.Row, location: str, user: str) -> None:
@@ -25385,6 +25549,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 }
             )
             results.append(item)
+        results = self.attach_cutting_search_states_v513(results)
         return {
             "results": results,
             "total": total,
@@ -27949,7 +28114,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "id": int(row_value(row, "id", 0) or 0), "expectedItemId": int(row_value(row, "expected_item_id", 0) or 0),
             "sourceLineItemId": str(row_value(row, "source_line_item_id") or ""), "barcode": str(row_value(row, "barcode") or ""),
             "entryType": str(row_value(row, "entry_type") or "scan"), "scannedAt": str(row_value(row, "scanned_at") or ""),
-            "scannedBy": str(row_value(row, "scanned_by") or ""), "jobNr": str(row_value(row, "job_no") or ""),
+            "scannedBy": str(row_value(row, "scanned_by") or ""), "deliveryDate": str(row_value(row, "delivery_date") or ""), "jobNr": str(row_value(row, "job_no") or ""),
             "customer": str(row_value(row, "customer") or ""), "order": str(row_value(row, "order_no") or ""),
             "item": str(row_value(row, "item_no") or ""), "glassType": str(row_value(row, "glass_type") or ""),
             "itemId": str(row_value(row, "item_id") or ""), "dimensions": str(row_value(row, "dimensions") or ""),
@@ -27977,7 +28142,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 matched_scan_ids.add(int(physical["id"]))
                 differences = []
                 comparisons = (
-                    ("jobNr", "Job Nr."), ("customer", "Customer"), ("qty", "Quantity"),
+                    ("deliveryDate", "Delivery date"), ("jobNr", "Job Nr."), ("customer", "Customer"), ("qty", "Quantity"),
                     ("glassType", "Glass type"), ("itemId", "Item ID"), ("dimensions", "Size"),
                     ("sqftEach", "SQFT"),
                 )
@@ -28215,7 +28380,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
         return {
             "found": True, "sourceLineItemId": str(row_value(row, "id") or ""), "barcode": str(row_value(row, "barcode") or ""),
-            "jobNr": str(row_value(row, "job") or ""), "customer": str(row_value(row, "customer") or ""),
+            "jobNr": str(row_value(row, "job") or ""), "deliveryDate": str(row_value(row, "delivery_date") or ""), "customer": str(row_value(row, "customer") or ""),
             "order": str(row_value(row, "order_no") or ""), "item": self._inventory_clean_item_no(row_value(row, "item_no")),
             "glassType": str(mapping.get("glassLabel") or canonical_clear_glass_label(row_value(row, "product")) or row_value(row, "product") or ""),
             "itemId": str(mapping.get("itemId") or ""), "dimensions": dimensions, "sqftEach": sqft_each,
@@ -28268,8 +28433,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
                 mapping = self._inventory_item_mapping(con, row_value(matched, "product"))
                 qty = max(int(row_value(matched, "qty", 1) or 1), 1)
+                matched_list = con.execute("SELECT delivery_date FROM delivery_lists WHERE id=?", (str(row_value(matched, "list_id") or ""),)).fetchone()
                 fields = {
-                    "jobNr": str(row_value(matched, "job") or ""), "customer": str(row_value(matched, "customer") or ""),
+                    "jobNr": str(row_value(matched, "job") or ""), "deliveryDate": str(row_value(matched_list, "delivery_date") or ""), "customer": str(row_value(matched, "customer") or ""),
                     "order": str(row_value(matched, "order_no") or ""), "item": self._inventory_clean_item_no(row_value(matched, "item_no")),
                     "glassType": str(mapping.get("glassLabel") or canonical_clear_glass_label(row_value(matched, "product")) or row_value(matched, "product") or ""),
                     "itemId": str(mapping.get("itemId") or ""), "dimensions": dimensions, "sqftEach": sqft_each,
@@ -28280,11 +28446,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """
                 INSERT INTO inventory_scans
                     (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
-                     job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft)
-                VALUES (?, ?, ?, ?, 'scan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft)
+                VALUES (?, ?, ?, ?, 'scan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, str(row_value(matched, "id") or ""), canonical or scan_text,
-                 now, actor, fields.get("jobNr", ""), fields.get("customer", ""), fields.get("order", ""), fields.get("item", ""),
+                 now, actor, fields.get("deliveryDate", ""), fields.get("jobNr", ""), fields.get("customer", ""), fields.get("order", ""), fields.get("item", ""),
                  fields.get("glassType", ""), fields.get("itemId", ""), fields.get("dimensions", ""), fields.get("sqftEach", 0), qty, total_sqft),
             )
             scan_id = int(cursor.lastrowid)
@@ -28331,6 +28497,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return str(smart.get(smart_field or field) or "") if smart.get("found") else ""
 
             job_no = choose("jobNr")
+            delivery_date = choose("deliveryDate")
             customer = choose("customer")
             order_no = choose("order")
             item_no = self._inventory_clean_item_no(choose("item"))
@@ -28360,12 +28527,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """
                 INSERT INTO inventory_scans
                     (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
-                     job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft,
+                     delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft,
                      notes, manual_fields_json)
-                VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, source_line_item_id,
-                 str(data.get("barcode") or "").strip(), now, actor, job_no, customer, order_no, item_no,
+                 str(data.get("barcode") or "").strip(), now, actor, delivery_date, job_no, customer, order_no, item_no,
                  glass_type, item_id, dimensions, sqft_each, qty, total_sqft, str(data.get("notes") or "").strip(),
                  json.dumps(manual_fields, separators=(",", ":"), default=str)),
             )
@@ -28549,17 +28716,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             summary_rows.append([item["glassType"], item["itemId"], item["expectedQty"], item["scannedQty"], item["varianceQty"],
                                  item["expectedSqft"], item["scannedSqft"], item["varianceSqft"]])
 
-        physical_rows = [["Scanned Date/Time", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
+        physical_rows = [["Scanned Date/Time", "Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
         for item in reversed(detail["scans"]):
-            physical_rows.append([item["scannedAt"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
+            physical_rows.append([item["scannedAt"], item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
                                   item["dimensions"], item["sqftEach"], item["qty"], item["totalSqft"], item["entryType"].title(), item["scannedBy"], item["notes"]])
 
-        system_rows = [["Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Route", "Bay", "Reason"]]
+        system_rows = [["Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Route", "Bay", "Reason"]]
         for item in detail["expectedItems"]:
-            system_rows.append([item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"], item["dimensions"],
+            system_rows.append([item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"], item["dimensions"],
                                 item["sqftEach"], item["qty"], item["totalSqft"], item["route"], item["bayCode"], item["sourceReason"]])
 
-        reconcile_rows = [["Result", "System Job", "Physical Job", "System Customer", "Physical Customer", "System Order", "Physical Order", "System Item", "Physical Item",
+        reconcile_rows = [["Result", "System DD", "Physical DD", "System Job", "Physical Job", "System Customer", "Physical Customer", "System Order", "Physical Order", "System Item", "Physical Item",
                            "System Glass", "Physical Glass", "System Item ID", "Physical Item ID", "System Size", "Physical Size", "System SQFT", "Physical SQFT",
                            "System Qty", "Physical Qty", "System Total SQFT", "Physical Total SQFT", "Difference"]]
         labels = {"matched": "MATCH", "mismatch": "MISMATCH", "missing_physical": "MISSING PHYSICAL", "not_in_system": "NOT IN SYSTEM"}
@@ -28567,7 +28734,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             system_item = row.get("system") or {}
             physical = row.get("physical") or {}
             reconcile_rows.append([
-                labels.get(row["status"], row["status"].upper()), system_item.get("jobNr", ""), physical.get("jobNr", ""),
+                labels.get(row["status"], row["status"].upper()), system_item.get("deliveryDate", ""), physical.get("deliveryDate", ""), system_item.get("jobNr", ""), physical.get("jobNr", ""),
                 system_item.get("customer", ""), physical.get("customer", ""), system_item.get("order", ""), physical.get("order", ""),
                 system_item.get("item", ""), physical.get("item", ""), system_item.get("glassType", ""), physical.get("glassType", ""),
                 system_item.get("itemId", ""), physical.get("itemId", ""), system_item.get("dimensions", ""), physical.get("dimensions", ""),

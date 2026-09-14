@@ -5239,3 +5239,89 @@ body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_shar
   .production-item-actions-v521 .production-fab-memory-v522 { width: 100%; margin-left: 0; }
   .production-item-actions-v521 .is-check-fab-v527 { margin-left: auto !important; }
 }
+
+/* ========================================================================== */
+/* v0.529 adaptive shared close controls + shared loading bar                 */
+/* ========================================================================== */
+/* Standard/full GUIs retain the 49px close control.  Utility and medium
+   surfaces opt into the compact variants through their existing container. */
+body :is(
+  .inventory-manual-modal,
+  .lookup-editor-surface-v470,
+  .action-confirm-dialog,
+  .action-prompt-dialog,
+  .user-deactivate-dialog,
+  .rack-destination-dialog,
+  .rack-transfer-dialog,
+  .outbound-override-dialog,
+  .production-email-preview-v506,
+  .sheet-usage-settings-modal-v527,
+  .cutting-label-preview-modal-v502
+) button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  --shared-close-size: 38px;
+  --shared-close-icon-size: 16px;
+  border-radius: 9px !important;
+}
+body :is(.notification-center, .notification-center-panel, .line-update-review-prompt, .automation-update-toast) button.gui-close-button:is(#_sharedCloseA, *):is(#_sharedCloseB, *):is(#_sharedCloseC, *) {
+  --shared-close-size: 30px;
+  --shared-close-icon-size: 14px;
+  border-radius: 8px !important;
+}
+
+.app-loading-state-v529 {
+  --loading-accent-v529:#2378b8;
+  display:grid;
+  gap:10px;
+  width:100%;
+  min-width:0;
+  padding:16px 18px;
+  border:1px solid #d7e3ed;
+  border-radius:10px;
+  background:linear-gradient(180deg,#fff,#f5f9fc);
+  color:#4f6b82;
+  font-size:12px;
+  font-weight:800;
+}
+.app-loading-state-v529 > strong {
+  color:#173f68;
+  font-size:13px;
+  font-weight:900;
+  line-height:1.2;
+}
+.app-loading-state-v529 > small {
+  color:#627d93;
+  font-size:10.5px;
+  font-weight:700;
+  line-height:1.35;
+}
+.app-loading-state-v529.is-compact-v529 {
+  padding:10px 12px;
+  gap:7px;
+}
+.app-loading-bar-v529 {
+  position:relative;
+  height:7px;
+  overflow:hidden;
+  border-radius:999px;
+  background:#dfeaf2;
+  box-shadow:inset 0 1px 2px rgba(22,61,89,.09);
+}
+.app-loading-bar-v529::after {
+  content:"";
+  position:absolute;
+  inset:0 auto 0 -38%;
+  width:38%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--loading-accent-v529) 88%,white),transparent);
+  animation:app-loading-sweep-v529 1.05s ease-in-out infinite;
+}
+@keyframes app-loading-sweep-v529 { to { left:100%; } }
+@media (prefers-reduced-motion:reduce){.app-loading-bar-v529::after{animation:none;left:31%;background:var(--loading-accent-v529)}}
+
+/* Override the legacy <=1740px two-column placement once the current compact
+   sketch and label widths leave enough room for Progress/A+W beside them. */
+@media (min-width:1181px) {
+  .production-order-item-v476.production-order-item-v480.production-order-item-v481.production-order-item-v512.production-order-item-v518 .production-item-main-v519 {
+    grid-column:3 !important;
+  }
+}

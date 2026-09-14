@@ -10046,3 +10046,57 @@
   border: 1px solid rgb(255 255 255 / 80%);
   box-shadow: 0 0 0 2px rgb(255 255 255 / 15%) !important;
 }
+
+/* ========================================================================== */
+/* v0.529 Print / Export filter normalization                                 */
+/* ========================================================================== */
+.print-route-section-v203 .print-filter-chip-v197,
+.print-status-section-v203 .print-filter-chip-v197,
+.print-attention-section-v203 .print-filter-chip-v197,
+.print-machine-section-v520 .print-filter-chip-v197 {
+  min-height: 34px !important;
+  height: 34px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 7px !important;
+  padding: 0 9px !important;
+}
+.print-route-section-v203 .print-filter-chip-v197 > span,
+.print-status-section-v203 .print-filter-chip-v197 > span,
+.print-attention-section-v203 .print-filter-chip-v197 > span,
+.print-machine-section-v520 .print-filter-chip-v197 > span {
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  line-height: 1.05 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.print-route-section-v203 .print-filter-chip-v197 > b,
+.print-status-section-v203 .print-filter-chip-v197 > b,
+.print-attention-section-v203 .print-filter-chip-v197 > b,
+.print-machine-section-v520 .print-filter-chip-v197 > b {
+  margin: 0 0 0 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  line-height: 1 !important;
+  align-self: center !important;
+}
+.print-machine-section-v520 .print-filter-chip-v197.is-machine-choice-v521::before {
+  width: 9px !important;
+  height: 9px !important;
+  flex-basis: 9px !important;
+}
+.print-route-section-v203 .print-filter-chip-v197 > b,
+.print-status-section-v203 .print-filter-chip-v197 > b,
+.print-attention-section-v203 .print-filter-chip-v197 > b,
+.print-machine-section-v520 .print-filter-chip-v197 > b {
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+}

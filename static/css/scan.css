@@ -7598,7 +7598,7 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   color: #fff !important;
 }
 .internal-reject-incident-strip-v154 {
-  min-height: 29px !important;
+  min-height: 31px !important;
   grid-template-columns: auto auto minmax(82px,1.3fr) minmax(92px,1.1fr) auto minmax(82px,.85fr) minmax(112px,1.05fr) !important;
   gap: 6px !important;
   overflow: visible !important;
@@ -7619,13 +7619,13 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   height: 21px !important;
   padding: 0 5px;
   border-radius: 5px !important;
-  font-size: 7.5px !important;
+  font-size: 8.5px !important;
 }
 .internal-reject-incident-badge-v154.is-new-v527 { background: #f7e6b3 !important; color: #583e13 !important; border-color: #f1d887 !important; }
 .internal-reject-incident-badge-v154.is-history-v527 { background: rgb(255 255 255 / 10%) !important; }
-.internal-reject-incident-title-v154 { font-size: 9px !important; letter-spacing: .02em !important; }
-.internal-reject-incident-strip-v154 small { color: #e9dadd !important; font-size: 6.8px !important; }
-.internal-reject-incident-strip-v154 b { font-size: 9px !important; line-height: 1.05 !important; }
+.internal-reject-incident-title-v154 { font-size: 10px !important; letter-spacing: .015em !important; }
+.internal-reject-incident-strip-v154 small { color: #eadde0 !important; font-size: 7.8px !important; line-height: 1 !important; }
+.internal-reject-incident-strip-v154 b { font-size: 9.6px !important; line-height: 1.08 !important; }
 
 .scan-filter-machine-section-v512 .scan-machine-filter-v521::before { display: none !important; content: none !important; }
 .scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active,
@@ -7642,3 +7642,209 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 }
 .scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active span,
 .scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] span { color: #fff !important; }
+
+/* v0.528: keep the one-row reject ribbon compact without shrinking
+   incident metadata below the surrounding Scan UI's practical reading size. */
+
+/* ========================================================================== */
+/* v0.529 priority rows, reject review, filters, and Scan geometry             */
+/* ========================================================================== */
+/* Priority color belongs to the logical row, not to every table cell.  Keep
+   cell backgrounds transparent so the gradient reads once from left to right
+   and normal column borders do not turn into a dark grid. */
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 {
+  --priority-wash-v529: #b42336;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--priority-wash-v529) 86%, #111827) 0%,
+    color-mix(in srgb, var(--priority-wash-v529) 64%, #ffffff) 20%,
+    color-mix(in srgb, var(--priority-wash-v529) 22%, #ffffff) 48%,
+    rgba(255,255,255,.82) 72%,
+    #fff 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-priority-rush-v480 { --priority-wash-v529: #b42336; }
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 { --priority-wash-v529: #23272d; }
+.scan-page .delivery-table .scan-order-item-v477.is-priority-both-v480 { --priority-wash-v529: #532832; }
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 > td,
+.scan-page .delivery-table .scan-order-item-v477.is-priority-both-v480 > td {
+  background: transparent !important;
+  color: #123b63 !important;
+  border-top-color: #d8e2ea !important;
+  border-bottom-color: #d8e2ea !important;
+  border-left-color: #e4ebf1 !important;
+  border-right-color: #e4ebf1 !important;
+}
+/* Older nth-child rules painted each cell separately and outranked the row
+   rule above. Match that specificity so Rush and Remake render as one wash. */
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(n) {
+  background: transparent !important;
+  background-image: none !important;
+  border-left-color: transparent !important;
+  border-right-color: transparent !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:first-child {
+  border-left-color: #d8e2ea !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:last-child {
+  border-right-color: #d8e2ea !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:first-child {
+  color: #fff !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:first-child :is(strong,b,.scan-glass-type-copy-v484) {
+  color: #fff !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.22);
+}
+/* Mid/right columns stay high-contrast even where the priority wash is dark. */
+.scan-page .delivery-table .scan-order-item-v477.has-priority-rail-v482 > td:nth-child(n+2) :is(strong,b,.scan-glass-type-copy-v484) {
+  color: #123b63 !important;
+  text-shadow: none !important;
+}
+.scan-page .delivery-table .scan-priority-rail-v481 > b {
+  font-size: 9.4px !important;
+  line-height: 1 !important;
+  letter-spacing: .065em !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.22);
+}
+.scan-page .delivery-table .scan-priority-rail-v481.is-both > b {
+  font-size: 7.3px !important;
+  letter-spacing: .035em !important;
+}
+
+/* Internal Reject is a compact red incident band that visually fades into the
+   physical line directly below it.  NEW is represented only by the yellow badge. */
+.internal-reject-incident-strip-v154 {
+  min-height: 31px !important;
+  border-color: #aa2d45 !important;
+  border-bottom-color: rgba(170,45,69,.46) !important;
+  border-radius: 7px 7px 0 0 !important;
+  background: linear-gradient(100deg, #821e35 0%, #982d45 50%, #ad4054 100%) !important;
+  box-shadow: 0 2px 5px rgb(112 20 40 / 14%) !important;
+  margin-bottom: -1px !important;
+}
+.internal-reject-incident-strip-v154::after {
+  inset: auto 0 -12px !important;
+  height: 13px !important;
+  background: linear-gradient(to bottom, rgba(170,45,69,.27), rgba(170,45,69,.09) 55%, transparent) !important;
+  z-index: 4;
+}
+.internal-reject-incident-badge-v154.is-new-v527 {
+  background: #fff0ad !important;
+  border-color: #e9cb55 !important;
+  color: #5c4300 !important;
+}
+.internal-reject-incident-title-v154 { color:#fff !important; }
+.internal-reject-incident-strip-v154 small { color:#f5dfe4 !important; }
+.internal-reject-incident-strip-v154 b { color:#fff !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject:not(.has-priority-rail-v482) > td {
+  border-top-color: rgba(151,50,67,.34) !important;
+  background-image: linear-gradient(180deg, rgba(151,50,67,.095) 0, rgba(151,50,67,.025) 12px, transparent 28px) !important;
+}
+
+/* Unreviewed Internal Reject date markers are intentionally red and distinct
+   from blue New/Updated order markers. */
+.custom-select-value-indicator.is-reject,
+.custom-select-option-indicator.is-reject {
+  border: 1px solid #dc8793 !important;
+  background: #fff0f2 !important;
+  color: #a71931 !important;
+  box-shadow: 0 0 0 3px rgba(183,35,58,.11) !important;
+}
+
+/* Route and Machine choices use the exact Status-filter geometry: one flat
+   button surface with plain label + count.  Machine color remains one dot. */
+.scan-page .scan-filter-options .route-filter-tab,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521 {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 7px !important;
+  min-height: 36px !important;
+  padding: 0 11px !important;
+}
+.scan-page .scan-filter-options .route-filter-tab > span:first-child,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521 > span {
+  display: inline !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  opacity: 1 !important;
+  font: inherit !important;
+}
+.scan-page .scan-filter-options .route-filter-tab > span[id^="count"],
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521 > b {
+  margin-left: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  opacity: .82 !important;
+}
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521 > i {
+  width: 9px !important;
+  min-width: 9px !important;
+  height: 9px !important;
+  flex: 0 0 9px !important;
+}
+.scan-page .scan-filter-options .route-filter-tab.is-active,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] {
+  border-color: #135cff !important;
+  background: linear-gradient(180deg, #1b68ff, #0d4bd2) !important;
+  color: #fff !important;
+  box-shadow: 0 7px 15px rgba(19,92,255,.20) !important;
+}
+.scan-page .scan-filter-options .route-filter-tab.is-active > span,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active > span,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521.is-active > b,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] > span,
+.scan-page .scan-filter-machine-section-v512 .scan-machine-filter-v521[data-active="true"] > b {
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+
+/* Rebalance desktop columns: Location only needs enough room for the maintained
+   current location labels; Progress owns the recovered width. */
+@media (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 11.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 31.5% !important; }
+  .scan-page .scan-date-wide-progress-v485 > span,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+    width: 119px !important;
+    min-width: 119px !important;
+    flex-basis: 119px !important;
+  }
+  .scan-page .scan-progress-flow-line-v485 > i {
+    width: 18px !important;
+    flex-basis: 18px !important;
+    font-size: 20px !important;
+    font-weight: 950 !important;
+  }
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 12.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 30% !important; }
+  .scan-page .scan-date-wide-progress-v485 > span,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-progress-step-v485,
+  .scan-page .scan-date-wide-progress-v485 > .scan-date-wide-fabrication-v511 {
+    width: 112px !important;
+    min-width: 112px !important;
+    flex-basis: 112px !important;
+  }
+}
+
+/* One cheap page-enter transition; inner rows are not animated, so normal
+   filtering/date repaints remain unaffected. */
+.scan-page:not([hidden]) { animation: scan-page-enter-v529 150ms ease-out both; }
+@keyframes scan-page-enter-v529 { from { opacity:.2; transform:translateY(3px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { .scan-page:not([hidden]) { animation:none !important; } }

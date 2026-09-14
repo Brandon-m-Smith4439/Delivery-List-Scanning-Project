@@ -2480,7 +2480,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/reports/sheet-usage-settings":
-            if not self.require_permission("view_reports"):
+            if not self.require_any_permission("view_reports", "manage_lookup_values"):
                 return
             self.send_json(STORE.get_sheet_usage_settings())
             return
@@ -3039,6 +3039,21 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"]))
                 return
 
+            if parsed.path == "/api/operations/internal-rejects/acknowledge":
+                user = self.require_permission("view_delivery_lists")
+                if not user:
+                    return
+                list_id = str(data.get("listId") or "").strip()
+                if not list_id:
+                    self.send_json({"error": "listId is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if not STORE.user_can_access_list(user, list_id):
+                    self.send_json({"error": "Permission denied for this delivery list"}, HTTPStatus.FORBIDDEN)
+                    return
+                reject_ids = data.get("rejectIds") if isinstance(data.get("rejectIds"), list) else []
+                self.send_json(OPERATIONS.acknowledge_internal_rejects(list_id, reject_ids, user["username"]))
+                return
+
             if parsed.path == "/api/operations/line-flags/batch":
                 user = self.require_permission("view_delivery_lists")
                 if not user:
@@ -3205,12 +3220,52 @@ class Handler(SimpleHTTPRequestHandler):
                         continue
                     evidence_after = str(row.get("lastRejectedAt") or "").strip() or STORE.latest_internal_reject_at(order, item)
                     request_key = str(row.get("key") or f"{order}:{item}:{job}")
-                    status = service.fabrication_status(
-                        order, item, job, allow_content_read=True, evidence_after=evidence_after,
-                        label_hint=label_hints.get(request_key),
-                        force_check=force_check,
-                    )
                     cutting = dict(label_hints.get(request_key) or {})
+                    if cutting.get("manualMachineComplete") is True and not force_check:
+                        machine_code = str(cutting.get("manualMachineCode") or "").strip().lower()
+                        machine_row = next(
+                            (entry for entry in service.settings_snapshot().get("machines", []) if str(entry.get("code") or "").strip().lower() == machine_code),
+                            {},
+                        )
+                        machine_name = str(machine_row.get("name") or machine_code.replace("-", " ").title() or "Fabrication")
+                        checked_at = str(cutting.get("manualProgressUpdatedAt") or "")
+                        status = {
+                            "checkedAt": checked_at,
+                            "remembered": True,
+                            "machine": machine_name,
+                            "machineCode": machine_code,
+                            "assignedMachine": machine_name,
+                            "assignedMachineCode": machine_code,
+                            "actualMachine": machine_name,
+                            "actualMachineCode": machine_code,
+                            "machineOverride": False,
+                            "machineConfidence": "manual",
+                            "machineSource": "manual_progress_override",
+                            "machineAssignmentReason": "Completed manually in Edit Delivery Lists",
+                            "required": True,
+                            "enforceable": True,
+                            "fabricated": True,
+                            "blockStaging": False,
+                            "label": f"Fabricated - {machine_name}",
+                            "evidence": None,
+                            "availability": service.availability(),
+                            "programs": [],
+                            "completedWaterjet": [],
+                            "evidenceAfter": evidence_after,
+                            "evidenceResetRequired": bool(evidence_after),
+                            "lifecycleRevision": str(cutting.get("lifecycleRevision") or ""),
+                            "identityTokens": [order, job],
+                            "staleEvidence": None,
+                            "retryAfterSeconds": 0,
+                            "manualProgressOverride": True,
+                            "manualProgressUpdatedBy": str(cutting.get("manualProgressUpdatedBy") or ""),
+                        }
+                    else:
+                        status = service.fabrication_status(
+                            order, item, job, allow_content_read=True, evidence_after=evidence_after,
+                            label_hint=cutting,
+                            force_check=force_check,
+                        )
                     cutting.pop("lifecycleRevision", None)
                     if status.get("fabricated") is True and not cutting.get("complete"):
                         # Verified downstream fabrication also proves that this

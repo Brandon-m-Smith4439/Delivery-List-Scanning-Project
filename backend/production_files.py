@@ -147,6 +147,17 @@ class ProductionFileService:
             self._background_refresh_enabled = False
         self._load_persisted_index()
 
+    @staticmethod
+    def _canonical_machine_code_v529(value: Any) -> str:
+        """Normalize maintained machine aliases onto stable evidence-backed codes."""
+        raw = str(value or "").strip().lower()
+        compact = re.sub(r"[^a-z0-9]+", "", raw)
+        if compact in {"wj", "waterjet"}:
+            return "waterjet"
+        if compact in {"denver", "denvercnc"}:
+            return "denver"
+        return re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-")[:40]
+
     def configure(self, settings: dict[str, Any] | None) -> None:
         """Apply persisted Admin settings without exposing storage details to callers."""
         values = settings or {}
@@ -165,13 +176,13 @@ class ProductionFileService:
         terms = values.get("machineTerms") if isinstance(values.get("machineTerms"), dict) else {}
         colors = values.get("machineColors") if isinstance(values.get("machineColors"), dict) else {}
         raw_machines = values.get("machines") if isinstance(values.get("machines"), list) else []
-        current_by_code = {str(row.get("code") or "").strip().lower(): dict(row) for row in self.machine_definitions}
+        current_by_code = {self._canonical_machine_code_v529(row.get("code") or row.get("name")): dict(row) for row in self.machine_definitions}
         next_machines: list[dict[str, Any]] = []
         if raw_machines:
             for raw in raw_machines:
                 if not isinstance(raw, dict):
                     continue
-                code = re.sub(r"[^a-z0-9_-]+", "-", str(raw.get("code") or "").strip().lower()).strip("-")
+                code = self._canonical_machine_code_v529(raw.get("code") or raw.get("name"))
                 if not code:
                     continue
                 previous = current_by_code.get(code, {})
@@ -1223,14 +1234,15 @@ class ProductionFileService:
         token = str(code_or_name or "").strip().casefold()
         if not token:
             return None
+        canonical = self._canonical_machine_code_v529(token)
         for row in self.machine_definitions:
-            code = str(row.get("code") or "").strip().casefold()
+            code = self._canonical_machine_code_v529(row.get("code") or row.get("name"))
             name = str(row.get("name") or "").strip().casefold()
-            if token in {code, name}:
+            if canonical == code or token == name:
                 return row
             if code == "denver" and token in {"denver cnc", "denver"}:
                 return row
-            if code == "waterjet" and token in {"waterjet", "water jet", "wj"}:
+            if code == "waterjet" and token in {"waterjet", "water jet", "water-jet", "water_jet", "wj"}:
                 return row
         return None
 

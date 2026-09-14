@@ -1,3 +1,45 @@
+## v0.529 - Internal Reject Review, Production Progress Memory, and UI Completion
+
+- Added schema 21 with per-user Internal Reject review receipts, lifecycle-bound manual Cutting/fabrication overrides, and Inventory scan delivery dates.
+- Added the Internal Reject review card, Mark Reviewed action, and red delivery-date indicator; a later reject event automatically becomes unreviewed again.
+- Retained cut/fabricated progress until an actual reject/remake lifecycle change, with explicit Manual Edit progression through active machines and every scanner checkpoint.
+- Kept Denver and Waterjet active because both own maintained completion-evidence integrations, while preserving their configurable names, terms, colors, and positions.
+- Fixed Remake and Rush rows to render one continuous charcoal/red gradient without per-cell pink fills or dark column borders.
+- Made Internal Reject ribbons redder, removed duplicate NEW/IR markers, and blended the compact incident ribbon into its item row.
+- Normalized Scan route/machine filters and Print/Export filter chips, including one-line labels and aligned counts.
+- Added delivery date to Inventory manual entry, persistence, tables, reconciliation, and export data.
+- Added glass-profile stock sheet size and recipient settings to Lookup Manager and retained the stock-sheet usage statistic/email configuration.
+- Normalized Lookup machine rows and all Lookup editor Save buttons, compacted adaptive close controls, and simplified Edit Delivery Lists to one current-to-next progress display.
+- Added the shared animated loading bar across update, statistics, inventory, Order Details, Print/Export, delivery-list, Settings, history, and reject loading surfaces.
+- Retained responsive Order Details sketch/label fitting and visible maximize controls, the lightweight Scan page transition, and deeper click-guided tutorials.
+- Corrected a legacy workstation-width rule that placed Progress/A+W below the sketch and Cutting Label; the complete item now keeps all three columns aligned above 1180px.
+- Advanced changed frontend cache keys and application version to v0.529.
+
+### Validation
+- Complete maintained suite: **332/332 tests passed**; JavaScript syntax and all 18 Python source parses passed.
+- Isolated schema-21 database: integrity OK, 0 foreign-key violations, and 2.68-second repeat initialization.
+- Isolated Chromium: cached 50-row date return in 49.1ms with 0 fabrication calls or visible Checking Fab state; Scan stayed usable through a pending update; desktop/tablet/phone workflows completed with 0 page/console errors and 0px responsive overflow.
+
+## v0.528 - Codex Completion, Workflow Verification, and UI Readability
+
+### Completion audit / targeted fixes
+- Continued directly from the unfinished v0.527 source and verified the requested A+W-update stability, Inventory/History revamp, fabrication/date-switch behavior, Order Details production controls, Internal Reject/Remake presentation, stage-less Delivery List editing/completion, Lookup Manager persistence/colors, All Scans reject deduplication, stock-sheet reporting, Production Count first-render performance, tutorials/chatbot, Spanish Inventory coverage, sketch REMAKE ownership, and normalized machine matching.
+- Removed the last operator-visible stage-era delete wording from Edit Delivery Lists: deleting an Order / Item now describes synchronized workflow records rather than “all stages.” The underlying sibling-row cleanup remains the same maintained backend operation.
+- Completed exact Spanish mappings for Inventory Manual Entry/Reconciliation field/status labels and made the shared Settings/Production Files load-error surface respect the selected language just like its loading state.
+- Increased the compact one-row Internal Reject ribbon metadata to a practical reading size while keeping the quieter burgundy gradient/fading bottom edge. The no-click NEW treatment remains visible for 72 hours, then becomes Internal Reject History automatically.
+
+### Regression coverage added
+- Added browser-runtime coverage proving an empty import-result catalog cannot erase a loaded Home/Scan catalog; duplicate representations of one Internal Reject ID collapse to one All Scans entry; and deferred sketch `REMAKE` evidence feeds the existing remake owner.
+- Added SQLite runtime coverage proving Lookup Manager glass label/cost/color changes survive a new store instance, active colors stay unique, Edit Delivery Lists completion creates no rack/bay assignments, Inventory “already gone” completion creates no rack/bay assignments, and A+W optimization SHEETCOUNT is counted once with configured stock size/email recipients.
+- Added production-file coverage for `REMAKE` PDF-page detection and punctuation/spacing tolerant WaterJet machine terms (`WATER-JET`, `WATER_JET`, `WATERJET`, `WJ`).
+
+### Version / schema / validation
+- Advanced the application exactly one step from **v0.527** to **v0.528**. SQLite schema remains **20**; there is no migration or database reset in this finishing release.
+- JavaScript syntax and changed Python parse checks pass. Focused affected workflow/static validation passes **314/314**, and the complete maintained suite passes **328/328**. The changed-files overlay installed on a fresh extraction of the uploaded v0.527 tree also passes **328/328** at v0.528/schema 20.
+- The uploaded runtime `data/` tree remains byte-for-byte unchanged across all **77 files**, including the SQLite database and WAL/SHM sidecars. Read-only Production Count benchmarking measured the core report at roughly **37-46 ms**; supplemental production-share enrichment is no longer on the blocking first-render path.
+- A bounded static desktop render was inspected for the revamped Inventory/History, Scan priority/reject treatment, Order Details, stage-less Edit Delivery Lists, Print / Export filters, and Statistics. Responsive layout contracts cover desktop, vertical-tablet, tablet, phone, TC22 portrait, and TC22 landscape. Repeated Chromium/secondary renderer runs hang in this container, so interactive browser-only visual behavior remains a controlled floor check; no browser/renderer processes are left running.
+- Runtime data, production databases/WAL/SHM, logs, credentials, local configuration, verification artifacts, and generated exports remain excluded from release packages.
+
 ## v0.527 - Stable Production Checks, A+W Review Flags, and Faster Navigation
 
 ### Scan and production status

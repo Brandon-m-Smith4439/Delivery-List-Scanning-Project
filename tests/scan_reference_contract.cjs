@@ -63,6 +63,7 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
    items:[],globalSearchLastResults:[],orderDetailProductionCacheV507:new Map(),orderDetailRenderedPayloadV507:null};
   const cadenceContext=vm.createContext({state:cadenceState,document:{hidden:false},Date,Number,Math,Array,String,Boolean,Map,Set,console,FABRICATION_AUTO_RETRY_MS_V526:600000,
    hasAnyPermission:()=>true,fabricationRevisionV521:()=>'',fabricationStatusKeyV474:()=>fabricationKey,cuttingProgressPresentationV498:()=>({complete:false}),
+   isRemakeItem:(row)=>Boolean(row?.remake),
    requestFabricationBatchV522:async()=>{fabricationRequests++;return {results:[{key:fabricationKey,status:{fabricated:false,retryAfterSeconds:300},cutting:{},progressRetryAfterSeconds:300}]}},
    fabricationStatusItemKeyV521:()=>fabricationKey,window:{setTimeout},scheduleScanRender:()=>{},printWorkspaceIsVisible:()=>false});
  vm.runInContext(definition('hydrateFabricationStatusesV474'),cadenceContext);
@@ -85,5 +86,58 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
   await cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
   assert.equal(fabricationRequests,2,'A failed fabrication request must not retry again on the next render');
   assert.equal(failedRepaints,0,'A failed fabrication request must not replace Scan rows');
+
+
+  // v0.528 completion audit: import-status snapshots that omit the catalog must
+  // never erase usable Home/Scan state while a manual/automatic A+W run finishes.
+  const importState={lists:[{id:'live-list',deliveryDate:'2026-09-16'}],items:[{id:'live-item'}],meta:{id:'live-list'},
+    adminRecentImports:[],adminTodayImportEntries:[],adminTodayImportLoaded:false,activeListId:'live-list'};
+  let catalogApplies=0,visibleRefreshes=0;
+  const importDocument={
+    getElementById:()=>null,
+    dispatchEvent:()=>{},
+    addEventListener:()=>{},
+  };
+  const importContext=vm.createContext({state:importState,console,Array,String,Boolean,Date,Map,Set,
+    document:importDocument,CustomEvent:function(){},window:{setTimeout:(fn)=>{fn();},requestAnimationFrame:(fn)=>{fn();}},
+    dlsAutomationLatestImportCheckedAt:'',
+    dlsAutomationMergeRecentImports:(current,latest)=>[...(current||[]),...(latest||[])],
+    todayKey:()=> '2026-09-11',
+    dlsAutomationApplyDeliveryCatalog:()=>{catalogApplies++;return true;},
+    dlsAutomationActiveDetailIsStale:()=>false,
+    dlsAutomationRefreshVisibleListViews:()=>{visibleRefreshes++;},
+    refreshAdminTodayImportRuns:()=>Promise.resolve(),
+    dlsAutomationRefreshActiveListDetail:()=>Promise.resolve(true),
+  });
+  const importStart=source.indexOf('function dlsAutomationApplyImportSnapshot(');
+  const importEnd=source.indexOf('\ndocument.addEventListener("dls:delivery-list-data-refreshed"',importStart);
+  assert(importStart >= 0 && importEnd > importStart,'dlsAutomationApplyImportSnapshot exact boundary');
+  vm.runInContext(source.slice(importStart,importEnd),importContext);
+  importContext.dlsAutomationApplyImportSnapshot({lists:[],latestImportResults:[{runId:'run-1'}],lastCheckedAt:'2026-09-11T12:00:00Z'});
+  assert.equal(catalogApplies,0,'Empty import-result catalog must not replace an already loaded delivery catalog');
+  assert.equal(importState.lists.length,1);assert.equal(importState.lists[0].id,'live-list');
+  assert.equal(importState.items.length,1);assert.equal(importState.items[0].id,'live-item');
+  assert.equal(visibleRefreshes,1,'Visible page may repaint while retaining its loaded data');
+
+  // All Scans must render one Internal Reject incident even when the same reject
+  // reaches the merged history through multiple source/event representations.
+  const dedupeContext=vm.createContext({console,Set,String,Array,scanEntryDisplayItem:(entry)=>entry.item||{}});
+  vm.runInContext(definition('dedupeRecentEventsV527'),dedupeContext);
+  const deduped=dedupeContext.dedupeRecentEventsV527([
+    {eventType:'internal_reject',rejectId:'reject-77',item:{order:'238100',item:'001'}},
+    {eventType:'reject_sync',details:{rejectId:'reject-77'},item:{order:'238100',item:'001'}},
+    {eventType:'scan',item:{order:'238100',item:'001'}},
+  ]);
+  assert.equal(deduped.length,2,'Duplicate representations of one rejectId must collapse to one All Scans row');
+
+  // A deferred sketch parse that sees the large REMAKE text is authoritative for
+  // the existing item-level remake owner without mutating production-line data.
+  const remakeKey='238200|001';
+  const remakeState={fabricationStatusCacheV474:new Map([[remakeKey,{sketchRemake:true}]])};
+  const remakeContext=vm.createContext({state:remakeState,Boolean,String,
+    fabricationStatusItemKeyV521:()=>remakeKey});
+  vm.runInContext(definition('isRemakeItem'),remakeContext);
+  assert.equal(remakeContext.isRemakeItem({order:'238200',item:'001'}),true,'Sketch REMAKE evidence must flag the item as a remake');
+
   console.log('Scan ownership, cancellation, date cache, fabrication cadence and reference geometry behavior passed.');
 })().catch(error=>{console.error(error);process.exitCode=1});

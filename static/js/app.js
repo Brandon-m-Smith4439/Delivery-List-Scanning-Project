@@ -337,6 +337,7 @@ const state = {
   lookupGlassUncombineSelectionV362: [],
   presentationProfile: { ...DEFAULT_PRESENTATION_PROFILE_V355 },
   manualEditLookupLibraryLoadedAt: 0,
+  lookupSheetUsageSettingsV529: { profiles: {} },
   lookupManagerActiveType: "glass_profile",
   lookupManagerSearch: "",
   lookupGlassFamilyV350: "Annealed",
@@ -459,6 +460,8 @@ const state = {
   adminDeliveryListsNormalizedMarkup: "",
   pendingUpdateDates: new Map(),
   pendingUpdateStages: new Map(),
+  pendingRejectDatesV529: new Map(),
+  pendingRejectStagesV529: new Map(),
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [], historyReasons: [], historyLocations: [], awMappings: [] },
   rejectHistory: [],
@@ -1327,6 +1330,7 @@ const els = {
   inventoryManualOrder: document.getElementById("inventoryManualOrder"),
   inventoryManualItem: document.getElementById("inventoryManualItem"),
   inventoryManualJob: document.getElementById("inventoryManualJob"),
+  inventoryManualDeliveryDate: document.getElementById("inventoryManualDeliveryDate"),
   inventoryManualCustomer: document.getElementById("inventoryManualCustomer"),
   inventoryManualGlass: document.getElementById("inventoryManualGlass"),
   inventoryManualGlassCustomWrap: document.getElementById("inventoryManualGlassCustomWrap"),
@@ -5551,6 +5555,18 @@ function shouldSkipUiTranslation(element) {
   ["Physical item not in the snapshot", "Articulo fisico fuera de la captura"], ["Manual Inventory Entry", "Entrada manual de inventario"],
   ["Add Physical Item", "Agregar articulo fisico"], ["Smart Fill from Order / Item", "Completar desde Orden / Articulo"],
   ["Enter an Order / Item to look up known information.", "Ingrese una Orden / Articulo para buscar la informacion conocida."],
+  ["Item Number", "Numero de articulo"], ["Item ID", "ID de articulo"],
+  ["Custom Glass Type", "Tipo de vidrio personalizado"], ["Custom Item ID", "ID de articulo personalizado"],
+  ["SQFT / piece", "Pies cuadrados / pieza"], ["Total SQFT", "Pies cuadrados totales"],
+  ["Notes", "Notas"], ["System reason", "Motivo del sistema"], ["Entry", "Entrada"],
+  ["Awaiting physical scan", "Esperando escaneo fisico"], ["Physical item not in system", "Articulo fisico no esta en el sistema"],
+  ["System item missing physically", "Articulo del sistema faltante fisicamente"], ["Mismatch", "Diferencia"],
+  ["Used by Stock sheets used statistics and production email summaries.", "Se usa en las estadisticas de hojas y los resumenes de produccion por correo."],
+  ["Review Rejects", "Revisar rechazos"], ["Review Open", "Revision abierta"],
+  ["Advance progress to", "Avanzar progreso a"], ["Earlier required steps complete automatically.", "Los pasos anteriores requeridos se completan automaticamente."],
+  ["Cutting complete", "Corte completado"], ["Complete / out of system", "Completo / fuera del sistema"],
+  ["Loading current delivery-list choices…", "Cargando opciones de la lista de entrega…"],
+  ["Retrieving the current page.", "Recuperando la pagina actual."],
 ].forEach(([english, spanish]) => SPANISH_UI_TEXT.set(english, spanish));
 
 function applyLanguageToRoot(root = document.body, force = false) {
@@ -5976,6 +5992,12 @@ function customSelectOptionSignature(select) {
 
 function customSelectUpdateIndicatorTitle(select, option, indicatorCount) {
   const countText = indicatorCount || "Unreviewed";
+  const indicatorKindV529 = String(option?.dataset?.customIndicator || "").trim();
+  if (indicatorKindV529 === "reject") {
+    const rejectText = indicatorCount === 1 ? "Internal Reject" : "Internal Rejects";
+    if (state.language === "es") return `${countText} ${indicatorCount === 1 ? "rechazo interno necesita" : "rechazos internos necesitan"} su revision en esta fecha de entrega`;
+    return `${countText} ${rejectText} need your review on this delivery date`;
+  }
   const lineText = indicatorCount === 1 ? "line" : "lines";
   if (select?.id === "deliveryStageSelect") {
     const stageLabel = String(option?.textContent || "this stage").trim() || "this stage";
@@ -6050,8 +6072,8 @@ function syncCustomSelect(select) {
   if (indicator) {
     indicator.hidden = !indicatorKind;
     indicator.className = `custom-select-value-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
-    indicator.textContent = indicatorKind === "new" ? "!" : "";
-    indicator.title = indicatorKind === "new"
+    indicator.textContent = indicatorKind ? "!" : "";
+    indicator.title = indicatorKind
       ? customSelectUpdateIndicatorTitle(select, option, indicatorCount)
       : "";
   }
@@ -6315,8 +6337,8 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     button.classList.toggle("has-indicator", Boolean(indicatorKind));
     indicator.className = `custom-select-option-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
     indicator.hidden = !indicatorKind;
-    indicator.textContent = indicatorKind === "new" ? "!" : "";
-    indicator.title = indicatorKind === "new"
+    indicator.textContent = indicatorKind ? "!" : "";
+    indicator.title = indicatorKind
       ? customSelectUpdateIndicatorTitle(select, row.option, indicatorCount)
       : "";
 
@@ -7695,6 +7717,15 @@ function requestContext() {
  * Effects: Updates visible dom state, may call the backend api, may update shared client state.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
+function appLoadingStateHtmlV529(message = "Loading...", detail = "", extraClass = "") {
+  const classes = ["app-loading-state-v529", String(extraClass || "").trim()].filter(Boolean).join(" ");
+  return `<div class="${escapeHtml(classes)}" role="status" aria-live="polite" aria-busy="true">
+    <strong>${escapeHtml(localizedUiValue(message))}</strong>
+    ${detail ? `<small>${escapeHtml(localizedUiValue(detail))}</small>` : ""}
+    <span class="app-loading-bar-v529" aria-hidden="true"></span>
+  </div>`;
+}
+
 function showImportStatusLoading(message, detail = "") {
   if (!els.importPreviewBox) return;
 
@@ -7702,11 +7733,7 @@ function showImportStatusLoading(message, detail = "") {
   els.importPreviewBox.classList.remove("success", "review", "notice", "import-status-compact");
   els.importPreviewBox.classList.add("loading");
 
-  els.importPreviewBox.innerHTML = `
-    <strong>${escapeHtml(message)}</strong>
-    <span class="loading-bar"><i></i></span>
-    ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
-  `;
+  els.importPreviewBox.innerHTML = appLoadingStateHtmlV529(message, detail, "is-compact-v529");
 }
 
 /**
@@ -9961,6 +9988,14 @@ function cachedFabricationStatusV474(item = {}) {
   return state.fabricationStatusCacheV474.get(fabricationStatusItemKeyV521(item)) || null;
 }
 
+function canonicalMachineCodeV529(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  const compact = raw.replace(/[^a-z0-9]+/g, "");
+  if (["wj", "waterjet"].includes(compact)) return "waterjet";
+  if (["denver", "denvercnc"].includes(compact)) return "denver";
+  return raw.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+
 function machineDefinitionsV521({ activeOnly = true } = {}) {
   const rows = Array.isArray(state.productionFileSettings?.machines) ? state.productionFileSettings.machines : [];
   const fallback = [
@@ -9971,12 +10006,12 @@ function machineDefinitionsV521({ activeOnly = true } = {}) {
     .filter((row) => row && typeof row === "object")
     .filter((row) => !activeOnly || row.active !== false)
     .map((row) => ({
-      code: String(row.code || "").trim().toLowerCase(),
+      code: canonicalMachineCodeV529(row.code || row.name || ""),
       name: String(row.name || row.code || "Machine").trim(),
       terms: Array.isArray(row.terms) ? row.terms.map((term) => String(term || "").trim()).filter(Boolean) : [],
       color: safeProgressColorV476(row.color, "#64748b"),
       progressRank: Number.isFinite(Number(row.progressRank)) ? Number(row.progressRank) : 0,
-      active: row.active !== false,
+      active: ["denver", "waterjet"].includes(canonicalMachineCodeV529(row.code || row.name || "")) ? true : row.active !== false,
       completionKind: String(row.completionKind || "custom").trim().toLowerCase(),
     })).filter((row) => row.code);
 }
@@ -11441,7 +11476,6 @@ function renderItemRow(item) {
   const priorityRail = scanPriorityRailV481(item);
   const priorityKindV480 = scanPriorityKindV480(item);
   const inlineMarkers = [
-    rejectPieceCount > 0 ? '<span class="row-marker internal-reject-marker">IR</span>' : "",
     item.manualOnly ? '<span class="row-marker manual-only-marker">Manual</span>' : "",
     cuttingIrregularity ? `<span class="row-marker aw-irregular-marker-v527" title="${escapeHtml(cuttingIrregularity.detail || cuttingIrregularity.label)}">A+W</span>` : "",
   ].filter(Boolean).join("");
@@ -11456,16 +11490,15 @@ function renderItemRow(item) {
   const rejectReason = item.lastRejectReason || "Internal reject";
   const rejectLocation = item.lastRejectLocation || "Unknown process location";
   const rejectTime = item.lastRejectedAt ? formatDateTime(item.lastRejectedAt) : "Time not available";
-  const rejectAgeMs = Date.now() - Date.parse(item.lastRejectedAt || "");
-  const recentRejectV527 = Number.isFinite(rejectAgeMs) && rejectAgeMs >= 0 && rejectAgeMs <= 72 * 60 * 60 * 1000;
+  const unseenRejectV529 = Boolean(item.hasUnseenReject);
   const rejectQty = Number(item.lastRejectQty || rejectPieceCount || 0);
   const rejectedBy = item.lastRejectedBy || "System";
   const rejectIncidentRow = rejectPieceCount > 0
     ? `<tr class="internal-reject-detail-row-v154" data-reject-detail-for="${escapeHtml(item.id)}" data-line-detail-ribbon="reject">
         <td colspan="8">
           <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
-            <span class="internal-reject-incident-badge-v154 ${recentRejectV527 ? "is-new-v527" : "is-history-v527"}">${recentRejectV527 ? "NEW" : "IR"}</span>
-            <strong class="internal-reject-incident-title-v154">${recentRejectV527 ? "New Internal Reject" : "Internal Reject History"}</strong>
+            ${unseenRejectV529 ? '<span class="internal-reject-incident-badge-v154 is-new-v527" title="This Internal Reject still needs your review">NEW</span>' : ""}
+            <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
             <span><small>Reason</small><b>${escapeHtml(rejectReason)}</b></span>
             <span><small>Machine / location</small><b>${escapeHtml(rejectLocation)}</b></span>
             <span><small>Qty</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
@@ -14185,6 +14218,7 @@ function renderDeliveryDateSelect() {
     dates: groups.map((group) => [
       group.date,
       Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0),
+      Math.max(Number(state.pendingRejectDatesV529.get(group.date) || 0), 0),
       group.lists.map((list) => [String(list.id || ""), String(list.label || ""), String(list.stage || ""), String(list.scanner || "")]),
     ]),
   });
@@ -14198,7 +14232,10 @@ function renderDeliveryDateSelect() {
     els.deliveryDateSelect.dataset.deliveryDateSelect = "true";
     els.deliveryDateSelect.innerHTML = groupedDeliveryDateOptions(groups, (group) => {
       const pendingCount = Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0);
-      return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${pendingCount ? "new" : ""}" data-custom-indicator-count="${pendingCount}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`;
+      const rejectCountV529 = Math.max(Number(state.pendingRejectDatesV529.get(group.date) || 0), 0);
+      const indicatorKindV529 = rejectCountV529 ? "reject" : pendingCount ? "new" : "";
+      const indicatorCountV529 = rejectCountV529 || pendingCount;
+      return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${indicatorKindV529}" data-custom-indicator-count="${indicatorCountV529}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`;
     });
     els.deliveryDateSelect.value = activeDate;
   }
@@ -14253,6 +14290,8 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
   if (!state.backend || !Array.isArray(state.lists) || !state.lists.length) {
     state.pendingUpdateDates = new Map();
     state.pendingUpdateStages = new Map();
+    state.pendingRejectDatesV529 = new Map();
+    state.pendingRejectStagesV529 = new Map();
     renderDeliveryListSelect();
     syncAllCustomSelects();
     return;
@@ -14275,6 +14314,8 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
 
   const stageCounts = new Map();
   const dateItemKeys = new Map();
+  const rejectStageCountsV529 = new Map();
+  const rejectDateItemKeysV529 = new Map();
   const lists = [...listsById.values()];
   let markersByList = {};
   try {
@@ -14291,22 +14332,32 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
     const flags = markersByList[listId];
     if (!listId || !deliveryDate || !flags) return;
     const pending = Math.max(Number(flags.pendingLineCount || 0), 0);
+    const pendingRejectsV529 = Math.max(Number(flags.pendingRejectCount || 0), 0);
     if (deliveryDate === activeDate && pending) stageCounts.set(listId, pending);
+    if (deliveryDate === activeDate && pendingRejectsV529) rejectStageCountsV529.set(listId, pendingRejectsV529);
     if (!representativeIds.has(listId)) return;
     if (!dateItemKeys.has(deliveryDate)) dateItemKeys.set(deliveryDate, new Set());
+    if (!rejectDateItemKeysV529.has(deliveryDate)) rejectDateItemKeysV529.set(deliveryDate, new Set());
     (flags.items || []).forEach((item) => {
-      if (!item?.hasUnseenUpdate) return;
       const order = String(item.order || "").trim();
       const itemNo = String(item.item || "").trim();
       const fallback = String(item.lineItemId || "").trim();
-      dateItemKeys.get(deliveryDate).add(order || itemNo ? `${order}|${itemNo}` : `${listId}|${fallback}`);
+      const identity = order || itemNo ? `${order}|${itemNo}` : `${listId}|${fallback}`;
+      if (item?.hasUnseenUpdate) dateItemKeys.get(deliveryDate).add(identity);
+      if (item?.hasUnseenReject) rejectDateItemKeysV529.get(deliveryDate).add(identity);
     });
   });
   if (requestId !== state.pendingUpdateDatesRequestId) return;
 
   state.pendingUpdateStages = stageCounts;
+  state.pendingRejectStagesV529 = rejectStageCountsV529;
   state.pendingUpdateDates = new Map(
     [...dateItemKeys.entries()]
+      .map(([date, keys]) => [date, keys.size])
+      .filter(([, count]) => count > 0),
+  );
+  state.pendingRejectDatesV529 = new Map(
+    [...rejectDateItemKeysV529.entries()]
       .map(([date, keys]) => [date, keys.size])
       .filter(([, count]) => count > 0),
   );
@@ -16321,10 +16372,7 @@ function renderStatisticsAnalytics() {
     state.homeChartSelectedLabel = "";
     if ((dataset.isProductionCount && dataset.loading) || (state.homeReportSummaryLoading && !activeHomeReportSummaryV472())) {
       els.statisticsChartCanvas.innerHTML = `
-        <div class="statistics-chart-loading-v507" role="status" aria-live="polite">
-          <span class="statistics-chart-loading-spinner-v507" aria-hidden="true"></span>
-          <div><strong>Loading statistics…</strong><p>Building the selected production and breakage metrics.</p></div>
-        </div>
+        ${appLoadingStateHtmlV529("Loading statistics…", "Building the selected production and breakage metrics.", "statistics-chart-loading-v507")}
       `;
     } else {
       els.statisticsChartCanvas.innerHTML = `
@@ -17898,12 +17946,12 @@ const HELP_PAGE_CONTENT = Object.freeze({
     summary: "Select a delivery date, scan pieces, and review live stage progress.",
     questions: ["How do I scan a piece?", "How do I choose a rack?", "How do I undo a scan?"],
     steps: Object.freeze([
-      { selector: "#deliveryDateSelect", title: "Choose the delivery date", body: "Select the date you are working. The scanner opens the stage allowed for your station and account." },
-      { selector: "#scanFilterDrawer", actionV527: "filters", title: "Filter the active list", body: "Open Filters to combine progress, attention, machine, route, and glass choices. Machine buttons use their maintained colors and a selected button turns blue with white text." },
+      { selector: ".custom-select-shell[data-custom-select-for='deliveryDateSelect'] > .custom-select-trigger", title: "Choose the delivery date", body: "Select the date you are working. The scanner opens the stage allowed for your station and account." },
+      { selector: "#scanFilterDrawer .scan-filter-drawer-panel", triggerSelectorV529: "#scanFilterDrawer > summary", actionV527: "filters", title: "Filter the active list", body: "First click Filters. The panel then combines progress, attention, machine, route, and glass choices using the same filter pattern throughout the scanner." },
       { selector: "#scanRackPanel", actionV527: "racks", title: "Choose transportation", body: "Open the Rack list on Staging and choose Truck or an available rack before scanning. Completed racks cannot accept more pieces." },
       { selector: "#scanForm", title: "Scan a barcode", body: "Keep focus in this box and scan the piece label. A colored notice confirms the result without stopping the next scan." },
-      { selector: "#adminModal", actionV527: "all-scans", title: "Review All Scans", body: "All Scans opens the full audit history for the active delivery date. Internal Reject incidents appear once, with the source, user, time, and outcome retained for review." },
-      { selector: "#productionExplorerPanelV470", actionV527: "order-details", title: "Open Order Details", body: "Double-click an item to open this Order Details GUI. Review progress, A+W optimization and cutting evidence, sketches, fabrication status, programs, and the order-level hardware section." },
+      { selector: "#adminModal", triggerSelectorV529: "#recentScanCard [data-open-all-scans], #scanHistoryCard [data-open-all-scans], #openRecentScansBtn", actionV527: "all-scans", title: "Review All Scans", body: "Use the All Scans button first. The GUI then opens the full audit history for the active delivery date; each Internal Reject incident appears once." },
+      { selector: "#productionExplorerPanelV470", triggerSelectorV529: "[data-production-order-v470], [data-view-order-details]", actionV527: "order-details", title: "Open Order Details", body: "Open Order Details by double-clicking a piece or choosing View order details. The GUI then shows progress, A+W optimization/cutting evidence, sketches, fabrication, programs, and order-level hardware." },
       { selector: "#listRows, #mobileListCards", title: "Delivery list items", body: "Rows are grouped by Order and glass type. Progress stays visible immediately while background evidence refreshes only unfinished work." },
     ]),
   }),
@@ -17970,7 +18018,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
   }),
 });
 
-const helpTutorialState = { page: "home", step: 0, target: null, positionFrame: 0, openedSurfaceV527: "" };
+const helpTutorialState = { page: "home", step: 0, target: null, positionFrame: 0, openedSurfaceV527: "", actionTimerV529: 0 };
 let helpChatPage = "";
 
 function activeHelpPage() {
@@ -18111,6 +18159,10 @@ function positionTutorialCoach() {
 }
 
 function cleanupPageTutorialSurfaceV527() {
+  window.clearTimeout(helpTutorialState.actionTimerV529);
+  helpTutorialState.actionTimerV529 = 0;
+  document.getElementById("pageTutorialClickCueV529")?.remove();
+  document.querySelectorAll(".tutorial-click-target-v529").forEach((node) => node.classList.remove("tutorial-click-target-v529"));
   if (helpTutorialState.openedSurfaceV527 === "admin") void closeAdminModal();
   if (helpTutorialState.openedSurfaceV527 === "production") closeProductionExplorerV470();
   if (helpTutorialState.openedSurfaceV527 === "operations") closeOperationsModal();
@@ -18122,12 +18174,29 @@ function cleanupPageTutorialSurfaceV527() {
   helpTutorialState.openedSurfaceV527 = "";
 }
 
-function runPageTutorialActionV527(step) {
+function showTutorialClickCueV529(target, { doubleClick = false } = {}) {
+  if (!target) return;
+  document.getElementById("pageTutorialClickCueV529")?.remove();
+  document.querySelectorAll(".tutorial-click-target-v529").forEach((node) => node.classList.remove("tutorial-click-target-v529"));
+  target.classList.add("tutorial-click-target-v529");
+  const rect = target.getBoundingClientRect();
+  const cue = document.createElement("span");
+  cue.id = "pageTutorialClickCueV529";
+  cue.className = `page-tutorial-click-cue-v529${doubleClick ? " is-double-v529" : ""}`;
+  cue.setAttribute("aria-hidden", "true");
+  cue.style.left = `${Math.min(Math.max(rect.left + Math.min(rect.width * .58, rect.width - 14), 12), window.innerWidth - 34)}px`;
+  cue.style.top = `${Math.min(Math.max(rect.top + Math.min(rect.height * .55, rect.height - 12), 12), window.innerHeight - 34)}px`;
+  document.body.appendChild(cue);
+}
+
+function performPageTutorialActionV529(step) {
   const action = String(step?.actionV527 || "");
   if (action === "filters") {
     const drawer = document.getElementById("scanFilterDrawer");
     if (drawer) drawer.open = true;
     helpTutorialState.openedSurfaceV527 = "filters";
+    helpTutorialState.target = visibleTutorialTarget(step.selector);
+    requestAnimationFrame(positionTutorialCoach);
   } else if (action === "racks") {
     document.querySelector("#scanRackPanel .custom-select-trigger")?.click();
   } else if (action === "all-scans") {
@@ -18159,12 +18228,29 @@ function runPageTutorialActionV527(step) {
   }
 }
 
+function runPageTutorialActionV527(step) {
+  const triggerSelector = String(step?.triggerSelectorV529 || "").trim();
+  const trigger = triggerSelector ? visibleTutorialTarget(triggerSelector) : null;
+  if (trigger) {
+    helpTutorialState.target = trigger;
+    showTutorialClickCueV529(trigger, { doubleClick: String(step?.actionV527 || "") === "order-details" });
+    helpTutorialState.actionTimerV529 = window.setTimeout(() => {
+      document.getElementById("pageTutorialClickCueV529")?.remove();
+      trigger.classList.remove("tutorial-click-target-v529");
+      performPageTutorialActionV529(step);
+    }, 520);
+    return true;
+  }
+  performPageTutorialActionV529(step);
+  return false;
+}
+
 function renderPageTutorialStep() {
   const content = HELP_PAGE_CONTENT[helpTutorialState.page] || activeHelpPage();
   const step = content.steps[helpTutorialState.step];
   if (!step) return closePageTutorial();
-  runPageTutorialActionV527(step);
-  helpTutorialState.target = visibleTutorialTarget(step.selector);
+  const actionPendingV529 = runPageTutorialActionV527(step);
+  if (!actionPendingV529) helpTutorialState.target = visibleTutorialTarget(step.selector);
   document.getElementById("pageTutorialCounter").textContent = `Step ${helpTutorialState.step + 1} of ${content.steps.length}`;
   document.getElementById("pageTutorialTitle").textContent = step.title;
   document.getElementById("pageTutorialBody").textContent = step.body;
@@ -18460,7 +18546,9 @@ function renderInventorySessionV524() {
   if (els.inventorySessionTitle) els.inventorySessionTitle.textContent = `${cycle} physical count`;
   if (els.inventorySessionMeta) {
     const end = session.status === "completed" ? ` · Completed ${formatDateTime(session.completedAt)}` : session.status === "cancelled" ? " · Cancelled" : " · Count in progress";
-    els.inventorySessionMeta.textContent = `Started ${formatDateTime(session.startedAt)} by ${session.startedBy || "Unknown"}${end}`;
+    els.inventorySessionMeta.textContent = state.language === "es"
+      ? `Iniciado ${formatDateTime(session.startedAt)} por ${session.startedBy || "Desconocido"}${session.status === "completed" ? ` · Completado ${formatDateTime(session.completedAt)}` : session.status === "cancelled" ? " · Cancelado" : " · Conteo en progreso"}`
+      : `Started ${formatDateTime(session.startedAt)} by ${session.startedBy || "Unknown"}${end}`;
   }
   if (els.inventoryExpectedQty) els.inventoryExpectedQty.textContent = Number(session.expectedQty || 0).toLocaleString();
   if (els.inventoryExpectedSqft) els.inventoryExpectedSqft.textContent = inventorySqftTextV524(session.expectedTotalSqft);
@@ -18485,14 +18573,14 @@ function inventoryRenderScanTableV524(items, meta) {
   if (!items.length) return `<div class="inventory-empty">No physical pieces have been counted yet.</div>`;
   const canRemove = state.inventorySessionV524?.status === "open" && hasPermission("manage_inventory");
   const rows = items.map((item) => `<tr>
-    <td>${escapeHtml(formatDateTime(item.scannedAt))}</td><td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td>
+    <td>${escapeHtml(formatDateTime(item.scannedAt))}</td><td>${escapeHtml(item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : "-")}</td><td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td>
     <td><strong>${escapeHtml(item.order || "-")}</strong></td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.glassType || "Unmapped")}</td>
     <td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td>
     <td><strong>${Number(item.qty || 0).toLocaleString()}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td>
     <td>${escapeHtml(item.entryType === "manual" ? "Manual" : "Scan")}</td><td>${escapeHtml(item.scannedBy || "-")}</td>
     ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">Remove</button></td>` : ""}
   </tr>`).join("");
-  return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Scanned</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Entry</th><th>User</th>${canRemove ? "<th>Action</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
+  return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Scanned</th><th>Delivery Date</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Entry</th><th>User</th>${canRemove ? "<th>Action</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
 }
 
 function inventoryRenderSystemTableV524(items, meta) {
@@ -18509,14 +18597,14 @@ function inventoryRenderSystemTableV524(items, meta) {
   const rows = items.map((item) => {
     const order = String(item.order || "").trim();
     const checked = state.inventorySelectedOrdersV527.has(order);
-    return `<tr class="${checked ? "is-selected-v527" : ""}">${canComplete ? `<td><input type="checkbox" data-inventory-select-order-v527="${escapeHtml(order)}" ${checked ? "checked" : ""} aria-label="Select Order ${escapeHtml(order)}"></td>` : ""}<td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td><td><strong>${escapeHtml(order || "-")}</strong></td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.glassType || "Unmapped")}</td><td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td><td><strong>${Number(item.qty || 0)}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td><td>${escapeHtml(item.route || "IT")}</td><td>${escapeHtml(item.bayCode || "-")}</td><td>${escapeHtml(item.sourceReason || "-")}</td></tr>`;
+    return `<tr class="${checked ? "is-selected-v527" : ""}">${canComplete ? `<td><input type="checkbox" data-inventory-select-order-v527="${escapeHtml(order)}" ${checked ? "checked" : ""} aria-label="Select Order ${escapeHtml(order)}"></td>` : ""}<td>${escapeHtml(item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : "-")}</td><td>${escapeHtml(item.jobNr || "-")}</td><td>${escapeHtml(item.customer || "-")}</td><td><strong>${escapeHtml(order || "-")}</strong></td><td>${escapeHtml(item.item || "-")}</td><td>${escapeHtml(item.glassType || "Unmapped")}</td><td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td><td><strong>${Number(item.qty || 0)}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td><td>${escapeHtml(item.route || "IT")}</td><td>${escapeHtml(item.bayCode || "-")}</td><td>${escapeHtml(item.sourceReason || "-")}</td></tr>`;
   }).join("");
-  return `${controls}<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr>${canComplete ? "<th>Select</th>" : ""}<th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Route</th><th>Bay</th><th>System reason</th></tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
+  return `${controls}<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr>${canComplete ? "<th>Select</th>" : ""}<th>Delivery Date</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Route</th><th>Bay</th><th>System reason</th></tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
 }
 
 function inventoryCompareCardV524(item, side) {
   if (!item) return `<div><span class="inventory-compare-title">— Missing —</span><div class="inventory-compare-meta"><span>No ${side} record</span></div></div>`;
-  return `<div><span class="inventory-compare-title">${escapeHtml(item.order || "-")} / ${escapeHtml(item.item || "-")} · ${escapeHtml(item.glassType || "Unmapped")}</span><div class="inventory-compare-meta"><span>Job ${escapeHtml(item.jobNr || "-")}</span><span>${escapeHtml(item.customer || "-")}</span><span>${escapeHtml(item.itemId || "Item ID missing")}</span><span>${escapeHtml(item.dimensions || "-")}</span><span>${Number(item.sqftEach || 0).toFixed(2)} SQFT × ${Number(item.qty || 0)} = <strong>${Number(item.totalSqft || 0).toFixed(2)} SQFT</strong></span></div></div>`;
+  return `<div><span class="inventory-compare-title">${escapeHtml(item.order || "-")} / ${escapeHtml(item.item || "-")} · ${escapeHtml(item.glassType || "Unmapped")}</span><div class="inventory-compare-meta"><span>DD ${escapeHtml(item.deliveryDate ? formatNumericDeliveryDate(item.deliveryDate) : "-")}</span><span>Job ${escapeHtml(item.jobNr || "-")}</span><span>${escapeHtml(item.customer || "-")}</span><span>${escapeHtml(item.itemId || "Item ID missing")}</span><span>${escapeHtml(item.dimensions || "-")}</span><span>${Number(item.sqftEach || 0).toFixed(2)} SQFT × ${Number(item.qty || 0)} = <strong>${Number(item.totalSqft || 0).toFixed(2)} SQFT</strong></span></div></div>`;
 }
 
 function inventoryRenderReconciliationV524(items, meta) {
@@ -18562,7 +18650,7 @@ function renderInventoryTabV524() {
   const data = state.inventoryViewDataV524[tab] || [];
   const meta = state.inventoryViewMetaV524[tab];
   if (!meta && state.inventoryBusyV524) {
-    els.inventoryView.innerHTML = `<div class="inventory-empty">Loading ${escapeHtml(tab)}...</div>`;
+    els.inventoryView.innerHTML = appLoadingStateHtmlV529(`Loading ${tab}...`, "Retrieving the current inventory count without blocking scanning.");
     return;
   }
   if (tab === "scans") els.inventoryView.innerHTML = inventoryRenderScanTableV524(data, meta);
@@ -18675,6 +18763,7 @@ async function smartFillInventoryManualV524() {
   if (els.inventoryManualOrder) els.inventoryManualOrder.value = payload.order || order;
   if (els.inventoryManualItem) els.inventoryManualItem.value = payload.item || item;
   if (els.inventoryManualJob) els.inventoryManualJob.value = payload.jobNr || "";
+  if (els.inventoryManualDeliveryDate) els.inventoryManualDeliveryDate.value = payload.deliveryDate || "";
   if (els.inventoryManualCustomer) els.inventoryManualCustomer.value = payload.customer || "";
   if (els.inventoryManualDimensions) els.inventoryManualDimensions.value = payload.dimensions || "";
   if (els.inventoryManualSqft) els.inventoryManualSqft.value = Number(payload.sqftEach || 0) ? Number(payload.sqftEach).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "";
@@ -18779,6 +18868,7 @@ async function submitInventoryManualV524(event) {
     order: els.inventoryManualOrder?.value.trim() || "",
     item: els.inventoryManualItem?.value.trim() || "",
     jobNr: els.inventoryManualJob?.value.trim() || "",
+    deliveryDate: els.inventoryManualDeliveryDate?.value || "",
     customer: els.inventoryManualCustomer?.value.trim() || "",
     glassType: inventoryManualGlassValueV524(),
     itemId: inventoryManualItemIdValueV524(),
@@ -21023,7 +21113,12 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
     const cuttingDue = !cuttingComplete && (!progressCheck.at || Date.now() - Number(progressCheck.at) >= progressRetrySeconds * 1000);
     if ((!fabricationDue && !cuttingDue) || state.fabricationStatusPendingV474.has(key)) continue;
     state.fabricationStatusPendingV474.add(key);
-    candidates.push({ key, order, item, job, product, lastRejectedAt, remake: Boolean(row?.remake), processState: row?.processState || "", queueState: row?.queueState || "" });
+    candidates.push({
+      key, order, item, job, product, lastRejectedAt,
+      deliveryDate: String(row?.deliveryDate || state.meta?.deliveryDate || ""),
+      remake: Boolean(row?.remake || isRemakeItem(row)),
+      processState: row?.processState || "", queueState: row?.queueState || "",
+    });
     if (candidates.length >= 80) break;
   }
   if (!candidates.length) return;
@@ -22324,7 +22419,7 @@ async function openInTransitManifest() {
         <div><small>${escapeHtml(portable.receivingSite)} Receiving</small><h2>Loading in-transit manifest...</h2><span>Checking outbound scans against received scans.</span></div>
         <button class="modal-close-x gui-close-button transit-manifest-close" type="button" data-close-transit-manifest aria-label="Close">&times;</button>
       </header>
-      <div class="transit-empty"><strong>Loading</strong><span>Please wait while the current in-transit jobs are pulled together.</span></div>
+      <div class="transit-empty">${appLoadingStateHtmlV529("Loading in-transit manifest...", "Checking outbound scans against received scans.")}</div>
     </section>
   `;
   document.body.appendChild(shell);
@@ -25853,10 +25948,7 @@ async function openBayAllScansModal(page = 1) {
     body: `
       <div class="full-scans-modal bay-full-scans-modal bay-full-scans-modal-v159 is-loading">
         <div class="bay-all-scans-loading-note-v316">Retrieving page ${requestedPage} with no more than 25 scans.</div>
-        <div class="bay-all-scans-loading-v159" role="status" aria-live="polite">
-          <span class="bay-all-scans-spinner-v159" aria-hidden="true"></span>
-          <div><strong>Loading retained scans</strong><small>Only the requested page is being downloaded.</small></div>
-        </div>
+        ${appLoadingStateHtmlV529("Loading retained scans", "Only the requested page is being downloaded.", "bay-all-scans-loading-v159")}
       </div>
     `,
   });
@@ -26971,7 +27063,12 @@ function fabricationStatusHtmlV470(status = {}, item = {}) {
 
 function productionSketchFrameUrlV479(assetId, pageNumber = 0, { toolbar = false } = {}) {
   const controls = toolbar ? "toolbar=1" : "toolbar=0";
-  return `${productionAssetUrlV470(assetId, pageNumber)}#page=1&zoom=page-fit&view=Fit&navpanes=0&scrollbar=0&${controls}`;
+  // v0.529: inline previews fill the available width so Chrome's PDF viewer
+  // cannot leave a variable gray gutter beside narrower source pages. The
+  // large viewer keeps page-fit because operators may want the entire page.
+  const zoom = toolbar ? "page-fit" : "page-width";
+  const view = toolbar ? "Fit" : "FitH";
+  return `${productionAssetUrlV470(assetId, pageNumber)}#page=1&zoom=${zoom}&view=${view}&navpanes=0&scrollbar=0&${controls}`;
 }
 
 function parseGeneratedSketchDimensionV516(value = "") {
@@ -27993,7 +28090,7 @@ async function openOrderDetailV470(orderNo, options = {}) {
   if (cached) {
     renderOrderDetailV470(cached);
   } else if (body) {
-    body.innerHTML = `<div class="production-explorer-loading-v470">Loading order ${escapeHtml(order)}…</div>`;
+    body.innerHTML = appLoadingStateHtmlV529(`Loading order ${order}…`, "Opening saved order facts first, then production files.", "production-explorer-loading-v470");
   }
 
   // Paint authoritative SQLite/A+W state first. Reopening the same Order reuses
@@ -29557,7 +29654,7 @@ function applyPrintCalendarSelection() {
 
 /** Show explicit loading content so filter failures never look like empty sections. */
 function setPrintFilterLoadingState() {
-  const loading = '<div class="print-filter-empty-v197 is-loading">Loading current delivery-list choices…</div>';
+  const loading = appLoadingStateHtmlV529("Loading current delivery-list choices…", "Preparing routes, glass, status, attention, and machine filters.", "print-filter-empty-v197 is-loading");
   for (const container of [els.printRouteOptions, els.printStatusOptions, els.printAttentionOptions, els.printMachineOptions, els.printOptionsGlassType]) {
     if (container) container.innerHTML = loading;
   }
@@ -31253,7 +31350,7 @@ function setPrintOrientation(value, refresh = true) {
 function localPrintPackageStylesheetUrls() {
   return [
     new URL("static/css/styles.css?v=20260910-v0.527", window.location.href).href,
-    new URL("static/css/print.css?v=20260910-v0.527", window.location.href).href,
+    new URL("static/css/print.css?v=20260911-v0.529", window.location.href).href,
   ];
 }
 
@@ -32086,11 +32183,7 @@ function adminDeliveryListModalShellHtml(resultsHtml = adminDeliveryListModalRes
 /** Show immediate feedback while the current delivery-list catalog is being refreshed. */
 function adminDeliveryListModalLoadingHtml() {
   return adminDeliveryListModalShellHtml(`
-    <div class="admin-empty loading admin-delivery-list-loading-v333">
-      <strong>Loading delivery lists...</strong>
-      <span>The window is ready. Current delivery dates and stage totals are being refreshed.</span>
-      <span class="loading-bar"><i></i></span>
-    </div>
+    ${appLoadingStateHtmlV529("Loading delivery lists...", "The window is ready. Current delivery dates and totals are being refreshed.", "admin-delivery-list-loading-v333")}
   `);
 }
 
@@ -32171,12 +32264,7 @@ async function loadAdminDeliveryListCatalogPage(page = 1, query = "", options = 
   const requestedPage = Math.max(Number(page || 1), 1);
 
   if (options.showLoading !== false && target) {
-    target.innerHTML = `
-      <div class="admin-empty loading admin-delivery-list-loading-v339">
-        <strong>Loading this page...</strong>
-        <span>Fetching only the delivery lists needed for this three-week view.</span>
-        <span class="loading-bar"><i></i></span>
-      </div>`;
+    target.innerHTML = appLoadingStateHtmlV529("Loading this page...", "Fetching only the delivery lists needed for this three-week view.", "admin-delivery-list-loading-v339");
   }
   if (summary) summary.textContent = `Loading page ${requestedPage}...`;
   if (range) range.textContent = cleanQuery ? "Searching delivery lists..." : "Preparing date range...";
@@ -32240,10 +32328,11 @@ function adminDeliveryListDateGroupHtml(group, editable = false) {
         ${editable ? `<span class="admin-date-action-row">
           ${hasAnyPermission(["edit_delivery_list_items", "create_delivery_list_orders", "delete_delivery_list_items"]) && preferredList.id ? `<button
             type="button"
-            class="app-primary-button admin-delivery-open-whole-v527"
+            class="icon-only icon-pencil admin-delivery-open-whole-v527 admin-edit-delivery-lists-launch-v529"
             data-admin-list-edit="${escapeHtml(preferredList.id)}"
-            title="Open the whole delivery list for ${escapeHtml(compactDate)}"
-          >Open whole list</button>` : ""}
+            title="Edit the whole delivery list for ${escapeHtml(compactDate)}"
+            aria-label="Edit the whole delivery list for ${escapeHtml(compactDate)}"
+          ></button>` : ""}
           ${hasPermission("reset_delivery_lists") ? `<button
             type="button"
             class="icon-only icon-reset"
@@ -32725,7 +32814,7 @@ async function openDeliveryListUpdatePreview(listIds, routeGroup = "", contextKe
     eyebrow: "Delivery List Management",
     description: "",
     status: "Loading",
-    body: `<div class="admin-empty loading">Loading changes...</div>`,
+    body: appLoadingStateHtmlV529("Loading changes...", "Retrieving the newest changed items."),
   });
 
   try {
@@ -33357,7 +33446,7 @@ function ensureActionHistoryToolbar(scope, entry) {
 
 function actionHistoryRowsMarkup(rows = [], hasEvents = false, loading = false) {
   if (loading) {
-    return `<div class="admin-empty loading">Loading action history...</div>`;
+    return appLoadingStateHtmlV529("Loading action history...", "Retrieving recent changes for this workspace.");
   }
   if (!rows.length) {
     return `<div class="admin-empty">${hasEvents ? "No action-history events match the selected filters." : "No action history has been recorded for this GUI yet."}</div>`;
@@ -34204,19 +34293,13 @@ function adminModalLoadingHtmlV507(kind = "") {
   const profile = adminModalProfile(kind);
   const title = localizedUiValue(profile?.title || "Settings");
   return `
-    <div class="admin-modal-loading-v507" role="status" aria-live="polite" aria-busy="true">
-      <span class="admin-modal-loading-spinner-v507" aria-hidden="true"></span>
-      <span class="admin-modal-loading-copy-v507">
-        <strong>${escapeHtml(localizedUiValue("Loading settings..."))}</strong>
-        <small>${escapeHtml(title)}</small>
-      </span>
-    </div>
+    ${appLoadingStateHtmlV529("Loading settings...", title, "admin-modal-loading-v507")}
   `;
 }
 
 function adminModalLoadErrorHtmlV507(error) {
-  const message = String(error?.message || error || translatedUiValue("Settings could not be loaded."));
-  return `<div class="admin-empty review"><strong>${escapeHtml(translatedUiValue("Settings could not be loaded."))}</strong><span>${escapeHtml(message)}</span></div>`;
+  const message = String(error?.message || error || localizedUiValue("Settings could not be loaded."));
+  return `<div class="admin-empty review"><strong>${escapeHtml(localizedUiValue("Settings could not be loaded."))}</strong><span>${escapeHtml(message)}</span></div>`;
 }
 
 function finishDeferredAdminModalOpenV507(kind) {
@@ -34713,7 +34796,7 @@ function stationLookupManagerHtmlV346() {
       <form class="station-alias-editor-v470" id="stationAliasEditorV470" hidden>
         <label><span>Display name</span><input id="stationAliasInputV470" type="text" autocomplete="off"><small id="stationAliasInternalV470"></small></label>
         <input id="stationAliasInternalInputV470" type="hidden">
-        <button type="submit" class="icon-only icon-save" title="Save station display name" aria-label="Save station display name"></button>
+        <button type="submit" class="app-primary-button lookup-save-button-v529" title="Save station display name">${lookupActionIconHtmlV346("save")}<span>Save</span></button>
       </form>
       <aside class="portable-architecture-note-v355"><strong>Portable by design</strong><span>The internal station value stays stable. The Display Name is what operators see, so a future site can show “Dock 4” while the existing backend station identity remains unchanged.</span></aside>
     </section>
@@ -34771,7 +34854,7 @@ function stageDefinitionManagerHtmlV346() {
         <label><span>Internal station binding</span><select id="stageDefinitionScannerV346">${stageStationOptionsV355(DEFAULT_STATIONS[0])}</select><small>Choose the stable station used for scan attribution and access. Change its operator-facing wording in the Stations tab instead of renaming this binding.</small></label>
         <label><span>Route code</span><input id="stageDefinitionRouteV346" type="text" autocomplete="off" placeholder="Optional; required for Custom Route"><small>Use the stable route code. Change the visible route wording in the Routes tab.</small></label>
         <aside class="stage-preset-note-v346"><strong>Portable workflow rule</strong><span>Keys, behavior presets, station bindings, and route codes are engine contracts. Display names and aliases are presentation. Keeping those layers separate makes location/company changes safe.</span></aside>
-        <footer><button type="button" class="secondary lookup-clear-button-v346" data-stage-definition-clear-v346>${lookupActionIconHtmlV346("clear")}<span>Clear</span></button><button type="submit" class="icon-only icon-save" title="Save stage" aria-label="Save stage"></button></footer>
+        <footer><button type="button" class="secondary lookup-clear-button-v346" data-stage-definition-clear-v346>${lookupActionIconHtmlV346("clear")}<span>Clear</span></button><button type="submit" class="app-primary-button lookup-save-button-v529" title="Save stage">${lookupActionIconHtmlV346("save")}<span>Save</span></button></footer>
       </form>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346">
@@ -34801,7 +34884,7 @@ function presentationProfileManagerHtmlV355() {
         <label><span>Support / report email</span><input id="presentationSupportEmailV355" type="email" maxlength="160" value="${escapeHtml(labels.supportEmail || "")}" placeholder="support@example.com"><small>Used by the Report Bugs link. Leave blank to hide that link.</small></label>
         <label class="presentation-brand-choice-v355"><span>Installed logo</span><span class="presentation-checkbox-row-v355"><input id="presentationUseInstalledLogoV355" type="checkbox" ${labels.useDefaultBrandLogo !== false ? "checked" : ""}><b>Use installed logo asset</b></span><small>Turn this off when the installed image belongs to another company. The shell will use clean company initials and text branding instead.</small></label>
         <aside class="stage-preset-note-v346"><strong>Where location wording comes from</strong><span>Use Stations for physical-area display aliases, Stages for workflow-step names, and Routes for destination names. This Presentation tab owns company/application branding and shell identity only.</span></aside>
-        <footer><button type="submit" class="icon-only icon-save" title="Save presentation settings" aria-label="Save presentation settings"></button></footer>
+        <footer><button type="submit" class="app-primary-button lookup-save-button-v529" title="Save presentation settings">${lookupActionIconHtmlV346("save")}<span>Save</span></button></footer>
       </form>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346 portable-workflow-preview-v355">
@@ -35065,12 +35148,14 @@ function glassProfileManagerHtmlV349() {
               <label><span>Display label</span><input id="glassProfileLabelV349" type="text" autocomplete="off" placeholder="1/4 Clear Annealed"><small>Friendly wording shown in Admin lookup choices.</small></label>
               <label><span>Cost per SQFT</span><input id="glassProfileCostV349" type="number" min="0" step="0.01" inputmode="decimal" placeholder="1.83"><small>Leave blank when pricing is not configured yet.</small></label>
               <label class="lookup-glass-color-field-v312"><span>Preview color</span><span class="lookup-glass-color-picker-v312"><input id="glassProfileColorV349" type="color" value="${escapeHtml(defaultColor)}"><b data-glass-profile-color-v349>${escapeHtml(defaultColor)}</b></span><small>This color drives glass-aware preview interfaces.</small></label>
+              <label><span>Stock sheet size</span><input id="glassProfileSheetSizeV529" type="text" autocomplete="off" placeholder="96 x 130"><small>Used by Stock sheets used statistics and production email summaries.</small></label>
+              <label><span>Sheet usage email recipients</span><input id="glassProfileSheetEmailsV529" type="text" autocomplete="off" placeholder="name@company.com; another@company.com"><small>Recipients are included when this glass type used stock sheets.</small></label>
             </div>
             <aside class="lookup-live-preview glass-profile-preview-v349" aria-live="polite">
               ${lookupPreviewIconHtmlV346()}
               <div><small>Glass profile preview</small><strong data-glass-profile-preview-label-v349>New Glass Type</strong><span><b>Cost:</b> <em data-glass-profile-preview-cost-v349>Not configured</em></span><p><span class="glass-profile-preview-swatch-v349" data-glass-profile-preview-swatch-v349 style="--lookup-glass-color:${escapeHtml(defaultColor)}"></span><span data-glass-profile-preview-color-v349>${escapeHtml(defaultColor)}</span></p></div>
             </aside>
-            <footer class="lookup-form-actions"><button type="button" class="secondary" data-glass-profile-clear-v349>Clear form</button><button type="submit" class="icon-only icon-save" title="Save glass settings" aria-label="Save glass settings"></button></footer>
+            <footer class="lookup-form-actions"><button type="button" class="secondary" data-glass-profile-clear-v349>Clear form</button><button type="submit" class="app-primary-button lookup-save-button-v529" title="Save glass settings">${lookupActionIconHtmlV346("save")}<span>Save</span></button></footer>
           </form>
         </section>
         <section class="lookup-manager-list lookup-library glass-profile-library-v349 glass-profile-library-v350">
@@ -35114,6 +35199,10 @@ function clearGlassProfileFormV349() {
   if (original) original.value = "";
   const color = document.getElementById("glassProfileColorV349");
   if (color) color.value = glassVisualColor("New Glass Type", glassProfileItemsV349().map((profile) => profile.value));
+  const sheetSize = document.getElementById("glassProfileSheetSizeV529");
+  const sheetEmails = document.getElementById("glassProfileSheetEmailsV529");
+  if (sheetSize) sheetSize.value = "";
+  if (sheetEmails) sheetEmails.value = "";
   syncGlassProfilePreviewV349();
   document.getElementById("glassProfileValueV349")?.focus();
 }
@@ -35126,11 +35215,16 @@ function editGlassProfileV349(value) {
   const labelInput = document.getElementById("glassProfileLabelV349");
   const costInput = document.getElementById("glassProfileCostV349");
   const colorInput = document.getElementById("glassProfileColorV349");
+  const sheetSizeInput = document.getElementById("glassProfileSheetSizeV529");
+  const sheetEmailsInput = document.getElementById("glassProfileSheetEmailsV529");
+  const sheetProfile = state.lookupSheetUsageSettingsV529?.profiles?.[profile.value] || state.lookupSheetUsageSettingsV529?.profiles?.[profile.label] || {};
   if (original) original.value = profile.value;
   if (valueInput) valueInput.value = profile.value;
   if (labelInput) labelInput.value = profile.label || profile.value;
   if (costInput) costInput.value = profile.rate === null || profile.rate === undefined ? "" : String(profile.rate);
   if (colorInput) colorInput.value = normalizeGlassVisualColor(profile.color) || glassVisualColor(profile.value);
+  if (sheetSizeInput) sheetSizeInput.value = String(sheetProfile.sheetSize || "");
+  if (sheetEmailsInput) sheetEmailsInput.value = Array.isArray(sheetProfile.emails) ? sheetProfile.emails.join("; ") : "";
   syncGlassProfilePreviewV349();
   openLookupEditorV470({ focusSelector: "#glassProfileValueV349" });
   valueInput?.select();
@@ -35144,12 +35238,19 @@ async function saveGlassProfileV349() {
   const label = !rawLabel || rawLabel.toLowerCase() === rawValue.toLowerCase() ? value : rawLabel;
   const rate = document.getElementById("glassProfileCostV349")?.value.trim() || "";
   const color = document.getElementById("glassProfileColorV349")?.value.trim() || "";
+  const sheetSize = document.getElementById("glassProfileSheetSizeV529")?.value.trim() || "";
+  const sheetEmails = String(document.getElementById("glassProfileSheetEmailsV529")?.value || "").split(/[;,]/).map((email) => email.trim()).filter(Boolean);
   if (!value) throw new Error("Glass type is required.");
   if (original && original.toLowerCase() !== value.toLowerCase()) {
     throw new Error("Glass type identity cannot be renamed in place. Remove the old profile and save the new glass type instead.");
   }
   const payload = await fetchJson("/api/admin/manual-edit-lookups/glass-profile", { method: "POST", body: JSON.stringify({ value, label, rate, color }) });
   adoptManualEditLookups(payload);
+  const profiles = { ...(state.lookupSheetUsageSettingsV529?.profiles || {}) };
+  if (original && original !== value) delete profiles[original];
+  if (sheetSize || sheetEmails.length) profiles[value] = { sheetSize, emails: sheetEmails };
+  else delete profiles[value];
+  state.lookupSheetUsageSettingsV529 = await fetchJson("/api/reports/sheet-usage-settings", { method: "POST", body: JSON.stringify({ profiles }) });
   state.lookupManagerActiveType = "glass_profile";
   renderLookupManagerModal();
   await loadHomeReportSummary();
@@ -35361,7 +35462,8 @@ function machineLookupManagerHtmlV521() {
   const terms = (editing?.terms || []).join(", ");
   const color = safeProgressColorV476(editing?.color, "#64748b");
   const progressRank = Number(editing?.progressRank || 0);
-  const active = editing ? editing.active !== false : true;
+  const editingSystemMachine = ["denver", "waterjet"].includes(code);
+  const active = editingSystemMachine ? true : (editing ? editing.active !== false : true);
   const rows = machines.length ? machines.map((row) => {
     const protectedMachine = ["denver", "waterjet"].includes(row.code);
     const search = [row.code, row.name, ...(row.terms || [])].join(" ").toLowerCase();
@@ -35380,9 +35482,9 @@ function machineLookupManagerHtmlV521() {
         <label><span>Machine color</span><span class="machine-lookup-color-field-v521"><input id="machineLookupColorV521" type="color" value="${escapeHtml(color)}"><b style="--machine-lookup-color:${escapeHtml(color)}">Progress color</b></span><small>Shared by Scan, Smart Search, Order Details, and Print / Export.</small></label>
         <label class="wide"><span>Detection terms</span><textarea id="machineLookupTermsV521" rows="3" placeholder="DENVER, DENVER CNC">${escapeHtml(terms)}</textarea><small>Comma-separated wording that can identify this machine in sketches/production evidence. Keep terms specific enough to avoid cross-matches.</small></label>
         <label><span>Progress position</span><select id="machineLookupRankV521">${machineProgressPositionOptionsV521(progressRank)}</select><small>Places the machine checkpoint relative to Cutting and scanner stages.</small></label>
-        <label class="machine-lookup-active-v521"><span>Availability</span><span><input id="machineLookupActiveV521" type="checkbox" ${active ? "checked" : ""}><b>Active machine</b></span><small>Inactive machines remain saved but disappear from normal filters and matching.</small></label>
+        <label class="machine-lookup-active-v521"><span>Availability</span><span><input id="machineLookupActiveV521" type="checkbox" ${active ? "checked" : ""} ${editingSystemMachine ? "disabled" : ""}><b>Active machine</b></span><small>${editingSystemMachine ? "Evidence-backed machines remain available while their maintained file source is configured." : "Inactive machines remain saved but disappear from normal filters and matching."}</small></label>
         <aside class="stage-preset-note-v346 wide"><strong>Completion evidence</strong><span>Denver and WaterJet retain their maintained .egl/.nce completion sources. Custom machines can be named, colored, matched, and positioned now; they remain informational until a completion evidence source is integrated for that machine.</span></aside>
-        <footer><button type="button" class="secondary" data-machine-new-v521>Clear / New</button><button type="submit" class="icon-only icon-save" title="Save machine" aria-label="Save machine"></button></footer>
+        <footer><button type="button" class="secondary" data-machine-new-v521>Clear / New</button><button type="submit" class="app-primary-button lookup-save-button-v529" title="Save machine">${lookupActionIconHtmlV346("save")}<span>Save</span></button></footer>
       </form>
     </section>
     <section class="lookup-manager-list lookup-config-library-v346 machine-lookup-library-v521">
@@ -35403,7 +35505,7 @@ function machineProgressPositionLabelV521(rank = 0) {
 }
 
 function machineCodeFromNameV521(name = "") {
-  return String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return canonicalMachineCodeV529(name);
 }
 
 function editMachineDefinitionV521(code = "") {
@@ -35459,7 +35561,7 @@ async function saveMachineDefinitionV521() {
     terms: terms.length ? terms : [name],
     color: safeProgressColorV476(document.getElementById("machineLookupColorV521")?.value, current.color || "#64748b"),
     progressRank: Number(document.getElementById("machineLookupRankV521")?.value || 0),
-    active: Boolean(document.getElementById("machineLookupActiveV521")?.checked),
+    active: ["denver", "waterjet"].includes(code) ? true : Boolean(document.getElementById("machineLookupActiveV521")?.checked),
     completionKind: current.completionKind || (["denver", "waterjet"].includes(code) ? code : "custom"),
   };
   const next = machines.filter((row) => row.code !== originalCode && row.code !== code);
@@ -35561,7 +35663,7 @@ function lookupManagerModalHtml() {
 
             <footer class="lookup-form-actions">
               <button type="button" class="secondary" data-lookup-clear-form>Clear form</button>
-              <button type="submit" class="icon-only icon-save" title="Save lookup" aria-label="Save lookup"></button>
+              <button type="submit" class="app-primary-button lookup-save-button-v529" title="Save lookup">${lookupActionIconHtmlV346("save")}<span>Save</span></button>
             </footer>
           </form>
         </section>
@@ -37408,6 +37510,7 @@ async function ensureManualEditLookupsLoaded() {
     fetchJson("/api/racks"),
     fetchJson("/api/indian-trail/bays"),
     manualLibraryFresh ? Promise.resolve(null) : fetchJson("/api/admin/manual-edit-lookups"),
+    manualLibraryFresh ? Promise.resolve(null) : fetchJson("/api/reports/sheet-usage-settings"),
   ]);
 
   const rackResult = lookups[0];
@@ -37429,6 +37532,10 @@ async function ensureManualEditLookupsLoaded() {
   if (manualLookupResult.status === "fulfilled" && manualLookupResult.value) {
     adoptManualEditLookups(manualLookupResult.value);
     state.manualEditLookupLibraryLoadedAt = Date.now();
+  }
+  const sheetSettingsResult = lookups[3];
+  if (sheetSettingsResult?.status === "fulfilled" && sheetSettingsResult.value) {
+    state.lookupSheetUsageSettingsV529 = sheetSettingsResult.value;
   }
 }
 
@@ -37452,11 +37559,7 @@ async function openManualEditForList(listId) {
   openAdminModal("manualEdit", {
     body: manualEditModalHtml(`
       <div class="manual-edit-loading">
-        <div class="admin-empty loading">
-          <strong>Loading editable rows...</strong>
-          <span>Preparing lookups and the selected delivery list.</span>
-          <span class="loading-bar"><i></i></span>
-        </div>
+        ${appLoadingStateHtmlV529("Loading editable rows...", "Preparing lookups and the selected delivery list.")}
       </div>
     `),
   });
@@ -37537,14 +37640,7 @@ async function runManualEditModalSearch(loadAll = false, requestedPage = 1, para
 
   const target = document.getElementById("manualEditModalResults");
   if (target) {
-    target.innerHTML = `
-      <div class="manual-edit-loading">
-        <div class="admin-empty loading">
-          <strong>Loading editable rows...</strong>
-          <span class="loading-bar"><i></i></span>
-        </div>
-      </div>
-    `;
+    target.innerHTML = `<div class="manual-edit-loading">${appLoadingStateHtmlV529("Loading editable rows...", "Retrieving the current page.")}</div>`;
   }
 
   const offset = (state.manualEditPage - 1) * MANUAL_EDIT_PAGE_SIZE;
@@ -42011,31 +42107,70 @@ function manualEditChangedFields(row, data) {
 }
 
 function manualEditProgressSummaryV527(item = {}) {
-  const rank = { staged: 10, outbound: 20, received: 30, pickup: 30, greenville: 30, dtc: 30 };
-  const rows = (Array.isArray(item.progressStages) ? item.progressStages : [])
+  const scannerRank = { staged: 10, outbound: 20, received: 30, pickup: 30, greenville: 30, dtc: 30 };
+  const scannerRows = (Array.isArray(item.progressStages) ? item.progressStages : [])
     .slice()
-    .sort((a, b) => (rank[a.category] || 99) - (rank[b.category] || 99));
-  const completed = rows.filter((row) => row.complete);
-  const next = rows.find((row) => !row.complete);
-  const previous = completed.at(-1);
-  if (!next && rows.length) return { current: previous?.stage || "Final stage", next: "Complete / out of system", complete: true };
-  return {
-    current: previous?.stage || "Cutting / fabrication",
-    next: next?.stage || "Staging",
-    complete: false,
-  };
+    .sort((a, b) => (scannerRank[a.category] || 99) - (scannerRank[b.category] || 99));
+  const scannerComplete = scannerRows.filter((row) => row.complete);
+  const nextScanner = scannerRows.find((row) => !row.complete);
+  const lastScanner = scannerComplete.at(-1);
+  if (!nextScanner && scannerRows.length && lastScanner) {
+    return { current: lastScanner.stage || "Final stage", next: "Complete / out of system", complete: true, nextTarget: "complete", machineCode: "" };
+  }
+
+  const cutting = item.cutting && typeof item.cutting === "object" ? item.cutting : {};
+  const cutDone = Boolean(cuttingProgressPresentationV498(cutting).complete);
+  const cachedFab = typeof cachedFabricationStatusV474 === "function" ? cachedFabricationStatusV474(item) : null;
+  const manualMachineCode = canonicalMachineCodeV529(cutting.manualMachineCode || "");
+  const fabricated = Boolean(cutting.manualMachineComplete || cachedFab?.fabricated === true);
+  const machineCode = canonicalMachineCodeV529(manualMachineCode || cachedFab?.actualMachineCode || cachedFab?.assignedMachineCode || "");
+  const machine = machineDefinitionsV521({ activeOnly: true }).find((row) => row.code === machineCode);
+  const machineName = machine?.name || cachedFab?.actualMachine || cachedFab?.assignedMachine || (machineCode ? machineCode.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "");
+
+  if (lastScanner) {
+    return {
+      current: lastScanner.stage || "Scanner progress",
+      next: nextScanner?.stage || "Complete / out of system",
+      complete: false,
+      nextTarget: nextScanner?.category === "outbound" ? "outbound" : ["received", "pickup", "greenville", "dtc"].includes(nextScanner?.category) ? "indian_trail" : "staging",
+      machineCode,
+    };
+  }
+  if (fabricated && machineName) {
+    return { current: machineName, next: nextScanner?.stage || "Staging", complete: false, nextTarget: "staging", machineCode };
+  }
+  if (cutDone) {
+    const requiredMachine = machineName || "Fabrication / Staging";
+    return { current: "Cutting", next: requiredMachine, complete: false, nextTarget: machineCode ? `machine:${machineCode}` : "staging", machineCode };
+  }
+  return { current: "Not Cut", next: "Cutting", complete: false, nextTarget: "cutting", machineCode };
 }
 
 function manualEditProgressControlV527(item = {}) {
   if (!hasPermission("edit_delivery_list_items")) return "";
-  return `<section class="manual-edit-progress-control-v527">
-    <div><small>ADVANCE PROGRESS</small><strong>Choose the stage this piece has reached</strong><span>Every earlier scanner stage will be completed automatically.</span></div>
+  const summary = manualEditProgressSummaryV527(item);
+  const machines = machineDefinitionsV521({ activeOnly: true });
+  const options = [
+    ["cutting", "Cutting complete"],
+    ...machines.map((machine) => [`machine:${machine.code}`, `${machine.name} complete`]),
+    ["staging", "Staging"],
+    ["outbound", "Outbound"],
+    ["indian_trail", "Indian Trail / destination received"],
+    ["complete", "Complete / out of system"],
+  ];
+  // v0.529: the card header already owns the current -> next summary. Keep the
+  // editor itself compact by treating Progress like the other editable fields.
+  return `<label class="manual-field manual-edit-progress-field-v529">
+    <span>Advance progress to</span>
     <select data-manual-progress-target-v527 aria-label="Progress stage for ${escapeHtml(item.order)}-${escapeHtml(item.item)}">
-      <option value="staging">Staging</option><option value="outbound">Outbound</option><option value="indian_trail">Indian Trail / destination received</option><option value="complete">Complete · out of system</option>
+      ${options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === summary.nextTarget ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
     </select>
-    <button class="app-secondary-button" type="button" data-manual-progress-item-v527="${escapeHtml(item.lineItemId)}">Advance Item</button>
-    <button class="app-primary-button" type="button" data-manual-progress-order-v527="${escapeHtml(item.lineItemId)}" data-order="${escapeHtml(item.order)}">Complete Order</button>
-  </section>`;
+    <small>Earlier required steps complete automatically.</small>
+  </label>
+  <div class="manual-edit-progress-actions-v529 wide">
+    <button class="app-primary-button" type="button" data-manual-progress-item-v527="${escapeHtml(item.lineItemId)}">Advance Item</button>
+    <button class="app-secondary-button manual-edit-complete-order-v529" type="button" data-manual-progress-order-v527="${escapeHtml(item.lineItemId)}" data-order="${escapeHtml(item.order)}">Complete Order</button>
+  </div>`;
 }
 
 /**
@@ -42108,7 +42243,6 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                   <div class="manual-edit-card-title">
                     <div class="manual-edit-card-title-line">
                       <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
-                      <span class="manual-edit-scan-status ${progressSummaryV527.complete ? "is-scanned" : "is-unscanned"}">${progressSummaryV527.complete ? "Final stage scanned" : "In progress"}</span>
                     </div>
                     <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
                     ${item._manualEditFilterMismatch ? `<small class="manual-edit-saved-filter-note">Saved successfully — this item no longer matches the active filters.</small>` : ""}
@@ -42218,6 +42352,8 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
 
                   <input data-edit-field="queueState" type="hidden" value="${escapeHtml(item.queueState || "")}">
 
+                  ${manualEditProgressControlV527(item)}
+
                   ${(item.manualOnly || item.manualSource) ? `
                     <label class="manual-order-only-toggle manual-edit-protection-toggle">
                       <input data-edit-field="protectFromAwImport" type="checkbox" ${item.protectFromAwImport ? "checked" : ""}>
@@ -42225,8 +42361,6 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
                     </label>
                   ` : `<input data-edit-field="protectFromAwImport" type="hidden" value="">`}
                   </div>
-
-                  ${manualEditProgressControlV527(item)}
 
                   <div class="manual-edit-row-error" hidden aria-live="polite"></div>
                 </div>
@@ -42261,7 +42395,7 @@ async function advanceManualDeliveryProgressV527(button, scope) {
   try {
     const payload = await fetchJson("/api/admin/delivery-progress", {
       method: "POST",
-      body: JSON.stringify({ scope, target, lineItemId, order, deliveryDate }),
+      body: JSON.stringify({ scope, target, lineItemId, order, deliveryDate, machineCode: manualEditProgressSummaryV527(state.manualEditResultRows.find((item) => String(item.lineItemId || "") === lineItemId) || {}).machineCode || "" }),
     });
     await loadDeliveryLists(state.manualEditListId || state.activeListId);
     await runManualEditModalSearch(false, state.manualEditPage || 1);
@@ -42429,8 +42563,8 @@ async function deleteManualLineItem(lineItemId) {
   const confirmed = await confirmWebAppAction({
     title: "Delete this order item from the delivery list?",
     message: `Delete ${itemLabel} from the entire delivery-list workflow?`,
-    details: "The same logical order/item is kept synchronized across Staging, Outbound, Indian Trail, CPU, Greenville, DTC, and any other stage copies. This removes all matching stage rows together.",
-    confirmLabel: "Delete From All Stages",
+    details: "This removes the matching Order / Item from every synchronized workflow copy for this delivery date so it cannot remain in Staging, Outbound, Indian Trail, CPU, Greenville, DTC, or another destination.",
+    confirmLabel: "Delete Order Item",
   });
   if (!confirmed) return;
   const payload = await fetchJson("/api/admin/line-item/delete", {
@@ -42446,7 +42580,7 @@ async function deleteManualLineItem(lineItemId) {
   playAppSound("destructive_action", { force: true });
   const deletedCount = Number(payload.deletedLineItemCount || 0);
   if (deletedCount) {
-    showSaveConfirmation(`${payload.deletedOrderItem || "Order item"} was deleted from ${deletedCount} stage row${deletedCount === 1 ? "" : "s"}.`);
+    showSaveConfirmation(`${payload.deletedOrderItem || "Order item"} was deleted from ${deletedCount} synchronized record${deletedCount === 1 ? "" : "s"}.`);
   }
 }
 
@@ -44059,7 +44193,7 @@ async function refreshRejectPage() {
     status.textContent = `Loading rejects for ${rejectFilterDescription()}...`;
   }
   if (els.rejectHistory) {
-    els.rejectHistory.innerHTML = `<div class="reject-loading-state"><span aria-hidden="true"></span><div><strong>Loading internal reject history</strong><p>Checking ${escapeHtml(rejectFilterDescription())}.</p></div></div>`;
+    els.rejectHistory.innerHTML = appLoadingStateHtmlV529("Loading internal reject history", `Checking ${rejectFilterDescription()}.`, "reject-loading-state");
   }
 
   const [historyResult, catalogResult] = await Promise.allSettled([
@@ -50885,6 +51019,7 @@ init().catch((error) => {
   const SESSION_ENDPOINT = "/api/session";
   const FLAGS_ENDPOINT = "/api/operations/line-flags";
   const UPDATE_ACK_ENDPOINT = "/api/operations/line-flags/acknowledge";
+  const REJECT_ACK_ENDPOINT_V529 = "/api/operations/internal-rejects/acknowledge";
   const POLL_MS = 10000;
   const UPDATE_PROMPT_TIMEOUT_MS = 10000;
 
@@ -50912,6 +51047,7 @@ init().catch((error) => {
   let markerBatchInflight = null;
   let markerBatchCache = { key: "", loadedAt: 0, results: {} };
   const reviewedSignatureByList = new Map();
+  const reviewedRejectSignatureByListV529 = new Map();
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -51260,9 +51396,15 @@ init().catch((error) => {
     const noticeIds = Array.isArray(payload?.noticeIds)
       ? payload.noticeIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
       : items.flatMap((item) => item.userUpdateNoticeIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
+    const rejectIdsV529 = Array.isArray(payload?.rejectIds)
+      ? payload.rejectIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
+      : items.flatMap((item) => item.unseenRejectIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
     return {
       listId,
       pendingLineCount: Number(payload?.pendingLineCount || items.filter((item) => item.hasUnseenUpdate).length || 0),
+      pendingRejectCount: Number(payload?.pendingRejectCount || items.filter((item) => item.hasUnseenReject).length || 0),
+      rejectIds: [...new Set(rejectIdsV529)],
+      rejectSignatureV529: [...new Set(rejectIdsV529)].join(","),
       newLineCount: Number(payload?.newLineCount || items.filter((item) => item.userUpdateState === "new").length || 0),
       updatedLineCount: Number(payload?.updatedLineCount || items.filter((item) => item.userUpdateState === "updated").length || 0),
       totalLineCount: Number(payload?.totalLineCount || items.length || 0),
@@ -51293,6 +51435,8 @@ init().catch((error) => {
         lastRejectedBy: String(current.lastRejectedBy || ""),
         lastRejectNotes: String(current.lastRejectNotes || ""),
         lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
+        hasUnseenReject: Boolean(current.hasUnseenReject),
+        unseenRejectIds: Array.isArray(current.unseenRejectIds) ? current.unseenRejectIds.map(Number).filter((id) => id > 0) : [],
         hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
         userUpdateState: String(current.userUpdateState || ""),
         userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
@@ -51301,6 +51445,7 @@ init().catch((error) => {
     currentFlags = flags;
     if (options.render !== false && typeof renderScanPage === "function") renderScanPage();
     renderReviewControl(flags);
+    renderRejectReviewControlV529(flags);
     document.dispatchEvent(new CustomEvent("dls:line-update-flags-applied", { detail: flags }));
   }
 
@@ -51428,6 +51573,77 @@ init().catch((error) => {
     }
     elements.control.classList.toggle("is-reviewing", updatedFilterActive);
     elements.control.hidden = false;
+  }
+
+  function rejectReviewControlElementsV529() {
+    return {
+      control: document.getElementById("scanRejectReviewControlV529"),
+      summary: document.getElementById("scanRejectReviewSummaryV529"),
+      review: document.getElementById("scanRejectReviewBtnV529"),
+      acknowledge: document.getElementById("scanRejectMarkReviewedBtnV529"),
+    };
+  }
+
+  function renderRejectReviewControlV529(flags = currentFlags) {
+    const elements = rejectReviewControlElementsV529();
+    const activeListId = String(state?.activeListId || "");
+    if (!elements.control) return;
+    const count = Math.max(Number(flags?.pendingRejectCount || 0), 0);
+    if (!flags || !count || String(flags.listId) !== activeListId) {
+      elements.control.hidden = true;
+      return;
+    }
+    const filterActive = Boolean(state?.activeFilters?.has?.("internal-rejects"));
+    const reviewed = reviewedRejectSignatureByListV529.get(flags.listId) === flags.rejectSignatureV529 && Boolean(flags.rejectSignatureV529);
+    elements.control.dataset.updateKind = "internal-rejects-v529";
+    if (elements.summary) elements.summary.textContent = state.language === "es"
+      ? `${count} rechazo${count === 1 ? " interno necesita" : "s internos necesitan"} su revision`
+      : `${count} Internal Reject${count === 1 ? "" : "s"} need your review`;
+    if (elements.review) {
+      elements.review.disabled = filterActive;
+      elements.review.querySelector("span").textContent = filterActive ? "Review Open" : "Review Rejects";
+      elements.review.onclick = () => {
+        state?.activeFilters?.add?.("internal-rejects");
+        state.pageIndex = 1;
+        reviewedRejectSignatureByListV529.set(flags.listId, flags.rejectSignatureV529);
+        if (typeof renderScanPage === "function") renderScanPage();
+        renderRejectReviewControlV529(flags);
+      };
+    }
+    if (elements.acknowledge) {
+      elements.acknowledge.hidden = !filterActive;
+      elements.acknowledge.disabled = !filterActive || !reviewed;
+      elements.acknowledge.onclick = () => acknowledgeRejectsV529(flags);
+    }
+    elements.control.classList.toggle("is-reviewing", filterActive);
+    elements.control.hidden = false;
+  }
+
+  async function acknowledgeRejectsV529(flags = currentFlags) {
+    if (!flags?.listId || !flags?.rejectSignatureV529 || reviewedRejectSignatureByListV529.get(flags.listId) !== flags.rejectSignatureV529) {
+      if (typeof showFloatingNotice === "function") showFloatingNotice("Review the Internal Rejects before marking them reviewed.", "notice");
+      return;
+    }
+    const buttonElement = document.getElementById("scanRejectMarkReviewedBtnV529");
+    if (buttonElement) buttonElement.disabled = true;
+    try {
+      await jsonFetch(REJECT_ACK_ENDPOINT_V529, {
+        method: "POST",
+        body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds }),
+      });
+      flagsByList.delete(flags.listId);
+      reviewedRejectSignatureByListV529.delete(flags.listId);
+      state?.pendingRejectStagesV529?.delete?.(flags.listId);
+      state?.activeFilters?.delete?.("internal-rejects");
+      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
+      await refreshPendingUpdateDates({ force: true });
+      if (typeof renderScanPage === "function") renderScanPage();
+      renderRejectReviewControlV529(refreshed);
+      if (typeof showSaveConfirmation === "function") showSaveConfirmation("Internal Rejects are marked reviewed for your account.");
+    } catch (error) {
+      if (buttonElement) buttonElement.disabled = false;
+      if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
+    }
   }
 
   function closeUpdatePrompt() {
@@ -51599,12 +51815,14 @@ init().catch((error) => {
     refresh: (options = {}) => loadFlags(String(state?.activeListId || ""), { force: true, ...options }),
     review: reviewUpdates,
     acknowledge: acknowledgeUpdates,
+    reviewRejectsV529: () => renderRejectReviewControlV529(currentFlags),
+    acknowledgeRejectsV529,
     getCurrent: () => currentFlags,
     getCached: (listId) => flagsByList.get(String(listId || "")) || null,
     clearCache: (listId = "") => listId ? flagsByList.delete(String(listId)) : flagsByList.clear(),
   };
 
-  document.addEventListener("dls:scan-filters-changed", () => renderReviewControl(currentFlags));
+  document.addEventListener("dls:scan-filters-changed", () => { renderReviewControl(currentFlags); renderRejectReviewControlV529(currentFlags); });
   document.addEventListener("dls:user-line-updates-reviewed", () => renderReviewControl(currentFlags));
 
   document.addEventListener("dls:delivery-list-catalog-synced", () => {

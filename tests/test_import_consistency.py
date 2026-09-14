@@ -138,7 +138,7 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 con.execute("UPDATE aw_reject_events SET breakage_date=? WHERE event_key=?", (source["breakageDate"], expected_event_key))
                 con.execute("UPDATE aw_reject_source_rows SET last_changed_at=? WHERE aw_row_id=?", (source["sourceLastChangedAt"], "timestamp-row-1"))
-                con.execute("DELETE FROM schema_migrations WHERE version IN (18, 19, 20)")
+                con.execute("DELETE FROM schema_migrations WHERE version IN (18, 19, 20, 21)")
                 run_sqlite_migrations(con, store)
                 repaired = con.execute(
                     "SELECT event_key, breakage_date FROM aw_reject_events WHERE event_key=?",
@@ -149,7 +149,7 @@ class ImportConsistencyTests(unittest.TestCase):
                     ("timestamp-row-1",),
                 ).fetchone()
                 installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
-            self.assertEqual(installed, 20)
+            self.assertEqual(installed, 21)
             self.assertEqual(repaired["event_key"], expected_event_key)
             self.assertEqual(repaired["breakage_date"], "2026-09-04T14:00:33+00:00")
             self.assertEqual(repaired_source["last_changed_at"], "2026-09-04T14:01:34+00:00")
@@ -172,10 +172,10 @@ class ImportConsistencyTests(unittest.TestCase):
                     {"code": "edge-polisher", "name": "Edge Polisher", "terms": ["EDGE POLISH"], "color": "#118855", "progressRank": 15, "active": True, "completionKind": "custom"},
                 ]
             }, "v521-test")
-            self.assertEqual(before_schema, 20)
+            self.assertEqual(before_schema, 21)
             with store.connect() as con:
                 after_schema = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
-            self.assertEqual(after_schema, 20)
+            self.assertEqual(after_schema, 21)
             by_code = {row["code"]: row for row in saved["machines"]}
             self.assertEqual(by_code["edge-polisher"]["name"], "Edge Polisher")
             self.assertEqual(by_code["edge-polisher"]["color"], "#118855")
@@ -4032,7 +4032,7 @@ class ImportConsistencyTests(unittest.TestCase):
             with store.connect() as con:
                 installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0)
                 indexes = {str(row["name"]) for row in con.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
-                self.assertEqual(installed, 20)
+                self.assertEqual(installed, 21)
             for name in {
                 "idx_line_items_active_order_item_v507",
                 "idx_delivery_lists_active_date_revision_v507",
@@ -4959,6 +4959,114 @@ class ImportConsistencyTests(unittest.TestCase):
             shutil.rmtree(verification_root, ignore_errors=True)
 
 
+    def test_v528_glass_profile_persists_restart_and_rejects_duplicate_color(self) -> None:
+        verification_root = ROOT / "_verification_v528_glass_persistence"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.upsert_glass_profile({
+                "value": "V528 Test Glass", "label": "V528 Test Glass",
+                "rate": 7.25, "color": "#3568A8",
+            }, "admin")
+
+            # Simulate an application restart by constructing a fresh store object
+            # against the same SQLite file. The Lookup Manager must read the
+            # durable manual rows instead of regenerating/forgetting the color.
+            restarted = SQLiteDeliveryStore(store.config)
+            lookups = restarted.get_manual_edit_lookups()
+            products = {row["value"]: row for row in lookups["products"]}
+            colors = {row["value"]: row for row in lookups["glassColors"]}
+            costs = {row["value"]: row for row in lookups["glassCosts"]}
+            self.assertIn("V528 Test Glass", products)
+            self.assertEqual(colors["V528 Test Glass"]["color"], "#3568A8")
+            self.assertAlmostEqual(float(costs["V528 Test Glass"]["rate"]), 7.25)
+
+            with self.assertRaisesRegex(ValueError, "already used"):
+                restarted.upsert_glass_profile({
+                    "value": "V528 Other Glass", "label": "V528 Other Glass",
+                    "color": "#3568A8",
+                }, "admin")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v528_progress_and_inventory_completion_do_not_create_locations(self) -> None:
+        verification_root = ROOT / "_verification_v528_completion_no_flood"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        user = {"username": "admin", "displayName": "Completion Admin", "stageAccess": ["*"]}
+        try:
+            store = self.make_store(verification_root)
+            manual = imported_item("728001", "1", 2, "v0528-progress:1")
+            manual.update({"dimensions": '24" x 48"', "product": '1/4" Clear Tempered', "barcode": "T200728001001000"})
+            inventory = imported_item("728002", "1", 2, "v0528-inventory-complete:1")
+            inventory.update({"dimensions": '36" x 72"', "product": '3/8" Clear Tempered', "barcode": "T200728002001000"})
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-18", "items": [manual, inventory]},
+                "fileName": "Delivery List 09-18-2026.xlsx", "user": "admin",
+            })
+            store.sync_aw_cutting_rows([{
+                "sourceRowId": "v528-cut-2", "orderNr": "728002", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "batchJobNumber": "95282", "batchStatusCode": 500,
+                "batchCreatedAt": "2026-09-11T08:00:00", "optimizationNumber": 95282,
+                "optimizationStatusCode": 500, "optimizationDate": "2026-09-11T07:45:00",
+                "optimizationSheetCount": 6, "quantity": 2, "cutQuantity": 2, "aggregateId": 1000,
+                "productDescription": '3/8" Clear Tempered',
+                "cuttingBookingAt": "2026-09-11T08:10:00", "cuttingBookingEmployee": "CUT",
+                "cuttingBookingRowId": "v528-book-2",
+            }])
+
+            with store.connect() as con:
+                before_rack = int(con.execute("SELECT COUNT(*) FROM rack_items").fetchone()[0])
+                before_bay = int(con.execute("SELECT COUNT(*) FROM bay_assignments").fetchone()[0])
+
+            advanced = store.advance_delivery_progress({
+                "scope": "order", "target": "complete",
+                "deliveryDate": "2026-09-18", "order": "728001",
+            }, "admin")
+            self.assertTrue(advanced["ok"])
+            with store.connect() as con:
+                rows = con.execute(
+                    "SELECT qty, scanned_qty FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id "
+                    "WHERE dl.delivery_date=? AND li.order_no=?",
+                    ("2026-09-18", "728001"),
+                ).fetchall()
+                self.assertTrue(rows)
+                self.assertTrue(all(int(row["scanned_qty"] or 0) == int(row["qty"] or 0) for row in rows))
+                self.assertEqual(int(con.execute("SELECT COUNT(*) FROM rack_items").fetchone()[0]), before_rack)
+                self.assertEqual(int(con.execute("SELECT COUNT(*) FROM bay_assignments").fetchone()[0]), before_bay)
+
+            session = store.start_inventory_session({"location": "airport_rd", "inventoryType": "full"}, user)
+            system_orders = {row["order"] for row in store.get_inventory_session_items(session["id"], "system", user)["items"]}
+            self.assertIn("728002", system_orders)
+            completed = store.complete_inventory_system_orders(session["id"], {"orders": ["728002"]}, user)
+            self.assertTrue(completed["ok"])
+            with store.connect() as con:
+                rows = con.execute(
+                    "SELECT qty, scanned_qty FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id "
+                    "WHERE dl.delivery_date=? AND li.order_no=?",
+                    ("2026-09-18", "728002"),
+                ).fetchall()
+                self.assertTrue(rows)
+                self.assertTrue(all(int(row["scanned_qty"] or 0) == int(row["qty"] or 0) for row in rows))
+                self.assertEqual(int(con.execute("SELECT COUNT(*) FROM rack_items").fetchone()[0]), before_rack)
+                self.assertEqual(int(con.execute("SELECT COUNT(*) FROM bay_assignments").fetchone()[0]), before_bay)
+
+            # The same retained A+W optimization should appear once in the new
+            # stock-sheet statistic, including its configured stock size/email.
+            store.save_sheet_usage_settings({"profiles": {
+                '3/8" Clear Tempered': {"sheetSize": '96" x 130"', "emails": ["inventory@example.com"]}
+            }}, "admin")
+            report = store.reports_summary({"dateFrom": "2026-09-11", "dateTo": "2026-09-11", "detailRows": 1})
+            self.assertEqual(report["sheetUsage"]["totalSheets"], 6)
+            self.assertEqual(report["sheetUsage"]["optimizationCount"], 1)
+            self.assertEqual(report["sheetUsage"]["byGlass"][0]["sheetSize"], '96" x 130"')
+            self.assertEqual(report["sheetUsage"]["byGlass"][0]["emails"], ["inventory@example.com"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
     def test_v524_schema20_inventory_migration_preserves_existing_rows_and_is_idempotent(self) -> None:
         verification_root = ROOT / "_verification_v524_inventory_migration"
         shutil.rmtree(verification_root, ignore_errors=True)
@@ -4979,12 +5087,12 @@ class ImportConsistencyTests(unittest.TestCase):
                 con.execute("PRAGMA foreign_keys=OFF")
                 for name in ("inventory_scans", "inventory_expected_items", "inventory_sessions", "inventory_item_mappings"):
                     con.execute(f'DROP TABLE IF EXISTS "{name}"')
-                con.execute("DELETE FROM schema_migrations WHERE version=20")
+                con.execute("DELETE FROM schema_migrations WHERE version IN (20, 21)")
                 con.commit()
                 con.execute("PRAGMA foreign_keys=ON")
                 applied = run_sqlite_migrations(con, store)
-                self.assertEqual(applied, [20])
-                self.assertEqual(int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]), 20)
+                self.assertEqual(applied, [20, 21])
+                self.assertEqual(int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]), 21)
                 for name, expected in before_counts.items():
                     self.assertEqual(int(con.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]), expected, name)
                 self.assertEqual(int(con.execute("SELECT COUNT(*) FROM inventory_item_mappings").fetchone()[0]), 15)
@@ -5049,6 +5157,111 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_v529_internal_reject_review_is_per_user_and_future_events_reopen_review(self) -> None:
+        verification_root = ROOT / "_verification_v529_reject_review"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-21", "items": [imported_item("729101", "1", 1, "v0529-reject:1")]},
+                "fileName": "Delivery List 09-21-2026.xlsx", "user": "admin",
+            })
+            with store.connect() as con:
+                con.executemany(
+                    "INSERT INTO users(username,email,display_name,password_hash,active,created_at) VALUES(?,?,?,?,1,?)",
+                    [
+                        ("reviewer-a", "a@example.com", "Reviewer A", "x", "2026-09-11T12:00:00+00:00"),
+                        ("reviewer-b", "b@example.com", "Reviewer B", "x", "2026-09-11T12:00:00+00:00"),
+                    ],
+                )
+                selected = con.execute(
+                    "SELECT id FROM delivery_lists WHERE delivery_date=? AND status='active' ORDER BY id LIMIT 1",
+                    ("2026-09-21",),
+                ).fetchone()
+                first = con.execute(
+                    "INSERT INTO reject_events(delivery_date,order_no,item_no,qty,reason_label,location_label,rejected_at,rejected_by) VALUES(?,?,?,?,?,?,?,?)",
+                    ("2026-09-21", "729101", "001", 1, "Broken", "Cutting", "2026-09-11T12:05:00+00:00", "admin"),
+                ).lastrowid
+                con.commit()
+            list_id = str(selected["id"])
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            self.assertEqual(operations.line_flags(list_id, "reviewer-a")["rejectIds"], [first])
+            acknowledged = operations.acknowledge_internal_rejects(list_id, [first], "reviewer-a")
+            self.assertEqual(acknowledged["pendingRejectCount"], 0)
+            self.assertEqual(operations.line_flags(list_id, "reviewer-b")["rejectIds"], [first])
+            with store.connect() as con:
+                second = con.execute(
+                    "INSERT INTO reject_events(delivery_date,order_no,item_no,qty,reason_label,location_label,rejected_at,rejected_by) VALUES(?,?,?,?,?,?,?,?)",
+                    ("2026-09-21", "729101", "001", 1, "Remake", "Denver", "2026-09-11T13:05:00+00:00", "admin"),
+                ).lastrowid
+                con.commit()
+            self.assertEqual(operations.line_flags(list_id, "reviewer-a")["rejectIds"], [second])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v529_manual_cut_and_machine_progress_survives_until_reject(self) -> None:
+        verification_root = ROOT / "_verification_v529_manual_progress"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-22", "items": [imported_item("729201", "1", 1, "v0529-progress:1")]},
+                "fileName": "Delivery List 09-22-2026.xlsx", "user": "admin",
+            })
+            with store.connect() as con:
+                anchor = con.execute(
+                    "SELECT li.id FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id WHERE dl.delivery_date=? ORDER BY li.id LIMIT 1",
+                    ("2026-09-22",),
+                ).fetchone()
+            store.advance_delivery_progress({"scope": "item", "target": "cutting", "lineItemId": anchor["id"]}, "admin")
+            store.advance_delivery_progress({"scope": "item", "target": "machine:waterjet", "lineItemId": anchor["id"]}, "admin")
+            hint = store.aw_fabrication_hints_for_requests([{
+                "key": "piece", "deliveryDate": "2026-09-22", "order": "729201", "item": "001",
+                "job": "88729201 TEST JOB", "lastRejectedAt": "", "remake": False,
+            }])["piece"]
+            self.assertTrue(hint["complete"])
+            self.assertTrue(hint["manualMachineComplete"])
+            self.assertEqual(hint["manualMachineCode"], "waterjet")
+            rejected_hint = store.aw_fabrication_hints_for_requests([{
+                "key": "piece", "deliveryDate": "2026-09-22", "order": "729201", "item": "001",
+                "job": "88729201 TEST JOB", "lastRejectedAt": "2026-09-11T14:00:00+00:00", "remake": False,
+            }])["piece"]
+            self.assertFalse(rejected_hint.get("manualProgressOverride", False))
+            self.assertFalse(rejected_hint.get("manualMachineComplete", False))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v529_inventory_delivery_date_and_evidence_machines_are_durable(self) -> None:
+        verification_root = ROOT / "_verification_v529_inventory_machine"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        user = {"username": "admin", "displayName": "Admin", "stageAccess": ["*"]}
+        try:
+            store = self.make_store(verification_root)
+            session = store.start_inventory_session({"location": "airport_rd", "inventoryType": "full"}, user)
+            store.record_inventory_manual_entry(session["id"], {
+                "order": "729301", "item": "1", "jobNr": "JOB-529", "customer": "TEST",
+                "deliveryDate": "2026-09-30", "glassType": "3/8 Clear", "dimensions": '24" x 48"', "qty": 1,
+            }, user)
+            with store.connect() as con:
+                delivery_date = con.execute("SELECT delivery_date FROM inventory_scans WHERE session_id=?", (session["id"],)).fetchone()[0]
+                installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
+            self.assertEqual(delivery_date, "2026-09-30")
+            self.assertEqual(installed, 21)
+            saved = store.update_machine_configuration({"machines": [
+                {"code": "waterjet", "name": "WJ", "active": False, "color": "#9865F1", "terms": ["WJ"]},
+                {"code": "denver", "name": "Denver", "active": False, "color": "#5085F7", "terms": ["DENVER"]},
+                {"code": "polisher", "name": "Polisher", "active": False, "color": "#118855", "terms": ["POLISH"]},
+            ]}, "admin")
+            by_code = {row["code"]: row for row in saved["machines"]}
+            self.assertTrue(by_code["waterjet"]["active"])
+            self.assertTrue(by_code["denver"]["active"])
+            self.assertFalse(by_code["polisher"]["active"])
+            self.assertEqual(by_code["waterjet"]["color"], "#9865F1")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

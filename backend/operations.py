@@ -108,6 +108,8 @@ class OperationsFeatureService:
             "listRevision": 1,
             "isNewStage": False,
             "noticeIds": [],
+            "pendingRejectCount": 0,
+            "rejectIds": [],
             "items": [],
         })
 
@@ -147,6 +149,14 @@ class OperationsFeatureService:
                     SELECT n.list_id, n.source_hash, n.created_at, n.change_token
                     FROM line_update_notices n
                     JOIN latest_notice_ids latest ON latest.notice_id = n.id
+                ), reject_reviewed AS (
+                    SELECT re.*,
+                           CASE WHEN review.reject_event_id IS NULL THEN 1 ELSE 0 END AS reject_unseen
+                    FROM reject_events re
+                    LEFT JOIN internal_reject_review_receipts review
+                      ON review.reject_event_id = re.id
+                     AND review.user_id = ?
+                    WHERE re.delivery_date IN (SELECT DISTINCT delivery_date FROM requested_lists)
                 ), reject_ranked AS (
                     SELECT re.*,
                            ROW_NUMBER() OVER (
@@ -158,9 +168,14 @@ class OperationsFeatureService:
                            ) AS reject_event_count,
                            SUM(re.qty) OVER (
                                PARTITION BY re.delivery_date, re.order_no, re.item_no
-                           ) AS reject_piece_count
-                    FROM reject_events re
-                    WHERE re.delivery_date IN (SELECT DISTINCT delivery_date FROM requested_lists)
+                           ) AS reject_piece_count,
+                           SUM(re.reject_unseen) OVER (
+                               PARTITION BY re.delivery_date, re.order_no, re.item_no
+                           ) AS unseen_reject_count,
+                           GROUP_CONCAT(CASE WHEN re.reject_unseen = 1 THEN re.id END) OVER (
+                               PARTITION BY re.delivery_date, re.order_no, re.item_no
+                           ) AS unseen_reject_ids
+                    FROM reject_reviewed re
                 )
                 SELECT dl.id AS list_id,
                        dl.delivery_date,
@@ -182,6 +197,8 @@ class OperationsFeatureService:
                        COALESCE(rr.rejected_by, '') AS last_rejected_by,
                        COALESCE(rr.notes, '') AS last_reject_notes,
                        COALESCE(rr.delivery_date, dl.delivery_date, '') AS last_reject_delivery_date,
+                       COALESCE(rr.unseen_reject_count, 0) AS unseen_reject_count,
+                       COALESCE(rr.unseen_reject_ids, '') AS unseen_reject_ids,
                        n.id AS notice_id,
                        n.change_type AS change_type,
                        r.notice_id AS receipt_notice_id
@@ -209,7 +226,7 @@ class OperationsFeatureService:
                  AND r.user_id = ?
                 ORDER BY dl.id, li.id, n.id
                 """,
-                (*clean_ids, user_id),
+                (*clean_ids, user_id, user_id),
             ).fetchall()
 
         results: dict[str, dict[str, Any]] = {
@@ -261,6 +278,12 @@ class OperationsFeatureService:
                     "lastRejectedBy": str(row["last_rejected_by"] or ""),
                     "lastRejectNotes": str(row["last_reject_notes"] or ""),
                     "lastRejectDeliveryDate": str(row["last_reject_delivery_date"] or ""),
+                    "hasUnseenReject": bool(int(row["unseen_reject_count"] or 0)),
+                    "unseenRejectIds": sorted({
+                        as_int(value)
+                        for value in str(row["unseen_reject_ids"] or "").split(",")
+                        if as_int(value) > 0
+                    }),
                     "userUpdateState": "",
                     "userUpdateNoticeIds": [],
                     "hasUnseenUpdate": False,
@@ -284,6 +307,13 @@ class OperationsFeatureService:
             result["newLineCount"] = sum(1 for item in values if item["userUpdateState"] == "new")
             result["updatedLineCount"] = sum(1 for item in values if item["userUpdateState"] == "updated")
             result["noticeIds"] = sorted(set(result["noticeIds"]))
+            result["rejectIds"] = sorted({
+                reject_id
+                for item in values
+                for reject_id in (item.get("unseenRejectIds") or [])
+                if as_int(reject_id) > 0
+            })
+            result["pendingRejectCount"] = sum(1 for item in values if item.get("hasUnseenReject"))
             result["isNewStage"] = bool(
                 values
                 and result["pendingLineCount"] > 0
@@ -364,6 +394,30 @@ class OperationsFeatureService:
                 """,
                 (*clean_ids, *clean_ids, user_id),
             ).fetchall()
+            reject_rows = con.execute(
+                f"""
+                SELECT dl.id AS list_id,
+                       li.id AS line_item_id,
+                       li.order_no,
+                       li.item_no,
+                       re.id AS reject_event_id
+                FROM delivery_lists dl
+                JOIN line_items li
+                  ON li.list_id = dl.id
+                 AND COALESCE(li.is_deleted, 0) = 0
+                JOIN reject_events re
+                  ON re.delivery_date = dl.delivery_date
+                 AND re.order_no = li.order_no
+                 AND re.item_no = li.item_no
+                LEFT JOIN internal_reject_review_receipts review
+                  ON review.reject_event_id = re.id
+                 AND review.user_id = ?
+                WHERE dl.id IN ({placeholders})
+                  AND review.reject_event_id IS NULL
+                ORDER BY dl.id, li.id, re.id
+                """,
+                (user_id, *clean_ids),
+            ).fetchall()
 
         results: dict[str, dict[str, Any]] = {
             list_id: {
@@ -394,6 +448,8 @@ class OperationsFeatureService:
                     "order": str(row["order_no"] or ""),
                     "item": str(row["item_no"] or ""),
                     "hasUnseenUpdate": True,
+                    "hasUnseenReject": False,
+                    "unseenRejectIds": [],
                     "userUpdateState": "",
                     "userUpdateNoticeIds": [],
                 },
@@ -406,11 +462,41 @@ class OperationsFeatureService:
             if change_type == "new" or not item["userUpdateState"]:
                 item["userUpdateState"] = change_type
 
+        for row in reject_rows:
+            list_id = str(row["list_id"] or "")
+            if list_id not in results:
+                continue
+            line_item_id = str(row["line_item_id"] or "")
+            item = items_by_list.setdefault(list_id, {}).setdefault(
+                line_item_id,
+                {
+                    "lineItemId": line_item_id,
+                    "order": str(row["order_no"] or ""),
+                    "item": str(row["item_no"] or ""),
+                    "hasUnseenUpdate": False,
+                    "hasUnseenReject": False,
+                    "unseenRejectIds": [],
+                    "userUpdateState": "",
+                    "userUpdateNoticeIds": [],
+                },
+            )
+            reject_id = as_int(row["reject_event_id"])
+            if reject_id > 0:
+                item["hasUnseenReject"] = True
+                item["unseenRejectIds"].append(reject_id)
+
         for list_id, result in results.items():
             items = list(items_by_list.get(list_id, {}).values())
             result["items"] = items
             result["noticeIds"] = sorted(set(result["noticeIds"]))
-            result["pendingLineCount"] = len(items)
+            result["pendingLineCount"] = sum(1 for item in items if item.get("hasUnseenUpdate"))
+            result["pendingRejectCount"] = sum(1 for item in items if item.get("hasUnseenReject"))
+            result["rejectIds"] = sorted({
+                reject_id
+                for item in items
+                for reject_id in (item.get("unseenRejectIds") or [])
+                if as_int(reject_id) > 0
+            })
             result["newLineCount"] = sum(1 for item in items if item["userUpdateState"] == "new")
             result["updatedLineCount"] = sum(1 for item in items if item["userUpdateState"] == "updated")
             result["isNewStage"] = bool(
@@ -553,6 +639,55 @@ class OperationsFeatureService:
                 "acknowledgedListIds": sorted(value for value in target_list_ids if value),
             }
         )
+        return result
+
+    def acknowledge_internal_rejects(self, list_id: str, reject_ids: list[Any], username: str) -> dict[str, Any]:
+        """Mark specific Internal Reject incidents reviewed for one user.
+
+        Review receipts are event-scoped and user-scoped. A future reject creates
+        a new event ID and therefore becomes visible automatically without aging
+        or clearing another operator's review state.
+        """
+        self._require_sqlite()
+        clean_list_id = clean_text(list_id, 255)
+        requested_ids = sorted({as_int(value) for value in (reject_ids or []) if as_int(value) > 0})
+        if not clean_list_id:
+            raise ValueError("listId is required")
+        if not requested_ids:
+            raise ValueError("No Internal Reject incidents were supplied")
+        with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            user_id = self._user_id(con, username)
+            selected = con.execute(
+                "SELECT delivery_date FROM delivery_lists WHERE id=? AND status='active'",
+                (clean_list_id,),
+            ).fetchone()
+            if not selected:
+                raise ValueError("The selected delivery list was not found")
+            marks = ",".join("?" for _ in requested_ids)
+            rows = con.execute(
+                f"SELECT id FROM reject_events WHERE delivery_date=? AND id IN ({marks}) ORDER BY id",
+                (str(selected["delivery_date"] or ""), *requested_ids),
+            ).fetchall()
+            valid_ids = [int(row["id"]) for row in rows]
+            if valid_ids != requested_ids:
+                raise ValueError("The Internal Reject list changed before review was saved. Refresh and review the current incidents.")
+            reviewed_at = utc_now()
+            con.executemany(
+                "INSERT OR IGNORE INTO internal_reject_review_receipts (reject_event_id, user_id, reviewed_at) VALUES (?, ?, ?)",
+                [(reject_id, user_id, reviewed_at) for reject_id in valid_ids],
+            )
+            self._audit(
+                con,
+                "internal_reject_review",
+                clean_list_id,
+                "acknowledge_internal_rejects",
+                username,
+                {"rejectIds": valid_ids, "deliveryDate": str(selected["delivery_date"] or ""), "reviewedAt": reviewed_at},
+            )
+            con.commit()
+        result = self.line_flags(clean_list_id, username)
+        result["acknowledgedRejectIds"] = valid_ids
         return result
 
     def reject_catalog(self) -> dict[str, Any]:

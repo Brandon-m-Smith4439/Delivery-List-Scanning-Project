@@ -103,3 +103,29 @@
   .inventory-page .inventory-page-heading{padding:15px}.inventory-system-complete-v527{display:grid;grid-template-columns:1fr 1fr}.inventory-system-complete-v527>div{grid-column:1/-1}.inventory-system-complete-v527 button{width:100%}.inventory-system-complete-v527 .inventory-complete-all-v527{grid-column:1/-1}
   .inventory-history-row{grid-template-columns:1fr auto!important}.inventory-history-row>*{display:none!important}.inventory-history-identity-v527,.inventory-history-status-v527,.inventory-history-row-actions{display:flex!important}.inventory-history-row-actions{grid-column:1/-1}.inventory-history-row-actions button{flex:1}
 }
+
+/* ========================================================================== */
+/* v0.529 Inventory header and delivery-date audit field                      */
+/* ========================================================================== */
+.inventory-page .inventory-page-heading::after {
+  width: 172px !important;
+  background: none !important;
+  border: 3px solid rgba(38,118,173,.11);
+  border-radius: 50%;
+  height: 172px;
+  right: -44px !important;
+  top: -68px !important;
+  left: auto !important;
+  bottom: auto !important;
+}
+.inventory-page .inventory-page-heading::before {
+  content:"";
+  position:absolute;
+  width:116px;
+  height:116px;
+  right:-16px;
+  top:-42px;
+  border:2px solid rgba(38,118,173,.07);
+  border-radius:50%;
+  pointer-events:none;
+}

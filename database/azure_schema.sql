@@ -1300,3 +1300,42 @@ ON target.item_id = source.item_id
 WHEN NOT MATCHED THEN INSERT(item_id, glass_label, description, match_terms_json, sort_order, active, created_at, updated_at)
 VALUES(source.item_id, source.glass_label, source.description, source.match_terms_json, source.sort_order, 1, @v524_now, @v524_now);
 GO
+
+-- v0.529 / schema 21: per-user Internal Reject review + manual production progress.
+IF OBJECT_ID(N'dbo.internal_reject_review_receipts', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.internal_reject_review_receipts (
+        reject_event_id bigint NOT NULL,
+        user_id bigint NOT NULL,
+        reviewed_at datetime2(0) NOT NULL,
+        CONSTRAINT pk_internal_reject_review_receipts PRIMARY KEY (reject_event_id, user_id),
+        CONSTRAINT fk_internal_reject_review_receipts_reject FOREIGN KEY (reject_event_id) REFERENCES dbo.reject_events(id) ON DELETE CASCADE,
+        CONSTRAINT fk_internal_reject_review_receipts_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
+    );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.internal_reject_review_receipts') AND name=N'idx_internal_reject_review_receipts_user')
+    CREATE INDEX idx_internal_reject_review_receipts_user ON dbo.internal_reject_review_receipts(user_id, reject_event_id);
+
+IF OBJECT_ID(N'dbo.manual_production_progress_overrides', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.manual_production_progress_overrides (
+        delivery_date nvarchar(32) NOT NULL,
+        order_no nvarchar(80) NOT NULL,
+        item_no nvarchar(40) NOT NULL,
+        job nvarchar(160) NOT NULL CONSTRAINT df_manual_prod_job_v529 DEFAULT N'',
+        remake_marker bit NOT NULL CONSTRAINT df_manual_prod_remake_v529 DEFAULT 0,
+        cutting_complete bit NOT NULL CONSTRAINT df_manual_prod_cutting_v529 DEFAULT 0,
+        machine_code nvarchar(80) NOT NULL CONSTRAINT df_manual_prod_machine_v529 DEFAULT N'',
+        machine_complete bit NOT NULL CONSTRAINT df_manual_prod_machine_done_v529 DEFAULT 0,
+        cutting_key_index int NOT NULL CONSTRAINT df_manual_prod_key_v529 DEFAULT 0,
+        reject_cutoff nvarchar(64) NOT NULL CONSTRAINT df_manual_prod_reject_v529 DEFAULT N'',
+        updated_by nvarchar(160) NOT NULL CONSTRAINT df_manual_prod_user_v529 DEFAULT N'',
+        updated_at datetime2(0) NOT NULL,
+        CONSTRAINT pk_manual_production_progress_overrides PRIMARY KEY (delivery_date, order_no, item_no)
+    );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.manual_production_progress_overrides') AND name=N'idx_manual_production_progress_identity')
+    CREATE INDEX idx_manual_production_progress_identity ON dbo.manual_production_progress_overrides(delivery_date, order_no, item_no);
+
+IF COL_LENGTH(N'dbo.inventory_scans', N'delivery_date') IS NULL
+    ALTER TABLE dbo.inventory_scans ADD delivery_date nvarchar(32) NOT NULL CONSTRAINT df_inventory_scans_delivery_date_v529 DEFAULT N'';

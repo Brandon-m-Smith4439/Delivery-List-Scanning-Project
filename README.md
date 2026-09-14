@@ -1,32 +1,41 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.527**. SQLite remains the active/default backend and schema remains **20**. This release stabilizes background production checks, identifies irregular A+W cutting records, and speeds Scan navigation without changing production data.
+Current maintained release: **v0.529**. SQLite remains the active/default backend and schema advances to **21** for per-user Internal Reject review receipts, lifecycle-bound manual production progress, and Inventory delivery dates.
 
-## Install v0.527
+## Install v0.529
 
-1. Stop the server and back up the current project folder, preserving the live `data/` folder separately.
-2. Inspect `Delivery_List_Scanner_v0.527_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, credentials, verification artifacts, and generated exports.
-3. Extract the ZIP into the existing **v0.526** project root with overwrite enabled. Schema remains **20** and no migration runs.
-4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.527** in the footer.
-5. Open a busy Scan date, hover rows, open Order Details, move to another page and back, and switch repeatedly among nearby delivery dates.
-6. Confirm A+W warnings appear for cut pieces that have no batch/optimization or have a batch without an optimization. Review the explicit **Batch created** or **Optimization dated** timestamp in Order Details.
-7. Review Inventory tabs, scan and manual-entry feedback, history, reconciliation, and responsive layouts.
+1. Stop the server and back up the current project folder. Preserve the live `data/` folder separately.
+2. Inspect `Delivery_List_Scanner_v0.529_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.528** project root with overwrite enabled. Do not replace the live `data/` folder.
+4. Restart with the maintained launcher. The verified schema-21 migration runs once and preserves existing records; hard-refresh floor browsers (`Ctrl+F5`) and confirm **0.529** in the footer.
+5. Review Internal Reject alerts, Remake/Rush rows, Scan and Print filters, Inventory, Edit Delivery Lists, Lookup Manager, Order Details, Statistics, and tutorials on a controlled delivery date.
 
-### v0.527 behavior
+### v0.529 behavior
 
-- **Stable production checks.** Scan records every bounded fabrication attempt, coalesces competing foreground/background work, retries unfinished cut/fabrication status on a ten-minute cadence, and stops checking completed physical progress until reject/remake lifecycle evidence resets it. One completed date hydration causes at most one Scan repaint, so hover and Order Details clicks remain stable.
-- **Faster date and sidebar navigation.** Scan claims date-wide warm ownership before rendering, reuses valid cached bundles, and prefetches only the two neighboring dates with a bounded coalesced request. The desktop navigation rail uses lighter containment, shadow, and transition work.
-- **A+W production review flags.** Completed Cutting records are flagged when they contain neither a batch nor optimization, or contain a batch without optimization. Scan shows item/order warnings and Order Details explains the irregularity without altering the piece's accumulated progress.
-- **Unambiguous A+W time.** Order Details labels the time as **Batch created** when A+W supplied a batch creation timestamp. Only the fallback optimization timestamp is labeled **Optimization dated**.
-- **Sketch file lifecycle.** PDF readers now close production files deterministically. Local index/preview work completes inline while mapped production shares retain background processing, preventing shutdown/cleanup races without moving network I/O onto Scan.
-- **No schema change.** Application advances exactly one step to v0.527 while `CURRENT_SCHEMA_VERSION` stays at 20.
+- **Internal Reject review is durable and per user.** Each new reject event remains flagged on its delivery date until that operator opens the Reject review and marks the displayed incidents reviewed. A future reject creates a new event and reopens review automatically.
+- **Production progress remains lifecycle-aware.** Manual Edit can advance an item through Cutting, configured fabrication machines, Staging, Outbound, Indian Trail, and Complete. Cut/fabricated progress is retained across normal refreshes and is ignored after a later reject, remake generation, changed Job, or newer A+W generation.
+- **Evidence-backed machines stay available.** Denver and Waterjet cannot disappear from normal detection and filters while their maintained evidence integrations exist. Their saved names, colors, terms, and positions remain configurable.
+- **Inventory records delivery dates.** Manual Inventory entry and Smart Fill retain the delivery date in history and reconciliation. Schema 21 adds the field without resetting prior counts.
+- **Updates remain usable.** A+W/manual update snapshots do not clear the loaded browser catalog; SQLite WAL reads, stale-response ownership, cached date bundles, and bounded background production checks keep scanning and date navigation available during updates.
+- **UI finish pass.** Remakes use one charcoal gradient, Rush uses red, Internal Reject ribbons fade into their item row, filters share flat chip geometry, Print/Export chips stay one line, Lookup editors have labeled Save controls, Manual Edit shows one current-to-next progress summary, and loading surfaces use the shared animated bar.
+- **Order Details and tutorials.** Sketch/label fit and visible maximize controls are retained, and Scan tutorials highlight the moved date selector and demonstrate opening Filters, All Scans, and Order Details before explaining them.
 
-### v0.527 validation
+### v0.529 validation
 
-- Browser reproduction on a 117-piece date fell from **132** fabrication-status requests in about 11 seconds to **3** bounded requests with no further requests over the next nine seconds. Hover caused zero extra fabrication calls and Order Details opened normally.
-- Three measured delivery-date changes completed in **250 ms, 322 ms, and 273 ms**. Repeated desktop sidebar hover stayed within a **16.8 ms** maximum animation frame.
-- Inventory tabs, manual entry/history, reconciliation/totals, one actual isolated count update, and six responsive widths from 390 to 1440 pixels passed with no horizontal overflow.
-- JavaScript syntax, focused regression contracts, and the complete maintained suite pass. The release package is checked as a v0.526 overlay and contains no runtime data.
+- JavaScript syntax passes, all **18 Python source files** parse, and the complete maintained suite passes **332/332 tests**.
+- An isolated copy migrated to schema **21**, returned `integrity_check: ok`, and reported **0 foreign-key violations**. A repeat startup completed database initialization in **2.68 seconds** without rerunning the one-time migration.
+- A real isolated Chromium workflow opened Scan/Order Details/Print/Inventory/Lookup/Edit/Tutorial surfaces without page or console errors. The cached return to a 50-row delivery date took **49.1 ms**, issued **0** fabrication requests, and showed no Checking Fab placeholder; the alternate date switch measured **106.4 ms** in the final pass.
+- Scan retained all **50 rows** and an enabled barcode field while an update request was held open. The Today Production report API returned its full detail payload in **220-277 ms** across five requests.
+- Desktop (1440x900), vertical tablet (768x1024), and scanner-phone (390x844) captures have **0 px** document overflow. Remake/reject rows, the three-column Order Details layout, visible sketch maximize control, Inventory History/Manual Entry, Print filters, and click-guided Scan tutorial were visually inspected.
+- Production A+W SQL/PowerShell sources, currently disconnected mapped production shares, printers, email delivery, and physical TC22 barcode hardware remain controlled deployment checks.
+
+## Previous release: v0.528
+
+v0.528 completed the v0.527 performance/UI pass: non-destructive A+W refreshes, bounded fabrication checks, Inventory and stage-less list editing, stock-sheet statistics, lookup persistence, expanded tutorials, and Order Details polish on schema 20.
+
+## Previous release: v0.527
+
+v0.527 introduced stable/coalesced fabrication checks, A+W cutting irregularity review flags, adjacent-date prefetch, the Inventory visual/history overhaul, stage-less Delivery List editing/completion, stock-sheet statistics/settings, deeper tutorials, sketch REMAKE recognition, broader machine matching, and related Order Details/Lookup/Print polish while keeping schema 20 unchanged.
 
 ## Previous release: v0.526
 

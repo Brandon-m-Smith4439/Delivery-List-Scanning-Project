@@ -28,6 +28,8 @@ UNIQUE_KEY_COLUMNS: dict[str, tuple[str, ...]] = {
     "stations": ("name",),
     "inventory_item_mappings": ("item_id",),
     "inventory_sessions": ("session_code",),
+    "internal_reject_review_receipts": ("reject_event_id", "user_id"),
+    "manual_production_progress_overrides": ("delivery_date", "order_no", "item_no"),
     "user_roles": ("user_id", "role_id"),
 }
 
