@@ -30544,3 +30544,208 @@ body button.app-primary-button.global-result-action-v475 {
   .app-sidebar,
   .sidebar-scrim { transition-duration: 1ms !important; }
 }
+
+/* v0.539 Statistics and Lookup Manager polish */
+.statistics-production-glass-row-v514 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.statistics-production-glass-copy-v539 {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statistics-production-glass-copy-v539 strong {
+  font-size: 13px;
+}
+
+.statistics-production-glass-copy-v539 small {
+  color: var(--app-text-muted, #5b6f82);
+  font-size: 11px;
+}
+
+.statistics-production-machine-card-v539 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(40, 88, 135, 0.16);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(247, 250, 255, 0.98), rgba(236, 243, 252, 0.94));
+}
+
+.statistics-production-machine-card-v539 strong {
+  font-size: 13px;
+}
+
+.statistics-production-machine-card-v539 span {
+  font-size: 12px;
+  font-weight: 800;
+  color: #123b60;
+}
+
+.color-manager-overview-v539 .lookup-row-list {
+  display: grid;
+  gap: 12px;
+}
+
+.color-manager-card-v539 {
+  position: relative;
+  border-left: 4px solid var(--color-manager-accent, #2c988d);
+}
+
+.color-manager-card-v539 .lookup-row-main small {
+  color: var(--app-text-muted, #5b6f82);
+}
+
+/* v0.539 final Statistics production-count polish */
+.statistics-production-glass-name-v539 {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+}
+.statistics-production-glass-name-v539 > strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statistics-production-glass-name-v539 > small {
+  color: #60788c;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: normal;
+  text-align: left;
+}
+.statistics-production-machine-ledger-v514 {
+  display: grid !important;
+  gap: 8px !important;
+}
+.statistics-production-machine-ledger-v514 > header {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+}
+.statistics-production-machine-row-v539 {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  padding: 9px 11px !important;
+  border: 1px solid #d7e3ec !important;
+  border-radius: 9px !important;
+  background: linear-gradient(135deg, #fbfdff, #f3f7fb) !important;
+}
+.statistics-production-machine-row-v539 > span {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 1px !important;
+}
+.statistics-production-machine-row-v539 > span small {
+  color: #7b8e9f !important;
+  font-size: 8.5px !important;
+  font-weight: 850 !important;
+  letter-spacing: .045em !important;
+  text-transform: uppercase !important;
+}
+.statistics-production-machine-row-v539 > span strong {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #173c5b !important;
+  font-size: 12px !important;
+}
+.statistics-production-machine-row-v539 > b {
+  color: #0b567c !important;
+  font-size: 14px !important;
+  white-space: nowrap !important;
+}
+.statistics-production-machine-row-v539 > b small {
+  font-size: 9px !important;
+  font-weight: 800 !important;
+}
+.statistics-production-machine-row-v539 > em {
+  color: #6f8292 !important;
+  font-size: 10px !important;
+  font-style: normal !important;
+  font-weight: 750 !important;
+  white-space: nowrap !important;
+}
+@media (max-width: 680px) {
+  .statistics-production-machine-row-v539 {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+  .statistics-production-machine-row-v539 > em {
+    grid-column: 1 / -1;
+  }
+}
+
+/* v0.539 Lookup Manager sheet-size and centralized color workspaces */
+.sheet-size-manager-v539 .lookup-config-editor-v346 {
+  display: grid;
+  gap: 14px;
+}
+.sheet-size-list-v539 {
+  display: grid;
+  gap: 9px;
+}
+.sheet-size-row-v539 {
+  display: grid !important;
+  grid-template-columns: minmax(220px,1.2fr) minmax(150px,.8fr) minmax(230px,1fr) !important;
+  gap: 12px !important;
+  align-items: end !important;
+}
+.sheet-size-row-v539 > label {
+  display: grid;
+  gap: 5px;
+}
+.sheet-size-row-v539 > label > span {
+  color: #60788c;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.sheet-size-row-v539 input {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid #bfd0dd;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #fff;
+  font: inherit;
+}
+.sheet-size-actions-v539 {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid #dce6ed;
+}
+.color-manager-attention-v539 > .lookup-manager-shell {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.color-manager-shell-v539 {
+  display: grid;
+  gap: 14px;
+}
+@media (max-width: 900px) {
+  .sheet-size-row-v539 {
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+  }
+}

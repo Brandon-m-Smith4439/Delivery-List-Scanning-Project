@@ -1,39 +1,50 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.538**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
+Current maintained release: **v0.539**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
 
-## Install v0.538
+## Install v0.539
 
 1. Stop the server and back up the current project folder. Preserve the live `data/` folder separately.
-2. Inspect `Delivery_List_Scanner_v0.538_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
-3. Extract the ZIP into the existing **v0.537** project root with overwrite enabled. Do not replace the live `data/` folder.
-4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.538**. SQLite remains schema **21** and no migration should run for this release.
-5. On Statistics, choose a historical date with one calendar click and apply it. Confirm the table/chart remains on that historical single day instead of falling back to Today.
-6. Select **Production count by day** in Live Analytics and use Table view to verify historical first-import counts.
-7. Open Scan and verify progress checkpoints use larger count/label/icon text without clipping at desktop and TC22 widths.
+2. Inspect `Delivery_List_Scanner_v0.539_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.538** project root with overwrite enabled. Do not replace the live `data/` folder.
+4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.539**. SQLite remains schema **21** and no migration should run for this release.
+5. On Scan, confirm every Progress checkpoint reads as one compact icon + step + quantity line and stays inside the Progress column at desktop and TC22 widths. Confirm External Remake Glass Type text remains dark/readable.
+6. On Statistics, select a historical single day and a multi-day range. Confirm Glass Quantity/Common Sizes follow the selected delivery-date range, Production Count follows the selected first-import activity range, stock-sheet counts sit beside their glass types, and the old **Production Count for Day** option and standalone **Sheet Settings** button are gone.
+7. In Lookup Manager, confirm the new **Sheet Sizes** tab contains stock-sheet size/recipient controls and **Color Manager** centralizes the maintained color workspaces.
+8. In Inventory, use a frozen line with Qty greater than 1. Mix barcode scans and Manual Entry and confirm both advance the same counted quantity, an entry that would exceed the expected Qty is blocked, and the scan result clearly shows success/failure plus current Airport Rd and Indian Trail system presence.
 
-### v0.538 behavior
+### v0.539 behavior
 
-- **Progress checkpoints are denser and more readable.** Count, stage label, and icon stay in dedicated lanes with larger typography/icons, tighter gaps, and clipping guards so the content remains inside each progress cell.
-- **Historical single-day Statistics works directly.** The first calendar click creates a valid one-day range immediately; a second date can extend that selection into a range.
-- **Production Count is available by day in Live Analytics.** The new table/chart metric uses the same immutable first-import Order/Item ledger as Today’s Production Count and excludes External Remakes.
-- **Event-day Statistics now use plant-local time.** Scan, bad/duplicate scan, manual/action, and Internal Reject activity use America/New_York reporting-day boundaries instead of UTC calendar midnight.
-- **Legitimate zeroes remain zeroes.** Glass quantity, incomplete-list, and Remake metrics no longer fall back to stale browser list data when the backend has correctly returned an empty/zero result.
-- **Monthly Remake boundaries use plant time.** Month rollover follows the operator’s local plant date rather than UTC midnight.
+- **Progress cells now use one owned layout.** Scan progress checkpoints render as icon + step label + count with consistent sizing, clipping guards, and final-authority CSS so old overlapping rules cannot push content outside the Progress column.
+- **External Remake glass labels stay readable.** The Glass Type copy on remake rows is forced back to dark text without disturbing the remake row treatment.
+- **Statistics keeps the selected range on the correct business date basis.** Glass Quantity and Common Glass Sizes remain delivery-date metrics, Production Count remains a first-import activity metric, and event/reject/sheet measures keep their event or optimization date bases.
+- **The redundant Production Count for Day metric is removed.** Historical Production Count remains available through the normal date-range selector and the range-scoped Production Count table.
+- **Stock-sheet usage is easier to audit.** Each Today’s Production Count glass row shows its sheet count inline, and the By Machine section uses a consistent compact card layout.
+- **Sheet-size settings live in Lookup Manager.** The standalone Statistics Sheet Settings button is removed and replaced by a dedicated **Sheet Sizes** tab beside Glass Types.
+- **Color settings are centralized.** Lookup Manager now has a **Color Manager** landing tab for Glass Type, Machine, Attention, and Presentation/branding color workspaces.
+- **Manual Inventory and barcode scans share the same quantity ceiling.** Manual Entry adds only the requested delta to the same physical-count row, combines correctly with scanner counts, and is rejected before the total can exceed the frozen/current known system quantity for that Order/Item.
+- **Manual count corrections are piece-safe.** Smart Fill starts Manual Entry at one piece, and Undo removes only one physical piece from any multi-quantity aggregate even when Manual Entry and barcode scans were mixed.
+- **Inventory scan feedback is explicit.** Successful, blocked, and failed scans show a persistent page result plus the normal app notification/sound. Successful and duplicate-known scans also show current **Airport Rd** and **Indian Trail** system presence and quantity/reason details.
+- **Remake duplicate review is more tolerant of route-only differences.** Same-day normal/remake candidates are grouped by Job + Customer + exact item set; route match is retained as evidence but no longer hides a strong remake duplicate from Superseded Orders review.
 - **No schema change is required.** SQLite remains schema **21**.
 
 ### Statistics calculation basis
 
-- Production Count: immutable first scanner import from A+W by stable Order + Item, grouped on plant-local import day; current External Remakes excluded.
-- Glass quantity / common sizes / workflow-stage and open-work metrics: selected delivery-list dates.
+- Production Count: immutable first scanner import from A+W by stable Order + Item, grouped on plant-local import day; current External Remakes are excluded from new production.
+- Glass Quantity / Common Glass Sizes / workflow-stage/open-work metrics / active External Remake range totals: selected delivery-list dates.
 - Scan/operator/issues/actions/Internal Reject activity: actual event timestamps converted to America/New_York reporting days.
-- External Remake range totals: current active delivery-list rows in the selected delivery-date range.
 - Stock sheets: retained A+W optimization evidence in the selected optimization-date range.
 - Breakage: selected delivery-date production denominator plus plant-local Internal Reject incidents; Yield Percentage remains excluded from reject-loss totals.
 
 ### Validation
 
-- JavaScript/Python syntax checks pass, the static/UI contract suite passes **235/235**, and the complete maintained suite passes **347/347**. A production-scale database copy preserves all **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events**, remains schema **21**, passes integrity/foreign-key checks, and reconciles the Statistics aggregate cross-checks documented in `README_CHANGELOG.md`. No live database is packaged or modified.
+- JavaScript syntax passes; all **31** maintained Python source files compile cleanly; focused Inventory tests pass **6/6**; the static/UI suite passes **237/237**; and the complete maintained suite passes **350/350**.
+- A copied production-scale SQLite database upgrades through the existing schema **11 → 21** migration path with all **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events** preserved, `integrity_check: ok`, and **0** foreign-key violations. v0.539 adds no migration.
+- An isolated v0.539 server returns healthy `/api/health` on a fresh schema-21 database and is shut down after validation. Native PowerShell parsing and final desktop/tablet/TC22 visual confirmation remain deployment checks in this Linux environment.
+
+## Previous release: v0.538
+
+v0.538 fixed one-click historical single-day Statistics selection, added the now-retired Production Count-by-day view, corrected plant-local event-day reporting, and improved progress readability while keeping schema 21.
 
 ## Previous release: v0.537
 

@@ -28371,6 +28371,120 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         ).fetchall()
         return self._inventory_group_rows(rows)
 
+    def _inventory_location_presence_for_group_con(self, con: Any, group: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        """Return bounded current-system presence for both maintained inventory locations.
+
+        The inventory scan hot path already loaded only the matching Order/barcode
+        stage copies. Reuse those rows and query only that Order/Item's cutting and
+        bay evidence so the success/failure banner can explain Airport Rd and
+        Indian Trail presence without reloading the full inventory catalog.
+        """
+        empty = {
+            "airportRd": {"location": "airport_rd", "label": "Airport Rd", "inSystem": False, "qty": 0, "reason": "Not in current Airport Rd WIP"},
+            "indianTrail": {"location": "indian_trail", "label": "Indian Trail", "inSystem": False, "qty": 0, "reason": "Not in current Indian Trail WIP"},
+        }
+        if not isinstance(group, dict) or not group.get("representative"):
+            return empty
+
+        row = group["representative"]
+        qty = max(int(row_value(row, "qty", 0) or 0), 0)
+        if qty <= 0:
+            return empty
+        stage_qty = group.get("stageQty") or {}
+        staging_qty = min(max(int(stage_qty.get("airport_staging", 0) or 0), 0), qty)
+        outbound_qty = min(max(int(stage_qty.get("airport_outbound", 0) or 0), 0), qty)
+        inbound_qty = min(max(int(stage_qty.get("indian_trail", 0) or 0), 0), qty)
+        order_no = str(row_value(row, "order_no") or "").strip()
+        item_no = self._inventory_clean_item_no(row_value(row, "item_no"))
+
+        cutting_rows = con.execute(
+            """
+            SELECT * FROM aw_cutting_generations
+            WHERE order_no=? AND item_no=?
+            ORDER BY key_index DESC, batch_creation_at DESC, batch_job_number DESC
+            """,
+            (order_no, item_no),
+        ).fetchall()
+        cutting_state = self.aw_cutting_state(
+            order_no,
+            item_no,
+            str(row_value(row, "last_rejected_at") or ""),
+            cutting_rows,
+        )
+        cut_complete = bool(cutting_state.get("complete"))
+        cut_quantity = min(max(int(round(float(cutting_state.get("cutQuantity") or 0))), 0), qty)
+        airport_qty = 0
+        airport_reason = "Not in current Airport Rd WIP"
+        if cut_complete or staging_qty > 0 or cut_quantity > 0:
+            if cut_complete:
+                available_qty = max(staging_qty, cut_quantity, qty if cut_quantity <= 0 else 0)
+            else:
+                available_qty = max(staging_qty, cut_quantity)
+            airport_qty = max(min(available_qty, qty) - outbound_qty, 0)
+            if airport_qty > 0:
+                airport_reason = "Cut/current WIP; not yet scanned Outbound"
+
+        route = str(row_value(row, "route") or row_value(row, "source_route") or "").strip()
+        route_item = {
+            "route": route,
+            "job": str(row_value(row, "job") or ""),
+            "customer": str(row_value(row, "customer") or ""),
+        }
+        indian_qty = 0
+        indian_reason = "Not in current Indian Trail WIP"
+        if route_category(route_item) == "indian_trail":
+            in_transit = max(outbound_qty - inbound_qty, 0)
+            row_ids = [str(row_value(candidate, "id") or "").strip() for candidate in group.get("rows") or []]
+            row_ids = [value for value in row_ids if value]
+            assignment = None
+            if row_ids:
+                placeholders = ",".join("?" for _ in row_ids)
+                assignment = con.execute(
+                    f"""
+                    SELECT ba.assigned_qty, ba.status, b.bay_code
+                    FROM bay_assignments ba
+                    LEFT JOIN bays b ON b.id=ba.bay_id
+                    WHERE ba.line_item_id IN ({placeholders})
+                    ORDER BY ba.id DESC
+                    LIMIT 1
+                    """,
+                    tuple(row_ids),
+                ).fetchone()
+            assignment_status = str(row_value(assignment, "status") or "") if assignment else ""
+            bay_code = str(row_value(assignment, "bay_code") or "") if assignment else ""
+            received_on_floor = 0
+            if inbound_qty > 0:
+                if assignment_status in {"Cleared", "Cancelled"}:
+                    received_on_floor = 0
+                elif assignment_status == "PreAssigned":
+                    received_on_floor = inbound_qty
+                elif assignment_status:
+                    assigned_qty = max(int(row_value(assignment, "assigned_qty", 0) or 0), 0)
+                    received_on_floor = min(inbound_qty, assigned_qty or inbound_qty)
+                else:
+                    received_on_floor = inbound_qty
+            indian_qty = min(max(in_transit + received_on_floor, 0), qty)
+            if indian_qty > 0:
+                if in_transit and received_on_floor:
+                    indian_reason = "Part in transit / part received at Indian Trail"
+                elif in_transit:
+                    indian_reason = "Airport Outbound; in transit to Indian Trail"
+                elif bay_code:
+                    indian_reason = f"Indian Trail bay {bay_code}"
+                else:
+                    indian_reason = "Received at Indian Trail"
+
+        return {
+            "airportRd": {
+                "location": "airport_rd", "label": "Airport Rd", "inSystem": airport_qty > 0,
+                "qty": airport_qty, "reason": airport_reason,
+            },
+            "indianTrail": {
+                "location": "indian_trail", "label": "Indian Trail", "inSystem": indian_qty > 0,
+                "qty": indian_qty, "reason": indian_reason,
+            },
+        }
+
     def _inventory_latest_bays(self, con: Any) -> dict[str, dict[str, Any]]:
         rows = con.execute(
             """
@@ -29011,6 +29125,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 return {"ok": False, "manualEntryRequired": True, "scan": scan_text, "canonical": canonical, "message": message}
 
             key = self._inventory_physical_key(matched)
+            matched_group = groups.get(key)
+            system_presence = self._inventory_location_presence_for_group_con(con, matched_group)
             expected = con.execute(
                 "SELECT * FROM inventory_expected_items WHERE session_id=? AND snapshot_key=?",
                 (session_id, key),
@@ -29062,6 +29178,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "countedQty": counted_qty,
                     "expectedQty": target_qty,
                     "remainingQty": 0,
+                    "systemPresence": system_presence,
                 }
 
             next_qty = counted_qty + 1
@@ -29113,10 +29230,18 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return {
             "ok": True, "matchedExpected": bool(expected), "message": result_message, "scan": scan,
             "countedQty": next_qty, "expectedQty": target_qty, "remainingQty": remaining_qty,
-            "lineComplete": complete, "session": self.get_inventory_session(session_id, user),
+            "lineComplete": complete, "systemPresence": system_presence,
+            "session": self.get_inventory_session(session_id, user),
         }
 
     def record_inventory_manual_entry(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        """Record manual physical quantity without allowing known system quantity overflow.
+
+        Manual Entry uses the same aggregate physical row as barcode scanning. If
+        the Order/Item exists in the frozen session (or current system smart-fill),
+        each manual save adds only the entered quantity and is rejected before the
+        aggregate could exceed the maintained system quantity.
+        """
         actor = str(user.get("displayName") or user.get("username") or "").strip()
         order_no = str(data.get("order") or "").strip()
         item_no = self._inventory_clean_item_no(data.get("item"))
@@ -29126,6 +29251,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             location = self._require_inventory_location(user, str(row_value(session, "location") or ""))
             if str(row_value(session, "status") or "") != "open":
                 raise ValueError("This inventory is complete and cannot accept manual entries")
+
             expected_candidates = []
             if order_no and item_no:
                 expected_candidates = con.execute(
@@ -29137,8 +29263,6 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     if self._inventory_clean_item_no(row_value(row, "item_no")) == item_no
                 ]
             expected = expected_candidates[0] if len(expected_candidates) == 1 else None
-            if expected and con.execute("SELECT 1 FROM inventory_scans WHERE session_id=? AND expected_item_id=?", (session_id, int(expected["id"]))).fetchone():
-                raise ValueError("That system item has already been physically counted")
             smart = self._inventory_smart_fill_con(con, order_no, item_no) if order_no else {"found": False}
             expected_public = self._inventory_public_expected(expected) if expected else {}
 
@@ -29161,9 +29285,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not item_id and glass_type:
                 item_id = str(self._inventory_item_mapping(con, glass_type).get("itemId") or "")
             try:
-                qty = max(int(data.get("qty") or expected_public.get("qty") or smart.get("qty") or 1), 1)
+                qty_delta = int(data.get("qty") or 1)
             except (TypeError, ValueError):
                 raise ValueError("Quantity must be a whole number greater than zero")
+            if qty_delta <= 0:
+                raise ValueError("Quantity must be a whole number greater than zero")
+
             sqft_each = self._inventory_round_sqft(data.get("sqftEach"))
             if sqft_each <= 0:
                 sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
@@ -29171,33 +29298,122 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Glass Type is required for a manual inventory entry")
             if not dimensions and sqft_each <= 0:
                 raise ValueError("Enter the piece size or SQFT for a manual inventory entry")
-            total_sqft = self._inventory_round_sqft(sqft_each * qty)
+
             source_line_item_id = str(row_value(expected, "source_line_item_id") or smart.get("sourceLineItemId") or "") if (expected or smart.get("found")) else ""
-            if source_line_item_id and con.execute("SELECT 1 FROM inventory_scans WHERE session_id=? AND source_line_item_id=?", (session_id, source_line_item_id)).fetchone():
-                raise ValueError("That physical system item has already been counted")
+            expected_id = int(row_value(expected, "id", 0) or 0) if expected else None
+            known_target_qty = 0
+            if expected:
+                known_target_qty = max(int(expected_public.get("qty") or 0), 1)
+            elif smart.get("found"):
+                known_target_qty = max(int(smart.get("qty") or 0), 1)
+
+            existing = None
+            if expected_id is not None or source_line_item_id:
+                existing = con.execute(
+                    """
+                    SELECT * FROM inventory_scans
+                    WHERE session_id=? AND (expected_item_id=? OR source_line_item_id=?)
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (session_id, expected_id if expected_id is not None else -1, source_line_item_id),
+                ).fetchone()
+            elif order_no and item_no:
+                existing = con.execute(
+                    """
+                    SELECT * FROM inventory_scans
+                    WHERE session_id=? AND order_no=? AND item_no=?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (session_id, order_no, item_no),
+                ).fetchone()
+
+            counted_qty = max(int(row_value(existing, "qty", 0) or 0), 0) if existing else 0
+            next_qty = counted_qty + qty_delta
+            if known_target_qty and next_qty > known_target_qty:
+                remaining = max(known_target_qty - counted_qty, 0)
+                con.rollback()
+                raise ValueError(
+                    f"Manual quantity would exceed the system quantity for {order_no or 'this order'} / {item_no or 'item'}: "
+                    f"{counted_qty} already counted, {known_target_qty} expected, {remaining} remaining."
+                )
+
+            total_sqft = self._inventory_round_sqft(sqft_each * next_qty)
             now = now_iso()
             manual_fields = {key: value for key, value in data.items() if key not in {"sessionId"}}
-            cursor = con.execute(
-                """
-                INSERT INTO inventory_scans
-                    (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
-                     delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft,
-                     notes, manual_fields_json)
-                VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, source_line_item_id,
-                 str(data.get("barcode") or "").strip(), now, actor, delivery_date, job_no, customer, order_no, item_no,
-                 glass_type, item_id, dimensions, sqft_each, qty, total_sqft, str(data.get("notes") or "").strip(),
-                 json.dumps(manual_fields, separators=(",", ":"), default=str)),
+            if existing:
+                scan_id = int(row_value(existing, "id", 0) or 0)
+                con.execute(
+                    """
+                    UPDATE inventory_scans
+                    SET expected_item_id=?, source_line_item_id=?, barcode=?, scanned_at=?, scanned_by=?,
+                        delivery_date=?, job_no=?, customer=?, order_no=?, item_no=?, glass_type=?, item_id=?,
+                        dimensions=?, sqft_each=?, qty=?, total_sqft=?, notes=?, manual_fields_json=?
+                    WHERE id=?
+                    """,
+                    (
+                        expected_id, source_line_item_id, str(data.get("barcode") or row_value(existing, "barcode") or "").strip(), now, actor,
+                        delivery_date, job_no, customer, order_no, item_no, glass_type, item_id,
+                        dimensions, sqft_each, next_qty, total_sqft, str(data.get("notes") or "").strip(),
+                        json.dumps(manual_fields, separators=(",", ":"), default=str), scan_id,
+                    ),
+                )
+            else:
+                cursor = con.execute(
+                    """
+                    INSERT INTO inventory_scans
+                        (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
+                         delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft,
+                         notes, manual_fields_json)
+                    VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id, expected_id, source_line_item_id, str(data.get("barcode") or "").strip(), now, actor,
+                        delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, next_qty, total_sqft,
+                        str(data.get("notes") or "").strip(), json.dumps(manual_fields, separators=(",", ":"), default=str),
+                    ),
+                )
+                scan_id = int(cursor.lastrowid)
+
+            remaining_qty = max(known_target_qty - next_qty, 0) if known_target_qty else 0
+            self.insert_audit(
+                con, "inventory_scan", str(scan_id), "inventory_manual_entry", actor, "", str(data.get("notes") or "").strip(),
+                {
+                    "sessionId": session_id, "location": location, "matchedExpected": bool(expected), "order": order_no,
+                    "item": item_no, "glassType": glass_type, "itemId": item_id, "qtyDelta": qty_delta,
+                    "countedQty": next_qty, "expectedQty": known_target_qty, "remainingQty": remaining_qty,
+                    "smartFilled": bool(smart.get("found")),
+                },
             )
-            scan_id = int(cursor.lastrowid)
-            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_manual_entry", actor, "", str(data.get("notes") or "").strip(),
-                              {"sessionId": session_id, "location": location, "matchedExpected": bool(expected), "order": order_no,
-                               "item": item_no, "glassType": glass_type, "itemId": item_id, "qty": qty, "smartFilled": bool(smart.get("found"))})
             inserted = con.execute("SELECT * FROM inventory_scans WHERE id=?", (scan_id,)).fetchone()
             scan = self._inventory_public_scan(inserted)
+
+            presence = {
+                "airportRd": {"location": "airport_rd", "label": "Airport Rd", "inSystem": False, "qty": 0, "reason": "Not in current Airport Rd WIP"},
+                "indianTrail": {"location": "indian_trail", "label": "Indian Trail", "inSystem": False, "qty": 0, "reason": "Not in current Indian Trail WIP"},
+            }
+            if order_no and item_no:
+                candidate_groups = self._inventory_scan_candidate_groups_con(con, f"{order_no}-{item_no}")
+                matching_groups = [
+                    group for group in candidate_groups.values()
+                    if str(row_value(group.get("representative"), "order_no") or "").strip() == order_no
+                    and self._inventory_clean_item_no(row_value(group.get("representative"), "item_no")) == item_no
+                ]
+                if len(matching_groups) == 1:
+                    presence = self._inventory_location_presence_for_group_con(con, matching_groups[0])
             con.commit()
-        return {"ok": True, "matchedExpected": bool(expected), "scan": scan, "session": self.get_inventory_session(session_id, user)}
+
+        return {
+            "ok": True,
+            "matchedExpected": bool(expected),
+            "knownSystemItem": bool(expected or smart.get("found")),
+            "scan": scan,
+            "countedQty": next_qty,
+            "expectedQty": known_target_qty,
+            "remainingQty": remaining_qty,
+            "lineComplete": bool(known_target_qty and next_qty == known_target_qty),
+            "systemPresence": presence,
+            "session": self.get_inventory_session(session_id, user),
+        }
 
     def complete_inventory_session(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
         actor = str(user.get("displayName") or user.get("username") or "").strip()
@@ -29322,7 +29538,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_inventory_session(session_id, user)
 
     def remove_inventory_scan(self, session_id: int, scan_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
-        """Undo one scanner-counted piece, or remove one manual aggregate entry."""
+        """Undo one counted physical piece, deleting the aggregate only at zero.
+
+        Manual Entry and barcode scanning now share one quantity row. A row can
+        therefore contain counts contributed by both paths even though the
+        schema-21 ``entry_type`` records only the row's original source. Always
+        decrement one when quantity is greater than one so correcting a mixed
+        row can never erase several already-counted pieces at once.
+        """
         actor = str(user.get("displayName") or user.get("username") or "").strip()
         reason = str(data.get("reason") or "Inventory scan correction").strip()
         with self.connect() as con:
@@ -29337,7 +29560,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             payload = self._inventory_public_scan(scan)
             entry_type = str(row_value(scan, "entry_type") or "scan").strip().lower()
             current_qty = max(int(row_value(scan, "qty", 0) or 0), 0)
-            if entry_type == "scan" and current_qty > 1:
+            if current_qty > 1:
                 next_qty = current_qty - 1
                 sqft_each = self._inventory_round_sqft(row_value(scan, "sqft_each", 0))
                 next_total = self._inventory_round_sqft(sqft_each * next_qty)

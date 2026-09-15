@@ -808,44 +808,50 @@ function Get-SupersededOrderCandidates {
             headerIdentity = if ($orderRows[0].HeaderIdentity -eq [DBNull]::Value) { '' } else { [string][int64]$orderRows[0].HeaderIdentity }
         })
     }
-    $duplicateBuckets = @($orderDescriptors | Where-Object { -not $_.mixedRemake } | Group-Object { "$($_.job)|$($_.customer)|$($_.route)|$($_.exactSignature)" })
+    # Route intentionally stays out of the duplicate identity. A+W remake rows
+    # can carry a revised route/destination while still representing the same
+    # physical Job + Customer + exact item set. Route agreement is retained as
+    # evidence for the operator, but it no longer hides a strong remake pair.
+    $duplicateBuckets = @($orderDescriptors | Where-Object { -not $_.mixedRemake } | Group-Object { "$($_.job)|$($_.customer)|$($_.exactSignature)" })
     foreach ($bucket in $duplicateBuckets) {
         $normalOrders = @($bucket.Group | Where-Object { -not $_.remake })
         $remakeOrders = @($bucket.Group | Where-Object { $_.remake })
         if (-not $normalOrders.Count -or -not $remakeOrders.Count) { continue }
         foreach ($normal in $normalOrders) {
-            # Prefer the newest remake Order Nr. when more than one exact remake exists.
-            $remake = $remakeOrders | Sort-Object order -Descending | Select-Object -First 1
-            if ($null -eq $remake -or [int64]$remake.order -eq [int64]$normal.order) { continue }
-            $normalOrder = [int64]$normal.order
-            $remakeOrder = [int64]$remake.order
-            $headerKey = if ($remake.headerIdentity) { [string]$remake.headerIdentity } elseif ($normal.headerIdentity) { [string]$normal.headerIdentity } else { 'remake-duplicate' }
-            $candidateKey = "${dateKey}|${headerKey}|${normalOrder}|${remakeOrder}"
-            if ($seenCandidateKeys.ContainsKey($candidateKey)) { continue }
-            $seenCandidateKeys[$candidateKey] = $true
-            $candidates.Add([ordered]@{
-                candidateKey = $candidateKey
-                deliveryDate = $dateKey
-                headerIdentity = $headerKey
-                originalOrderNumber = [string]$normalOrder
-                replacementOrderNumber = [string]$remakeOrder
-                confidence = 'high'
-                evidence = [ordered]@{
-                    sameHeaderIdentity = ([string]$normal.headerIdentity -ne '' -and [string]$normal.headerIdentity -eq [string]$remake.headerIdentity)
-                    sameDeliveryDate = $true
-                    sameJobNumber = $true
-                    sameCustomer = $true
-                    sameRoute = $true
-                    exactItemSetMatch = $true
-                    originalItemCount = [int]$normal.rows.Count
-                    replacementItemCount = [int]$remake.rows.Count
-                    originalIsRemake = $false
-                    replacementIsRemake = $true
-                    rule = 'v0.533-same-day-normal-remake-exact-duplicate-1'
-                }
-                originalItems = @($normal.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
-                replacementItems = @($remake.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
-            })
+            foreach ($remake in @($remakeOrders | Sort-Object order)) {
+                if ($null -eq $remake -or [int64]$remake.order -eq [int64]$normal.order) { continue }
+                $normalOrder = [int64]$normal.order
+                $remakeOrder = [int64]$remake.order
+                $sameRoute = ([string]$normal.route -eq [string]$remake.route)
+                $headerKey = if ($remake.headerIdentity) { [string]$remake.headerIdentity } elseif ($normal.headerIdentity) { [string]$normal.headerIdentity } else { 'remake-duplicate' }
+                $candidateKey = "${dateKey}|${headerKey}|${normalOrder}|${remakeOrder}"
+                if ($seenCandidateKeys.ContainsKey($candidateKey)) { continue }
+                $seenCandidateKeys[$candidateKey] = $true
+                $candidates.Add([ordered]@{
+                    candidateKey = $candidateKey
+                    deliveryDate = $dateKey
+                    headerIdentity = $headerKey
+                    originalOrderNumber = [string]$normalOrder
+                    replacementOrderNumber = [string]$remakeOrder
+                    confidence = 'high'
+                    evidence = [ordered]@{
+                        sameHeaderIdentity = ([string]$normal.headerIdentity -ne '' -and [string]$normal.headerIdentity -eq [string]$remake.headerIdentity)
+                        sameDeliveryDate = $true
+                        sameJobNumber = $true
+                        sameCustomer = $true
+                        sameRoute = [bool]$sameRoute
+                        routeIgnoredForDuplicateIdentity = $true
+                        exactItemSetMatch = $true
+                        originalItemCount = [int]$normal.rows.Count
+                        replacementItemCount = [int]$remake.rows.Count
+                        originalIsRemake = $false
+                        replacementIsRemake = $true
+                        rule = 'v0.535-same-day-normal-remake-exact-duplicate-2'
+                    }
+                    originalItems = @($normal.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+                    replacementItems = @($remake.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+                })
+            }
         }
     }
     return @($candidates.ToArray())

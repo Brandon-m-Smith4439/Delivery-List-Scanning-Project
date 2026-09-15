@@ -5529,6 +5529,110 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_v539_inventory_manual_quantity_and_dual_location_scan_feedback(self) -> None:
+        verification_root = ROOT / "_verification_v539_inventory_feedback"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        user = {"username": "admin", "displayName": "Inventory Admin", "stageAccess": ["*"]}
+        try:
+            store = self.make_store(verification_root)
+            item = imported_item("739901", "1", 3, "v0539-inventory:clear38")
+            item.update({"dimensions": '36" x 72"', "product": '3/8" Clear Tempered', "barcode": "T200739901001000"})
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-15", "items": [item]},
+                "fileName": "Delivery List 09-15-2026.xlsx",
+                "user": "admin",
+            })
+            store.sync_aw_cutting_rows([{
+                "sourceRowId": "v539-cut-1", "orderNr": "739901", "itemNr": "1", "bomId": 0,
+                "keyIndex": 1, "batchJobNumber": "95391", "batchStatusCode": 500,
+                "batchCreatedAt": "2026-09-15T08:00:00", "optimizationNumber": 95391,
+                "optimizationStatusCode": 500, "quantity": 3, "cutQuantity": 3, "aggregateId": 1000,
+                "cuttingBookingAt": "2026-09-15T08:10:00", "cuttingBookingEmployee": "CUT",
+                "cuttingBookingRowId": "v539-book-1",
+            }])
+
+            session = store.start_inventory_session({"location": "airport_rd", "inventoryType": "full"}, user)
+            self.assertEqual(session["expectedQty"], 3)
+
+            # The frozen target remains three pieces, but live system presence can
+            # move while the count is open. Two pieces are now in transit to IT.
+            with store.connect() as con:
+                con.execute(
+                    "UPDATE line_items SET scanned_qty=2 WHERE list_id=? AND order_no=?",
+                    ("2026-09-15-outbound-airport", "739901"),
+                )
+                con.commit()
+
+            first = store.record_inventory_scan(session["id"], item["barcode"], user)
+            self.assertTrue(first["ok"])
+            self.assertEqual(first["countedQty"], 1)
+            self.assertEqual(first["expectedQty"], 3)
+            self.assertEqual(first["systemPresence"]["airportRd"]["qty"], 1)
+            self.assertTrue(first["systemPresence"]["airportRd"]["inSystem"])
+            self.assertEqual(first["systemPresence"]["indianTrail"]["qty"], 2)
+            self.assertTrue(first["systemPresence"]["indianTrail"]["inSystem"])
+
+            manual = store.record_inventory_manual_entry(session["id"], {
+                "order": "739901", "item": "1", "qty": 1,
+            }, user)
+            self.assertTrue(manual["ok"])
+            self.assertTrue(manual["matchedExpected"])
+            self.assertEqual(manual["countedQty"], 2)
+            self.assertEqual(manual["expectedQty"], 3)
+            self.assertEqual(manual["remainingQty"], 1)
+
+            final = store.record_inventory_scan(session["id"], item["barcode"], user)
+            self.assertEqual(final["countedQty"], 3)
+            self.assertEqual(final["remainingQty"], 0)
+            self.assertTrue(final["lineComplete"])
+
+            with self.assertRaisesRegex(ValueError, "exceed the system quantity"):
+                store.record_inventory_manual_entry(session["id"], {
+                    "order": "739901", "item": "1", "qty": 1,
+                }, user)
+
+            duplicate = store.record_inventory_scan(session["id"], item["barcode"], user)
+            self.assertFalse(duplicate["ok"])
+            self.assertTrue(duplicate["duplicate"])
+            self.assertEqual(duplicate["countedQty"], 3)
+            self.assertIn("systemPresence", duplicate)
+
+            with store.connect() as con:
+                rows = con.execute(
+                    "SELECT qty, total_sqft FROM inventory_scans WHERE session_id=?",
+                    (session["id"],),
+                ).fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(int(rows[0]["qty"]), 3)
+            self.assertAlmostEqual(float(rows[0]["total_sqft"]), 54.0)
+
+            # A manual-first aggregate can later receive barcode counts. Undo must
+            # remove exactly one physical piece instead of deleting the whole row.
+            store.cancel_inventory_session(session["id"], {"reason": "v0.539 mixed-count undo test"}, user)
+            with store.connect() as con:
+                con.execute(
+                    "UPDATE line_items SET scanned_qty=0 WHERE list_id=? AND order_no=?",
+                    ("2026-09-15-outbound-airport", "739901"),
+                )
+                con.commit()
+            mixed_session = store.start_inventory_session({"location": "airport_rd", "inventoryType": "full"}, user)
+            mixed_manual = store.record_inventory_manual_entry(mixed_session["id"], {
+                "order": "739901", "item": "1", "qty": 2,
+            }, user)
+            self.assertEqual(mixed_manual["countedQty"], 2)
+            mixed_scan = store.record_inventory_scan(mixed_session["id"], item["barcode"], user)
+            self.assertEqual(mixed_scan["countedQty"], 3)
+            corrected = store.remove_inventory_scan(mixed_session["id"], int(mixed_scan["scan"]["id"]), {"reason": "undo one"}, user)
+            self.assertEqual(corrected["scannedQty"], 2)
+            with store.connect() as con:
+                mixed_rows = con.execute("SELECT qty FROM inventory_scans WHERE session_id=?", (mixed_session["id"],)).fetchall()
+            self.assertEqual(len(mixed_rows), 1)
+            self.assertEqual(int(mixed_rows[0]["qty"]), 2)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
     def test_v529_inventory_delivery_date_and_evidence_machines_are_durable(self) -> None:
         verification_root = ROOT / "_verification_v529_inventory_machine"
         shutil.rmtree(verification_root, ignore_errors=True)

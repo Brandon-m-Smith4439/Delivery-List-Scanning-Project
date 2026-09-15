@@ -1,3 +1,28 @@
+## v0.539 - Progress Geometry, Statistics Range Accuracy, and Lookup Navigation
+- Reworked Scan-page progress checkpoint markup so each step reads in one compact line as icon → label → quantity, keeps consistent sizing, and no longer clips outside the Progress column.
+- Added final-authority Scan CSS overrides for the progress column so later overlapping rules cannot shrink, wrap, or push progress content outside its cells.
+- Corrected remake-row glass-type text so External Remake rows keep readable dark copy instead of washing out to white.
+- Removed the unhelpful **Production Count for Day** overview metric from the Statistics dropdown; historical/range Production Count remains available through the standard date selector.
+- Re-audited Statistics date bases after the single-day selector work: Glass Quantity and Common Glass Sizes remain selected delivery-date metrics, Production Count remains first-import activity, and event/reject/sheet metrics keep their maintained event/optimization date bases. The full regression suite protects the rotated-size and explicit heat-treatment totals.
+- Kept sheet-usage totals attached to each glass-type line inside Today’s Production Count and reformatted **By machine** into consistent compact cards.
+- Removed the standalone Statistics **Sheet Settings** button and added a dedicated Lookup Manager **Sheet Sizes** tab for stock-sheet size and report-recipient maintenance beside the existing Glass Types workspace.
+- Added a Lookup Manager **Color Manager** landing tab that centralizes navigation to Glass Type, Machine, Attention, and Presentation/branding color workspaces without creating duplicate color-storage layers.
+- Changed Inventory Manual Entry to add only the submitted quantity delta to the same Order/Item physical-count row used by scanner counts. Manual and scanner counts can now be mixed safely, and a manual entry is rejected before the aggregate exceeds the frozen/current known system quantity.
+- Manual Smart Fill now defaults the count delta to **1 piece** instead of copying the full system quantity, and correcting a mixed Manual + barcode row removes only one physical piece at a time rather than deleting the aggregate.
+- Added explicit Inventory scan outcome feedback: success, blocked duplicate/full-quantity, and failure states now remain visible in the Inventory page and use the maintained scan success/error sounds plus normal app notices.
+- Added bounded dual-location Inventory presence evidence to successful/duplicate-known scans and manual saves. The result shows current **Airport Rd** and **Indian Trail** presence/quantity using the same Cutting, Outbound, Inbound, and bay evidence as the inventory snapshot builder without a full-catalog reload.
+- Restored the intended v0.535 Superseded Orders remake duplicate rule: Job + Customer + exact item set define the strong candidate identity even when A+W changes only the route. Route agreement is retained as review evidence, every matching remake order is surfaced, and nothing is auto-deleted.
+- Advanced the application exactly one step from v0.538 to **v0.539** and advanced cache keys for every changed CSS/JS runtime asset, including Inventory CSS.
+- Kept SQLite schema at **21**; v0.539 adds no database migration.
+
+### Validation
+- `node --check static/js/app.js` passes. All **31** maintained Python source files compile from source without bytecode churn, and changed backend imports report application **v0.539** with SQLite schema **21**.
+- Focused Inventory regression coverage passes **6/6**, including mixed scanner + Manual Entry quantity accumulation, overflow blocking, and simultaneous Airport Rd / Indian Trail presence evidence.
+- The complete static/UI contract suite passes **237/237** and the complete maintained test suite passes **350/350**.
+- A copied production-scale SQLite database upgrades through the existing migration ledger from schema **11 → 21** while preserving **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events** exactly; `integrity_check` is **ok** and `foreign_key_check` reports **0** violations. v0.539 adds no migration.
+- An isolated fresh v0.539 server returns healthy `/api/health`, initializes schema **21**, passes integrity/foreign-key checks, and is stopped after validation.
+- Native PowerShell parsing is unavailable in this Linux validation environment; the maintained static contract verifies the revised Superseded Orders duplicate block. Headless Chromium launched but could not reach the localhost test server in this managed environment, so final desktop/tablet/TC22 visual confirmation remains a controlled deployment check.
+
 ## v0.538 - Statistics Date Accuracy, Historical Production Count, and Progress Readability
 
 - Enlarged Scan progress checkpoint count/label/icon content while reducing internal spacing and preserving dedicated grid lanes so text and icons stay inside the cells on desktop and narrow layouts.

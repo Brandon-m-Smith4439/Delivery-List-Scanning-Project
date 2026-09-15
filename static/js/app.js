@@ -1179,7 +1179,6 @@ const els = {
   statisticsProductionActivity: document.getElementById("statisticsProductionActivity"),
   statisticsTodayProductionDateV514: document.getElementById("statisticsTodayProductionDateV514"),
   statisticsDailyProductionEmailBtn: document.getElementById("statisticsDailyProductionEmailBtn"),
-  statisticsSheetSettingsBtnV527: document.getElementById("statisticsSheetSettingsBtnV527"),
   statisticsProductionOptionsV514: document.getElementById("statisticsProductionOptionsV514"),
   statisticsProductionIncludeRemakesV514: document.getElementById("statisticsProductionIncludeRemakesV514"),
   statisticsProductionIncludeRejectsV514: document.getElementById("statisticsProductionIncludeRejectsV514"),
@@ -10461,7 +10460,7 @@ function progressStepHtmlV475(step, role = "") {
   const kindClass = step.kind === "fabrication" ? "is-fabrication-pending-v480" : step.kind === "cutting" ? "is-cutting-step-v511" : step.kind === "no-fab" ? "is-no-fab-slot-v512" : "";
   const iconKind = step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label || "Progress");
   const value = step.kind === "no-fab" ? "N/A" : `${scanned}/${qty}`;
-  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span>`;
+  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<span class="scan-progress-copy-v539"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span></span>`;
 }
 
 function scanProgressMarkupV475(item = {}) {
@@ -10471,7 +10470,7 @@ function scanProgressMarkupV475(item = {}) {
     const left = dateWide.previous || dateWide.next || { label: "Progress" };
     const right = dateWide.next || dateWide.previous || left;
     const style = `--progress-left:${progressStepColorV480(left)};--progress-right:${progressStepColorV480(right)}`;
-    const flow = `${progressStepHtmlV475(dateWide.previous, "previous")}${dateWide.previous && dateWide.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(dateWide.next, "next")}`;
+    const flow = `${progressStepHtmlV475(dateWide.previous, "previous")}${dateWide.previous && dateWide.next ? '<i class="scan-progress-arrow-v539" aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(dateWide.next, "next")}`;
     const layoutClassV531 = dateWide.previous && dateWide.next ? "is-paired-v486" : "is-single-v531";
     return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 ${layoutClassV531}" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
   }
@@ -10479,7 +10478,7 @@ function scanProgressMarkupV475(item = {}) {
   const left = pair.previous || pair.next || { label: "Progress" };
   const right = pair.next || pair.previous || left;
   const style = `--progress-left:${safeProgressColorV476(progressStageColorV476(left.label))};--progress-right:${safeProgressColorV476(progressStageColorV476(right.label))}`;
-  const flow = `${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(pair.next, "next")}`;
+  const flow = `${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? '<i class="scan-progress-arrow-v539" aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(pair.next, "next")}`;
   const layoutClassV531 = pair.previous && pair.next ? "is-paired-v486" : "is-single-v531";
   return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 ${layoutClassV531}" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
 }
@@ -17006,16 +17005,32 @@ function renderStatisticsProductionActivityV506() {
   const rejects = activity.internalRejects || {};
   const remakes = activity.externalRemakes || {};
   const sheetUsageV527 = report.sheetUsage || {};
+  const sheetUsageByGlassV539 = new Map();
+  for (const row of Array.isArray(sheetUsageV527.byGlass) ? sheetUsageV527.byGlass : []) {
+    const key = String(row?.glassType || "").trim().toLowerCase();
+    if (!key) continue;
+    const bucket = sheetUsageByGlassV539.get(key) || { sheets: 0, sizes: new Set() };
+    bucket.sheets += Math.max(0, Number(row?.sheets || 0));
+    if (String(row?.sheetSize || "").trim()) bucket.sizes.add(String(row.sheetSize).trim());
+    sheetUsageByGlassV539.set(key, bucket);
+  }
   const glassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
   const glassMarkup = glassRows.length
-    ? glassRows.map((row) => `
-        <button type="button" class="statistics-production-glass-row-v506 statistics-production-glass-drill-v536" data-production-glass-detail-v536="${escapeHtml(row.glassType || "Other Glass")}" title="View the exact Order/Item rows behind this total">
-          <span class="statistics-production-glass-name-v506">${escapeHtml(row.glassType || "Other Glass")}</span>
+    ? glassRows.map((row) => {
+        const glassName = String(row.glassType || "Other Glass").trim() || "Other Glass";
+        const sheets = sheetUsageByGlassV539.get(glassName.toLowerCase());
+        const sheetLabel = sheets
+          ? `${Number(sheets.sheets || 0)} stock sheet${Number(sheets.sheets || 0) === 1 ? "" : "s"}${sheets.sizes.size ? ` · ${[...sheets.sizes].join(" / ")}` : ""}`
+          : "No stock-sheet usage in this range";
+        return `
+        <button type="button" class="statistics-production-glass-row-v506 statistics-production-glass-drill-v536" data-production-glass-detail-v536="${escapeHtml(glassName)}" title="View the exact Order/Item rows behind this total">
+          <span class="statistics-production-glass-name-v506 statistics-production-glass-name-v539"><strong>${escapeHtml(glassName)}</strong><small>${escapeHtml(sheetLabel)}</small></span>
           <strong>${escapeHtml(Number(row.pieces || 0))}<small> pcs</small></strong>
           <span>${escapeHtml(Number(row.itemCount || 0))} item${Number(row.itemCount || 0) === 1 ? "" : "s"}</span>
           <em>DD ${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
           <span class="statistics-production-glass-open-v536" aria-hidden="true">View rows →</span>
-        </button>`).join("")
+        </button>`;
+      }).join("")
     : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported today.</div>`;
 
   const todayMachineBucketsV514 = new Map();
@@ -17028,7 +17043,7 @@ function renderStatisticsProductionActivityV506() {
   }
   const machineMarkupV514 = [...todayMachineBucketsV514.entries()]
     .sort((a, b) => Number(b[1].pieces || 0) - Number(a[1].pieces || 0) || a[0].localeCompare(b[0]))
-    .map(([machine, values]) => `<div class="statistics-production-machine-row-v514"><span>${escapeHtml(machine)}</span><strong>${escapeHtml(values.pieces)}<small> pcs</small></strong><em>${escapeHtml(values.items)} item${values.items === 1 ? "" : "s"}</em></div>`).join("")
+    .map(([machine, values]) => `<article class="statistics-production-machine-row-v514 statistics-production-machine-row-v539"><span><small>Machine</small><strong>${escapeHtml(machine)}</strong></span><b>${escapeHtml(values.pieces)}<small> pcs</small></b><em>${escapeHtml(values.items)} item${values.items === 1 ? "" : "s"}</em></article>`).join("")
     || `<div class="statistics-production-glass-empty-v506">No machine production has been recorded today.</div>`;
   const excludedPieces = Number(activity.yieldPercentageExcluded?.pieces || 0);
   els.statisticsProductionActivity.innerHTML = `
@@ -17323,77 +17338,6 @@ async function openDailyProductionEmailAppV506() {
     return;
   }
   window.location.href = `mailto:${encodeURIComponent((draft.recipients || []).join(";"))}?${fullParams}`;
-}
-
-function closeSheetUsageSettingsV527() {
-  const modal = document.getElementById("sheetUsageSettingsV527");
-  const backdrop = document.getElementById("sheetUsageSettingsBackdropV527");
-  if (modal) modal.hidden = true;
-  if (backdrop) backdrop.hidden = true;
-}
-
-async function openSheetUsageSettingsV527() {
-  const [settings, report] = await Promise.all([
-    fetchJson("/api/reports/sheet-usage-settings"),
-    ensureTodayProductionReportV514({ force: false }),
-  ]);
-  const profiles = settings?.profiles || {};
-  const names = [...new Set([
-    ...Object.keys(profiles),
-    ...((report?.sheetUsage?.byGlass || []).map((row) => String(row.glassType || "").trim())),
-    ...((report?.productionActivity?.newProduction?.byGlass || []).map((row) => String(row.glassType || "").trim())),
-  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  let backdrop = document.getElementById("sheetUsageSettingsBackdropV527");
-  let modal = document.getElementById("sheetUsageSettingsV527");
-  if (!backdrop) {
-    backdrop = document.createElement("div");
-    backdrop.id = "sheetUsageSettingsBackdropV527";
-    backdrop.className = "statistics-email-preview-backdrop-v505";
-    backdrop.addEventListener("click", closeSheetUsageSettingsV527);
-    document.body.appendChild(backdrop);
-  }
-  if (!modal) {
-    modal = document.createElement("section");
-    modal.id = "sheetUsageSettingsV527";
-    modal.className = "sheet-usage-settings-v527";
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    document.body.appendChild(modal);
-  }
-  const canEdit = hasPermission("manage_lookup_values");
-  modal.innerHTML = `<header><div><small>STATISTICS SETTINGS</small><h2>Stock sheets and email recipients</h2><p>A+W supplies the sheet count. Maintain the stock size and recipients for each glass type here.</p></div><button type="button" class="gui-close-button" data-sheet-settings-close-v527 aria-label="Close">×</button></header>
-    <div class="sheet-usage-settings-list-v527">${names.length ? names.map((glass) => {
-      const profile = profiles[glass] || {};
-      return `<article data-sheet-profile-v527="${escapeHtml(glass)}"><strong>${escapeHtml(glass)}</strong><label><span>Stock sheet size</span><input data-sheet-size-v527 value="${escapeHtml(profile.sheetSize || "")}" placeholder="96 x 130" ${canEdit ? "" : "disabled"}></label><label><span>Email recipients</span><input data-sheet-emails-v527 value="${escapeHtml((profile.emails || []).join("; "))}" placeholder="name@company.com; another@company.com" ${canEdit ? "" : "disabled"}></label></article>`;
-    }).join("") : `<div class="lookup-empty-state"><strong>No glass types are in today’s report</strong><span>Open this after A+W has supplied an optimization, or retain a previously configured profile.</span></div>`}</div>
-    <footer><span>Recipients are automatically added to the Daily Production email when their glass type used sheets.</span>${canEdit ? '<button type="button" class="app-primary-button" data-sheet-settings-save-v527>Save settings</button>' : ""}</footer>`;
-  modal.querySelector("[data-sheet-settings-close-v527]")?.addEventListener("click", closeSheetUsageSettingsV527);
-  modal.querySelector("[data-sheet-settings-save-v527]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-      const updated = {};
-      modal.querySelectorAll("[data-sheet-profile-v527]").forEach((row) => {
-        const glass = row.dataset.sheetProfileV527;
-        const sheetSize = String(row.querySelector("[data-sheet-size-v527]")?.value || "").trim();
-        const emails = String(row.querySelector("[data-sheet-emails-v527]")?.value || "").split(/[;,]/).map((value) => value.trim()).filter(Boolean);
-        if (sheetSize || emails.length) updated[glass] = { sheetSize, emails };
-      });
-      await fetchJson("/api/reports/sheet-usage-settings", { method: "POST", body: JSON.stringify({ profiles: updated }) });
-      state.statisticsTodayProductionReportV514 = null;
-      state.homeReportSummary = null;
-      closeSheetUsageSettingsV527();
-      await Promise.all([ensureTodayProductionReportV514({ force: true }), loadHomeReportSummary()]);
-      renderStatisticsPage();
-      showFloatingNotice("Stock sheet settings saved.", "success");
-    } catch (error) {
-      showFloatingNotice(error?.message || "Could not save stock sheet settings.", "error");
-    } finally {
-      button.disabled = false;
-    }
-  });
-  backdrop.hidden = false;
-  modal.hidden = false;
 }
 
 /**
@@ -18385,7 +18329,7 @@ function helpAssistantAnswer(question) {
   const value = String(question || "").trim().toLowerCase();
   const answers = [
     { terms: ["inventory", "physical count", "reconciliation", "missing physical", "not in system"], answer: "Open Inventory and choose Airport Road or Indian Trail. Start a Full or Cycle Inventory to freeze the current system WIP, scan the physical pieces, and review Reconciliation. Use Manual Entry for an unknown physical piece. If the system still lists work that is already out the door, select those system orders and use Complete Selected; the correction completes their workflow and clears active rack or bay locations without creating new bay assignments." },
-    { terms: ["sheet", "stock size", "optimization", "sheet email"], answer: "Statistics counts A+W SHEETCOUNT once per optimization. Choose Stock Sheets Used in the Data menu to compare glass types and stock sizes. Sheet Settings maintains each glass type’s stock size and email recipients; the Daily Production draft automatically addresses recipients for glass types that used sheets." },
+    { terms: ["sheet", "stock size", "optimization", "sheet email"], answer: "Statistics counts A+W SHEETCOUNT once per optimization. Choose Stock Sheets Used in the Data menu to compare glass types and stock sizes. Lookup Manager → Sheet Sizes maintains each glass type’s stock size and email recipients; the Daily Production draft automatically addresses recipients for glass types that used sheets." },
     { terms: ["scan", "barcode", "manual"], answer: "Open Scan, choose the delivery date, and select Truck or an open rack on Staging. Scan the piece label. Use Manual Scan only when a readable barcode is unavailable; the result notice and Recent Scans confirm what happened." },
     { terms: ["rack", "packing", "transport"], answer: "Choose a rack from Staging before scanning. Complete it when loading is finished, then print its packing list. Scanning that rack barcode on Outbound applies the quantity stored on each packing row." },
     { terms: ["bay", "indian trail", "receive", "preassign"], answer: "Outbound scans preassign Indian Trail glass. On Bay Map, choose Add, select the target bay, and scan to receive it. Choose Remove to scan glass out." },
@@ -18896,7 +18840,7 @@ function inventoryRenderScanTableV524(items, meta) {
     <td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td>
     <td><strong>${Number(item.qty || 0).toLocaleString()}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td>
     <td>${escapeHtml(item.entryType === "manual" ? "Manual" : "Scan")}</td><td>${escapeHtml(item.scannedBy || "-")}</td>
-    ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">${item.entryType === "manual" ? "Remove" : "Undo 1"}</button></td>` : ""}
+    ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">${Number(item.qty || 0) > 1 ? "Undo 1" : "Remove"}</button></td>` : ""}
   </tr>`).join("");
   return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Scanned</th><th>Delivery Date</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Entry</th><th>User</th>${canRemove ? "<th>Action</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
 }
@@ -19086,7 +19030,10 @@ async function smartFillInventoryManualV524() {
   if (els.inventoryManualCustomer) els.inventoryManualCustomer.value = payload.customer || "";
   if (els.inventoryManualDimensions) els.inventoryManualDimensions.value = payload.dimensions || "";
   if (els.inventoryManualSqft) els.inventoryManualSqft.value = Number(payload.sqftEach || 0) ? Number(payload.sqftEach).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "";
-  if (els.inventoryManualQty) els.inventoryManualQty.value = Math.max(Number(payload.qty || 1), 1);
+  // v0.539 Manual Entry quantity is a physical-count delta, not the system's
+  // full expected quantity. Default to one piece after Smart Fill so an operator
+  // cannot accidentally add the entire system quantity with one save.
+  if (els.inventoryManualQty) els.inventoryManualQty.value = "1";
   setInventoryMappedSelectV524(els.inventoryManualGlass, els.inventoryManualGlassCustomWrap, els.inventoryManualGlassCustom, payload.glassType || "");
   setInventoryMappedSelectV524(els.inventoryManualItemId, els.inventoryManualItemIdCustomWrap, els.inventoryManualItemIdCustom, payload.itemId || "");
   updateInventoryManualTotalV524({ inferSqft: true });
@@ -19134,6 +19081,37 @@ async function startInventoryV524() {
   }
 }
 
+function inventorySystemPresenceHtmlV539(payload = {}) {
+  const presence = payload?.systemPresence || {};
+  const rows = [presence.airportRd, presence.indianTrail].filter(Boolean);
+  if (!rows.length) return "";
+  return `<span class="inventory-system-presence-v539" aria-label="Current system inventory presence">${rows.map((row) => {
+    const inSystem = Boolean(row?.inSystem);
+    const qty = Math.max(0, Number(row?.qty || 0));
+    const detail = inSystem ? `${qty} pc${qty === 1 ? "" : "s"}` : "Not in system";
+    const title = String(row?.reason || detail);
+    return `<span class="inventory-system-presence-pill-v539 ${inSystem ? "is-present" : "is-absent"}" title="${escapeHtml(title)}"><b>${escapeHtml(row?.label || "Location")}</b><em>${escapeHtml(detail)}</em></span>`;
+  }).join("")}</span>`;
+}
+
+function inventorySystemPresenceNoticeV539(payload = {}) {
+  const presence = payload?.systemPresence || {};
+  const label = (row) => row
+    ? `${row.label || "Location"}: ${row.inSystem ? `in system (${Math.max(0, Number(row.qty || 0))})` : "not in system"}`
+    : "";
+  return [label(presence.airportRd), label(presence.indianTrail)].filter(Boolean).join(" · ");
+}
+
+function inventoryScanFailureV539(message = "Inventory scan failed.") {
+  const clean = String(message || "Inventory scan failed.").trim() || "Inventory scan failed.";
+  if (els.inventoryScanFeedback) {
+    els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
+    els.inventoryScanFeedback.innerHTML = `<strong>Scan failed.</strong> ${escapeHtml(clean)}`;
+  }
+  void playAppSound("scan_error", { force: true });
+  showFloatingNotice(`Inventory scan failed: ${clean}`, "error");
+}
+
 async function submitInventoryScanV524(event) {
   event?.preventDefault();
   if (state.inventoryBusyV524 || state.inventorySessionV524?.status !== "open") return;
@@ -19145,18 +19123,25 @@ async function submitInventoryScanV524(event) {
   try {
     const payload = await fetchJson("/api/inventory/scans", { method: "POST", body: JSON.stringify({ sessionId: state.inventorySessionV524.id, scan }) });
     if (payload.manualEntryRequired) {
+      const reason = payload.message || "Not found in current system data.";
       if (els.inventoryScanFeedback) {
         els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
-        els.inventoryScanFeedback.textContent = `${payload.message || "Not found in current system data."} Add the physical piece manually.`;
+        els.inventoryScanFeedback.innerHTML = `<strong>Scan not accepted.</strong> ${escapeHtml(reason)} Add the physical piece manually if it is truly on the floor.`;
       }
+      void playAppSound("scan_error", { force: true });
+      showFloatingNotice(`Inventory scan not accepted: ${reason}`, "error");
       openInventoryManualV524(scan);
       return;
     }
     if (payload.duplicate) {
+      const presenceHtml = inventorySystemPresenceHtmlV539(payload);
+      const reason = payload.message || "Expected quantity is already fully counted.";
       if (els.inventoryScanFeedback) {
         els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
-        els.inventoryScanFeedback.textContent = `Already fully counted: ${payload.existing?.order || ""} / ${payload.existing?.item || ""} · ${payload.message || "Duplicate scan"}`;
+        els.inventoryScanFeedback.innerHTML = `<span class="inventory-feedback-status-v539"><strong>Scan blocked.</strong> ${escapeHtml(reason)}</span>${presenceHtml}`;
       }
+      void playAppSound("scan_error", { force: true });
+      showFloatingNotice(`Inventory scan blocked: ${reason}${inventorySystemPresenceNoticeV539(payload) ? ` · ${inventorySystemPresenceNoticeV539(payload)}` : ""}`, "error");
       return;
     }
     state.inventorySessionV524 = payload.session || state.inventorySessionV524;
@@ -19164,16 +19149,22 @@ async function submitInventoryScanV524(event) {
     const countedQty = Number(payload.countedQty ?? physical.qty ?? 0);
     const expectedQty = Math.max(Number(payload.expectedQty ?? countedQty), countedQty);
     const remainingQty = Math.max(Number(payload.remainingQty ?? (expectedQty - countedQty)), 0);
+    const presenceHtml = inventorySystemPresenceHtmlV539(payload);
     if (els.inventoryScanFeedback) {
       els.inventoryScanFeedback.className = `inventory-scan-feedback ${payload.matchedExpected ? "is-good" : "is-alert"}`;
-      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓" : "!"} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · <strong>${countedQty}/${expectedQty} counted</strong>${remainingQty ? ` · ${remainingQty} remaining` : " · line complete"} · ${escapeHtml(physical.glassType || "Unmapped")} · ${escapeHtml(physical.itemId || "Item ID missing")} · ${Number(physical.sqftEach || 0).toFixed(2)} SQFT each`;
+      els.inventoryScanFeedback.innerHTML = `<span class="inventory-feedback-status-v539">${payload.matchedExpected ? "✓" : "!"} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · <strong>${countedQty}/${expectedQty} counted</strong>${remainingQty ? ` · ${remainingQty} remaining` : " · line complete"} · ${escapeHtml(physical.glassType || "Unmapped")} · ${escapeHtml(physical.itemId || "Item ID missing")}</span>${presenceHtml}`;
     }
+    void playAppSound("scan_success", { force: true });
+    const presenceNotice = inventorySystemPresenceNoticeV539(payload);
+    showFloatingNotice(`Inventory scan successful: ${physical.order || "-"} / ${physical.item || "-"} · ${countedQty}/${expectedQty} counted${presenceNotice ? ` · ${presenceNotice}` : ""}`, "success");
     state.inventoryViewDataV524.scans = [physical, ...(state.inventoryViewDataV524.scans || []).filter((item) => Number(item.id) !== Number(physical.id))].slice(0, 150);
     state.inventoryViewMetaV524.scans = { ...(state.inventoryViewMetaV524.scans || {}), page: 1, pageSize: 150, total: state.inventorySessionV524.scannedLineCount, hasMore: Number(state.inventorySessionV524.scannedLineCount || 0) > 150 };
     state.inventoryViewMetaV524.reconciliation = null;
     state.inventoryViewDataV524.reconciliation = [];
     renderInventorySessionV524();
     if (state.inventoryTabV524 === "reconciliation") await loadInventoryTabV524("reconciliation", { reset: true });
+  } catch (error) {
+    inventoryScanFailureV539(error?.message || "Inventory scan could not be recorded.");
   } finally {
     inventorySetBusyV524(false);
     window.setTimeout(() => els.inventoryScanInput?.focus(), 25);
@@ -19204,15 +19195,27 @@ async function submitInventoryManualV524(event) {
     const payload = await fetchJson("/api/inventory/manual-entry", { method: "POST", body: JSON.stringify(payloadData) });
     state.inventorySessionV524 = payload.session || state.inventorySessionV524;
     const physical = payload.scan || {};
+    const countedQty = Math.max(0, Number(payload.countedQty ?? physical.qty ?? 0));
+    const expectedQty = Math.max(0, Number(payload.expectedQty || 0));
+    const remainingQty = Math.max(0, Number(payload.remainingQty || 0));
     closeInventoryManualV524();
+    const presenceHtml = inventorySystemPresenceHtmlV539(payload);
     if (els.inventoryScanFeedback) {
       els.inventoryScanFeedback.className = `inventory-scan-feedback ${payload.matchedExpected ? "is-good" : "is-alert"}`;
-      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓ Manual entry matched the frozen system item." : "! Manual physical item recorded; it is not in the frozen system snapshot."} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · ${escapeHtml(physical.glassType || "Unmapped")} · Qty ${Number(physical.qty || 0)} · ${Number(physical.totalSqft || 0).toFixed(2)} total SQFT`;
+      const quantityCopy = expectedQty ? `${countedQty}/${expectedQty} counted${remainingQty ? ` · ${remainingQty} remaining` : " · line complete"}` : `Qty ${countedQty}`;
+      els.inventoryScanFeedback.innerHTML = `<span class="inventory-feedback-status-v539">${payload.matchedExpected ? "✓ Manual count matched the frozen system item." : payload.knownSystemItem ? "✓ Manual count saved for a known system item outside this frozen snapshot." : "! Manual physical item saved; it is not in current system inventory."} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · <strong>${escapeHtml(quantityCopy)}</strong> · ${escapeHtml(physical.glassType || "Unmapped")}</span>${presenceHtml}`;
     }
+    void playAppSound("scan_success", { force: true });
+    const presenceNotice = inventorySystemPresenceNoticeV539(payload);
+    showFloatingNotice(`Manual inventory count saved: ${physical.order || "-"} / ${physical.item || "-"}${expectedQty ? ` · ${countedQty}/${expectedQty} counted` : ` · Qty ${countedQty}`}${presenceNotice ? ` · ${presenceNotice}` : ""}`, "success");
     state.inventoryViewMetaV524.scans = null;
     state.inventoryViewMetaV524.reconciliation = null;
     renderInventorySessionV524();
     await loadInventoryTabV524(state.inventoryTabV524 === "totals" || state.inventoryTabV524 === "system" ? "scans" : state.inventoryTabV524, { reset: true });
+  } catch (error) {
+    const reason = error?.message || "Manual inventory entry could not be saved.";
+    if (els.inventoryManualSmartFillStatus) els.inventoryManualSmartFillStatus.textContent = reason;
+    inventoryScanFailureV539(reason);
   } finally {
     inventorySetBusyV524(false);
   }
@@ -31920,7 +31923,7 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260915-v0.538", window.location.href).href,
+    new URL("static/css/styles.css?v=20260915-v0.539", window.location.href).href,
     new URL("static/css/print.css?v=20260914-v0.532", window.location.href).href,
   ];
 }
@@ -34804,12 +34807,13 @@ function configureAdminModalSectionTabsV345(kind) {
     workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
     workspaceBadge.textContent = String(glassProfileCount);
     if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    insertTab("lookup:sheet_sizes", "Sheet Sizes", Object.keys(state.lookupSheetUsageSettingsV529?.profiles || {}).length);
     insertTab("lookup:route", "Routes", (lookups.routes || []).length);
     insertTab("lookup:process", "Process States", (lookups.processes || []).length);
     insertTab("lookup:machine", "Machines", machineDefinitionsV521({ activeOnly: false }).length);
     if (hasPermission("manage_stations")) insertTab("lookup:station", "Stations", (state.stations || []).length);
     insertTab("lookup:stage_definition", "Stages", (lookups.stages || []).length);
-    insertTab("lookup:attention_color", "Attention Colors", (lookups.attentionColors || []).length);
+    insertTab("lookup:color_manager", "Color Manager");
     insertTab("lookup:presentation", "Presentation");
     const selectedSection = `lookup:${state.lookupManagerActiveType || "glass_profile"}`;
     els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
@@ -34836,7 +34840,7 @@ function setAdminModalSection(section = "workspace") {
     renderCustomerEmailModal();
   } else if (!historySelected && section.startsWith("lookup:")) {
     const type = section.split(":", 2)[1] || "glass_profile";
-    state.lookupManagerActiveType = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
+    state.lookupManagerActiveType = ["glass_profile", "sheet_sizes", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
     state.lookupManagerSearch = "";
     renderLookupManagerModal();
   } else if (!historySelected && section.startsWith("scanPage:")) {
@@ -36243,16 +36247,99 @@ function wireAttentionColorManagerV530() {
   });
 }
 
+function sheetSizeManagerHtmlV539() {
+  const profiles = glassProfileItemsV349();
+  const settings = state.lookupSheetUsageSettingsV529?.profiles || {};
+  const rows = profiles.map((profile) => {
+    const configured = settings[profile.value] || settings[profile.label] || {};
+    return `<article class="lookup-row sheet-size-row-v539" data-sheet-size-row-v539="${escapeHtml(profile.value)}">
+      <div class="lookup-row-main"><strong>${escapeHtml(profile.label || profile.value)}</strong><small>Configure the stock sheet dimensions used by A+W sheet-usage reporting and optional report recipients.</small></div>
+      <label><span>Stock sheet size</span><input data-sheet-size-input-v539 value="${escapeHtml(configured.sheetSize || "")}" placeholder="96 x 130"></label>
+      <label><span>Email recipients</span><input data-sheet-email-input-v539 value="${escapeHtml(Array.isArray(configured.emails) ? configured.emails.join("; ") : "")}" placeholder="name@company.com; another@company.com"></label>
+    </article>`;
+  }).join("");
+  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 sheet-size-manager-v539">
+    <section class="lookup-config-editor-v346">
+      <header>${lookupLibraryIconHtml("product")}<div><strong>Stock Sheet Sizes</strong><p>Maintain sheet size and report recipients for every glass type in one place. This replaces the old Statistics Sheet Settings popup.</p></div></header>
+      <div class="lookup-row-list sheet-size-list-v539">${rows || '<div class="lookup-empty-state"><strong>No glass types configured</strong><span>Add a Glass Type first, then configure its stock sheet size here.</span></div>'}</div>
+      ${hasPermission("manage_lookup_values") ? '<footer class="sheet-size-actions-v539"><button type="button" class="app-primary-button" data-sheet-sizes-save-v539>Save Sheet Sizes</button></footer>' : ''}
+    </section>
+  </div>`;
+}
+
+async function saveSheetSizesV539() {
+  const profiles = {};
+  document.querySelectorAll("[data-sheet-size-row-v539]").forEach((row) => {
+    const glass = String(row.dataset.sheetSizeRowV539 || "").trim();
+    if (!glass) return;
+    const sheetSize = String(row.querySelector("[data-sheet-size-input-v539]")?.value || "").trim();
+    const emails = String(row.querySelector("[data-sheet-email-input-v539]")?.value || "")
+      .split(/[;,]/).map((value) => value.trim()).filter(Boolean);
+    if (sheetSize || emails.length) profiles[glass] = { sheetSize, emails };
+  });
+  state.lookupSheetUsageSettingsV529 = await fetchJson("/api/reports/sheet-usage-settings", {
+    method: "POST",
+    body: JSON.stringify({ profiles }),
+  });
+  state.statisticsTodayProductionReportV514 = null;
+  state.homeReportSummary = null;
+  renderLookupManagerModal();
+  showSaveConfirmation("Stock sheet sizes were saved.");
+}
+
+function wireSheetSizeManagerV539() {
+  const button = document.querySelector("[data-sheet-sizes-save-v539]");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try { await saveSheetSizesV539(); }
+    catch (error) { showInlineError(error?.message || "Unable to save stock sheet sizes.", true); }
+    finally { button.disabled = false; }
+  });
+}
+
+function colorManagerCardHtmlV539(title, description, countLabel, section, accent = "") {
+  return `<article class="lookup-row color-manager-card-v539"${accent ? ` style="--color-manager-accent:${escapeHtml(accent)}"` : ""}>
+    <div class="lookup-row-main">
+      <span class="lookup-row-heading"><strong>${escapeHtml(title)}</strong><em class="lookup-source-badge is-manual">Centralized</em></span>
+      <span>${escapeHtml(description)}</span>
+      <small>${escapeHtml(countLabel)}</small>
+    </div>
+    <div class="lookup-row-actions-v346">
+      <button type="button" class="app-primary-button" data-admin-modal-section="lookup:${escapeHtml(section)}">Open</button>
+    </div>
+  </article>`;
+}
+
+function colorManagerHtmlV539() {
+  const lookups = state.manualEditLookups || { glassColors: [], attentionColors: [] };
+  const machineCount = machineDefinitionsV521({ activeOnly: false }).length;
+  const glassColorCount = (lookups.glassColors || []).filter((row) => String(row?.value || row?.label || "").trim()).length;
+  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 color-manager-shell-v539">
+    <section class="lookup-config-editor-v346 color-manager-overview-v539">
+      <header>${lookupLibraryIconHtml("glass_color")}<div><strong>Color Manager</strong><p>One place for the application's configurable visual colors. Attention colors are edited directly below; Glass Type and Machine colors open their maintained editors because those colors are part of each record's broader configuration.</p></div></header>
+      <div class="lookup-row-list color-manager-list-v539">
+        ${colorManagerCardHtmlV539("Glass Type Colors", "Maintain each canonical glass type's shared color.", `${glassColorCount} configured glass color${glassColorCount === 1 ? "" : "s"}`, "glass_profile", "#2c988d")}
+        ${colorManagerCardHtmlV539("Machine Colors", "Maintain each fabrication machine's progress/filter color.", `${machineCount} maintained machine${machineCount === 1 ? "" : "s"}`, "machine", "#3779d6")}
+        ${colorManagerCardHtmlV539("Presentation & Branding", "Maintain presentation-only company/application identity settings.", "Branding and label settings", "presentation", "#7853d8")}
+      </div>
+    </section>
+    <section class="color-manager-attention-v539">${attentionColorManagerHtmlV530()}</section>
+  </div>`;
+}
+
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-  const supportedTypes = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "attention_color", "presentation"];
+  const supportedTypes = ["glass_profile", "sheet_sizes", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"];
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "glass_profile";
   if (activeType === "glass_profile") return glassProfileManagerHtmlV349();
+  if (activeType === "sheet_sizes") return sheetSizeManagerHtmlV539();
   if (activeType === "machine") return machineLookupManagerHtmlV521();
   if (activeType === "station") return stationLookupManagerHtmlV346();
   if (activeType === "stage_definition") return stageDefinitionManagerHtmlV346();
+  if (activeType === "color_manager") return colorManagerHtmlV539();
   if (activeType === "attention_color") return attentionColorManagerHtmlV530();
   if (activeType === "presentation") return presentationProfileManagerHtmlV355();
   const meta = lookupEditorMeta(activeType);
@@ -36503,11 +36590,12 @@ function renderLookupManagerModal() {
   els.adminModalBody.innerHTML = lookupManagerModalHtml();
   applyLanguageToRoot(els.adminModalBody);
   if (state.lookupManagerActiveType === "glass_profile") syncGlassProfilePreviewV349();
-  else if (!["machine", "attention_color"].includes(state.lookupManagerActiveType)) syncLookupManagerFormGuidance();
-  if (state.lookupManagerActiveType === "attention_color") wireAttentionColorManagerV530();
-  else filterLookupManagerLibrary(state.lookupManagerSearch || "");
+  else if (!["machine", "attention_color", "color_manager", "sheet_sizes"].includes(state.lookupManagerActiveType)) syncLookupManagerFormGuidance();
+  if (["attention_color", "color_manager"].includes(state.lookupManagerActiveType)) wireAttentionColorManagerV530();
+  if (state.lookupManagerActiveType === "sheet_sizes") wireSheetSizeManagerV539();
+  else if (state.lookupManagerActiveType !== "color_manager" && state.lookupManagerActiveType !== "attention_color") filterLookupManagerLibrary(state.lookupManagerSearch || "");
   configureAdminModalSectionTabsV345("lookups");
-  if (state.lookupManagerActiveType !== "attention_color") enhanceLookupManagerWorkflowV470();
+  if (!["attention_color", "color_manager", "sheet_sizes"].includes(state.lookupManagerActiveType)) enhanceLookupManagerWorkflowV470();
 }
 
 /**
@@ -46990,9 +47078,6 @@ function wireEvents() {
     if (!target) return;
     openTodayProductionGlassAuditV536(target.dataset.productionGlassDetailV536 || "");
   });
-  els.statisticsSheetSettingsBtnV527?.addEventListener("click", () => {
-    openSheetUsageSettingsV527().catch((error) => showFloatingNotice(error?.message || "Could not load stock sheet settings.", "error"));
-  });
   els.statisticsRefreshBtn?.addEventListener("click", async () => {
     const button = els.statisticsRefreshBtn;
     if (button) {
@@ -47040,8 +47125,8 @@ function wireEvents() {
   });
   els.statsChartMetricSelect?.addEventListener("change", () => {
     state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
-    if (state.homeChartMetric === "production-count-daily") state.homeChartSort = "source";
-    else if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
+    if (state.homeChartMetric === "production-count-daily") state.homeChartMetric = "production-count";
+    if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
     if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();

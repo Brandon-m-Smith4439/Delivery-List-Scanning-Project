@@ -8856,3 +8856,217 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
     font-size: 17px !important;
   }
 }
+
+/* v0.539 Scan progress geometry and remake glass-type readability */
+.scan-page .scan-order-item-v477 .scan-progress-flow-v485,
+.scan-page .scan-order-item-v477 .scan-progress-stack-v475 {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-stack-v475 {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-flow-line-v485 {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-arrow-v485 {
+  flex: 0 0 18px;
+  align-self: center;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 15px;
+  color: #53738f;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-step-v475 {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-step-v475.scan-progress-step-single-v485 {
+  flex-basis: 100%;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-icon-v475 {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  font-size: 15px;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-copy-v539 {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-label-v475 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-value-v475 {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.scan-page .scan-order-item-v477 .scan-progress-empty-v485 {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.scan-page .scan-order-item-v477.is-priority-remake-v480 .scan-glass-type-copy-v484,
+.scan-page .scan-order-item-v477.is-priority-remake-v480 .scan-glass-type-copy-v484 *,
+.scan-page .scan-order-item-v477.is-priority-both-v480 .scan-glass-type-copy-v484,
+.scan-page .scan-order-item-v477.is-priority-both-v480 .scan-glass-type-copy-v484 * {
+  color: #0d3550 !important;
+  text-shadow: none !important;
+}
+
+/* v0.539 final authority: one-line progress checkpoint = icon + label + count. */
+.scan-page .delivery-table .scan-order-item-v477 td:last-child,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-flow-v485,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-flow-line-v485 {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-flow-line-v485 {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 0 !important;
+}
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 5px 8px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+.scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.scan-page .delivery-table .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .delivery-table .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  margin: 0 !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 > b {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: 1 1 auto !important;
+  margin: 0 !important;
+  font-size: 12.5px !important;
+  line-height: 1.05 !important;
+  font-weight: 800 !important;
+  letter-spacing: -.08px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 > strong {
+  min-width: max-content !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  font-size: 11.5px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+}
+.scan-page .delivery-table .scan-progress-arrow-v539 {
+  flex: 0 0 14px !important;
+  width: 14px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 17px !important;
+  line-height: 1 !important;
+  color: #496b88 !important;
+}
+@media (max-width: 760px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    height: 36px !important;
+    min-height: 36px !important;
+    gap: 5px !important;
+    padding: 4px 6px !important;
+  }
+  .scan-page .delivery-table .scan-progress-step-v475 > .global-result-chip-icon-v433,
+  .scan-page .delivery-table .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+    flex-basis: 16px !important;
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    max-width: 16px !important;
+  }
+  .scan-page .delivery-table .scan-progress-copy-v539 { gap: 4px !important; }
+  .scan-page .delivery-table .scan-progress-copy-v539 > b { font-size: 11.4px !important; }
+  .scan-page .delivery-table .scan-progress-copy-v539 > strong { font-size: 10.6px !important; }
+  .scan-page .delivery-table .scan-progress-arrow-v539 { flex-basis: 10px !important; width: 10px !important; font-size: 14px !important; }
+}
