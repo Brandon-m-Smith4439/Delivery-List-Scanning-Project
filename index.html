@@ -14,18 +14,18 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>Delivery List Scanner</title>
   <link rel="icon" href="assets/delivery-list-scanner-icon.ico" sizes="any">
-    <link rel="stylesheet" href="static/css/styles.css?v=20260910-v0.527">
-    <link rel="stylesheet" href="static/css/rejects.css?v=20260911-v0.529">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260915-v0.538">
+    <link rel="stylesheet" href="static/css/rejects.css?v=20260914-v0.530">
     <link rel="stylesheet" href="static/css/home.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/statistics.css?v=20260910-v0.527">
-    <link rel="stylesheet" href="static/css/scan.css?v=20260911-v0.529">
+    <link rel="stylesheet" href="static/css/statistics.css?v=20260915-v0.536">
+    <link rel="stylesheet" href="static/css/scan.css?v=20260915-v0.538">
     <link rel="stylesheet" href="static/css/inventory.css?v=20260911-v0.529">
     <link rel="stylesheet" href="static/css/racks.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/admin.css?v=20260911-v0.529">
-    <link rel="stylesheet" href="static/css/print.css?v=20260911-v0.529">
-    <link rel="stylesheet" href="static/css/bays.css?v=20260908-v0.513">
+    <link rel="stylesheet" href="static/css/admin.css?v=20260914-v0.535">
+    <link rel="stylesheet" href="static/css/print.css?v=20260914-v0.532">
+    <link rel="stylesheet" href="static/css/bays.css?v=20260914-v0.530">
     <link rel="stylesheet" href="static/css/shell.css?v=20260908-v0.510">
-    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260911-v0.529">
+    <link rel="stylesheet" href="static/css/shared-ui.css?v=20260914-v0.533">
     <link rel="stylesheet" href="static/css/mobile.css?v=20260909-v0.517">
 </head>
 <body data-page="home">
@@ -384,6 +384,7 @@
                 <optgroup label="Production mix">
                   <option value="glass" selected>Glass type quantity</option>
                   <option value="glass-sizes">Common glass sizes</option>
+                  <option value="production-count-daily">Production count by day</option>
                   <option value="production-count">Production count by machine</option>
                   <option value="sheet-usage">Stock sheets used</option>
                 </optgroup>
@@ -605,15 +606,17 @@
                       <button class="tab route-filter-tab" data-filter="greenville-route" type="button"><span data-portable-label-v355="gnvRoute">Greenville</span> <span id="countGreenvilleRoute">0</span></button>
                     </div>
                   </section>
-                  <section class="scan-filter-section scan-filter-machine-section-v512" aria-label="Machine filters">
+                  <section class="scan-filter-section scan-filter-progress-section-v534" aria-label="Progress filters">
                     <div class="scan-filter-section-heading">
-                      <h3>Machine</h3>
-                      <span>Filter by required fabrication path</span>
+                      <h3>Progress</h3>
+                      <span>Filter by production or scanner checkpoint</span>
                     </div>
-                    <div class="scan-filter-options" id="scanMachineFilterOptionsV521">
-                      <button class="tab" data-filter="machine-no-fab" type="button">No Fab <span data-filter-count>0</span></button>
-                      <button class="tab" data-filter="machine-waterjet" type="button">WaterJet <span data-filter-count>0</span></button>
-                      <button class="tab" data-filter="machine-denver" type="button">Denver <span data-filter-count>0</span></button>
+                    <div class="scan-filter-options" id="scanProgressFilterOptionsV534">
+                      <button class="tab scan-progress-filter-v534" data-filter="progress-cutting" type="button"><span>Cutting</span> <b data-filter-count>0</b></button>
+                      <button class="tab scan-progress-filter-v534" data-filter="progress-waterjet" type="button"><span>WaterJet</span> <b data-filter-count>0</b></button>
+                      <button class="tab scan-progress-filter-v534" data-filter="progress-denver" type="button"><span>Denver</span> <b data-filter-count>0</b></button>
+                      <button class="tab scan-progress-filter-v534" data-filter="progress-staging" type="button"><span>Staging</span> <b data-filter-count>0</b></button>
+                      <button class="tab scan-progress-filter-v534" data-filter="progress-outbound" type="button"><span>Outbound</span> <b data-filter-count>0</b></button>
                     </div>
                   </section>
                   <section class="scan-filter-section scan-filter-glass-section" aria-label="Glass type filters">
@@ -636,22 +639,56 @@
               </div>
             </div>
 
-            <div class="scan-update-review-control" id="scanUpdateReviewControl" hidden aria-live="polite">
-              <span class="scan-update-review-icon" aria-hidden="true"></span>
-              <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New orders are ready to review.</span>
-              <span class="scan-update-review-actions">
-                <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanUpdateReviewBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Updates</span></button>
-                <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanUpdateMarkReviewedBtn" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
+            <div class="scan-fabrication-load-v531" id="scanFabricationLoadV531" hidden role="status" aria-live="polite">
+              <span class="scan-fabrication-load-badge-v531" aria-hidden="true">FAB</span>
+              <span class="scan-fabrication-load-copy-v531">
+                <strong id="scanFabricationLoadLabelV531">Loading fabrication</strong>
+                <small id="scanFabricationLoadDetailV531">Preparing fabrication status...</small>
               </span>
+              <b id="scanFabricationLoadPercentV531">0%</b>
+              <span class="scan-fabrication-load-track-v531 app-loading-track-v533" role="progressbar" aria-label="Fabrication check progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="scanFabricationLoadBarV531"></i></span>
             </div>
 
-            <div class="scan-update-review-control scan-internal-reject-review-control-v529" id="scanRejectReviewControlV529" hidden aria-live="polite">
-              <span class="scan-update-review-icon" aria-hidden="true">!</span>
-              <span class="scan-update-review-copy" id="scanRejectReviewSummaryV529">Internal Rejects need review.</span>
-              <span class="scan-update-review-actions">
-                <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanRejectReviewBtnV529" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Rejects</span></button>
-                <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanRejectMarkReviewedBtnV529" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
-              </span>
+            <div class="scan-review-grid-v530" id="scanReviewGridV530">
+              <div class="scan-review-toolbar-v531" id="scanReviewToolbarV531" hidden>
+                <span><strong>Review queue</strong><small id="scanReviewAllSummaryV531">New A+W items need review.</small></span>
+                <button class="scan-review-all-button-v531" id="scanReviewAllBtnV531" type="button" title="Mark every current review category reviewed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 4 4 7-8"></path><path d="m12 15 2 2 6-7"></path></svg><span>Mark All Reviewed</span></button>
+              </div>
+              <div class="scan-update-review-control is-new-orders-v530" id="scanUpdateReviewControl" hidden aria-live="polite">
+                <i class="custom-select-indicator-dot-v530 is-new scan-review-indicator-v531" aria-hidden="true">!</i>
+                <span class="scan-update-review-copy" id="scanUpdateReviewSummary">New orders are ready to review.</span>
+                <span class="scan-update-review-actions">
+                  <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanUpdateReviewBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Orders</span></button>
+                  <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanUpdateMarkReviewedBtn" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
+                </span>
+              </div>
+
+              <div class="scan-update-review-control is-remake-v530" id="scanRemakeReviewControlV530" hidden aria-live="polite">
+                <i class="custom-select-indicator-dot-v530 is-remake scan-review-indicator-v531" aria-hidden="true">!</i>
+                <span class="scan-update-review-copy" id="scanRemakeReviewSummaryV530">External Remakes need review.</span>
+                <span class="scan-update-review-actions">
+                  <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanRemakeReviewBtnV530" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Remakes</span></button>
+                  <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanRemakeMarkReviewedBtnV530" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
+                </span>
+              </div>
+
+              <div class="scan-update-review-control scan-internal-reject-review-control-v529 is-reject-v530" id="scanRejectReviewControlV529" hidden aria-live="polite">
+                <i class="custom-select-indicator-dot-v530 is-reject scan-review-indicator-v531" aria-hidden="true">!</i>
+                <span class="scan-update-review-copy" id="scanRejectReviewSummaryV529">Internal Rejects need review.</span>
+                <span class="scan-update-review-actions">
+                  <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanRejectReviewBtnV529" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Rejects</span></button>
+                  <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanRejectMarkReviewedBtnV529" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
+                </span>
+              </div>
+
+              <div class="scan-update-review-control is-rush-v530" id="scanRushReviewControlV530" hidden aria-live="polite">
+                <i class="custom-select-indicator-dot-v530 is-rush scan-review-indicator-v531" aria-hidden="true">!</i>
+                <span class="scan-update-review-copy" id="scanRushReviewSummaryV530">Rushes need review.</span>
+                <span class="scan-update-review-actions">
+                  <button class="scan-update-review-button scan-icon-button-v341 is-review" id="scanRushReviewBtnV530" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>Review Rushes</span></button>
+                  <button class="scan-update-reviewed-button app-primary-button scan-icon-button-v341 is-reviewed" id="scanRushMarkReviewedBtnV530" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span></button>
+                </span>
+              </div>
             </div>
 
 <div class="list-table-controls">
@@ -1785,9 +1822,9 @@
         <span><small>Active scanner</small><strong id="scannerName">Airport Rd</strong></span>
       </button>
       <div class="footer-support-v0163">
-        <span class="footer-version-v0163" aria-label="Application version 0.529">
+        <span class="footer-version-v0163" aria-label="Application version 0.538">
           <small>Version</small>
-          <strong>0.529</strong>
+          <strong>0.538</strong>
         </span>
         <a
           class="footer-report-bugs-v0163"
@@ -2172,6 +2209,6 @@
   </div>
 
   <!-- SECTION: Browser application bootstrap -->
-  <script src="static/js/app.js?v=20260911-v0.529"></script>
+  <script src="static/js/app.js?v=20260915-v0.538"></script>
 </body>
 </html>

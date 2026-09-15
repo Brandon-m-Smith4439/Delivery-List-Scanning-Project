@@ -1977,6 +1977,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(STORE.get_presentation_context())
             return
 
+        if parsed.path == "/api/attention-colors":
+            user = self.current_user()
+            if not user:
+                self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                return
+            lookups = STORE.get_manual_edit_lookups() or {}
+            self.send_json({"attentionColors": lookups.get("attentionColors") or []})
+            return
+
         if parsed.path == "/api/session":
             user = self.current_user()
             self.send_json({"authenticated": bool(user), "user": user})
@@ -3036,7 +3045,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "Permission denied for this delivery-list stage"}, HTTPStatus.FORBIDDEN)
                     return
                 notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else []
-                self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"]))
+                review_kind = str(data.get("reviewKind") or "").strip().lower()
+                self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"], review_kind))
                 return
 
             if parsed.path == "/api/operations/internal-rejects/acknowledge":

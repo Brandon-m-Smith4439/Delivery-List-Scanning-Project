@@ -7848,3 +7848,1011 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 .scan-page:not([hidden]) { animation: scan-page-enter-v529 150ms ease-out both; }
 @keyframes scan-page-enter-v529 { from { opacity:.2; transform:translateY(3px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion: reduce) { .scan-page:not([hidden]) { animation:none !important; } }
+
+/* ========================================================================== */
+/* v0.530 Scan attention palette + compact category review                    */
+/* ========================================================================== */
+.scan-page .scan-filter-options > button.tab[data-filter="updated"]::before { background: var(--attention-new-order) !important; border-color: var(--attention-new-order) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="internal-rejects"]::before { background: var(--attention-internal-reject) !important; border-color: var(--attention-internal-reject) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="remakes"]::before { background: var(--attention-external-remake) !important; border-color: var(--attention-external-remake) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="rushes"]::before { background: var(--attention-rush) !important; border-color: var(--attention-rush) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="updated"].is-active { border-color: var(--attention-new-order) !important; color: var(--attention-new-order) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="internal-rejects"].is-active { border-color: var(--attention-internal-reject) !important; color: #7a3d00 !important; background: color-mix(in srgb, var(--attention-internal-reject) 13%, white) !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="remakes"].is-active { border-color: var(--attention-external-remake) !important; background: var(--attention-external-remake) !important; color: #fff !important; }
+.scan-page .scan-filter-options > button.tab[data-filter="rushes"].is-active { border-color: var(--attention-rush) !important; background: color-mix(in srgb, var(--attention-rush) 12%, white) !important; color: var(--attention-rush) !important; }
+
+.scan-filter-glance-badge.is-updated.has-items { background: var(--attention-new-order) !important; border-color: var(--attention-new-order) !important; }
+.scan-filter-glance-badge.is-reject.has-items { background: var(--attention-internal-reject) !important; border-color: var(--attention-internal-reject) !important; }
+.scan-filter-glance-badge.is-remake.has-items { background: var(--attention-external-remake) !important; border-color: var(--attention-external-remake) !important; }
+.scan-filter-glance-badge.is-rush.has-items { background: var(--attention-rush) !important; border-color: var(--attention-rush) !important; }
+.scan-filter-glance-badge:is(.is-updated,.is-reject,.is-remake,.is-rush).has-items :is(i,b) { color: #fff !important; }
+
+.scan-review-grid-v530 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 8px 12px 0;
+}
+.scan-review-grid-v530 .scan-update-review-control {
+  --review-color: var(--attention-new-order);
+  min-width: 0 !important;
+  grid-template-columns: 26px minmax(0, 1fr) !important;
+  gap: 6px 8px !important;
+  margin: 0 !important;
+  padding: 7px 8px !important;
+  border: 1px solid color-mix(in srgb, var(--review-color) 55%, #d7e0ea) !important;
+  border-left: 4px solid var(--review-color) !important;
+  border-radius: 9px !important;
+  background: color-mix(in srgb, var(--review-color) 6%, white) !important;
+  box-shadow: 0 3px 9px rgba(20, 39, 61, .06) !important;
+}
+.scan-review-grid-v530 .scan-update-review-control.is-reject-v530 { --review-color: var(--attention-internal-reject); }
+.scan-review-grid-v530 .scan-update-review-control.is-remake-v530 { --review-color: var(--attention-external-remake); }
+.scan-review-grid-v530 .scan-update-review-control.is-rush-v530 { --review-color: var(--attention-rush); }
+.scan-review-grid-v530 .scan-update-review-control::before { display: none !important; }
+.scan-review-grid-v530 .scan-update-review-icon {
+  width: 24px !important;
+  height: 24px !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: var(--review-color) !important;
+  color: #fff !important;
+  font-size: 0 !important;
+  box-shadow: none !important;
+}
+.scan-review-grid-v530 .scan-update-review-icon::before { width: 14px !important; height: 14px !important; }
+.scan-review-grid-v530 .scan-update-review-copy {
+  color: #23384e !important;
+  font-size: 10.5px !important;
+  line-height: 1.25 !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions {
+  grid-column: 1 / -1;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions button {
+  min-height: 28px !important;
+  padding: 4px 6px !important;
+  border-radius: 7px !important;
+  font-size: 9px !important;
+}
+.scan-review-grid-v530 .scan-update-review-button { border-color: color-mix(in srgb, var(--review-color) 55%, #b8c5d2) !important; color: var(--review-color) !important; background: #fff !important; }
+.scan-review-grid-v530 .scan-update-reviewed-button { border-color: var(--review-color) !important; background: var(--review-color) !important; color: #fff !important; }
+
+/* IR is one orange incident ribbon. Every field remains one inline phrase, e.g.
+   REASON: Yield Percentage. Narrow screens can scroll the ribbon instead of
+   stacking or hiding incident details. */
+.internal-reject-incident-strip-v154 {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  min-height: 30px !important;
+  padding: 5px 8px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border-color: color-mix(in srgb, var(--attention-internal-reject) 78%, #8b4b00) !important;
+  border-bottom-color: color-mix(in srgb, var(--attention-internal-reject) 45%, transparent) !important;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--attention-internal-reject) 92%, #9c4d00) 0%, var(--attention-internal-reject) 58%, color-mix(in srgb, var(--attention-internal-reject) 72%, white) 100%) !important;
+  scrollbar-width: thin;
+}
+.internal-reject-incident-strip-v154::after {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--attention-internal-reject) 24%, transparent), color-mix(in srgb, var(--attention-internal-reject) 8%, transparent) 58%, transparent) !important;
+}
+.internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154),
+.internal-reject-incident-strip-v154 > strong {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  flex-flow: row nowrap !important;
+  align-items: baseline !important;
+  gap: 3px !important;
+  min-width: max-content !important;
+  white-space: nowrap !important;
+}
+.internal-reject-incident-strip-v154 small,
+.internal-reject-incident-strip-v154 b,
+.internal-reject-incident-title-v154 { display: inline !important; color: #fff !important; white-space: nowrap !important; }
+.internal-reject-incident-strip-v154 small { font-size: 8.5px !important; opacity: .88; }
+.internal-reject-incident-strip-v154 b { font-size: 9.5px !important; }
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject:not(.has-priority-rail-v482) > td {
+  border-top-color: color-mix(in srgb, var(--attention-internal-reject) 34%, transparent) !important;
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--attention-internal-reject) 9%, transparent) 0, color-mix(in srgb, var(--attention-internal-reject) 2%, transparent) 12px, transparent 28px) !important;
+}
+.scan-page .delivery-table .scan-priority-rail-v481.is-remake { background: linear-gradient(90deg, var(--attention-external-remake), color-mix(in srgb, var(--attention-external-remake) 74%, white)) !important; }
+.scan-page .delivery-table .scan-priority-rail-v481.is-rush { background: linear-gradient(90deg, var(--attention-rush), color-mix(in srgb, var(--attention-rush) 74%, black)) !important; }
+.scan-page .delivery-table .scan-priority-rail-v481.is-both > b.is-remake { background: var(--attention-external-remake) !important; }
+.scan-page .delivery-table .scan-priority-rail-v481.is-both > b.is-rush { background: var(--attention-rush) !important; }
+
+@media (max-width: 1100px) { .scan-review-grid-v530 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .scan-review-grid-v530 { grid-template-columns: 1fr; margin-inline: 7px; } }
+
+/* ========================================================================== */
+/* v0.531 review filters, compact IR ribbon, fabrication readiness             */
+/* ========================================================================== */
+.scan-review-toolbar-v531 {
+  grid-column: 1 / -1;
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 7px 4px 9px;
+  border: 1px solid #d7e1ec;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff, #f7faff);
+  box-shadow: 0 2px 6px rgba(20, 39, 61, .045);
+}
+.scan-review-toolbar-v531[hidden] { display: none !important; }
+.scan-review-toolbar-v531 > span { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.scan-review-toolbar-v531 strong { color: #1b3958; font-size: 9.5px; letter-spacing: .025em; text-transform: uppercase; }
+.scan-review-toolbar-v531 small { min-width: 0; color: #61758b; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-review-all-button-v531 {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid #8094aa;
+  border-radius: 6px;
+  background: #fff;
+  color: #294866;
+  font-size: 8.7px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.scan-review-all-button-v531:hover,
+.scan-review-all-button-v531:focus-visible { border-color: #315f90; background: #edf5ff; outline: none; }
+.scan-review-all-button-v531:disabled { opacity: .58; cursor: progress; }
+
+/* Reuse the exact date-selector ! dot component inside each review card. */
+.scan-review-grid-v530 .scan-review-indicator-v531 {
+  align-self: center;
+  justify-self: center;
+  margin: 0 !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button {
+  min-height: 24px !important;
+  padding: 2px 4px !important;
+  gap: 3px !important;
+  font-size: 8.1px !important;
+  line-height: 1 !important;
+  white-space: nowrap;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button svg { width: 11px !important; height: 11px !important; }
+.scan-review-grid-v530 .scan-update-review-button { min-height: 26px !important; padding-block: 3px !important; }
+
+/* Explicit exclusions sit beside normal filters instead of overloading include state. */
+.scan-filter-exclude-section-v531 {
+  border-top: 1px dashed #d7e1eb;
+  border-bottom: 1px dashed #d7e1eb;
+  background: #fbfcfe;
+}
+.scan-filter-exclude-options-v531 { gap: 6px !important; }
+.scan-exclude-filter-v531 {
+  border-style: dashed !important;
+  background: #fff !important;
+  color: #52677c !important;
+}
+.scan-exclude-filter-v531 > i {
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+  margin-right: 3px;
+  border-radius: 50%;
+  background: #eef2f6;
+  color: #53677a;
+  font-style: normal;
+  font-weight: 950;
+}
+.scan-exclude-filter-v531.is-active {
+  border-color: #52677c !important;
+  background: #eef2f6 !important;
+  color: #24384c !important;
+  box-shadow: inset 0 0 0 1px rgba(82,103,124,.12);
+}
+.scan-exclude-filter-v531.is-new-orders-v531.is-active { border-color: var(--attention-new-order) !important; }
+.scan-exclude-filter-v531.is-reject-v531.is-active { border-color: var(--attention-internal-reject) !important; }
+.scan-exclude-filter-v531.is-remake-v531.is-active { border-color: var(--attention-external-remake) !important; }
+.scan-exclude-filter-v531.is-rush-v531.is-active { border-color: var(--attention-rush) !important; }
+.scan-filter-chip.is-excluded-v531 {
+  border-style: dashed !important;
+  border-color: #8595a6 !important;
+  background: #f3f6f9 !important;
+  color: #34495e !important;
+}
+.scan-filter-chip.is-excluded-v531 > i { font-style: normal; font-weight: 950; }
+
+/* The IR incident ribbon is now genuinely one compact line. Wider gaps separate
+   phrases without restoring the tall stacked presentation. */
+.internal-reject-incident-strip-v154 {
+  min-height: 23px !important;
+  padding: 2px 7px !important;
+  gap: 15px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 1px 4px rgb(74 42 14 / 10%) !important;
+}
+.internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154),
+.internal-reject-incident-strip-v154 > strong { gap: 4px !important; }
+.internal-reject-incident-badge-v154 {
+  min-width: 20px !important;
+  height: 18px !important;
+  padding: 0 4px !important;
+  font-size: 8px !important;
+}
+.internal-reject-incident-strip-v154 small { font-size: 7.7px !important; line-height: 1 !important; }
+.internal-reject-incident-strip-v154 b,
+.internal-reject-incident-title-v154 { font-size: 9.1px !important; line-height: 1 !important; }
+.internal-reject-detail-row-v154 > td { padding-top: 2px !important; padding-bottom: 2px !important; }
+
+/* One pending Cutting checkpoint no longer stretches into the two-step geometry. */
+.scan-progress-flow-v485.is-single-v531 .scan-progress-flow-line-v485 {
+  justify-content: center !important;
+  gap: 0 !important;
+  overflow: visible !important;
+}
+.scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex: 0 1 150px !important;
+  width: min(150px, 100%) !important;
+  max-width: 150px !important;
+  grid-template-columns: 18px minmax(48px, 1fr) minmax(52px, auto) !important;
+}
+.scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 strong {
+  max-width: 64px !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  font-size: 8.4px !important;
+}
+
+/* Foreground fabrication readiness is visible without blocking list paint. */
+.scan-fabrication-load-v531 {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 12px 0;
+  padding: 5px 8px;
+  border: 1px solid #bed5ea;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f8fcff, #eef7ff);
+  color: #173f64;
+  box-shadow: 0 2px 7px rgba(17, 73, 120, .06);
+}
+.scan-fabrication-load-v531[hidden] { display: none !important; }
+.scan-fabrication-load-badge-v531 {
+  min-width: 29px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 5px;
+  background: #17689d;
+  color: #fff;
+  font-size: 7.5px;
+  font-weight: 950;
+  letter-spacing: .06em;
+}
+.scan-fabrication-load-copy-v531 { min-width: 0; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 1px 7px; }
+.scan-fabrication-load-copy-v531 strong { font-size: 9.3px; }
+.scan-fabrication-load-copy-v531 small { min-width: 0; color: #5e7890; font-size: 8.4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-fabrication-load-track-v531 { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 99px; background: #cfdeeb; }
+.scan-fabrication-load-track-v531 > i { display: block; width: 4%; height: 100%; border-radius: inherit; background: #2686bf; transition: width 180ms ease; }
+.scan-fabrication-load-v531 > b { min-width: 30px; text-align: right; color: #315d83; font-size: 8.6px; }
+.scan-fabrication-load-v531.is-complete-v531 { border-color: #bddfc9; background: linear-gradient(180deg, #f8fffa, #effaf3); }
+.scan-fabrication-load-v531.is-complete-v531 .scan-fabrication-load-badge-v531,
+.scan-fabrication-load-v531.is-complete-v531 .scan-fabrication-load-track-v531 > i { background: #2c8a53; }
+
+/* Remakes retain their row-level black priority wash, but the Glass Type cell
+   itself remains a normal glass identity cell rather than becoming black. */
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) > td.scan-glass-type-cell-v484,
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) > td.scan-glass-type-cell-v484:nth-child(n) {
+  background: #fff !important;
+  background-image: none !important;
+  color: #153a5a !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484,
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 strong {
+  color: #153a5a !important;
+  text-shadow: none !important;
+}
+
+@media (max-width: 620px) {
+  .scan-review-toolbar-v531 { align-items: center; }
+  .scan-review-toolbar-v531 small { display: none; }
+  .scan-fabrication-load-v531 { margin-inline: 7px; }
+  .scan-fabrication-load-copy-v531 { grid-template-columns: 1fr; }
+  .scan-fabrication-load-copy-v531 small { grid-column: 1; }
+  .scan-fabrication-load-track-v531 { grid-column: 1; }
+}
+
+/* ========================================================================== */
+/* v0.532 unified Include/Exclude filters, FAB feedback, IR/remake polish     */
+/* ========================================================================== */
+.scan-filter-mode-v532 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #d5e1ec;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9fd 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72);
+}
+.scan-filter-mode-copy-v532 { min-width: 0; display: grid; gap: 2px; }
+.scan-filter-mode-copy-v532 strong { color: #183d5d; font-size: 10px; font-weight: 900; letter-spacing: .025em; text-transform: uppercase; }
+.scan-filter-mode-copy-v532 small { color: #6b7f91; font-size: 8.5px; line-height: 1.2; }
+.scan-filter-mode-switch-v532 {
+  position: relative;
+  min-width: 164px;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid #b9c9d8;
+  border-radius: 999px;
+  background: #e8f0f7;
+  color: #34556f;
+  cursor: pointer;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: .02em;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.scan-filter-mode-switch-v532 > span { position: relative; z-index: 2; text-align: center; }
+.scan-filter-mode-switch-v532 > i {
+  position: absolute;
+  z-index: 1;
+  left: 3px;
+  top: 3px;
+  width: calc(50% - 3px);
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2f83b8, #17689d);
+  box-shadow: 0 2px 5px rgba(19,82,124,.22);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 160ms ease;
+}
+.scan-filter-mode-switch-v532 > span:first-child { color: #fff; }
+.scan-filter-mode-switch-v532.is-exclude-v532 { border-color: #899bac; background: #f3f5f7; }
+.scan-filter-mode-switch-v532.is-exclude-v532 > i { transform: translateX(100%); background: linear-gradient(180deg, #66798c, #43566a); }
+.scan-filter-mode-switch-v532.is-exclude-v532 > span:first-child { color: #566b7e; }
+.scan-filter-mode-switch-v532.is-exclude-v532 > span:last-child { color: #fff; }
+.scan-filter-mode-switch-v532:focus-visible { outline: 3px solid rgba(23,104,157,.17); outline-offset: 2px; }
+
+/* Exclude mode deliberately looks different without creating a second filter
+   system: the exact same buttons become dashed-outline removal choices. */
+.scan-filter-drawer-panel.is-exclude-mode-v532 .scan-filter-options > button.tab,
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-glass-filter] {
+  border-style: dashed !important;
+  border-width: 1px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  color: #4f6478 !important;
+}
+.scan-filter-drawer-panel.is-exclude-mode-v532 .scan-filter-options > button.tab.is-active,
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-glass-filter].is-active {
+  border-width: 2px !important;
+  background: #f5f7f9 !important;
+  box-shadow: inset 0 0 0 1px rgba(67,86,106,.06) !important;
+  color: #263d52 !important;
+}
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-filter="updated"] { border-color: color-mix(in srgb, var(--attention-new-order) 64%, #cbd5df) !important; color: var(--attention-new-order) !important; }
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-filter="internal-rejects"] { border-color: color-mix(in srgb, var(--attention-internal-reject) 70%, #d4d8dd) !important; color: #8a4800 !important; }
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-filter="remakes"] { border-color: color-mix(in srgb, var(--attention-external-remake) 70%, #c9d0d7) !important; color: var(--attention-external-remake) !important; }
+.scan-filter-drawer-panel.is-exclude-mode-v532 [data-filter="rushes"] { border-color: color-mix(in srgb, var(--attention-rush) 70%, #d7d9dc) !important; color: var(--attention-rush) !important; }
+.scan-filter-drawer-panel.is-exclude-mode-v532 .scan-machine-filter-v521::before { display: inline-block !important; }
+.scan-filter-drawer-panel.is-exclude-mode-v532 .scan-machine-filter-v521.is-active {
+  border-style: dashed !important;
+  background: color-mix(in srgb, var(--machine-filter-color, #64748b) 5%, #fff) !important;
+  color: color-mix(in srgb, var(--machine-filter-color, #64748b) 82%, #263d52) !important;
+}
+
+/* Make fabrication work obvious without dominating the Scan workspace. The
+   width changes only when a real bounded backend batch reports completion. */
+.scan-fabrication-load-v531 {
+  min-height: 44px !important;
+  gap: 10px !important;
+  margin: 7px 12px 2px !important;
+  padding: 7px 10px !important;
+  border-color: #a9cce5 !important;
+  border-radius: 10px !important;
+  background:
+    radial-gradient(circle at 9% 0%, rgba(66,157,211,.10), transparent 30%),
+    linear-gradient(180deg, #fbfdff 0%, #edf7ff 100%) !important;
+  box-shadow: 0 3px 10px rgba(17,73,120,.08), inset 0 1px 0 rgba(255,255,255,.86) !important;
+}
+.scan-fabrication-load-badge-v531 {
+  min-width: 34px !important;
+  height: 24px !important;
+  border-radius: 6px !important;
+  background: linear-gradient(180deg, #2585bd, #17689d) !important;
+  box-shadow: 0 2px 5px rgba(23,104,157,.22) !important;
+  font-size: 8px !important;
+}
+.scan-fabrication-load-copy-v531 { gap: 2px 8px !important; }
+.scan-fabrication-load-copy-v531 strong { font-size: 10px !important; color: #153e61; }
+.scan-fabrication-load-copy-v531 small { font-size: 8.8px !important; color: #58758e !important; }
+.scan-fabrication-load-track-v531 {
+  position: relative;
+  height: 7px !important;
+  border: 1px solid #bdd0df;
+  background: #d8e5ef !important;
+  box-shadow: inset 0 1px 2px rgba(24,63,95,.10);
+}
+.scan-fabrication-load-track-v531::after {
+  content: "";
+  position: absolute;
+  inset: 1px 2px auto;
+  height: 1px;
+  border-radius: 99px;
+  background: rgba(255,255,255,.62);
+  pointer-events: none;
+}
+.scan-fabrication-load-track-v531 > i {
+  background: linear-gradient(90deg, #17689d, #32a0d6) !important;
+  box-shadow: 0 0 7px rgba(38,134,191,.22);
+  transition: width 220ms cubic-bezier(.2,.8,.2,1) !important;
+}
+.scan-fabrication-load-v531 > b { min-width: 35px !important; font-size: 9.4px !important; color: #285a80 !important; }
+.scan-fabrication-load-v531.is-complete-v531 { border-color: #abd7bb !important; background: linear-gradient(180deg, #fbfffc, #edf9f1) !important; }
+.scan-fabrication-load-v531.is-complete-v531 .scan-fabrication-load-badge-v531 { background: linear-gradient(180deg, #3d9b62, #25784a) !important; }
+.scan-fabrication-load-v531.is-complete-v531 .scan-fabrication-load-track-v531 > i { background: linear-gradient(90deg, #25784a, #46a96c) !important; }
+
+/* The single-row IR ribbon now has more breathing room between phrases while
+   staying compact, and the orange incident color carries farther into the row. */
+.internal-reject-incident-strip-v154 {
+  min-height: 24px !important;
+  padding: 3px 9px !important;
+  gap: 20px !important;
+  border-radius: 7px !important;
+  border-color: color-mix(in srgb, var(--attention-internal-reject) 78%, #8f4b00) !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.10), transparent 48%),
+    linear-gradient(100deg,
+      color-mix(in srgb, var(--attention-internal-reject) 92%, #9b4c00) 0%,
+      var(--attention-internal-reject) 57%,
+      color-mix(in srgb, var(--attention-internal-reject) 75%, #fff) 100%) !important;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--attention-internal-reject) 17%, transparent), inset 0 1px 0 rgba(255,255,255,.15) !important;
+}
+.internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154),
+.internal-reject-incident-strip-v154 > strong { gap: 5px !important; }
+.internal-reject-incident-strip-v154::after {
+  inset: auto 0 -12px !important;
+  height: 13px !important;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--attention-internal-reject) 25%, transparent), color-mix(in srgb, var(--attention-internal-reject) 8%, transparent) 48%, transparent 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:nth-child(n) {
+  border-top-color: color-mix(in srgb, var(--attention-internal-reject) 38%, #d8e2ea) !important;
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--attention-internal-reject) 14%, transparent) 0,
+    color-mix(in srgb, var(--attention-internal-reject) 6%, transparent) 14px,
+    color-mix(in srgb, var(--attention-internal-reject) 2%, transparent) 24px,
+    transparent 34px) !important;
+}
+
+/* External Remake color belongs to the complete logical row. The first TD is
+   transparent like every other TD; the normal glass-tone element then paints
+   its own lookup-driven glass gradient above the black row wash. */
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 {
+  --priority-wash-v529: #111418;
+  background:
+    linear-gradient(90deg,
+      rgba(10,12,15,.72) 0%,
+      rgba(15,18,22,.51) 24%,
+      rgba(25,29,34,.27) 52%,
+      rgba(35,40,47,.10) 78%,
+      rgba(35,40,47,0) 100%),
+    #fff !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) > td.scan-glass-type-cell-v484,
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) > td.scan-glass-type-cell-v484:nth-child(n) {
+  background: transparent !important;
+  background-image: none !important;
+  color: #153a5a !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 > td:nth-child(n) {
+  background-color: transparent !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 {
+  position: relative;
+  z-index: 1;
+  color: #153a5a !important;
+  text-shadow: none !important;
+  /* Reassert the shared glass identity gradient after older priority rules. */
+  border-color: var(--glass-type-border) !important;
+  border-left-color: var(--glass-type-accent) !important;
+  background: linear-gradient(105deg, var(--glass-type-soft-strong) 0%, rgba(255,255,255,.96) 68%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 strong {
+  color: #153a5a !important;
+  text-shadow: none !important;
+}
+
+@media (max-width: 620px) {
+  .scan-filter-mode-v532 { align-items: stretch; flex-direction: column; gap: 7px; }
+  .scan-filter-mode-switch-v532 { width: 100%; min-width: 0; }
+  .scan-fabrication-load-v531 { min-height: 48px !important; margin-inline: 7px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-filter-mode-switch-v532 > i,
+  .scan-fabrication-load-track-v531 > i { transition: none !important; }
+}
+
+/* ========================================================================== */
+/* v0.533 review controls, smooth FAB meter, IR/remake layering               */
+/* ========================================================================== */
+
+/* Review-card actions share one compact icon language. Keep Mark Reviewed
+   intentionally smaller so icon + label remain on one line at TC22 widths. */
+.scan-review-grid-v530 .scan-update-review-actions button svg {
+  flex: 0 0 11px !important;
+  width: 11px !important;
+  height: 11px !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button {
+  gap: 2px !important;
+  padding-inline: 3px !important;
+  font-size: 7.5px !important;
+  letter-spacing: -.01em !important;
+  white-space: nowrap !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button > span,
+.scan-review-grid-v530 .scan-update-review-button > span { white-space: nowrap !important; }
+
+/* FAB work is hidden for the first three seconds in JS. If it lasts longer,
+   this max-height/spacing transition makes the Scan workspace move rather than
+   jump when the meter enters or leaves the document flow. */
+.scan-fabrication-load-v531:not([hidden]) {
+  display: flex !important;
+  min-height: 0 !important;
+  max-height: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-top-width: 0 !important;
+  border-bottom-width: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition:
+    max-height 320ms cubic-bezier(.2,.8,.2,1),
+    min-height 320ms cubic-bezier(.2,.8,.2,1),
+    margin 320ms cubic-bezier(.2,.8,.2,1),
+    padding 320ms cubic-bezier(.2,.8,.2,1),
+    border-width 240ms ease,
+    opacity 220ms ease,
+    transform 320ms cubic-bezier(.2,.8,.2,1) !important;
+}
+.scan-fabrication-load-v531.is-visible-v533 {
+  min-height: 46px !important;
+  max-height: 72px;
+  margin: 7px 12px 3px !important;
+  padding: 8px 11px !important;
+  border-top-width: 1px !important;
+  border-bottom-width: 1px !important;
+  opacity: 1;
+  transform: translateY(0);
+}
+.scan-fabrication-load-track-v531 {
+  height: 10px !important;
+  border-color: #9dbfd6 !important;
+  background: linear-gradient(180deg,#e8f1f7,#d7e5ee) !important;
+  box-shadow: inset 0 1px 3px rgba(18,52,78,.17), 0 1px 0 rgba(255,255,255,.85) !important;
+}
+.scan-fabrication-load-track-v531 > i {
+  background: linear-gradient(90deg,#176fd0 0%,#199bb7 52%,#35ad69 100%) !important;
+  box-shadow: 0 0 9px rgba(28,117,188,.26), 0 0 12px rgba(53,173,105,.17) !important;
+}
+.scan-fabrication-load-v531.is-complete-v531 .scan-fabrication-load-track-v531 > i {
+  background: linear-gradient(90deg,#176fd0 0%,#199bb7 48%,#35ad69 100%) !important;
+}
+
+/* Another 30% more space than v0.532 between IR facts, plus roughly 40% more
+   orange strength in the physical piece immediately below the ribbon. */
+.internal-reject-incident-strip-v154 { gap: 26px !important; }
+.internal-reject-incident-strip-v154 > span:not(.internal-reject-incident-badge-v154),
+.internal-reject-incident-strip-v154 > strong { gap: 7px !important; }
+.internal-reject-incident-strip-v154::after {
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--attention-internal-reject) 35%, transparent),
+    color-mix(in srgb, var(--attention-internal-reject) 11%, transparent) 48%,
+    transparent 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:nth-child(n) {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--attention-internal-reject) 20%, transparent) 0,
+    color-mix(in srgb, var(--attention-internal-reject) 8.5%, transparent) 14px,
+    color-mix(in srgb, var(--attention-internal-reject) 3%, transparent) 24px,
+    transparent 34px) !important;
+}
+
+/* External Remake wash belongs to the row, not the Glass Type surface. Keep
+   the charcoal treatment deliberately restrained so navy table text remains
+   readable, then paint an opaque lookup-derived Glass Type card above it. This
+   preserves one continuous left-to-right row gradient without tinting the
+   actual glass-color identity surface. */
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 {
+  background: linear-gradient(90deg,
+    rgba(10,12,15,.42) 0%,
+    rgba(14,17,21,.29) 24%,
+    rgba(22,27,32,.16) 52%,
+    rgba(32,38,44,.055) 79%,
+    rgba(32,38,44,0) 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 > td:nth-child(n) {
+  background: transparent !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 {
+  isolation: isolate;
+  background: linear-gradient(105deg,
+    color-mix(in srgb, var(--glass-type-color) 28%, #fff) 0%,
+    color-mix(in srgb, var(--glass-type-color) 12%, #fff) 58%,
+    #fff 100%) !important;
+  background-clip: padding-box !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.78) !important;
+}
+
+@media (max-width:620px) {
+  .scan-fabrication-load-v531.is-visible-v533 { margin-inline: 7px !important; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .scan-fabrication-load-v531:not([hidden]) { transition: none !important; transform: none !important; }
+}
+
+/* ========================================================================== */
+/* v0.534 review headers, progress filters, FAB width, and remake layering    */
+/* ========================================================================== */
+
+/* New-order state belongs to the grouped order header so operators can spot
+   the exact order before reading individual panes. */
+.scan-order-group-v477.has-new-order-v534 > td > div,
+.mobile-order-group-header-v477.has-new-order-v534 {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--attention-new-order) 8%, #fff) 0%,
+    color-mix(in srgb, var(--attention-new-order) 3%, #fff) 52%,
+    #fff 100%) !important;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--attention-new-order) 62%, #fff);
+}
+.scan-order-group-new-v534 {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  min-width: 31px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--attention-new-order) 68%, #fff);
+  border-radius: 999px;
+  background: var(--attention-new-order);
+  color: #fff;
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--attention-new-order) 20%, transparent);
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .05em;
+}
+
+/* Give the two visible progress checkpoints enough room for labels such as
+   Staging 0/1 without compressing the count against the text. */
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 0 0 124px !important;
+  width: 124px !important;
+  min-width: 124px !important;
+  max-width: 124px !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  grid-template-columns: 15px minmax(66px,1fr) minmax(30px,auto) !important;
+  column-gap: 5px !important;
+  padding: 4px 7px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b { font-size: 10.2px !important; }
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong { font-size: 9.2px !important; }
+.scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex-basis: 176px !important;
+  width: min(176px,100%) !important;
+  max-width: 176px !important;
+}
+
+/* Progress replaces Machine in the Scan filter drawer. The controls use each
+   checkpoint's existing production color and disappear when the list has none. */
+.scan-filter-progress-section-v534 .scan-filter-options { align-items: center; }
+.scan-filter-progress-section-v534 .scan-progress-filter-v534 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--progress-filter-color,#64748b) 28%, #d4dee8) !important;
+}
+.scan-filter-progress-section-v534 .scan-progress-filter-v534::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: var(--progress-filter-color,#64748b);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--progress-filter-color,#64748b) 13%, transparent);
+}
+.scan-filter-progress-section-v534 .scan-progress-filter-v534.is-active {
+  border-color: var(--progress-filter-color,#64748b) !important;
+  background: color-mix(in srgb, var(--progress-filter-color,#64748b) 12%, #fff) !important;
+  color: color-mix(in srgb, var(--progress-filter-color,#64748b) 78%, #18344d) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--progress-filter-color,#64748b) 16%, transparent) !important;
+}
+
+/* Let the real FAB batch progress track consume the available section width. */
+.scan-fabrication-load-v531.is-visible-v533 {
+  display: grid !important;
+  grid-template-columns: auto minmax(0,1fr) auto !important;
+  width: auto !important;
+}
+.scan-fabrication-load-copy-v531 {
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: auto minmax(0,1fr) !important;
+}
+.scan-fabrication-load-track-v531 {
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-column: 1 / -1 !important;
+}
+
+/* External Remakes use the exact same Glass Type identity surface as ordinary
+   rows. The black priority wash remains on the TR behind that surface only. */
+.scan-page .delivery-table .scan-order-item-v477.is-priority-remake-v480 {
+  background: linear-gradient(90deg,
+    rgba(10,12,15,.34) 0%,
+    rgba(14,17,21,.22) 25%,
+    rgba(22,27,32,.115) 54%,
+    rgba(32,38,44,.035) 80%,
+    rgba(32,38,44,0) 100%) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 {
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--glass-type-color) 16%, #fff) !important;
+  border-left: 3px solid var(--glass-type-color) !important;
+  background: linear-gradient(105deg,
+    color-mix(in srgb, var(--glass-type-color) 5.2%, #fff) 0%,
+    color-mix(in srgb, var(--glass-type-color) 2.4%, #fff) 48%,
+    #fff 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.48) !important;
+  color: #153a5a !important;
+}
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 strong {
+  color: #153a5a !important;
+  text-shadow: none !important;
+}
+
+/* Make the bulk review action unambiguous: it clears every currently-new
+   category, while the four cards remain the place to inspect one category. */
+.scan-review-all-button-v531 {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  min-height: 28px;
+  padding: 5px 9px !important;
+  border-color: #8fb4dd !important;
+  background: linear-gradient(180deg,#f7fbff,#eaf4ff) !important;
+  color: #194f86 !important;
+  box-shadow: 0 2px 5px rgba(30,91,151,.08);
+}
+.scan-review-all-button-v531 svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.scan-review-all-button-v531:hover,
+.scan-review-all-button-v531:focus-visible { background: linear-gradient(180deg,#eef7ff,#deedff) !important; }
+
+@media (max-width: 760px) {
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    flex-basis: 110px !important;
+    width: 110px !important;
+    min-width: 110px !important;
+    max-width: 110px !important;
+    grid-template-columns: 13px minmax(56px,1fr) minmax(27px,auto) !important;
+  }
+}
+.scan-page .scan-filter-progress-section-v534 { grid-column: 2 !important; }
+@media (max-width: 900px) {
+  .scan-page .scan-filter-progress-section-v534 { grid-column: 1 !important; }
+}
+
+
+/* ========================================================================== */
+/* v0.535 remake glass identity + progress checkpoint geometry                */
+/* ========================================================================== */
+/* One shared Glass Type surface now owns BOTH regular and External Remake
+   rows. The remake's black wash remains on the TR behind the padded surface,
+   while the glass label uses the same lookup-derived white/soft-color card and
+   dark ink as every ordinary pane. */
+.scan-page .delivery-table .scan-glass-type-copy-v484 {
+  border: 1px solid color-mix(in srgb, var(--glass-type-color) 18%, #dbe6ee) !important;
+  border-left: 3px solid color-mix(in srgb, var(--glass-type-color) 72%, #fff) !important;
+  border-radius: 7px !important;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--glass-type-color) 7%, #fff) 0%,
+    color-mix(in srgb, var(--glass-type-color) 3%, #fff) 48%,
+    #fff 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72) !important;
+  color: #08131d !important;
+  text-shadow: none !important;
+}
+.scan-page .delivery-table .scan-glass-type-copy-v484 > strong,
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484,
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 > strong {
+  color: #08131d !important;
+  text-shadow: none !important;
+}
+/* Keep the remake row wash behind the normal Glass Type card. */
+.scan-page .delivery-table .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) > td.scan-glass-type-cell-v484:nth-child(n) {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+/* The compact workflow card is easier to read when quantity comes first,
+   stage name stays centered, and the stage icon has breathing room at right.
+   Explicit grid placement prevents either outer item from clipping the border. */
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 0 0 136px !important;
+  width: 136px !important;
+  min-width: 136px !important;
+  max-width: 136px !important;
+  min-height: 35px !important;
+  height: 35px !important;
+  grid-template-columns: minmax(31px,auto) minmax(66px,1fr) 17px !important;
+  column-gap: 6px !important;
+  padding: 4px 8px !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  justify-self: start !important;
+  min-width: 31px !important;
+  font-size: 10.4px !important;
+  font-weight: 950 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  justify-self: center !important;
+  font-size: 11.2px !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  justify-self: end !important;
+  width: 15px !important;
+  height: 15px !important;
+}
+.scan-page .scan-progress-flow-line-v485 {
+  gap: 7px !important;
+}
+.scan-page .scan-progress-flow-line-v485 > i {
+  width: 19px !important;
+  flex: 0 0 19px !important;
+  color: #365c78 !important;
+  font-size: 21px !important;
+  line-height: 1 !important;
+  font-weight: 1000 !important;
+  text-shadow: 0 1px 0 rgba(255,255,255,.8), 0 0 1px rgba(32,72,103,.28);
+  transform: translateY(-1px) scaleX(1.08) !important;
+}
+.scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex-basis: 184px !important;
+  width: min(184px,100%) !important;
+  max-width: 184px !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    flex-basis: 122px !important;
+    width: 122px !important;
+    min-width: 122px !important;
+    max-width: 122px !important;
+    grid-template-columns: minmax(28px,auto) minmax(56px,1fr) 15px !important;
+    padding-inline: 6px !important;
+  }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b { font-size: 10.5px !important; }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong { font-size: 9.8px !important; }
+  .scan-page .scan-progress-flow-line-v485 > i { width: 16px !important; flex-basis: 16px !important; font-size: 18px !important; }
+}
+
+/* ========================================================================== */
+/* v0.538 progress checkpoint readability                                     */
+/* ========================================================================== */
+/* The v0.535 cells fixed clipping by reserving generous grid columns, but the
+   content became visually too small and spread out. Keep count / label / icon
+   in fixed lanes with tighter internal gaps and larger typography so every
+   checkpoint remains legible without escaping its card. */
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 0 0 142px !important;
+  width: 142px !important;
+  min-width: 142px !important;
+  max-width: 142px !important;
+  min-height: 38px !important;
+  height: 38px !important;
+  grid-template-columns: 29px minmax(0,1fr) 19px !important;
+  column-gap: 3px !important;
+  padding: 4px 6px !important;
+  overflow: hidden !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong {
+  min-width: 0 !important;
+  max-width: 29px !important;
+  font-size: 11.7px !important;
+  line-height: 1 !important;
+  letter-spacing: -.12px !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  font-size: 12.4px !important;
+  line-height: 1.05 !important;
+  letter-spacing: -.16px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+}
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  width: 17px !important;
+  height: 17px !important;
+  max-width: 17px !important;
+  max-height: 17px !important;
+}
+.scan-page .scan-progress-flow-line-v485 {
+  gap: 5px !important;
+}
+.scan-page .scan-progress-flow-line-v485 > i {
+  width: 18px !important;
+  flex: 0 0 18px !important;
+  font-size: 20px !important;
+}
+.scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex-basis: 184px !important;
+  width: min(184px,100%) !important;
+  max-width: 184px !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475,
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    flex-basis: 124px !important;
+    width: 124px !important;
+    min-width: 124px !important;
+    max-width: 124px !important;
+    min-height: 36px !important;
+    height: 36px !important;
+    grid-template-columns: 27px minmax(0,1fr) 17px !important;
+    column-gap: 2px !important;
+    padding-inline: 5px !important;
+  }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > strong {
+    max-width: 27px !important;
+    font-size: 10.8px !important;
+  }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > b {
+    font-size: 11.2px !important;
+  }
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .global-result-chip-icon-v433,
+  .scan-page .scan-progress-flow-v481 .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+    width: 16px !important;
+    height: 16px !important;
+  }
+  .scan-page .scan-progress-flow-line-v485 > i {
+    width: 14px !important;
+    flex-basis: 14px !important;
+    font-size: 17px !important;
+  }
+}

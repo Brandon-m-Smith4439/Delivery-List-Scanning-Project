@@ -3333,3 +3333,16 @@ tr.has-internal-reject > td:first-child {
     grid-row: 1;
   }
 }
+
+/* v0.530 Internal Reject presentation is orange throughout its dedicated UI. */
+.internal-reject-notification-toast {
+  border-color: color-mix(in srgb, var(--attention-internal-reject) 45%, #e5e7eb) !important;
+  border-left-color: var(--attention-internal-reject) !important;
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--attention-internal-reject) 18%, transparent) !important;
+}
+.internal-reject-toast-icon,
+.internal-reject-toast-ack { background: var(--attention-internal-reject) !important; border-color: var(--attention-internal-reject) !important; color: #fff !important; }
+.internal-reject-toast-copy small,
+.internal-reject-toast-copy b { color: color-mix(in srgb, var(--attention-internal-reject) 72%, #5b2b00) !important; }
+.reject-history-item.is-internal-reject,
+.reject-timeline-card-v151.is-internal-reject { border-left-color: var(--attention-internal-reject) !important; }

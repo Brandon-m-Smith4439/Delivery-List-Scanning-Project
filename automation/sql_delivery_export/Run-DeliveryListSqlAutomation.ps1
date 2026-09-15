@@ -679,6 +679,21 @@ function Get-SupersededOrderCandidates {
         ) -join '|'
     }
 
+    function Get-ExactOrderSignature {
+        param([Parameter(Mandatory = $true)]$OrderRows)
+        # v0.533: Remakes can be created after a normal order was already imported.
+        # A same-day remake is considered a duplicate candidate only when the Job,
+        # Customer, Item Nr., product, quantity, and dimensions all match exactly.
+        # This intentionally feeds the existing review queue instead of deleting
+        # either order automatically.
+        return (@($OrderRows | ForEach-Object {
+            @(
+                ([string][int]$_.ItemNumber).PadLeft(3, '0'),
+                (Get-ItemSignature -Row $_)
+            ) -join '|'
+        } | Sort-Object) -join '||')
+    }
+
     $dateKey = $Date.ToString('yyyy-MM-dd')
     $candidates = New-Object System.Collections.Generic.List[object]
     $identityGroups = @($Rows | Where-Object {
@@ -755,6 +770,81 @@ function Get-SupersededOrderCandidates {
                 }
                 originalItems = @($originalRows | ForEach-Object { Convert-CandidateItem -Row $_ })
                 replacementItems = @($best.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+            })
+        }
+    }
+
+    # v0.533: Catch the second superseded-order pattern seen on the floor: A+W
+    # may first expose a normal order, then later create an otherwise identical
+    # External Remake for the same delivery date. Header identity/status cannot
+    # safely identify that case, so use a deliberately strict same-Job/same-
+    # Customer/exact-item-set comparison and send it through the existing manual
+    # superseded-order review workflow. The normal order is suggested for removal
+    # and the remake is suggested as the replacement; nothing is auto-deleted.
+    $seenCandidateKeys = @{}
+    foreach ($candidate in $candidates) { $seenCandidateKeys[[string]$candidate.candidateKey] = $true }
+    $allOrderGroups = @($Rows | Group-Object { [string][int64]$_.OrderNumber })
+    $orderDescriptors = New-Object System.Collections.Generic.List[object]
+    foreach ($orderGroup in $allOrderGroups) {
+        $orderRows = @($orderGroup.Group)
+        if (-not $orderRows.Count) { continue }
+        $jobs = @($orderRows | ForEach-Object { ([string]$_.JobNumber).Trim().ToUpperInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+        $customers = @($orderRows | ForEach-Object { ([string]$_.Customer).Trim().ToUpperInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+        $routes = @($orderRows | ForEach-Object { ([string]$_.SourceRoute).Trim().ToUpperInvariant() } | Select-Object -Unique)
+        if ($jobs.Count -ne 1 -or $customers.Count -ne 1 -or $routes.Count -ne 1) { continue }
+        $remakeRows = @($orderRows | Where-Object {
+            $flags = if ($_.RemakeFlags -eq [DBNull]::Value) { [int64]0 } else { [int64]$_.RemakeFlags }
+            $RemakeMask -gt 0 -and (($flags -band $RemakeMask) -eq $RemakeMask)
+        })
+        $orderDescriptors.Add([pscustomobject]@{
+            order = [int64]$orderGroup.Name
+            rows = $orderRows
+            job = [string]$jobs[0]
+            customer = [string]$customers[0]
+            route = [string]$routes[0]
+            remake = ($remakeRows.Count -eq $orderRows.Count)
+            mixedRemake = ($remakeRows.Count -gt 0 -and $remakeRows.Count -lt $orderRows.Count)
+            exactSignature = Get-ExactOrderSignature -OrderRows $orderRows
+            headerIdentity = if ($orderRows[0].HeaderIdentity -eq [DBNull]::Value) { '' } else { [string][int64]$orderRows[0].HeaderIdentity }
+        })
+    }
+    $duplicateBuckets = @($orderDescriptors | Where-Object { -not $_.mixedRemake } | Group-Object { "$($_.job)|$($_.customer)|$($_.route)|$($_.exactSignature)" })
+    foreach ($bucket in $duplicateBuckets) {
+        $normalOrders = @($bucket.Group | Where-Object { -not $_.remake })
+        $remakeOrders = @($bucket.Group | Where-Object { $_.remake })
+        if (-not $normalOrders.Count -or -not $remakeOrders.Count) { continue }
+        foreach ($normal in $normalOrders) {
+            # Prefer the newest remake Order Nr. when more than one exact remake exists.
+            $remake = $remakeOrders | Sort-Object order -Descending | Select-Object -First 1
+            if ($null -eq $remake -or [int64]$remake.order -eq [int64]$normal.order) { continue }
+            $normalOrder = [int64]$normal.order
+            $remakeOrder = [int64]$remake.order
+            $headerKey = if ($remake.headerIdentity) { [string]$remake.headerIdentity } elseif ($normal.headerIdentity) { [string]$normal.headerIdentity } else { 'remake-duplicate' }
+            $candidateKey = "${dateKey}|${headerKey}|${normalOrder}|${remakeOrder}"
+            if ($seenCandidateKeys.ContainsKey($candidateKey)) { continue }
+            $seenCandidateKeys[$candidateKey] = $true
+            $candidates.Add([ordered]@{
+                candidateKey = $candidateKey
+                deliveryDate = $dateKey
+                headerIdentity = $headerKey
+                originalOrderNumber = [string]$normalOrder
+                replacementOrderNumber = [string]$remakeOrder
+                confidence = 'high'
+                evidence = [ordered]@{
+                    sameHeaderIdentity = ([string]$normal.headerIdentity -ne '' -and [string]$normal.headerIdentity -eq [string]$remake.headerIdentity)
+                    sameDeliveryDate = $true
+                    sameJobNumber = $true
+                    sameCustomer = $true
+                    sameRoute = $true
+                    exactItemSetMatch = $true
+                    originalItemCount = [int]$normal.rows.Count
+                    replacementItemCount = [int]$remake.rows.Count
+                    originalIsRemake = $false
+                    replacementIsRemake = $true
+                    rule = 'v0.533-same-day-normal-remake-exact-duplicate-1'
+                }
+                originalItems = @($normal.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+                replacementItems = @($remake.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
             })
         }
     }

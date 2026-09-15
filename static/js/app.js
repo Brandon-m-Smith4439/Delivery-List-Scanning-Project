@@ -45,12 +45,21 @@ const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_DATE_CACHE_LIMIT_V526 = 5;
 const FABRICATION_AUTO_RETRY_MS_V526 = 10 * 60 * 1000;
+const FUTURE_FABRICATION_CACHE_LIMIT_V530 = 96;
+const FABRICATION_MEMORY_STORAGE_KEY_V533 = "delivery-scanner:fabrication-memory:v1";
+const FABRICATION_MEMORY_MAX_ENTRIES_V533 = 1800;
+const FABRICATION_MEMORY_MAX_AGE_MS_V533 = 24 * 60 * 60 * 1000;
+const FABRICATION_LOAD_DELAY_MS_V533 = 3000;
+const FABRICATION_LOAD_COLLAPSE_MS_V533 = 360;
+const ATTENTION_COLOR_DEFAULTS_V530 = Object.freeze({
+  new_order: "#1766D8",
+  internal_reject: "#F28C28",
+  external_remake: "#111111",
+  rush: "#C62828",
+});
 const SCAN_FILTER_GROUPS = Object.freeze({
-  // v0.514: one Status group owns completion. With no Machine selected it
-  // describes the whole required production/scanner workflow; with WaterJet
-  // or Denver selected it describes that fabrication checkpoint specifically.
   status: Object.freeze(["remaining", "partial", "complete", "updated", "errors"]),
-  machine: Object.freeze(["machine-no-fab", "machine-waterjet", "machine-denver"]),
+  progress: Object.freeze(["progress-cutting", "progress-waterjet", "progress-denver", "progress-staging", "progress-outbound"]),
   attention: Object.freeze(["remakes", "rushes", "internal-rejects", "priority"]),
   route: Object.freeze(["indian-trail-route", "cpu-route", "dtc-route", "greenville-route"]),
 });
@@ -58,9 +67,11 @@ const SCAN_FILTER_LABELS = Object.freeze({
   remaining: "Not Complete",
   partial: "Partial",
   complete: "Complete",
-  "machine-no-fab": "No Fab",
-  "machine-waterjet": "WaterJet",
-  "machine-denver": "Denver",
+  "progress-cutting": "Cutting",
+  "progress-waterjet": "WaterJet",
+  "progress-denver": "Denver",
+  "progress-staging": "Staging",
+  "progress-outbound": "Outbound",
   "internal-rejects": "Internal Rejects",
   remakes: "Remakes",
   rushes: "Rushes",
@@ -99,6 +110,10 @@ const state = {
   errors: [],
   selectedId: null,
   activeFilters: new Set(),
+  excludedFiltersV531: new Set(),
+  excludedGlassTypeFiltersV532: new Set(),
+  scanFilterModeV532: "include",
+  priorityReviewKindV530: "",
   glassTypeFilters: new Set(),
   scanSortKey: "",
   scanSortDirection: "asc",
@@ -111,6 +126,13 @@ const state = {
   fabricationStatusCacheV474: new Map(),
   fabricationStatusPendingV474: new Set(),
   fabricationStatusBatchTokenV474: 0,
+  fabricationLoadProgressV531: { date: "", completed: 0, total: 0, active: false, message: "" },
+  fabricationLoadHideTimerV531: 0,
+  fabricationLoadShowTimerV533: 0,
+  fabricationLoadCollapseTimerV533: 0,
+  fabricationLoadStartedAtV533: 0,
+  fabricationLoadVisibleV533: false,
+  fabricationMemorySaveTimerV533: 0,
   cuttingStatusCacheV522: new Map(),
   productionProgressCheckedV522: new Map(),
   productionProgressMonitorAtV522: 0,
@@ -162,6 +184,8 @@ const state = {
   scanDateWideCacheLimitV526: SCAN_DATE_CACHE_LIMIT_V526,
   scanDatePrefetchV527: new Map(),
   scanDatePrefetchTimerV527: 0,
+  futureFabricationPrewarmTimerV530: 0,
+  futureFabricationPrewarmRunV530: null,
   fabricationWarmByDateV526: new Map(),
   deliveryDateSelectSignatureV487: "",
   pageIndex: 1,
@@ -243,6 +267,15 @@ const state = {
   printGlassFamilies: [],
   printGlassRuleTypes: [],
   printAllGlass: true,
+  printFilterModeV532: "include",
+  printIncludedStatusesV532: new Set(),
+  printIncludedAttentionV532: new Set(),
+  printIncludedMachinesV532: new Set(),
+  printExcludedRoutesV532: new Set(),
+  printExcludedStatusesV532: new Set(),
+  printExcludedAttentionV532: new Set(),
+  printExcludedMachinesV532: new Set(),
+  printExcludedGlassV532: new Set(),
   printWorkspaceReady: false,
   printWorkspaceOpenId: 0,
   printWorkspacePromise: null,
@@ -299,7 +332,7 @@ const state = {
   machineConfigurationPromiseV521: null,
   machineLookupEditCodeV521: "",
   fabricationDeliveryCacheV521: new Map(),
-  fabricationDeliveryCacheLimitV521: 5,
+  fabricationDeliveryCacheLimitV521: FUTURE_FABRICATION_CACHE_LIMIT_V530,
   bayAutoAssignSettings: {
     standardMaxInches: 59.99,
     tallMinInches: 60,
@@ -328,7 +361,9 @@ const state = {
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
-  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], glassAliases: [], stages: [] },
+  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], glassAliases: [], attentionColors: [], stages: [] },
+  attentionColorsLoadedV530: false,
+  attentionColorsPromiseV530: null,
   lookupGlassCombineTargetV360: "",
   lookupGlassCombineModeV361: false,
   lookupGlassCombineSelectionV361: [],
@@ -412,6 +447,7 @@ const state = {
   statisticsCalendarMonth: "",
   statisticsCalendarDraftStart: "",
   statisticsCalendarDraftEnd: "",
+  statisticsCalendarAwaitingRangeEndV538: false,
   language: (() => {
     try {
       return localStorage.getItem(LANGUAGE_KEY) === "es" ? "es" : "en";
@@ -460,6 +496,10 @@ const state = {
   adminDeliveryListsNormalizedMarkup: "",
   pendingUpdateDates: new Map(),
   pendingUpdateStages: new Map(),
+  pendingRemakeDatesV530: new Map(),
+  pendingRemakeStagesV530: new Map(),
+  pendingRushDatesV530: new Map(),
+  pendingRushStagesV530: new Map(),
   pendingRejectDatesV529: new Map(),
   pendingRejectStagesV529: new Map(),
   pendingUpdateDatesRequestId: 0,
@@ -963,7 +1003,7 @@ document.addEventListener("dls:open-internal-reject-notification", () => {
 });
 
 const APP_SOUND_VOLUME_KEY = "delivery-list-scanner-sound-volume-v3";
-const APP_SOUND_CACHE_VERSION = "20260722-v105";
+const APP_SOUND_CACHE_VERSION = "20260914-v106";
 const APP_SOUND_FILES = Object.freeze({
   // Normal accepted item scans use the restrained confirmation cue. The
   // fuller scan_success cue is reserved for a successful cross-date switch.
@@ -989,6 +1029,8 @@ const APP_SOUND_FILES = Object.freeze({
   redo: "sounds/redo.wav",
   import_start: "sounds/import_start.wav",
   import_complete: "sounds/import_complete.wav",
+  import_success: "sounds/import_success.wav",
+  import_failed: "sounds/import_failed.wav",
   save: "sounds/save.wav",
   print_ready: "sounds/print_ready.wav",
   email_sent: "sounds/email_sent.wav",
@@ -1031,6 +1073,8 @@ const APP_SOUND_ENABLED_KINDS = new Set([
   "redo",
   "import_start",
   "import_complete",
+  "import_success",
+  "import_failed",
   "save",
   "print_ready",
   "email_sent",
@@ -5987,6 +6031,8 @@ function customSelectOptionSignature(select) {
     option.textContent?.trim() || "",
     option.disabled ? "1" : "0",
     option.hidden ? "1" : "0",
+    option.dataset.customIndicators || option.dataset.customIndicator || "",
+    option.dataset.customIndicatorCount || "",
   ].join(":")) .join("|");
 }
 
@@ -6004,6 +6050,27 @@ function customSelectUpdateIndicatorTitle(select, option, indicatorCount) {
     return `${countText} new or updated ${lineText} need review in ${stageLabel}`;
   }
   return `${countText} new or updated ${lineText} need review on this delivery date`;
+}
+
+function customSelectIndicatorEntriesV530(option) {
+  const encoded = String(option?.dataset?.customIndicators || "").trim();
+  if (encoded) {
+    return encoded.split("|").map((token) => {
+      const [kind, rawCount] = token.split(":", 2);
+      return { kind: String(kind || "").trim(), count: Math.max(Number(rawCount || 0), 0) };
+    }).filter((entry) => entry.kind);
+  }
+  const kind = String(option?.dataset?.customIndicator || "").trim();
+  return kind ? [{ kind, count: Math.max(Number(option?.dataset?.customIndicatorCount || 0), 0) }] : [];
+}
+
+function customSelectIndicatorLabelV530(kind, count) {
+  const labels = { new: "New Orders", reject: "Internal Rejects", remake: "External Remakes", rush: "Rushes" };
+  return `${count || "Unreviewed"} ${labels[kind] || "updates"} need review`;
+}
+
+function customSelectIndicatorMarkupV530(entries) {
+  return entries.map(({ kind, count }) => `<i class="custom-select-indicator-dot-v530 is-${escapeHtml(kind)}" title="${escapeHtml(customSelectIndicatorLabelV530(kind, count))}">!</i>`).join("");
 }
 
 /**
@@ -6066,16 +6133,13 @@ function syncCustomSelect(select) {
     value.textContent = selectedText;
   }
   const indicator = trigger.querySelector(".custom-select-value-indicator");
-  const indicatorKind = String(option?.dataset.customIndicator || "").trim();
-  const indicatorCount = Math.max(Number(option?.dataset.customIndicatorCount || 0), 0);
-  trigger.classList.toggle("has-indicator", Boolean(indicatorKind));
+  const indicatorEntriesV530 = customSelectIndicatorEntriesV530(option);
+  trigger.classList.toggle("has-indicator", indicatorEntriesV530.length > 0);
   if (indicator) {
-    indicator.hidden = !indicatorKind;
-    indicator.className = `custom-select-value-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
-    indicator.textContent = indicatorKind ? "!" : "";
-    indicator.title = indicatorKind
-      ? customSelectUpdateIndicatorTitle(select, option, indicatorCount)
-      : "";
+    indicator.hidden = indicatorEntriesV530.length === 0;
+    indicator.className = "custom-select-value-indicator";
+    indicator.innerHTML = customSelectIndicatorMarkupV530(indicatorEntriesV530);
+    indicator.title = indicatorEntriesV530.map(({ kind, count }) => customSelectIndicatorLabelV530(kind, count)).join(" · ");
   }
 
   shell.hidden = hidden;
@@ -6331,16 +6395,13 @@ function renderCustomSelectOptions(select, optionsHost, query = "") {
     check.className = "custom-select-option-check";
     check.setAttribute("aria-hidden", "true");
 
-    const indicatorKind = String(row.option.dataset.customIndicator || "").trim();
-    const indicatorCount = Math.max(Number(row.option.dataset.customIndicatorCount || 0), 0);
+    const indicatorEntriesV530 = customSelectIndicatorEntriesV530(row.option);
     const indicator = document.createElement("span");
-    button.classList.toggle("has-indicator", Boolean(indicatorKind));
-    indicator.className = `custom-select-option-indicator${indicatorKind ? ` is-${indicatorKind}` : ""}`;
-    indicator.hidden = !indicatorKind;
-    indicator.textContent = indicatorKind ? "!" : "";
-    indicator.title = indicatorKind
-      ? customSelectUpdateIndicatorTitle(select, row.option, indicatorCount)
-      : "";
+    button.classList.toggle("has-indicator", indicatorEntriesV530.length > 0);
+    indicator.className = "custom-select-option-indicator";
+    indicator.hidden = indicatorEntriesV530.length === 0;
+    indicator.innerHTML = customSelectIndicatorMarkupV530(indicatorEntriesV530);
+    indicator.title = indicatorEntriesV530.map(({ kind, count }) => customSelectIndicatorLabelV530(kind, count)).join(" · ");
 
     if (rackCueWrap) button.append(rackCueWrap);
     button.append(label);
@@ -6996,7 +7057,7 @@ function statisticsActiveRangeKeysV455() {
   if (state.overviewRange === "custom") {
     const dateFrom = String(state.statisticsCustomDateFrom || "");
     const dateTo = String(state.statisticsCustomDateTo || "");
-    if (/^\d{4}-\d{0}-\d{0}$/.test(dateFrom) && /^\d{4}-\d{0}-\d{0}$/.test(dateTo)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
       return { dateFrom, dateTo };
     }
   }
@@ -7004,7 +7065,7 @@ function statisticsActiveRangeKeysV455() {
   if (state.overviewRange === "all") {
     const dates = [...new Set((state.lists || [])
       .map((list) => String(list?.deliveryDate || "").trim())
-      .filter((date) => /^\d{4}-\d{0}-\d{0}$/.test(date)))]
+      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))]
       .sort();
     return dates.length ? { dateFrom: dates[0], dateTo: dates[dates.length - 1] } : { dateFrom: "", dateTo: "" };
   }
@@ -7233,10 +7294,7 @@ function scanFilterLabelV355(filter) {
   if (filter === "cpu-route") return workflowPresentationV355().cpuRoute;
   if (filter === "dtc-route") return workflowPresentationV355().dtcRoute;
   if (filter === "greenville-route") return workflowPresentationV355().gnvRoute;
-  if (filter === "machine-no-fab") return "No Fab";
-  if (String(filter || "").startsWith("machine-")) {
-    return machineDisplayNameV521(String(filter).slice(8)) || String(filter).slice(8);
-  }
+  if (String(filter || "").startsWith("progress-")) return SCAN_FILTER_LABELS[filter] || String(filter).slice(9);
   return SCAN_FILTER_LABELS[filter] || filter;
 }
 
@@ -7822,6 +7880,7 @@ function updateModalScrollLock() {
   const modalIsOpen = [...document.querySelectorAll(APP_MODAL_STATE_SELECTOR)].some(modalNodeIsOpen);
   const wasLocked = document.body.classList.contains("modal-scroll-locked");
 
+  if (modalIsOpen) closeOldBayReviewNotice();
   document.body.classList.toggle("modal-scroll-locked", modalIsOpen);
   if (wasLocked && !modalIsOpen && state.page === "racks") scheduleRackHeadingHitTargetRepair();
 }
@@ -8566,7 +8625,10 @@ function applyOperationalLineFlags(payload, listId = state.activeListId) {
       lastRejectedBy: String(current.lastRejectedBy || ""),
       lastRejectNotes: String(current.lastRejectNotes || ""),
       lastRejectDeliveryDate: String(current.lastRejectDeliveryDate || ""),
+      hasUnseenReject: Boolean(current.hasUnseenReject),
+      unseenRejectIds: Array.isArray(current.unseenRejectIds) ? current.unseenRejectIds.map(Number).filter((id) => id > 0) : [],
       hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
+      updateReviewKind: String(current.updateReviewKind || "order"),
       userUpdateState: String(current.userUpdateState || ""),
       userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
     };
@@ -8626,7 +8688,10 @@ function mergeDateWideLineFlagsV485(item = {}, flagsPayload = null) {
     lastRejectedBy: String(row.lastRejectedBy || ""),
     lastRejectNotes: String(row.lastRejectNotes || ""),
     lastRejectDeliveryDate: String(row.lastRejectDeliveryDate || ""),
+    hasUnseenReject: Boolean(row.hasUnseenReject),
+    unseenRejectIds: Array.isArray(row.unseenRejectIds) ? row.unseenRejectIds.map(Number).filter((id) => id > 0) : [],
     hasUnseenUpdate: Boolean(row.hasUnseenUpdate),
+    updateReviewKind: String(row.updateReviewKind || "order"),
     userUpdateState: String(row.userUpdateState || ""),
     userUpdateNoticeIds: Array.isArray(row.userUpdateNoticeIds) ? row.userUpdateNoticeIds.slice() : [],
   };
@@ -8793,6 +8858,34 @@ function scheduleScanDatePrefetchV527(activeDate = "") {
     void neighbors.reduce((chain, date) => chain.then(() => prefetchScanDateBundleV527(date)), Promise.resolve());
   };
   state.scanDatePrefetchTimerV527 = window.setTimeout(run, 450);
+  scheduleFutureFabricationPrewarmV530();
+}
+
+function scheduleFutureFabricationPrewarmV530() {
+  window.clearTimeout(state.futureFabricationPrewarmTimerV530);
+  const run = async () => {
+    if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
+    const today = todayKey();
+    const dates = listsByDeliveryDate().map((group) => String(group.date || "")).filter((date) => date && date >= today);
+    for (const date of dates) {
+      if (document.hidden || state.page !== "scan") return;
+      let records = cachedScanDateBundleV526(date)?.records || [];
+      if (!records.length) {
+        const bundle = await prefetchScanDateBundleV527(date);
+        records = Array.isArray(bundle?.records) ? bundle.records.filter(Boolean) : cachedScanDateBundleV526(date)?.records || [];
+      }
+      if (!records.length) continue;
+      const projected = buildDateWideScanItemsV485(records);
+      await warmFabricationDeliveryV521(date, projected, { background: true });
+      await new Promise((resolve) => window.setTimeout(resolve, 75));
+    }
+  };
+  state.futureFabricationPrewarmTimerV530 = window.setTimeout(() => {
+    const promise = run().catch(() => null).finally(() => {
+      if (state.futureFabricationPrewarmRunV530 === promise) state.futureFabricationPrewarmRunV530 = null;
+    });
+    state.futureFabricationPrewarmRunV530 = promise;
+  }, 900);
 }
 
 function cancelScanDateWideLoadV512() {
@@ -8867,6 +8960,13 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     // successful load and starts the same date request for a second time.
     state.scanDateWideLoadingV485 = false;
     state.scanDateWideAbortControllerV512 = null;
+    // Seed the per-user review cards from the same date-wide payload before the
+    // first Scan paint. This prevents a stale/empty card state from flashing
+    // while a second line-flags request catches up after date navigation.
+    const activeRecordV531 = records.find((record) => String(record.list?.id || record.payload?.meta?.id || "") === String(state.activeListId || "")) || representative;
+    if (activeRecordV531?.flags && window.DLSLineUpdates?.applyPayload) {
+      window.DLSLineUpdates.applyPayload(activeRecordV531.flags, state.activeListId, { prompt: false, render: false });
+    }
     // Claim the date-wide warm before Scan renders. This prevents the visible
     // page hydrator and the full-date hydrator from queuing the same pieces.
     if (typeof warmFabricationDeliveryV521 === "function") void warmFabricationDeliveryV521(date, projectedItems).catch(() => {});
@@ -9389,12 +9489,12 @@ function playAppSound(kind = "notice", options = {}) {
   const delay = Math.max(Number(options.delay || 0), 0);
 
   const soundCategory = (() => {
-    if (["scan_error", "machine_fault"].includes(normalizedKind)) return "error";
+    if (["scan_error", "machine_fault", "import_failed"].includes(normalizedKind)) return "error";
     if (normalizedKind === "scan_duplicate") return "duplicate";
     if (normalizedKind === "scan_warning") return "warning";
     if (["task_complete", "rack_complete"].includes(normalizedKind)) return "complete";
     if (["scan_rush", "scan_remake"].includes(normalizedKind)) return "priority";
-    if (["save", "print_ready", "email_sent", "import_complete", "rack_barcode"].includes(normalizedKind)) return "confirmed";
+    if (["save", "print_ready", "email_sent", "import_complete", "import_success", "rack_barcode"].includes(normalizedKind)) return "confirmed";
     if (["undo", "logout", "rack_reopened", "rack_returned", "destructive_action"].includes(normalizedKind)) return "down";
     if (["redo", "login", "import_start", "notification", "machine_scan", "rack_outbound"].includes(normalizedKind)) return "up";
     return "success";
@@ -9599,25 +9699,28 @@ function getStats(items = state.items, errors = state.errors) {
 function scanFilterGroupsV521() {
   return {
     status: SCAN_FILTER_GROUPS.status,
-    machine: ["machine-no-fab", ...machineDefinitionsV521().map((row) => `machine-${row.code}`)],
+    progress: SCAN_FILTER_GROUPS.progress,
     attention: SCAN_FILTER_GROUPS.attention,
     route: SCAN_FILTER_GROUPS.route,
   };
 }
 
 function scanFilterGroup(filter) {
-  if (String(filter || "").startsWith("machine-")) return "machine";
+  if (String(filter || "").startsWith("progress-")) return "progress";
   return Object.entries(SCAN_FILTER_GROUPS).find(([, filters]) => filters.includes(filter))?.[0] || "";
 }
 
 function renderScanMachineFiltersV521() {
-  const target = document.getElementById("scanMachineFilterOptionsV521");
+  const target = document.getElementById("scanProgressFilterOptionsV534");
   if (!target) return;
   const buttons = [
-    { key: "machine-no-fab", label: "No Fab", color: "#7b8796" },
-    ...machineDefinitionsV521().map((row) => ({ key: `machine-${row.code}`, label: machineDisplayNameV521(row.code), color: row.color })),
+    { key: "progress-cutting", label: "Cutting", color: "#0f80c4" },
+    { key: "progress-waterjet", label: "WaterJet", color: productionMachineColorV476("waterjet") },
+    { key: "progress-denver", label: "Denver", color: productionMachineColorV476("denver") },
+    { key: "progress-staging", label: workflowPresentationV355().stagingStage || "Staging", color: "#4d74e6" },
+    { key: "progress-outbound", label: workflowPresentationV355().outboundStage || "Outbound", color: "#d89a1f" },
   ];
-  target.innerHTML = buttons.map((row) => `<button class="tab scan-machine-filter-v521" style="--machine-filter-color:${escapeHtml(safeProgressColorV476(row.color, "#64748b"))}" data-filter="${escapeHtml(row.key)}" type="button"><i aria-hidden="true"></i><span>${escapeHtml(row.label)}</span><b data-filter-count>0</b></button>`).join("");
+  target.innerHTML = buttons.map((row) => `<button class="tab scan-progress-filter-v534" style="--progress-filter-color:${escapeHtml(safeProgressColorV476(row.color, "#64748b"))}" data-filter="${escapeHtml(row.key)}" type="button"><i aria-hidden="true"></i><span>${escapeHtml(row.label)}</span><b data-filter-count>0</b></button>`).join("");
   syncScanFilterButtons();
 }
 
@@ -9627,20 +9730,6 @@ function renderScanMachineFiltersV521() {
  * Flow: Evaluates status, attention, or route rules and returns whether the item belongs to that filter.
  */
 function scanWorkflowCompletionStateV514(item = {}) {
-  const selectedMachineFilters = scanFilterGroupsV521().machine.filter((key) => state.activeFilters.has(key));
-  const fabricationStatus = cachedFabricationStatusV474(item);
-  const fabricationCompletion = fabricationCompletionStateV512(item, fabricationStatus);
-
-  // When a production machine is selected, Status describes that checkpoint.
-  // This makes WaterJet + Complete / Partial / Not Complete composable without
-  // a second, competing Production Progress filter group. No Fab has no
-  // fabrication checkpoint, so its status continues to describe the workflow.
-  if (selectedMachineFilters.length && fabricationCompletion.machine !== "No Fab") {
-    if (fabricationCompletion.complete) return "complete";
-    if (fabricationCompletion.state === "partial") return "partial";
-    return "remaining";
-  }
-
   const dateWide = scanDateWideProgressStepsV485(item);
   if (!dateWide?.steps?.length) return itemStatus(item);
   const required = dateWide.steps.filter((step) => !step.nonBlockingUnknown);
@@ -9659,20 +9748,24 @@ function itemMatchesScanFilter(item, filter) {
   const status = scanWorkflowCompletionStateV514(item);
   if (filter === "remaining") return status !== "complete";
   if (filter === "partial" || filter === "complete") return status === filter;
-  const fabricationStatus = cachedFabricationStatusV474(item);
-  const fabricationCompletion = fabricationCompletionStateV512(item, fabricationStatus);
-  if (filter === "machine-no-fab") return fabricationCompletion.noFab === true;
-  if (String(filter || "").startsWith("machine-")) {
-    const requestedCode = String(filter).slice(8);
-    const statusMachine = fabricationStatus?.machineCode || fabricationStatus?.actualMachineCode || fabricationStatus?.assignedMachineCode || fabricationCompletion.machine;
-    return machineCodeV521(statusMachine) === requestedCode;
+  if (String(filter || "").startsWith("progress-")) {
+    const requested = String(filter).slice(9);
+    const progress = scanDateWideProgressPairV486(item);
+    const steps = [progress?.previous, progress?.next].filter(Boolean);
+    return steps.some((step) => {
+      if (requested === "cutting") return step.kind === "cutting";
+      if (requested === "waterjet" || requested === "denver") return step.kind === "fabrication" && machineCodeV521(step.label || "") === requested;
+      if (requested === "staging") return step.preset === "airport_staging" || /stag/i.test(String(step.label || ""));
+      if (requested === "outbound") return step.preset === "airport_outbound" || /outbound/i.test(String(step.label || ""));
+      return false;
+    });
   }
   if (filter === "internal-rejects") return Number(item.internalRejectCount || 0) > 0;
   if (filter === "errors") return hasScanError(item);
-  if (filter === "remakes") return isRemakeItem(item);
-  if (filter === "rushes") return isRushItem(item);
+  if (filter === "remakes") return isRemakeItem(item) && (state.priorityReviewKindV530 !== "remake" || (item.hasUnseenUpdate && String(item.updateReviewKind || "") === "remake"));
+  if (filter === "rushes") return isRushItem(item) && (state.priorityReviewKindV530 !== "rush" || (item.hasUnseenUpdate && String(item.updateReviewKind || "") === "rush"));
   if (filter === "priority") return isRemakeOrRush(item);
-  if (filter === "updated") return isNewOrUpdatedItem(item);
+  if (filter === "updated") return isNewOrUpdatedItem(item) && String(item.updateReviewKind || "order") === "order";
   if (filter === "cpu-route") return routeCategory(item) === "cpu";
   if (filter === "dtc-route") return routeCategory(item) === "dtc";
   if (filter === "greenville-route") return routeCategory(item) === "greenville";
@@ -9686,21 +9779,72 @@ function itemMatchesScanFilter(item, filter) {
  * Flow: Reads the shared Set and returns one consistent active-state answer for every renderer.
  */
 function isScanFilterActive(filter) {
-  return filter === "all" ? state.activeFilters.size === 0 : state.activeFilters.has(filter);
+  if (filter === "all") return state.activeFilters.size === 0 && state.glassTypeFilters.size === 0;
+  return state.activeFilters.has(filter);
 }
 
-/**
- * Purpose: Synchronize Scan-page filter button styling and accessibility state.
- * Effects: Updates every desktop or mobile filter button currently in the DOM.
- * Flow: Applies the shared selected Set, including the special All/clear state, without rerendering the list.
- */
+/** v0.533: Scan returned to one normal include-only filter model. */
+function syncScanFilterModeV532() {
+  state.scanFilterModeV532 = "include";
+  state.excludedFiltersV531.clear();
+  state.excludedGlassTypeFiltersV532.clear();
+}
+
+function setScanFilterModeV532() {
+  syncScanFilterModeV532();
+  syncScanFilterButtons();
+}
+
 function syncScanFilterButtons() {
+  syncScanFilterModeV532();
   document.querySelectorAll("[data-filter]").forEach((button) => {
-    const active = isScanFilterActive(button.dataset.filter || "all");
+    const filter = button.dataset.filter || "all";
+    const active = isScanFilterActive(filter);
     button.classList.toggle("is-active", active);
+    button.classList.remove("is-exclude-choice-v532");
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-glass-filter]").forEach((button) => {
+    const value = button.dataset.glassFilter || "all";
+    const active = value === "all" ? state.glassTypeFilters.size === 0 : state.glassTypeFilters.has(value);
+    button.classList.toggle("is-active", active);
+    button.classList.remove("is-exclude-choice-v532");
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
   renderActiveScanFilters();
+}
+
+const SCAN_REVIEW_FILTER_KEYS_V531 = Object.freeze(["updated", "internal-rejects", "remakes", "rushes", "priority"]);
+
+/** Install one isolated review preset so review categories never inherit conflicting filters. */
+function applyScanReviewPresetV531(kind = "order") {
+  SCAN_REVIEW_FILTER_KEYS_V531.forEach((key) => state.activeFilters.delete(key));
+  state.excludedFiltersV531.clear();
+  state.excludedGlassTypeFiltersV532.clear();
+  state.scanFilterModeV532 = "include";
+  state.priorityReviewKindV530 = "";
+  const presets = {
+    // New Orders explicitly excludes External Remakes as requested. The other
+    // review categories clear competing includes/exclusions and then use only
+    // their target include so an item that legitimately carries two attention
+    // states (for example Remake + Internal Reject) is not hidden from review.
+    // updateReviewKind is mutually exclusive in the backend: External Remakes
+    // never enter the ordinary New Orders bucket, so no user-visible exclusion
+    // mode is necessary here.
+    order: { include: "updated", exclude: [] },
+    reject: { include: "internal-rejects", exclude: [] },
+    remake: { include: "remakes", exclude: [] },
+    rush: { include: "rushes", exclude: [] },
+  };
+  const preset = presets[kind] || presets.order;
+  state.activeFilters.add(preset.include);
+  preset.exclude.forEach((key) => state.excludedFiltersV531.add(key));
+  if (kind === "remake" || kind === "rush") state.priorityReviewKindV530 = kind;
+  state.pageIndex = 1;
+  syncScanFilterButtons();
+  document.dispatchEvent(new CustomEvent("dls:scan-filters-changed", {
+    detail: { filters: [...state.activeFilters], excludedFilters: [...state.excludedFiltersV531] },
+  }));
 }
 
 function cuttingStateForItemV527(item = {}) {
@@ -9853,15 +9997,21 @@ function renderActiveScanFilters() {
 function toggleScanFilter(filter) {
   if (!filter || filter === "all") {
     state.activeFilters.clear();
-  } else if (state.activeFilters.has(filter)) {
-    state.activeFilters.delete(filter);
   } else if (scanFilterGroup(filter)) {
-    state.activeFilters.add(filter);
+    if (state.activeFilters.has(filter)) state.activeFilters.delete(filter);
+    else state.activeFilters.add(filter);
   }
+  state.excludedFiltersV531.clear();
+  state.excludedGlassTypeFiltersV532.clear();
   syncScanFilterButtons();
   document.dispatchEvent(new CustomEvent("dls:scan-filters-changed", {
     detail: { filters: [...state.activeFilters] },
   }));
+}
+
+/** Legacy API kept as a harmless include-only alias for older event contracts. */
+function toggleScanExcludeFilterV531(filter) {
+  toggleScanFilter(filter);
 }
 
 /**
@@ -9879,7 +10029,8 @@ function filteredItems() {
     });
 
     if (!matchesSelectedGroups) return false;
-    if (state.glassTypeFilters.size && !state.glassTypeFilters.has(glassTypeLabel(item))) return false;
+    const glassLabel = glassTypeLabel(item);
+    if (state.glassTypeFilters.size && !state.glassTypeFilters.has(glassLabel)) return false;
     if (!search) return true;
 
     const haystack = [item.order, item.item, item.job, item.customer, item.dimensions, item.product, item.route, item.barcode]
@@ -10309,7 +10460,7 @@ function progressStepHtmlV475(step, role = "") {
   const toneClass = step.tone === "no-fab-v478" ? "is-no-fab-v478" : "";
   const kindClass = step.kind === "fabrication" ? "is-fabrication-pending-v480" : step.kind === "cutting" ? "is-cutting-step-v511" : step.kind === "no-fab" ? "is-no-fab-slot-v512" : "";
   const iconKind = step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label || "Progress");
-  const value = step.kind === "no-fab" ? "N/A" : step.kind === "cutting" && step.detail ? step.detail : `${scanned}/${qty}`;
+  const value = step.kind === "no-fab" ? "N/A" : `${scanned}/${qty}`;
   return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span>`;
 }
 
@@ -10321,14 +10472,16 @@ function scanProgressMarkupV475(item = {}) {
     const right = dateWide.next || dateWide.previous || left;
     const style = `--progress-left:${progressStepColorV480(left)};--progress-right:${progressStepColorV480(right)}`;
     const flow = `${progressStepHtmlV475(dateWide.previous, "previous")}${dateWide.previous && dateWide.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(dateWide.next, "next")}`;
-    return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
+    const layoutClassV531 = dateWide.previous && dateWide.next ? "is-paired-v486" : "is-single-v531";
+    return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 ${layoutClassV531}" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
   }
   const pair = scanProgressPairV475(item);
   const left = pair.previous || pair.next || { label: "Progress" };
   const right = pair.next || pair.previous || left;
   const style = `--progress-left:${safeProgressColorV476(progressStageColorV476(left.label))};--progress-right:${safeProgressColorV476(progressStageColorV476(right.label))}`;
   const flow = `${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? '<i aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(pair.next, "next")}`;
-  return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 is-paired-v486" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
+  const layoutClassV531 = pair.previous && pair.next ? "is-paired-v486" : "is-single-v531";
+  return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 ${layoutClassV531}" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
 }
 
 /** Return the compact current scanner stage for legacy/mobile callers. */
@@ -10903,13 +11056,18 @@ function renderCounts() {
   updateScanFilterGlanceBadge(els.scanFilterRejectBadge, internalRejectCount, "internal reject pieces");
   if (els.countErrors) els.countErrors.textContent = `${stats.errorCount}`;
 
-  const machineFilterCountsV514 = {
-    "machine-no-fab": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-no-fab"))),
-    "machine-waterjet": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-waterjet"))),
-    "machine-denver": pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, "machine-denver"))),
-  };
-  Object.entries(machineFilterCountsV514).forEach(([filter, count]) => {
-    document.querySelectorAll(`[data-filter="${filter}"] [data-filter-count]`).forEach((node) => { node.textContent = String(count); });
+  let filterSelectionChanged = false;
+  const progressFilterCountsV534 = Object.fromEntries(SCAN_FILTER_GROUPS.progress.map((filter) => [
+    filter,
+    pieceCount(state.items.filter((item) => itemMatchesScanFilter(item, filter))),
+  ]));
+  Object.entries(progressFilterCountsV534).forEach(([filter, count]) => {
+    document.querySelectorAll(`[data-filter="${filter}"]`).forEach((button) => {
+      const counter = button.querySelector("[data-filter-count]");
+      if (counter) counter.textContent = String(count);
+      button.hidden = count === 0;
+      if (count === 0 && state.activeFilters.delete(filter)) filterSelectionChanged = true;
+    });
   });
   const workflowStatusCountsV514 = {
     remaining: pieceCount(state.items.filter((item) => scanWorkflowCompletionStateV514(item) !== "complete")),
@@ -10929,7 +11087,6 @@ function renderCounts() {
   if (els.countCpuRoute) els.countCpuRoute.textContent = `${routeCounts["cpu-route"]}`;
   if (els.countDtcRoute) els.countDtcRoute.textContent = `${routeCounts["dtc-route"]}`;
   if (els.countGreenvilleRoute) els.countGreenvilleRoute.textContent = `${routeCounts["greenville-route"]}`;
-  let filterSelectionChanged = false;
   document.querySelectorAll(".route-filter-tab").forEach((button) => {
     const filter = button.dataset.filter || "";
     const count = routeCounts[filter] || 0;
@@ -10941,18 +11098,20 @@ function renderCounts() {
   for (const selectedGlassType of [...state.glassTypeFilters]) {
     if (!glassCounts.has(selectedGlassType)) state.glassTypeFilters.delete(selectedGlassType);
   }
+  state.excludedGlassTypeFiltersV532.clear();
   if (els.glassFilterTabs) {
     const sortedGlassEntries = [...glassCounts.entries()].sort(
       (a, b) => Number(b[1] || 0) - Number(a[1] || 0) || a[0].localeCompare(b[0]),
     );
     const selectedGlassTypes = [...state.glassTypeFilters].sort((a, b) => a.localeCompare(b));
+    const editingSet = state.glassTypeFilters;
     const signature = JSON.stringify([selectedGlassTypes, sortedGlassEntries]);
     if (signature !== state.lastGlassFilterSignature) {
       els.glassFilterTabs.innerHTML = [
-        `<button class="tab glass-filter-tab ${state.glassTypeFilters.size ? "" : "is-active"}" data-glass-filter="all" type="button" aria-pressed="${state.glassTypeFilters.size ? "false" : "true"}">All Glass Types <span>${totalItems}</span></button>`,
+        `<button class="tab glass-filter-tab ${editingSet.size ? "" : "is-active"} " data-glass-filter="all" type="button" aria-pressed="${editingSet.size ? "false" : "true"}">All Glass Types <span>${totalItems}</span></button>`,
         ...sortedGlassEntries.map(([label, count]) => {
-          const active = state.glassTypeFilters.has(label);
-          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""}" ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>${escapeHtml(count)}</span></button>`;
+          const active = editingSet.has(label);
+          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""} " ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>${escapeHtml(count)}</span></button>`;
         }),
       ].join("");
       state.lastGlassFilterSignature = signature;
@@ -11274,6 +11433,49 @@ function glassToneAttributes(label, colorMap = null) {
   return `data-glass-type="${escapeHtml(clean)}" style="${escapeHtml(glassVisualCssVariables(clean, colorMap))}"`;
 }
 
+/** Apply operator-maintained attention colors as shared CSS variables. */
+function attentionColorMapV530() {
+  const colors = { ...ATTENTION_COLOR_DEFAULTS_V530 };
+  for (const item of state.manualEditLookups?.attentionColors || []) {
+    const key = String(item?.value || "").trim();
+    const color = String(item?.color || item?.category || "").trim().toUpperCase();
+    if (key in colors && /^#[0-9A-F]{6}$/.test(color)) colors[key] = color;
+  }
+  return colors;
+}
+
+function applyAttentionColorsV530() {
+  const colors = attentionColorMapV530();
+  const root = document.documentElement;
+  root.style.setProperty("--attention-new-order", colors.new_order);
+  root.style.setProperty("--attention-internal-reject", colors.internal_reject);
+  root.style.setProperty("--attention-external-remake", colors.external_remake);
+  root.style.setProperty("--attention-rush", colors.rush);
+  return colors;
+}
+
+async function ensureAttentionColorLibraryV530({ force = false } = {}) {
+  if (!state.backend) return applyAttentionColorsV530();
+  if (!force && state.attentionColorsLoadedV530) return applyAttentionColorsV530();
+  if (!state.attentionColorsPromiseV530) {
+    state.attentionColorsPromiseV530 = fetchJson("/api/attention-colors")
+      .then((payload) => {
+        state.manualEditLookups = {
+          ...(state.manualEditLookups || {}),
+          attentionColors: Array.isArray(payload?.attentionColors) ? payload.attentionColors : [],
+        };
+        state.attentionColorsLoadedV530 = true;
+        return applyAttentionColorsV530();
+      })
+      .catch(() => {
+        state.attentionColorsLoadedV530 = true;
+        return applyAttentionColorsV530();
+      })
+      .finally(() => { state.attentionColorsPromiseV530 = null; });
+  }
+  return state.attentionColorsPromiseV530;
+}
+
 /** Load Lookup Manager glass colors for every authenticated operator, not only admins. */
 async function ensureGlassVisualLookupLibrary({ force = false } = {}) {
   if (!state.backend) return state.manualEditLookups?.glassColors || [];
@@ -11499,11 +11701,11 @@ function renderItemRow(item) {
           <div class="internal-reject-incident-strip-v154 line-detail-strip-v156">
             ${unseenRejectV529 ? '<span class="internal-reject-incident-badge-v154 is-new-v527" title="This Internal Reject still needs your review">NEW</span>' : ""}
             <strong class="internal-reject-incident-title-v154">Internal Reject</strong>
-            <span><small>Reason</small><b>${escapeHtml(rejectReason)}</b></span>
-            <span><small>Machine / location</small><b>${escapeHtml(rejectLocation)}</b></span>
-            <span><small>Qty</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
-            <span><small>Rejected by</small><b>${escapeHtml(rejectedBy)}</b></span>
-            <span><small>Incident</small><b>${escapeHtml(rejectTime)}</b></span>
+            <span><small>REASON:</small><b>${escapeHtml(rejectReason)}</b></span>
+            <span><small>MACHINE / LOCATION:</small><b>${escapeHtml(rejectLocation)}</b></span>
+            <span><small>QTY:</small><b>${escapeHtml(rejectQty || rejectPieceCount)} pc${rejectQty === 1 ? "" : "s"}</b></span>
+            <span><small>REJECTED BY:</small><b>${escapeHtml(rejectedBy)}</b></span>
+            <span><small>INCIDENT:</small><b>${escapeHtml(rejectTime)}</b></span>
           </div>
         </td>
       </tr>`
@@ -11557,15 +11759,18 @@ function scanOrderGroupHeaderV477(group = {}, { mobile = false } = {}) {
   const hasRemake = priorityKinds.some((kind) => kind === "remake" || kind === "both");
   const priorityKind = hasRush && hasRemake ? "both" : hasRemake ? "remake" : hasRush ? "rush" : "";
   const priorityClass = priorityKind ? ` has-priority-v485 is-${priorityKind}-v485` : "";
+  const hasNewOrderV534 = items.some((item) => Boolean(item.hasUnseenUpdate) && String(item.updateReviewKind || "order") === "order");
+  const newOrderClassV534 = hasNewOrderV534 ? " has-new-order-v534" : "";
+  const newOrderBadgeV534 = hasNewOrderV534 ? '<span class="scan-order-group-new-v534" aria-label="New order awaiting review">NEW</span>' : "";
   const priorityIcon = priorityKind ? `<span class="scan-order-group-priority-icon-v485" aria-label="${escapeHtml(priorityKind === "both" ? "Rush and Remake order" : `${priorityKind} order`)}">${globalSearchIconV433("flag")}</span>` : "";
   const fields = [["Job Nr.", job || "-"], ["Customer", customer || "-"]]
     .map(([label, value]) => `<span class="scan-order-group-field-v479"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`).join("");
   const irregularFlagV527 = irregularItemsV527.length
     ? `<span class="scan-order-group-irregular-v527" title="${escapeHtml(cuttingIrregularityV527(irregularItemsV527[0])?.detail || "A+W production record needs review")}">${globalSearchIconV433("flag")}<b>A+W REVIEW</b><small>${escapeHtml(irregularItemsV527.length)} item${irregularItemsV527.length === 1 ? "" : "s"}</small></span>`
     : "";
-  const content = `${priorityIcon}<span class="scan-order-group-copy-v477 scan-order-group-fields-v479">${fields}</span><span class="scan-order-group-count-v477">${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"} · ${escapeHtml(pieces)} pc${pieces === 1 ? "" : "s"}</span>${irregularFlagV527}${order ? `<button type="button" class="scan-order-detail-button-v477" data-open-order-detail-v474="${escapeHtml(order)}">${globalSearchIconV433("cube")}<span>View order details</span></button>` : ""}`;
-  if (mobile) return `<header class="mobile-order-group-header-v477${priorityClass}">${content}</header>`;
-  return `<tr class="scan-order-group-v477${priorityClass}" data-order-group-v477="${escapeHtml(order)}"><td colspan="8"><div>${content}</div></td></tr>`;
+  const content = `${newOrderBadgeV534}${priorityIcon}<span class="scan-order-group-copy-v477 scan-order-group-fields-v479">${fields}</span><span class="scan-order-group-count-v477">${escapeHtml(items.length)} item${items.length === 1 ? "" : "s"} · ${escapeHtml(pieces)} pc${pieces === 1 ? "" : "s"}</span>${irregularFlagV527}${order ? `<button type="button" class="scan-order-detail-button-v477" data-open-order-detail-v474="${escapeHtml(order)}">${globalSearchIconV433("cube")}<span>View order details</span></button>` : ""}`;
+  if (mobile) return `<header class="mobile-order-group-header-v477${priorityClass}${newOrderClassV534}">${content}</header>`;
+  return `<tr class="scan-order-group-v477${priorityClass}${newOrderClassV534}" data-order-group-v477="${escapeHtml(order)}"><td colspan="8"><div>${content}</div></td></tr>`;
 }
 
 function renderOrderGroupedRowsV477(items = []) {
@@ -14218,6 +14423,8 @@ function renderDeliveryDateSelect() {
     dates: groups.map((group) => [
       group.date,
       Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0),
+      Math.max(Number(state.pendingRemakeDatesV530.get(group.date) || 0), 0),
+      Math.max(Number(state.pendingRushDatesV530.get(group.date) || 0), 0),
       Math.max(Number(state.pendingRejectDatesV529.get(group.date) || 0), 0),
       group.lists.map((list) => [String(list.id || ""), String(list.label || ""), String(list.stage || ""), String(list.scanner || "")]),
     ]),
@@ -14232,10 +14439,16 @@ function renderDeliveryDateSelect() {
     els.deliveryDateSelect.dataset.deliveryDateSelect = "true";
     els.deliveryDateSelect.innerHTML = groupedDeliveryDateOptions(groups, (group) => {
       const pendingCount = Math.max(Number(state.pendingUpdateDates.get(group.date) || 0), 0);
+      const remakeCountV530 = Math.max(Number(state.pendingRemakeDatesV530.get(group.date) || 0), 0);
+      const rushCountV530 = Math.max(Number(state.pendingRushDatesV530.get(group.date) || 0), 0);
       const rejectCountV529 = Math.max(Number(state.pendingRejectDatesV529.get(group.date) || 0), 0);
-      const indicatorKindV529 = rejectCountV529 ? "reject" : pendingCount ? "new" : "";
-      const indicatorCountV529 = rejectCountV529 || pendingCount;
-      return `<option value="${escapeHtml(group.date)}" data-custom-indicator="${indicatorKindV529}" data-custom-indicator-count="${indicatorCountV529}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`;
+      const indicatorsV530 = [
+        ["new", pendingCount],
+        ["remake", remakeCountV530],
+        ["reject", rejectCountV529],
+        ["rush", rushCountV530],
+      ].filter(([, count]) => count > 0).map(([kind, count]) => `${kind}:${count}`).join("|");
+      return `<option value="${escapeHtml(group.date)}" data-custom-indicators="${escapeHtml(indicatorsV530)}">${escapeHtml(formatNumericDeliveryDate(group.date))}</option>`;
     });
     els.deliveryDateSelect.value = activeDate;
   }
@@ -14290,6 +14503,10 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
   if (!state.backend || !Array.isArray(state.lists) || !state.lists.length) {
     state.pendingUpdateDates = new Map();
     state.pendingUpdateStages = new Map();
+    state.pendingRemakeDatesV530 = new Map();
+    state.pendingRemakeStagesV530 = new Map();
+    state.pendingRushDatesV530 = new Map();
+    state.pendingRushStagesV530 = new Map();
     state.pendingRejectDatesV529 = new Map();
     state.pendingRejectStagesV529 = new Map();
     renderDeliveryListSelect();
@@ -14314,6 +14531,10 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
 
   const stageCounts = new Map();
   const dateItemKeys = new Map();
+  const remakeStageCountsV530 = new Map();
+  const remakeDateItemKeysV530 = new Map();
+  const rushStageCountsV530 = new Map();
+  const rushDateItemKeysV530 = new Map();
   const rejectStageCountsV529 = new Map();
   const rejectDateItemKeysV529 = new Map();
   const lists = [...listsById.values()];
@@ -14331,28 +14552,48 @@ async function refreshPendingUpdateDates({ force = false } = {}) {
     const deliveryDate = String(list?.deliveryDate || "").trim();
     const flags = markersByList[listId];
     if (!listId || !deliveryDate || !flags) return;
-    const pending = Math.max(Number(flags.pendingLineCount || 0), 0);
+    const pending = Math.max(Number(flags.pendingOrderCount ?? flags.pendingLineCount ?? 0), 0);
+    const pendingRemakesV530 = Math.max(Number(flags.pendingRemakeCount || 0), 0);
+    const pendingRushesV530 = Math.max(Number(flags.pendingRushCount || 0), 0);
     const pendingRejectsV529 = Math.max(Number(flags.pendingRejectCount || 0), 0);
     if (deliveryDate === activeDate && pending) stageCounts.set(listId, pending);
+    if (deliveryDate === activeDate && pendingRemakesV530) remakeStageCountsV530.set(listId, pendingRemakesV530);
+    if (deliveryDate === activeDate && pendingRushesV530) rushStageCountsV530.set(listId, pendingRushesV530);
     if (deliveryDate === activeDate && pendingRejectsV529) rejectStageCountsV529.set(listId, pendingRejectsV529);
     if (!representativeIds.has(listId)) return;
     if (!dateItemKeys.has(deliveryDate)) dateItemKeys.set(deliveryDate, new Set());
+    if (!remakeDateItemKeysV530.has(deliveryDate)) remakeDateItemKeysV530.set(deliveryDate, new Set());
+    if (!rushDateItemKeysV530.has(deliveryDate)) rushDateItemKeysV530.set(deliveryDate, new Set());
     if (!rejectDateItemKeysV529.has(deliveryDate)) rejectDateItemKeysV529.set(deliveryDate, new Set());
     (flags.items || []).forEach((item) => {
       const order = String(item.order || "").trim();
       const itemNo = String(item.item || "").trim();
       const fallback = String(item.lineItemId || "").trim();
       const identity = order || itemNo ? `${order}|${itemNo}` : `${listId}|${fallback}`;
-      if (item?.hasUnseenUpdate) dateItemKeys.get(deliveryDate).add(identity);
+      if (item?.hasUnseenUpdate && String(item.updateReviewKind || "order") === "order") dateItemKeys.get(deliveryDate).add(identity);
+      if (item?.hasUnseenUpdate && String(item.updateReviewKind || "") === "remake") remakeDateItemKeysV530.get(deliveryDate).add(identity);
+      if (item?.hasUnseenUpdate && String(item.updateReviewKind || "") === "rush") rushDateItemKeysV530.get(deliveryDate).add(identity);
       if (item?.hasUnseenReject) rejectDateItemKeysV529.get(deliveryDate).add(identity);
     });
   });
   if (requestId !== state.pendingUpdateDatesRequestId) return;
 
   state.pendingUpdateStages = stageCounts;
+  state.pendingRemakeStagesV530 = remakeStageCountsV530;
+  state.pendingRushStagesV530 = rushStageCountsV530;
   state.pendingRejectStagesV529 = rejectStageCountsV529;
   state.pendingUpdateDates = new Map(
     [...dateItemKeys.entries()]
+      .map(([date, keys]) => [date, keys.size])
+      .filter(([, count]) => count > 0),
+  );
+  state.pendingRemakeDatesV530 = new Map(
+    [...remakeDateItemKeysV530.entries()]
+      .map(([date, keys]) => [date, keys.size])
+      .filter(([, count]) => count > 0),
+  );
+  state.pendingRushDatesV530 = new Map(
+    [...rushDateItemKeysV530.entries()]
       .map(([date, keys]) => [date, keys.size])
       .filter(([, count]) => count > 0),
   );
@@ -14431,6 +14672,7 @@ function applyPermissionUi() {
 function renderScanPage() {
   renderMeta();
   renderCounts();
+  renderFabricationLoadProgressV531();
   const mobileViewport = window.matchMedia("(max-width: 760px)").matches;
   state.scanViewportMobile = mobileViewport;
   if (mobileViewport) renderMobileCards();
@@ -15044,6 +15286,7 @@ function openStatisticsDateCalendar() {
   const fallbackEnd = todayKey() || printCalendarDateKey(new Date());
   state.statisticsCalendarDraftStart = active.dateFrom || fallbackEnd;
   state.statisticsCalendarDraftEnd = active.dateTo || active.dateFrom || fallbackEnd;
+  state.statisticsCalendarAwaitingRangeEndV538 = false;
   state.statisticsCalendarMonth = printCalendarDateKey(printCalendarMonthDate(state.statisticsCalendarDraftStart));
   if (els.statisticsDateCalendar) els.statisticsDateCalendar.hidden = false;
   syncStatisticsChartRangeControlV455();
@@ -15073,11 +15316,13 @@ function renderStatisticsDateCalendar() {
   els.statisticsCalendarRightGrid.innerHTML = dateRangeCalendarMonthButtons(rightMonth, today, availableDates, start, end, "data-statistics-calendar-date");
   if (els.statisticsCalendarFromValue) els.statisticsCalendarFromValue.textContent = start ? formatNumericDeliveryDate(start) : "Select start date";
   if (els.statisticsCalendarToValue) els.statisticsCalendarToValue.textContent = end ? formatNumericDeliveryDate(end) : "Select end date";
-  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="from"]')?.classList.toggle("is-active", !start || Boolean(end));
-  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="to"]')?.classList.toggle("is-active", Boolean(start) && !end);
+  const awaitingRangeEnd = Boolean(state.statisticsCalendarAwaitingRangeEndV538 && start && end);
+  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="from"]')?.classList.toggle("is-active", !start || !awaitingRangeEnd);
+  els.statisticsDateCalendar?.querySelector('[data-statistics-range-role="to"]')?.classList.toggle("is-active", awaitingRangeEnd);
   if (els.statisticsCalendarSelectionText) {
-    if (!start) els.statisticsCalendarSelectionText.textContent = "Choose the Date From.";
-    else if (!end) els.statisticsCalendarSelectionText.textContent = `Date From: ${formatNumericDeliveryDate(start)}. Now choose the Date To.`;
+    if (!start) els.statisticsCalendarSelectionText.textContent = "Choose a reporting date.";
+    else if (awaitingRangeEnd && start === end) els.statisticsCalendarSelectionText.textContent = `${formatNumericDeliveryDate(start)} selected. Apply for one day, or choose another date to extend the range.`;
+    else if (start === end) els.statisticsCalendarSelectionText.textContent = `${formatNumericDeliveryDate(start)} · Single day`;
     else els.statisticsCalendarSelectionText.textContent = `${formatNumericDeliveryDate(start)} – ${formatNumericDeliveryDate(end)}`;
   }
   if (els.statisticsCalendarApply) els.statisticsCalendarApply.disabled = !(start && end);
@@ -15086,14 +15331,19 @@ function renderStatisticsDateCalendar() {
 function chooseStatisticsCalendarDate(dateKey) {
   const key = String(dateKey || "");
   if (!printCalendarDateFromKey(key)) return;
-  if (!state.statisticsCalendarDraftStart || state.statisticsCalendarDraftEnd) {
+
+  // v0.538: the first click is immediately a valid one-day range. A second
+  // date can extend it, which keeps historical single-day table reports from
+  // falling back to Today simply because a separate Date To was never picked.
+  if (!state.statisticsCalendarDraftStart || !state.statisticsCalendarAwaitingRangeEndV538) {
     state.statisticsCalendarDraftStart = key;
-    state.statisticsCalendarDraftEnd = "";
-  } else if (key < state.statisticsCalendarDraftStart) {
-    state.statisticsCalendarDraftEnd = state.statisticsCalendarDraftStart;
-    state.statisticsCalendarDraftStart = key;
-  } else {
     state.statisticsCalendarDraftEnd = key;
+    state.statisticsCalendarAwaitingRangeEndV538 = true;
+  } else {
+    const start = state.statisticsCalendarDraftStart;
+    state.statisticsCalendarDraftStart = key < start ? key : start;
+    state.statisticsCalendarDraftEnd = key < start ? start : key;
+    state.statisticsCalendarAwaitingRangeEndV538 = false;
   }
   renderStatisticsDateCalendar();
 }
@@ -15101,6 +15351,7 @@ function chooseStatisticsCalendarDate(dateKey) {
 function resetStatisticsCalendarRange() {
   state.statisticsCalendarDraftStart = "";
   state.statisticsCalendarDraftEnd = "";
+  state.statisticsCalendarAwaitingRangeEndV538 = false;
   renderStatisticsDateCalendar();
 }
 
@@ -15143,7 +15394,8 @@ function reportActionCount(action) {
  */
 function glassQuantitiesForStatistics(overviewLists) {
   const reportRows = activeHomeReportSummaryV472()?.glassQuantityByType || [];
-  if (reportRows.length) {
+  const activeReport = activeHomeReportSummaryV472();
+  if (activeReport && Array.isArray(activeReport.glassQuantityByType)) {
     return reportRows
       .map((row) => ({
         label: String(row.glassType || row.label || "Other Glass").trim() || "Other Glass",
@@ -15395,8 +15647,30 @@ function statisticsDateBuckets(overviewLists = []) {
  */
 function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureOverride = "") {
   const overviewLists = filterListsByOverviewRange(state.lists);
-  const report = activeHomeReportSummaryV472() || {};
+  const activeReport = activeHomeReportSummaryV472();
+  const report = activeReport || {};
   const dateBuckets = statisticsDateBuckets(overviewLists);
+
+  if (metric === "production-count-daily") {
+    const rows = Array.isArray(report.productionActivity?.newProduction?.byDate)
+      ? report.productionActivity.newProduction.byDate
+      : [];
+    return {
+      metric,
+      icon: "stage",
+      title: "Production count by import day",
+      subtitle: "Genuinely new regular A+W pieces by first scanner import day. External Remakes are excluded.",
+      suffix: " pcs",
+      allowDonut: false,
+      shareable: false,
+      entries: rows.map((row) => ({
+        label: formatDisplayDate(row.date),
+        value: Number(row.pieces || 0),
+        detail: `${Number(row.itemCount || 0)} item${Number(row.itemCount || 0) === 1 ? "" : "s"} · ${Number(row.orderCount || 0)} order${Number(row.orderCount || 0) === 1 ? "" : "s"}`,
+        searchText: String(row.date || ""),
+      })),
+    };
+  }
 
   if (metric === "production-count") {
     const rangeReady = state.statisticsProductionReportRangeV514 === homeReportRangeKeyV472();
@@ -15496,7 +15770,7 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
 
   if (metric === "incomplete") {
     const backendRows = report.incompleteByDeliveryList || [];
-    const entries = backendRows.length
+    const entries = activeReport && Array.isArray(activeReport.incompleteByDeliveryList)
       ? backendRows.map((row) => ({
           label: row.deliveryList || row.label || "Delivery list",
           value: Number(row.remainingQty || 0),
@@ -16444,11 +16718,12 @@ function renderStatisticsMiniCharts() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 function selectedRangeRemakeStats(overviewLists = []) {
-  const report = activeHomeReportSummaryV472() || {};
+  const activeReport = activeHomeReportSummaryV472();
+  const report = activeReport || {};
   const backendQty = Number(report.rangeRemakeQty ?? report.remakeRangeQty ?? 0);
   const backendCount = Number(report.rangeRemakeCount ?? report.remakeRangeCount ?? 0);
 
-  if (backendQty || backendCount) {
+  if (activeReport && (Object.prototype.hasOwnProperty.call(activeReport, "rangeRemakeQty") || Object.prototype.hasOwnProperty.call(activeReport, "rangeRemakeCount"))) {
     return { qty: backendQty, rows: backendCount };
   }
 
@@ -16512,6 +16787,48 @@ function productionDeliveryDatesV506(values = []) {
   const dates = [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
   if (!dates.length) return "—";
   return dates.map((value) => formatNumericDeliveryDate(value) || value).join(" · ");
+}
+
+/** Open the exact Order/Item rows behind one Today's Production Count glass bucket. */
+function openTodayProductionGlassAuditV536(glassType = "") {
+  const cleanGlass = String(glassType || "").trim();
+  if (!cleanGlass) return;
+  const activity = statisticsProductionActivityV506(state.statisticsTodayProductionReportV514);
+  const rows = (activity.newProduction?.rows || [])
+    .filter((row) => String(row.glassType || "Other Glass").trim() === cleanGlass)
+    .slice()
+    .sort((left, right) =>
+      String(left.order || "").localeCompare(String(right.order || ""), undefined, { numeric: true })
+        || String(left.item || "").localeCompare(String(right.item || ""), undefined, { numeric: true })
+    );
+  const pieces = rows.reduce((sum, row) => sum + Math.max(0, Number(row.qty || 0)), 0);
+  const tableRows = rows.map((row) => `<tr>
+    <td><strong>${escapeHtml(row.order || "—")}</strong></td>
+    <td>${escapeHtml(String(row.item || "").replace(/^0+/, "") || "—")}</td>
+    <td><strong>${escapeHtml(Number(row.qty || 0))}</strong></td>
+    <td>${escapeHtml(row.customer || "—")}</td>
+    <td>${escapeHtml(row.job || "—")}</td>
+    <td>${escapeHtml(row.dimensions || "—")}</td>
+    <td>${escapeHtml(formatNumericDeliveryDate(row.deliveryDate) || row.deliveryDate || "—")}</td>
+    <td>${escapeHtml(formatDateTime(row.firstSeenAt) || row.firstSeenAt || "—")}</td>
+  </tr>`).join("");
+  openAdminModal("custom", {
+    title: `${cleanGlass} production audit`,
+    eyebrow: "Today's Production Count",
+    description: `${pieces} piece${pieces === 1 ? "" : "s"} across ${rows.length} logical Order/Item row${rows.length === 1 ? "" : "s"}. These are the exact rows contributing to this glass total.`,
+    body: `<div class="statistics-production-audit-v536">
+      <div class="statistics-production-audit-summary-v536">
+        <span><small>Glass type</small><strong>${escapeHtml(cleanGlass)}</strong></span>
+        <span><small>Pieces</small><strong>${escapeHtml(pieces)}</strong></span>
+        <span><small>Items</small><strong>${escapeHtml(rows.length)}</strong></span>
+      </div>
+      <div class="admin-table statistics-production-audit-table-v536">
+        <table><thead><tr><th>Order</th><th>Item</th><th>Qty</th><th>Customer</th><th>Job Nr.</th><th>Dimensions</th><th>Delivery Date</th><th>First Seen from A+W</th></tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="8"><div class="admin-empty">No contributing New Production rows are available.</div></td></tr>`}</tbody></table>
+      </div>
+      <p class="statistics-production-audit-note-v536">New Production uses the earliest retained A+W-imported scanner line for each Order / Item, even if its delivery date later moves. Current External Remakes and Internal Reject replacement copies do not create another new-production row.</p>
+    </div>`,
+  });
 }
 
 /** Resolve the fabrication machine for one production activity row without synchronous file work. */
@@ -16692,12 +17009,13 @@ function renderStatisticsProductionActivityV506() {
   const glassRows = Array.isArray(newWork.byGlass) ? newWork.byGlass : [];
   const glassMarkup = glassRows.length
     ? glassRows.map((row) => `
-        <div class="statistics-production-glass-row-v506">
+        <button type="button" class="statistics-production-glass-row-v506 statistics-production-glass-drill-v536" data-production-glass-detail-v536="${escapeHtml(row.glassType || "Other Glass")}" title="View the exact Order/Item rows behind this total">
           <span class="statistics-production-glass-name-v506">${escapeHtml(row.glassType || "Other Glass")}</span>
           <strong>${escapeHtml(Number(row.pieces || 0))}<small> pcs</small></strong>
           <span>${escapeHtml(Number(row.itemCount || 0))} item${Number(row.itemCount || 0) === 1 ? "" : "s"}</span>
           <em>DD ${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
-        </div>`).join("")
+          <span class="statistics-production-glass-open-v536" aria-hidden="true">View rows →</span>
+        </button>`).join("")
     : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported today.</div>`;
 
   const todayMachineBucketsV514 = new Map();
@@ -16718,9 +17036,9 @@ function renderStatisticsProductionActivityV506() {
       <header class="statistics-production-new-header-v506">
         <span class="statistics-production-count-icon-v505" aria-hidden="true"></span>
         <div>
-          <small>New production</small>
+          <small>New orders first seen from A+W today</small>
           <strong>${escapeHtml(Number(newWork.pieces || 0))}<span> pieces</span></strong>
-          <p>${escapeHtml(Number(newWork.itemCount || 0))} item${Number(newWork.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(newWork.orderCount || 0))} order${Number(newWork.orderCount || 0) === 1 ? "" : "s"} · remakes excluded</p>
+          <p>${escapeHtml(Number(newWork.itemCount || 0))} item${Number(newWork.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(newWork.orderCount || 0))} order${Number(newWork.orderCount || 0) === 1 ? "" : "s"} · External Remakes excluded</p>
         </div>
       </header>
       <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">${glassMarkup}</div>
@@ -18578,7 +18896,7 @@ function inventoryRenderScanTableV524(items, meta) {
     <td><strong>${escapeHtml(item.itemId || "MISSING")}</strong></td><td>${escapeHtml(item.dimensions || "-")}</td><td>${Number(item.sqftEach || 0).toFixed(2)}</td>
     <td><strong>${Number(item.qty || 0).toLocaleString()}</strong></td><td><strong>${Number(item.totalSqft || 0).toFixed(2)}</strong></td>
     <td>${escapeHtml(item.entryType === "manual" ? "Manual" : "Scan")}</td><td>${escapeHtml(item.scannedBy || "-")}</td>
-    ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">Remove</button></td>` : ""}
+    ${canRemove ? `<td><button class="inventory-remove-scan" type="button" data-inventory-remove-scan="${Number(item.id)}">${item.entryType === "manual" ? "Remove" : "Undo 1"}</button></td>` : ""}
   </tr>`).join("");
   return `<div class="inventory-table-scroll"><table class="inventory-table"><thead><tr><th>Scanned</th><th>Delivery Date</th><th>Job Nr.</th><th>Customer</th><th>Order</th><th>Item</th><th>Glass Type</th><th>Item ID</th><th>Size</th><th>SQFT</th><th>Qty</th><th>Total SQFT</th><th>Entry</th><th>User</th>${canRemove ? "<th>Action</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>${inventoryShowMoreV524(meta)}`;
 }
@@ -18611,11 +18929,12 @@ function inventoryRenderReconciliationV524(items, meta) {
   if (!items.length) return `<div class="inventory-empty">There are no comparison rows in this inventory.</div>`;
   const finalized = state.inventorySessionV524?.status === "completed";
   const rows = items.map((row) => {
-    const pending = row.status === "missing_physical" && !finalized;
+    const partial = row.status === "partial" && !finalized;
+    const pending = (row.status === "missing_physical" || partial) && !finalized;
     const match = row.status === "matched";
     const alert = !match && !pending;
     const icon = match ? "✓" : pending ? "…" : "!";
-    const label = match ? "Matched" : pending ? "Awaiting physical scan" : row.status === "not_in_system" ? "Physical item not in system" : row.status === "missing_physical" ? "System item missing physically" : "Mismatch";
+    const label = match ? "Matched" : partial ? "Partially counted" : pending ? "Awaiting physical scan" : row.status === "not_in_system" ? "Physical item not in system" : row.status === "missing_physical" ? "System item missing physically" : "Mismatch";
     return `<div class="inventory-reconcile-row ${match ? "is-match" : alert ? "is-alert" : "is-pending"}">
       <div class="inventory-reconcile-status"><span class="inventory-result-icon ${match ? "good" : alert ? "bad" : "pending"}">${icon}</span></div>
       ${inventoryCompareCardV524(row.system, "system")}${inventoryCompareCardV524(row.physical, "physical")}
@@ -18836,15 +19155,18 @@ async function submitInventoryScanV524(event) {
     if (payload.duplicate) {
       if (els.inventoryScanFeedback) {
         els.inventoryScanFeedback.className = "inventory-scan-feedback is-alert";
-        els.inventoryScanFeedback.textContent = `Already counted: ${payload.existing?.order || ""} / ${payload.existing?.item || ""} · ${payload.message || "Duplicate scan"}`;
+        els.inventoryScanFeedback.textContent = `Already fully counted: ${payload.existing?.order || ""} / ${payload.existing?.item || ""} · ${payload.message || "Duplicate scan"}`;
       }
       return;
     }
     state.inventorySessionV524 = payload.session || state.inventorySessionV524;
     const physical = payload.scan || {};
+    const countedQty = Number(payload.countedQty ?? physical.qty ?? 0);
+    const expectedQty = Math.max(Number(payload.expectedQty ?? countedQty), countedQty);
+    const remainingQty = Math.max(Number(payload.remainingQty ?? (expectedQty - countedQty)), 0);
     if (els.inventoryScanFeedback) {
       els.inventoryScanFeedback.className = `inventory-scan-feedback ${payload.matchedExpected ? "is-good" : "is-alert"}`;
-      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓" : "!"} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · ${escapeHtml(physical.glassType || "Unmapped")} · ${escapeHtml(physical.itemId || "Item ID missing")} · ${Number(physical.sqftEach || 0).toFixed(2)} SQFT × ${Number(physical.qty || 0)} = ${Number(physical.totalSqft || 0).toFixed(2)} SQFT`;
+      els.inventoryScanFeedback.innerHTML = `${payload.matchedExpected ? "✓" : "!"} <strong>${escapeHtml(physical.order || "-")} / ${escapeHtml(physical.item || "-")}</strong> · <strong>${countedQty}/${expectedQty} counted</strong>${remainingQty ? ` · ${remainingQty} remaining` : " · line complete"} · ${escapeHtml(physical.glassType || "Unmapped")} · ${escapeHtml(physical.itemId || "Item ID missing")} · ${Number(physical.sqftEach || 0).toFixed(2)} SQFT each`;
     }
     state.inventoryViewDataV524.scans = [physical, ...(state.inventoryViewDataV524.scans || []).filter((item) => Number(item.id) !== Number(physical.id))].slice(0, 150);
     state.inventoryViewMetaV524.scans = { ...(state.inventoryViewMetaV524.scans || {}), page: 1, pageSize: 150, total: state.inventorySessionV524.scannedLineCount, hasMore: Number(state.inventorySessionV524.scannedLineCount || 0) > 150 };
@@ -18933,7 +19255,7 @@ async function cancelInventoryV524() {
 
 async function removeInventoryScanV524(scanId) {
   if (!state.inventorySessionV524 || !hasPermission("manage_inventory")) return;
-  const confirmed = await confirmWebAppAction({ title: "Remove this physical count?", message: "Use this only to correct a mistaken inventory scan. The removal is recorded in the audit log.", confirmLabel: "Remove scan", cancelLabel: "Keep scan", danger: true });
+  const confirmed = await confirmWebAppAction({ title: "Correct this physical count?", message: "Scanner-counted lines undo one piece at a time; a manual entry is removed as entered. Every correction stays in the audit log.", confirmLabel: "Correct count", cancelLabel: "Keep count", danger: true });
   if (!confirmed) return;
   state.inventorySessionV524 = await fetchJson("/api/inventory/scans/remove", { method: "POST", body: JSON.stringify({ sessionId: state.inventorySessionV524.id, scanId, reason: "Inventory count correction" }) });
   state.inventoryViewMetaV524.scans = null;
@@ -19060,6 +19382,7 @@ function showPage(page) {
   if (page === "inventory" && !hasAnyPermission(["view_inventory", "scan_inventory", "manage_inventory"])) page = "home";
   if (page === "rejects" && !hasAnyPermission(["view_rejects", "log_rejects", "manage_reject_settings", "manage_reject_records", "view_delivery_lists"])) page = "home";
   const pageChanged = state.page !== page;
+  if (pageChanged) closeOldBayReviewNotice();
   const leavingInventoryV525 = state.page === "inventory" && page !== "inventory";
   if (state.page === "scan" && page !== "scan" && state.scanDateWideLoadingV485) cancelScanDateWideLoadV512();
   if (page === "home") state.expandedDeliveryDate = "";
@@ -21039,6 +21362,59 @@ function printCurrentPageManaged() {
  * Effects: Keeps side effects limited to the behavior implied by the function name and its direct callers.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+/** Restore bounded fabrication evidence so app-tab changes and browser refreshes
+ * do not make already-checked pieces look unknown again. Server revision checks
+ * still invalidate unfinished evidence when production data actually changes. */
+function restoreFabricationMemoryV533() {
+  try {
+    const raw = window.localStorage?.getItem(FABRICATION_MEMORY_STORAGE_KEY_V533);
+    if (!raw) return;
+    const payload = JSON.parse(raw);
+    const savedAt = Number(payload?.savedAt || 0);
+    if (!savedAt || Date.now() - savedAt > FABRICATION_MEMORY_MAX_AGE_MS_V533) {
+      window.localStorage?.removeItem(FABRICATION_MEMORY_STORAGE_KEY_V533);
+      return;
+    }
+    for (const [key, value] of Array.isArray(payload?.fabrication) ? payload.fabrication : []) {
+      if (key && value && typeof value === "object") state.fabricationStatusCacheV474.set(String(key), value);
+    }
+    for (const [key, value] of Array.isArray(payload?.progress) ? payload.progress : []) {
+      if (key && value && typeof value === "object") state.productionProgressCheckedV522.set(String(key), value);
+    }
+    for (const [key, value] of Array.isArray(payload?.cutting) ? payload.cutting : []) {
+      if (key && value && typeof value === "object") state.cuttingStatusCacheV522.set(String(key), value);
+    }
+    if (payload?.revision) state.fabricationRevisionV522 = String(payload.revision);
+  } catch (_error) {
+    // Browser storage is an optimization only; private/kiosk policies may block it.
+  }
+}
+
+function persistFabricationMemoryNowV533() {
+  try {
+    const takeTail = (map) => [...map.entries()].slice(-FABRICATION_MEMORY_MAX_ENTRIES_V533);
+    window.localStorage?.setItem(FABRICATION_MEMORY_STORAGE_KEY_V533, JSON.stringify({
+      savedAt: Date.now(),
+      revision: String(state.fabricationRevisionV522 || ""),
+      fabrication: takeTail(state.fabricationStatusCacheV474),
+      progress: takeTail(state.productionProgressCheckedV522),
+      cutting: takeTail(state.cuttingStatusCacheV522),
+    }));
+  } catch (_error) {
+    // Quota/storage failures must never affect Scan.
+  }
+}
+
+function scheduleFabricationMemorySaveV533() {
+  if (state.fabricationMemorySaveTimerV533) window.clearTimeout(state.fabricationMemorySaveTimerV533);
+  state.fabricationMemorySaveTimerV533 = window.setTimeout(() => {
+    state.fabricationMemorySaveTimerV533 = 0;
+    persistFabricationMemoryNowV533();
+  }, 250);
+}
+
+restoreFabricationMemoryV533();
+
 function syncFabricationRevisionV522(revision = "") {
   const next = String(revision || "");
   if (!next || next === state.fabricationRevisionV522) return;
@@ -21057,6 +21433,7 @@ function syncFabricationRevisionV522(revision = "") {
   }
   // Source changes are uncommon. No new timer or share walk is attached to the
   // existing catalog heartbeat; only unfinished pieces are warmed again.
+  scheduleFabricationMemorySaveV533();
   if (state.page === "scan") void warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items);
 }
 
@@ -21072,7 +21449,7 @@ function requestFabricationBatchV522(items, forceCheck = false) {
   return pending;
 }
 
-async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = {}) {
+async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onProgress = null } = {}) {
   // v0.512: Scan machine/progress filters use the same bounded status endpoint
   // as Smart Search. The backend independently enforces accessible Order/Items.
   if (!state.backend || !hasAnyPermission(["global_search", "view_delivery_lists", "view_reports"])) return;
@@ -21087,7 +21464,7 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
     const key = fabricationStatusKeyV474(order, item, job, lastRejectedAt, fabricationRevisionV521(row));
     const cached = state.fabricationStatusCacheV474.get(key);
     const progressCheck = state.productionProgressCheckedV522.get(key) || {};
-    const automaticScanContextV526 = context === "scan" || context === "prewarm";
+    const automaticScanContextV526 = context === "scan" || context === "prewarm" || context === "future-prewarm";
     const minimumRetrySecondsV526 = automaticScanContextV526 ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 0;
     const retrySeconds = Math.max(minimumRetrySecondsV526, Number(cached?.retryAfterSeconds || 0));
     const checkedAtMs = Date.parse(cached?.checkedAt || "");
@@ -21147,11 +21524,11 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
   // Smaller sequential requests publish the first machine result quickly while
   // keeping PDF/network-share work bounded. Total work is unchanged and the
   // scanner still paints before any production evidence is requested.
-  const chunkSize = context === "prewarm" ? 40 : 10;
+  const chunkSize = ["prewarm", "future-prewarm"].includes(context) ? 40 : 10;
   let scanPublishedV527 = false;
   for (let offset = 0; offset < candidates.length; offset += chunkSize) {
     const chunk = candidates.slice(offset, offset + chunkSize);
-    if ((context === "scan" || context === "prewarm") && (document.hidden || state.page !== "scan")) {
+    if (document.hidden || (["scan", "future-prewarm"].includes(context) && state.page !== "scan")) {
       candidates.slice(offset).forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
       break;
     }
@@ -21163,7 +21540,7 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
       if (cached?.fabricated === true) return false;
       const progress = state.productionProgressCheckedV522.get(key) || {};
       const retrySeconds = Math.max(
-        context === "scan" || context === "prewarm" ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
+        ["scan", "prewarm", "future-prewarm"].includes(context) ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
         Number(cached?.retryAfterSeconds || 0),
         Number(progress.retryAfterSeconds || 0),
       );
@@ -21223,15 +21600,19 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan" } = 
       requestedChunkV527.forEach(({ key }) => state.productionProgressCheckedV522.set(key, {
         at: attemptedAtV527,
         retryAfterSeconds: Math.max(
-          context === "scan" || context === "prewarm" ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
+          ["scan", "prewarm", "future-prewarm"].includes(context) ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
           Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0),
         ),
       }));
     } finally {
       chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
     }
+    if (typeof scheduleFabricationMemorySaveV533 === "function") scheduleFabricationMemorySaveV533();
+    if (typeof onProgress === "function") {
+      try { onProgress(Math.min(offset + chunk.length, candidates.length), candidates.length); } catch (_progressError) {}
+    }
     if (chunkPublishedV527 && context === "scan") scanPublishedV527 = true;
-    else if (chunkPublishedV527) repaint();
+    else if (chunkPublishedV527 && context !== "future-prewarm") repaint();
   }
   // Replace Scan rows at most once for the complete visible batch. Repainting
   // after every ten pieces was removing the hovered row and cancelling clicks.
@@ -21267,54 +21648,178 @@ function rememberFabricationDeliveryV521(deliveryDate = "", rows = []) {
   }
 }
 
-function fabricationRowsNeedRefreshV527(rows = []) {
-  const now = Date.now();
-  for (const row of rows || []) {
-    const order = String(row?.order || "").trim();
-    if (!order) continue;
-    const key = fabricationStatusItemKeyV521(row);
-    if (!key || state.fabricationStatusPendingV474.has(key)) continue;
-    const cached = state.fabricationStatusCacheV474.get(key);
-    const progress = state.productionProgressCheckedV522.get(key) || {};
-    const retryMs = Math.max(
-      FABRICATION_AUTO_RETRY_MS_V526,
-      Number(cached?.retryAfterSeconds || 0) * 1000,
-      Number(progress.retryAfterSeconds || 0) * 1000,
-    );
-    const cachedAt = Date.parse(cached?.checkedAt || "");
-    const checkedAt = Number.isFinite(cachedAt) ? cachedAt : Number(progress.at || 0);
-    const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= retryMs);
-    const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
-    const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= retryMs);
-    if (fabricationDue || cuttingDue) return true;
-  }
-  return false;
+function fabricationRowNeedsRefreshV532(row = {}, now = Date.now()) {
+  const order = String(row?.order || "").trim();
+  if (!order) return false;
+  const key = fabricationStatusItemKeyV521(row);
+  if (!key || state.fabricationStatusPendingV474.has(key)) return false;
+  const cached = state.fabricationStatusCacheV474.get(key);
+  const progress = state.productionProgressCheckedV522.get(key) || {};
+  const retryMs = Math.max(
+    FABRICATION_AUTO_RETRY_MS_V526,
+    Number(cached?.retryAfterSeconds || 0) * 1000,
+    Number(progress.retryAfterSeconds || 0) * 1000,
+  );
+  const cachedAt = Date.parse(cached?.checkedAt || "");
+  const checkedAt = Number.isFinite(cachedAt) ? cachedAt : Number(progress.at || 0);
+  const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= retryMs);
+  const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
+  const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= retryMs);
+  return fabricationDue || cuttingDue;
 }
 
-async function warmFabricationDeliveryV521(deliveryDate = "", rows = []) {
+function fabricationRowsNeedRefreshV527(rows = []) {
+  const now = Date.now();
+  return (rows || []).some((row) => fabricationRowNeedsRefreshV532(row, now));
+}
+
+function setFabricationLoadVisibleV533(visible) {
+  const host = document.getElementById("scanFabricationLoadV531");
+  if (!host) return;
+  if (state.fabricationLoadCollapseTimerV533) {
+    window.clearTimeout(state.fabricationLoadCollapseTimerV533);
+    state.fabricationLoadCollapseTimerV533 = 0;
+  }
+  if (visible) {
+    state.fabricationLoadVisibleV533 = true;
+    host.hidden = false;
+    window.requestAnimationFrame(() => host.classList.add("is-visible-v533"));
+    return;
+  }
+  state.fabricationLoadVisibleV533 = false;
+  host.classList.remove("is-visible-v533");
+  state.fabricationLoadCollapseTimerV533 = window.setTimeout(() => {
+    if (!state.fabricationLoadVisibleV533) host.hidden = true;
+    state.fabricationLoadCollapseTimerV533 = 0;
+  }, FABRICATION_LOAD_COLLAPSE_MS_V533);
+}
+
+function renderFabricationLoadProgressV531() {
+  const host = document.getElementById("scanFabricationLoadV531");
+  if (!host) return;
+  const progress = state.fabricationLoadProgressV531 || {};
+  const currentDate = String(state.meta?.deliveryDate || "");
+  if (state.page !== "scan" || String(progress.date || "") !== currentDate) {
+    if (state.fabricationLoadVisibleV533) setFabricationLoadVisibleV533(false);
+    return;
+  }
+  const total = Math.max(Number(progress.total || 0), 0);
+  const complete = Math.min(Math.max(Number(progress.completed || 0), 0), total || 0);
+  const percent = total ? Math.round((complete / total) * 100) : (progress.active ? 5 : 100);
+  const bar = document.getElementById("scanFabricationLoadBarV531");
+  const label = document.getElementById("scanFabricationLoadLabelV531");
+  const detail = document.getElementById("scanFabricationLoadDetailV531");
+  const value = document.getElementById("scanFabricationLoadPercentV531");
+  host.classList.toggle("is-complete-v531", !progress.active);
+  const track = host.querySelector('.scan-fabrication-load-track-v531');
+  if (track) {
+    track.setAttribute('aria-valuenow', String(Math.min(percent, 100)));
+    track.setAttribute('aria-valuetext', total ? `${complete} of ${total} fabrication items processed` : (progress.active ? 'Checking fabrication' : 'Fabrication ready'));
+  }
+  if (bar) bar.style.width = `${Math.max(progress.active ? 4 : 0, Math.min(percent, 100))}%`;
+  if (label) label.textContent = progress.active ? "Checking fabrication" : "Fabrication ready";
+  if (detail) detail.textContent = String(progress.message || (progress.active ? `${complete} of ${total} pieces checked` : `${total} pieces ready`));
+  if (value) value.textContent = `${Math.min(percent, 100)}%`;
+}
+
+function scheduleFabricationLoadRevealV533(date) {
+  if (state.fabricationLoadVisibleV533 || state.fabricationLoadShowTimerV533) return;
+  const elapsed = Date.now() - Number(state.fabricationLoadStartedAtV533 || Date.now());
+  const delay = Math.max(FABRICATION_LOAD_DELAY_MS_V533 - elapsed, 0);
+  state.fabricationLoadShowTimerV533 = window.setTimeout(() => {
+    state.fabricationLoadShowTimerV533 = 0;
+    const progress = state.fabricationLoadProgressV531 || {};
+    if (!progress.active || String(progress.date || "") !== String(date || "") || state.page !== "scan" || String(state.meta?.deliveryDate || "") !== String(date || "")) return;
+    renderFabricationLoadProgressV531();
+    setFabricationLoadVisibleV533(true);
+  }, delay);
+}
+
+function setFabricationLoadProgressV531(date, completed, total, active, message = "") {
+  const cleanDate = String(date || "");
+  const wasActive = Boolean(state.fabricationLoadProgressV531?.active);
+  const previousDate = String(state.fabricationLoadProgressV531?.date || "");
+  if (state.fabricationLoadHideTimerV531) {
+    window.clearTimeout(state.fabricationLoadHideTimerV531);
+    state.fabricationLoadHideTimerV531 = 0;
+  }
+  if (active && (!wasActive || previousDate !== cleanDate)) {
+    state.fabricationLoadStartedAtV533 = Date.now();
+  }
+  state.fabricationLoadProgressV531 = { date: cleanDate, completed: Number(completed || 0), total: Number(total || 0), active: Boolean(active), message: String(message || "") };
+  renderFabricationLoadProgressV531();
+
+  if (active) {
+    scheduleFabricationLoadRevealV533(cleanDate);
+    return;
+  }
+
+  if (state.fabricationLoadShowTimerV533) {
+    window.clearTimeout(state.fabricationLoadShowTimerV533);
+    state.fabricationLoadShowTimerV533 = 0;
+  }
+  const elapsed = Date.now() - Number(state.fabricationLoadStartedAtV533 || Date.now());
+  // Fast checks stay invisible. A visible long-running check gets a short,
+  // satisfying completion state and then collapses smoothly so Scan moves up.
+  if (!state.fabricationLoadVisibleV533 || elapsed < FABRICATION_LOAD_DELAY_MS_V533) {
+    state.fabricationLoadProgressV531.message = "";
+    setFabricationLoadVisibleV533(false);
+    return;
+  }
+  renderFabricationLoadProgressV531();
+  state.fabricationLoadHideTimerV531 = window.setTimeout(() => {
+    if (!state.fabricationLoadProgressV531.active && String(state.fabricationLoadProgressV531.date || "") === cleanDate) {
+      state.fabricationLoadProgressV531.message = "";
+      setFabricationLoadVisibleV533(false);
+    }
+  }, 900);
+}
+
+async function warmFabricationDeliveryV521(deliveryDate = "", rows = [], { background = false } = {}) {
   const date = String(deliveryDate || "").trim();
   if (!date) return;
   const existing = state.fabricationWarmByDateV526.get(date);
   if (existing) return existing;
   const source = Array.isArray(rows) ? rows.slice() : [];
   rememberFabricationDeliveryV521(date, source);
-  // Date navigation is a cache read. Only unfinished pieces whose retry window
-  // actually expired may schedule production-share work.
-  if (!fabricationRowsNeedRefreshV527(source)) return;
+  const now = Date.now();
+  const refreshRows = source.filter((row) => fabricationRowNeedsRefreshV532(row, now));
+  if (!refreshRows.length) {
+    if (!background && String(state.meta?.deliveryDate || "") === date) {
+      setFabricationLoadProgressV531(date, source.length, source.length, false, `${source.length} items already ready`);
+    }
+    return;
+  }
+  const total = refreshRows.length;
+  if (!background) setFabricationLoadProgressV531(date, 0, total, true, `Checking 0 of ${total} fabrication items`);
   const run = (async () => {
-    for (let offset = 0; offset < source.length; offset += 80) {
-      if (document.hidden || (state.page === "scan" && String(state.meta?.deliveryDate || "") !== date)) return;
-      await hydrateFabricationStatusesV474(source.slice(offset, offset + 80), { context: "prewarm" });
+    for (let offset = 0; offset < refreshRows.length; offset += 80) {
+      if (document.hidden || (background && state.page !== "scan") || (!background && String(state.meta?.deliveryDate || "") !== date)) {
+        if (!background) setFabricationLoadProgressV531(date, Math.min(offset, total), total, false, "Fabrication loading paused");
+        return;
+      }
+      const batch = refreshRows.slice(offset, offset + 80);
+      let batchProgress = 0;
+      await hydrateFabricationStatusesV474(batch, {
+        context: background ? "future-prewarm" : "prewarm",
+        onProgress: (completedInBatch) => {
+          batchProgress = Math.max(batchProgress, Number(completedInBatch || 0));
+          if (!background) {
+            const completed = Math.min(offset + batchProgress, total);
+            setFabricationLoadProgressV531(date, completed, total, true, `Checked ${completed} of ${total} fabrication items`);
+          }
+        },
+      });
+      const completed = Math.min(offset + batch.length, total);
+      if (!background) setFabricationLoadProgressV531(date, completed, total, completed < total, `Checked ${completed} of ${total} fabrication items`);
       await new Promise((resolve) => window.setTimeout(resolve, 25));
     }
+    if (!background) setFabricationLoadProgressV531(date, total, total, false, `${total} fabrication items checked`);
     if (state.page === "scan" && String(state.meta?.deliveryDate || "") === date) scheduleScanRender();
   })();
   state.fabricationWarmByDateV526.set(date, run);
-  try {
-    return await run;
-  } finally {
-    if (state.fabricationWarmByDateV526.get(date) === run) state.fabricationWarmByDateV526.delete(date);
-  }
+  try { return await run; }
+  finally { if (state.fabricationWarmByDateV526.get(date) === run) state.fabricationWarmByDateV526.delete(date); }
 }
 
 function monitorPendingProductionProgressV522() {
@@ -28917,22 +29422,44 @@ function selectedPrintFilterValues(container, selector) {
     .filter(Boolean);
 }
 
-/** Return selected status values; All Status means no status restriction. */
+function printFilterModeIsExcludeV532() { return false; }
+
 function selectedPrintStatusValues() {
-  if (els.printStatusOptions?.querySelector('input[data-print-status-all]')?.checked) return [];
-  return selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]:not([data-print-status-all])');
+  if (printFilterModeIsExcludeV532()) return [...state.printIncludedStatusesV532];
+  const values = els.printStatusOptions?.querySelector('input[data-print-status-all]')?.checked
+    ? [] : selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]:not([data-print-status-all])');
+  state.printIncludedStatusesV532 = new Set(values);
+  return values;
 }
 
-/** Return selected attention values; All Attention includes rows with no attention flags. */
 function selectedPrintAttentionValues() {
-  if (els.printAttentionOptions?.querySelector('input[data-print-attention-all]')?.checked) return [];
-  return selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]:not([data-print-attention-all])');
+  if (printFilterModeIsExcludeV532()) return [...state.printIncludedAttentionV532];
+  const values = els.printAttentionOptions?.querySelector('input[data-print-attention-all]')?.checked
+    ? [] : selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]:not([data-print-attention-all])');
+  state.printIncludedAttentionV532 = new Set(values);
+  return values;
 }
 
-/** Return selected production-machine values; All Machines means no machine restriction. */
 function selectedPrintMachineValuesV520() {
-  if (els.printMachineOptions?.querySelector('input[data-print-machine-all]')?.checked) return [];
-  return selectedPrintFilterValues(els.printMachineOptions, 'input[data-print-machine]:not([data-print-machine-all])');
+  if (printFilterModeIsExcludeV532()) return [...state.printIncludedMachinesV532];
+  const values = els.printMachineOptions?.querySelector('input[data-print-machine-all]')?.checked
+    ? [] : selectedPrintFilterValues(els.printMachineOptions, 'input[data-print-machine]:not([data-print-machine-all])');
+  state.printIncludedMachinesV532 = new Set(values);
+  return values;
+}
+
+function syncPrintFilterModeUiV532() {
+  state.printFilterModeV532 = "include";
+  state.printExcludedRoutesV532.clear();
+  state.printExcludedStatusesV532.clear();
+  state.printExcludedAttentionV532.clear();
+  state.printExcludedMachinesV532.clear();
+  state.printExcludedGlassV532.clear();
+  document.querySelector('.print-filter-pane-v238')?.classList.remove('is-exclude-mode-v532');
+}
+
+async function setPrintFilterModeV532() {
+  syncPrintFilterModeUiV532();
 }
 
 /** Classify one Print / Export row from the shared fabrication-status cache. */
@@ -28956,7 +29483,10 @@ function renderPrintMachineOptionsV520(rows = null) {
   const scopedRows = Array.isArray(rows)
     ? rows
     : printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()), selectedPrintRouteGroups());
-  const selected = new Set(selectedPrintFilterValues(els.printMachineOptions, 'input[data-print-machine]'));
+  const excludeMode = printFilterModeIsExcludeV532();
+  const selected = excludeMode
+    ? new Set(state.printExcludedMachinesV532)
+    : new Set(selectedPrintFilterValues(els.printMachineOptions, 'input[data-print-machine]'));
   const definitions = printMachineDefinitionsV521();
   const counts = new Map(definitions.map((row) => [row.code, 0]));
   let pending = false;
@@ -28968,14 +29498,15 @@ function renderPrintMachineOptionsV520(rows = null) {
   }
   const total = scopedRows.reduce((sum, { item }) => sum + itemPieceQty(item), 0);
   const active = definitions.map((row) => row.code).filter((value) => selected.has(value) && (pending || Number(counts.get(value) || 0) > 0));
-  const allSelected = selected.has("__all__") || !active.length;
+  const allSelected = !excludeMode && (selected.has("__all__") || !active.length);
   els.printMachineOptions.innerHTML = `${printFilterChipMarkup({
-    value: "__all__", label: "All Machines", count: total, checked: allSelected, disabled: total <= 0,
+    value: "__all__", label: "All Machines", count: total, checked: allSelected, disabled: total <= 0 || excludeMode,
     type: "machine-all", data: 'data-print-machine="1" data-print-machine-all="1"',
   })}${definitions.map((row) => printFilterChipMarkup({
-    value: row.code, label: row.name, count: counts.get(row.code) || 0, checked: !allSelected && active.includes(row.code),
+    value: row.code, label: row.name, count: counts.get(row.code) || 0, checked: excludeMode ? active.includes(row.code) : (!allSelected && active.includes(row.code)),
     disabled: !pending && Number(counts.get(row.code) || 0) <= 0, type: "machine-choice-v521", data: 'data-print-machine="1"', color: row.color,
   })).join("")}`;
+  syncPrintFilterModeUiV532();
 }
 
 /** Return a stable comparison key for an imported or selected glass type. */
@@ -29676,9 +30207,9 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   const listIds = selectedPrintListIds();
   const renderId = ++state.printEntityRenderId;
   const previousRoutes = new Set(selectedPrintRouteGroups());
-  const previousStatuses = new Set(selectedPrintFilterValues(els.printStatusOptions, 'input[data-print-status]'));
-  const previousAttention = new Set(selectedPrintFilterValues(els.printAttentionOptions, 'input[data-print-attention]'));
-  const previousMachines = new Set(selectedPrintFilterValues(els.printMachineOptions, 'input[data-print-machine]'));
+  const previousStatuses = new Set((printFilterModeIsExcludeV532() || !captureControlSelections) ? state.printIncludedStatusesV532 : selectedPrintStatusValues());
+  const previousAttention = new Set((printFilterModeIsExcludeV532() || !captureControlSelections) ? state.printIncludedAttentionV532 : selectedPrintAttentionValues());
+  const previousMachines = new Set((printFilterModeIsExcludeV532() || !captureControlSelections) ? state.printIncludedMachinesV532 : selectedPrintMachineValuesV520());
   // v0.465: absorb v0.464-era controls during an in-place rerender so a user
   // does not lose New/Updated or Error selections while they move to Status.
   for (const legacyStatus of ["updated", "error"]) {
@@ -29736,12 +30267,13 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   if (els.printRouteOptions) {
     els.printRouteOptions.innerHTML = PRINT_ROUTE_GROUPS.map(({ value, label }) => {
       const count = routeCounts.get(value) || 0;
+      const excludeMode = printFilterModeIsExcludeV532();
       return printFilterChipMarkup({
         value,
         label,
         count,
-        checked: selectedRoutes.includes(value),
-        disabled: count <= 0,
+        checked: excludeMode ? state.printExcludedRoutesV532.has(value) : selectedRoutes.includes(value),
+        disabled: count <= 0 || (excludeMode && value === "airport"),
         type: `route-${value.replaceAll("_", "-")}`,
         data: 'data-print-route-group="1"',
       });
@@ -29771,20 +30303,20 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
     ["not-scanned", "Not Scanned"],
     ["partial", "Partial"],
     ["complete", "Complete"],
-    ["updated", "New/Updated"],
+    ["updated", "New Orders"],
     ["error", "Errors"],
   ];
   const availableSelectedStatuses = statusDefinitions
     .map(([value]) => value)
     .filter((value) => previousStatuses.has(value) && Number(statusCounts.get(value) || 0) > 0);
-  const statusAllSelected = !preserveSelections || previousStatuses.has("__all__") || !availableSelectedStatuses.length;
+  const statusAllSelected = !printFilterModeIsExcludeV532() && (!preserveSelections || !availableSelectedStatuses.length);
   if (els.printStatusOptions) {
     els.printStatusOptions.innerHTML = `${printFilterChipMarkup({
       value: "__all__",
       label: "All Status",
       count: scopedPieceCount,
       checked: statusAllSelected,
-      disabled: scopedPieceCount <= 0,
+      disabled: scopedPieceCount <= 0 || printFilterModeIsExcludeV532(),
       type: "status-all",
       data: 'data-print-status="1" data-print-status-all="1"',
     })}${statusDefinitions.map(([value, label]) => {
@@ -29793,7 +30325,7 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
         value,
         label,
         count,
-        checked: !statusAllSelected && availableSelectedStatuses.includes(value),
+        checked: printFilterModeIsExcludeV532() ? state.printExcludedStatusesV532.has(value) : (!statusAllSelected && availableSelectedStatuses.includes(value)),
         disabled: count <= 0,
         type: `status-${value}`,
         data: 'data-print-status="1"',
@@ -29802,7 +30334,7 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   }
 
   const attentionDefinitions = [
-    ["remake", "Remakes", true],
+    ["remake", "External Remakes", true],
     ["rush", "Rushes", true],
     ["reject", "Internal Rejects", true],
   ];
@@ -29810,14 +30342,14 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
     .map(([value, , showHealthState]) => ({ value, showHealthState }))
     .filter(({ value, showHealthState }) => previousAttention.has(value) && (showHealthState || Number(attentionCounts.get(value) || 0) > 0))
     .map(({ value }) => value);
-  const attentionAllSelected = !preserveSelections || previousAttention.has("__all__") || !availableSelectedAttention.length;
+  const attentionAllSelected = !printFilterModeIsExcludeV532() && (!preserveSelections || !availableSelectedAttention.length);
   if (els.printAttentionOptions) {
     els.printAttentionOptions.innerHTML = `${printFilterChipMarkup({
       value: "__all__",
       label: "All Attention",
       count: scopedPieceCount,
       checked: attentionAllSelected,
-      disabled: scopedPieceCount <= 0,
+      disabled: scopedPieceCount <= 0 || printFilterModeIsExcludeV532(),
       type: "attention-all",
       data: 'data-print-attention="1" data-print-attention-all="1"',
     })}${attentionDefinitions.map(([value, label, showHealthState]) => {
@@ -29826,7 +30358,7 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
         value,
         label,
         count,
-        checked: !attentionAllSelected && availableSelectedAttention.includes(value),
+        checked: printFilterModeIsExcludeV532() ? state.printExcludedAttentionV532.has(value) : (!attentionAllSelected && availableSelectedAttention.includes(value)),
         disabled: !showHealthState && count <= 0,
         type: `attention-${value}`,
         data: 'data-print-attention="1"',
@@ -29840,14 +30372,14 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
   const availableSelectedMachinesV520 = machineDefinitionsV520
     .map((row) => row.code)
     .filter((value) => previousMachines.has(value) && (machineEvidencePendingV520 || Number(machineCountsV520.get(value) || 0) > 0));
-  const machineAllSelectedV520 = !preserveSelections || previousMachines.has("__all__") || !availableSelectedMachinesV520.length;
+  const machineAllSelectedV520 = !printFilterModeIsExcludeV532() && (!preserveSelections || !availableSelectedMachinesV520.length);
   if (els.printMachineOptions) {
     els.printMachineOptions.innerHTML = `${printFilterChipMarkup({
       value: "__all__",
       label: "All Machines",
       count: scopedPieceCount,
       checked: machineAllSelectedV520,
-      disabled: scopedPieceCount <= 0,
+      disabled: scopedPieceCount <= 0 || printFilterModeIsExcludeV532(),
       type: "machine-all",
       data: 'data-print-machine="1" data-print-machine-all="1"',
     })}${machineDefinitionsV520.map((row) => {
@@ -29856,7 +30388,7 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
         value: row.code,
         label: row.name,
         count,
-        checked: !machineAllSelectedV520 && availableSelectedMachinesV520.includes(row.code),
+        checked: printFilterModeIsExcludeV532() ? state.printExcludedMachinesV532.has(row.code) : (!machineAllSelectedV520 && availableSelectedMachinesV520.includes(row.code)),
         disabled: !machineEvidencePendingV520 && count <= 0,
         type: "machine-choice-v521",
         data: 'data-print-machine="1"',
@@ -29879,15 +30411,20 @@ async function renderPrintFilterChoices({ preserveSelections = true, captureCont
     // Keep it restrictive so returning to another date automatically restores the
     // family instead of silently switching the preset to All Glass.
     const selectAllCurrent = !preserveSelections || (!ruleActive && (previousAllGlass || !matchedGlassLabels.length));
-    const selectedKeys = new Set(matchedGlassLabels.map(printGlassTypeMatchKey));
-    const glassMarkup = printGlassCategoryMarkup(glassEntries, selectedKeys, selectAllCurrent);
+    const selectedKeys = printFilterModeIsExcludeV532()
+      ? new Set([...state.printExcludedGlassV532].map(printGlassTypeMatchKey))
+      : new Set(matchedGlassLabels.map(printGlassTypeMatchKey));
+    const glassMarkup = printGlassCategoryMarkup(glassEntries, selectedKeys, printFilterModeIsExcludeV532() ? false : selectAllCurrent);
     els.printOptionsGlassType.innerHTML = glassEntries.length
-      ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass Types", count: totalPieces, checked: selectAllCurrent, type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}`
+      ? `${printFilterChipMarkup({ value: "__all__", label: "All Glass Types", count: totalPieces, checked: printFilterModeIsExcludeV532() ? false : selectAllCurrent, disabled: printFilterModeIsExcludeV532(), type: "glass-all", data: 'data-print-all-glass="1"' })}${glassMarkup}`
       : '<div class="print-filter-empty-v197">No glass types exist for the selected date and route.</div>';
-    state.printAllGlass = selectAllCurrent;
-    state.printGlassTypes = selectAllCurrent ? [] : matchedGlassLabels;
+    if (!printFilterModeIsExcludeV532()) {
+      state.printAllGlass = selectAllCurrent;
+      state.printGlassTypes = selectAllCurrent ? [] : matchedGlassLabels;
+    }
   }
 
+  syncPrintFilterModeUiV532();
   renderPrintSelectedOrders();
   renderPrintSearchSuggestions();
   schedulePrintSelectionPreview(0);
@@ -30195,11 +30732,15 @@ function printFilteredRows() {
   const selectedAttention = new Set(selectedPrintAttentionValues());
   const selectedMachinesV520 = new Set(selectedPrintMachineValuesV520());
   return printRowsForSelectedRoutes(printBaseRows(selectedPrintListIds()), selectedRoutes).filter(({ list, item }) => {
-    if (!allGlass && selectedGlass.size && !selectedGlass.has(printGlassTypeMatchKey(glassTypeLabel(item)))) return false;
+    const glassKey = printGlassTypeMatchKey(glassTypeLabel(item));
+    const statusKeys = printItemStatusKeysV465(item);
+    const attentionKeys = printItemAttentionKeys(item);
+    const machineKey = printMachineKeyV520(item);
+    if (!allGlass && selectedGlass.size && !selectedGlass.has(glassKey)) return false;
     if (!allGlass && !selectedGlass.size) return false;
-    if (selectedStatuses.size && !printItemStatusKeysV465(item).some((key) => selectedStatuses.has(key))) return false;
-    if (selectedAttention.size && !printItemAttentionKeys(item).some((key) => selectedAttention.has(key))) return false;
-    if (selectedMachinesV520.size && !selectedMachinesV520.has(printMachineKeyV520(item))) return false;
+    if (selectedStatuses.size && !statusKeys.some((key) => selectedStatuses.has(key))) return false;
+    if (selectedAttention.size && !attentionKeys.some((key) => selectedAttention.has(key))) return false;
+    if (selectedMachinesV520.size && !selectedMachinesV520.has(machineKey)) return false;
     if (!printRowMatchesExactSelection(list, item)) return false;
     if (state.printContext?.updatedOnly && !/\b(update|updated|new|change|changed|added|add)\b/i.test(`${item.processState || ""} ${item.queueState || ""}`)) return false;
     return true;
@@ -30394,6 +30935,7 @@ function printCurrentFilterSummary() {
   if (statuses.length) parts.push(printCompactFilterValue(statuses, "", statusLabels, "statuses"));
   if (attention.length) parts.push(printCompactFilterValue(attention, "", attentionLabels, "attention filters"));
   if (machinesV520.length) parts.push(printCompactFilterValue(machinesV520, "", machineLabelsV520, "machines"));
+
 
   const exactOrders = selectedPrintOrderValues();
   const exactItems = selectedPrintItemValues();
@@ -30595,6 +31137,16 @@ async function refreshPrintWorkspaceChoices(options = {}) {
 /** Restore the route-based workspace's default filter state. */
 async function resetPrintFilters({ clearActivePreset = true } = {}) {
   const groups = listsByDeliveryDate();
+  state.printFilterModeV532 = "include";
+  state.printIncludedStatusesV532.clear();
+  state.printIncludedAttentionV532.clear();
+  state.printIncludedMachinesV532.clear();
+  state.printExcludedRoutesV532.clear();
+  state.printExcludedStatusesV532.clear();
+  state.printExcludedAttentionV532.clear();
+  state.printExcludedMachinesV532.clear();
+  state.printExcludedGlassV532.clear();
+  syncPrintFilterModeUiV532();
   const requestedDate = state.printContext?.date || selectedDeliveryDate() || dashboardDateKey() || groups[0]?.date || "";
   const requestedRoutes = normalizePrintRouteGroups(state.printContext?.initialRouteGroups || ["airport"]);
   if (els.printSearchInput) els.printSearchInput.value = "";
@@ -30853,10 +31405,13 @@ function adoptManualEditLookups(payload = {}) {
     glassCosts: Array.isArray(payload.glassCosts) ? payload.glassCosts : [],
     glassColors: Array.isArray(payload.glassColors) ? payload.glassColors : [],
     glassAliases: Array.isArray(payload.glassAliases) ? payload.glassAliases : [],
+    attentionColors: Array.isArray(payload.attentionColors) ? payload.attentionColors : (state.manualEditLookups?.attentionColors || []),
     stages: Array.isArray(payload.stages) ? payload.stages : [],
   };
   state.manualEditLookupsLoaded = true;
   if (Array.isArray(payload.glassColors)) state.glassVisualLookupLoaded = true;
+  if (Array.isArray(payload.attentionColors)) state.attentionColorsLoadedV530 = true;
+  applyAttentionColorsV530();
   applyPortablePresentationV355();
   return state.manualEditLookups;
 }
@@ -31207,6 +31762,16 @@ async function deletePrintPreset(name) {
 async function applyPrintPreset(name, { persist = true } = {}) {
   const preset = availablePrintPresets()[name];
   if (!preset) return;
+  state.printFilterModeV532 = "include";
+  state.printIncludedStatusesV532.clear();
+  state.printIncludedAttentionV532.clear();
+  state.printIncludedMachinesV532.clear();
+  state.printExcludedRoutesV532.clear();
+  state.printExcludedStatusesV532.clear();
+  state.printExcludedAttentionV532.clear();
+  state.printExcludedMachinesV532.clear();
+  state.printExcludedGlassV532.clear();
+  syncPrintFilterModeUiV532();
   if (persist) setActivePrintPresetName(name);
   if (els.printSearchInput) els.printSearchInput.value = "";
   state.printSelectedOrders = [];
@@ -31228,9 +31793,15 @@ async function applyPrintPreset(name, { persist = true } = {}) {
     if (allInput) allInput.checked = allSelected;
     details.forEach((input) => { input.checked = !allSelected && wanted.has(input.value); });
   };
-  applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', printPresetStatusValuesV465(preset));
-  applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', printPresetAttentionValuesV465(preset));
-  applyAllAwareValues(els.printMachineOptions, 'input[data-print-machine-all]', 'input[data-print-machine]:not([data-print-machine-all])', preset.machines || []);
+  const presetStatusesV532 = printPresetStatusValuesV465(preset);
+  const presetAttentionV532 = printPresetAttentionValuesV465(preset);
+  const presetMachinesV532 = preset.machines || [];
+  applyAllAwareValues(els.printStatusOptions, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])', presetStatusesV532);
+  applyAllAwareValues(els.printAttentionOptions, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])', presetAttentionV532);
+  applyAllAwareValues(els.printMachineOptions, 'input[data-print-machine-all]', 'input[data-print-machine]:not([data-print-machine-all])', presetMachinesV532);
+  state.printIncludedStatusesV532 = new Set(presetStatusesV532);
+  state.printIncludedAttentionV532 = new Set(presetAttentionV532);
+  state.printIncludedMachinesV532 = new Set(presetMachinesV532);
   if (els.printExportType) els.printExportType.value = ["pdf", "xlsx", "csv"].includes(String(preset.outputType || "")) ? String(preset.outputType) : "pdf";
   setPrintCopies(preset.copies || 1, false);
   setPrintOrientation(preset.orientation || "portrait", false);
@@ -31349,8 +31920,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260910-v0.527", window.location.href).href,
-    new URL("static/css/print.css?v=20260911-v0.529", window.location.href).href,
+    new URL("static/css/styles.css?v=20260915-v0.538", window.location.href).href,
+    new URL("static/css/print.css?v=20260914-v0.532", window.location.href).href,
   ];
 }
 
@@ -32007,7 +32578,7 @@ async function importTempDeliveryFolder() {
           <small>${escapeHtml(windowText)}</small>
         `;
   }
-  playAppSound(failed ? "scan_warning" : "import_complete", { force: true });
+  playAppSound(failed ? "import_failed" : "import_success", { force: true });
 }
 
 /**
@@ -33759,12 +34330,36 @@ function supersededOrderReviewCardHtml(review = {}) {
   const status = String(review.status || "pending");
   const originalOrder = String(review.originalOrderNumber || "");
   const replacementOrder = String(review.replacementOrderNumber || "");
-  const suggestedOrder = originalOrder;
+  const suggestedOrder = String(review.suggestedRemoveOrderNumber || originalOrder);
+  const suggestedKeepOrder = suggestedOrder === originalOrder ? replacementOrder : originalOrder;
   const approvedRemoveOrder = String(review.approvedRemoveOrderNumber || "");
   const selectedRemoveOrder = approvedRemoveOrder || suggestedOrder;
   const decisionCopy = review.decidedAt
     ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))}${approvedRemoveOrder ? ` · removed order ${escapeHtml(approvedRemoveOrder)}` : ""} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
     : `<small>Detected ${escapeHtml(formatDisplayDate(review.lastSeenAt || review.detectedAt || ""))}</small>`;
+  const sketchSafetyMarkupV534 = (orderNumber, safety = {}, impact = {}) => {
+    const cancelled = Math.max(Number(safety.cancelledItemCount || 0), 0);
+    if (!cancelled) return "";
+    const warning = Boolean(safety.productionWarning);
+    const items = Array.isArray(safety.items) ? safety.items : [];
+    const detail = items.slice(0, 5).map((item) => {
+      const page = Number(item.pageNumber || 0) > 0 ? ` · page ${Number(item.pageNumber)}` : "";
+      const cutting = item.cuttingComplete ? " · Cutting complete" : "";
+      const scanned = Math.max(Number(item.scannerScannedQty || 0), 0);
+      const scanner = scanned ? ` · ${scanned} scanner scan${scanned === 1 ? "" : "s"}` : "";
+      return `Item ${escapeHtml(item.itemNumber || "-")}${escapeHtml(page)}${cutting}${scanner}`;
+    }).join(" • ");
+    const scans = Math.max(Number(safety.scannerAfterCancelQty || 0), 0);
+    return `<div class="superseded-sketch-safety-v534 ${warning ? "has-production-warning" : ""}">
+      <span class="superseded-sketch-x-v534" aria-hidden="true">×</span>
+      <span><strong>Blue-X cancellation detected on order ${escapeHtml(orderNumber)}</strong><small>${cancelled} crossed-out sketch item${cancelled === 1 ? "" : "s"}${warning ? ` · production activity found${scans ? ` · ${scans} scanner scan${scans === 1 ? "" : "s"}` : ""}` : " · no scanner/cutting production evidence found"}</small>${detail ? `<em>${detail}</em>` : ""}</span>
+    </div>`;
+  };
+  const sketchSafetyMarkup = [
+    sketchSafetyMarkupV534(originalOrder, review.originalSketchSafetyV534 || {}, originalImpact),
+    sketchSafetyMarkupV534(replacementOrder, review.replacementSketchSafetyV534 || {}, replacementImpact),
+  ].filter(Boolean).join("");
+
   const choiceMarkup = (orderNumber, keepOrderNumber, impact, suggested = false) => {
     const scannedQty = Number(impact.scannedQty || 0);
     const selected = selectedRemoveOrder === String(orderNumber);
@@ -33794,13 +34389,14 @@ function supersededOrderReviewCardHtml(review = {}) {
       <div>
         <small>Suggested removal</small>
         <strong>Remove order ${escapeHtml(suggestedOrder)}</strong>
-        <span>Keep order ${escapeHtml(replacementOrder)}. Nothing is removed until an Admin approves the selection.</span>
+        <span>Keep order ${escapeHtml(suggestedKeepOrder)}. Blue-X sketch evidence overrides the normal original-order suggestion when only one candidate is crossed out. Nothing is removed until an Admin approves the selection.</span>
       </div>
       <div class="superseded-review-match-summary-v328">
         <span>Same A+W identity</span>
         <span>${Number(evidence.exactItemOverlapCount || 0)} exact item match${Number(evidence.exactItemOverlapCount || 0) === 1 ? "" : "es"}</span>
       </div>
     </section>
+    ${sketchSafetyMarkup ? `<section class="superseded-sketch-safety-stack-v534">${sketchSafetyMarkup}</section>` : ""}
     <details class="superseded-review-evidence-details-v328" open>
       <summary>Item evidence <span>${Number(review.originalItems?.length || 0)} original · ${Number(review.replacementItems?.length || 0)} replacement</span></summary>
       <div class="superseded-review-compare">
@@ -33816,8 +34412,8 @@ function supersededOrderReviewCardHtml(review = {}) {
     </details>
     <div class="superseded-review-removal-choice-v328" role="radiogroup" aria-label="Choose which candidate order to remove">
       <div class="superseded-review-choice-intro-v328"><strong>Approve a removal</strong><small>The suggested order is preselected. Use the item evidence above to verify the recommendation before approving it.</small></div>
-      ${choiceMarkup(originalOrder, replacementOrder, originalImpact, true)}
-      ${choiceMarkup(replacementOrder, originalOrder, replacementImpact, false)}
+      ${choiceMarkup(originalOrder, replacementOrder, originalImpact, suggestedOrder === originalOrder)}
+      ${choiceMarkup(replacementOrder, originalOrder, replacementImpact, suggestedOrder === replacementOrder)}
     </div>
     ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
     <footer class="superseded-review-actions">
@@ -34213,6 +34809,7 @@ function configureAdminModalSectionTabsV345(kind) {
     insertTab("lookup:machine", "Machines", machineDefinitionsV521({ activeOnly: false }).length);
     if (hasPermission("manage_stations")) insertTab("lookup:station", "Stations", (state.stations || []).length);
     insertTab("lookup:stage_definition", "Stages", (lookups.stages || []).length);
+    insertTab("lookup:attention_color", "Attention Colors", (lookups.attentionColors || []).length);
     insertTab("lookup:presentation", "Presentation");
     const selectedSection = `lookup:${state.lookupManagerActiveType || "glass_profile"}`;
     els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
@@ -34239,7 +34836,7 @@ function setAdminModalSection(section = "workspace") {
     renderCustomerEmailModal();
   } else if (!historySelected && section.startsWith("lookup:")) {
     const type = section.split(":", 2)[1] || "glass_profile";
-    state.lookupManagerActiveType = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "presentation"].includes(type) ? type : "glass_profile";
+    state.lookupManagerActiveType = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
     state.lookupManagerSearch = "";
     renderLookupManagerModal();
   } else if (!historySelected && section.startsWith("scanPage:")) {
@@ -35581,9 +36178,74 @@ async function removeMachineDefinitionV521(code = "") {
   await persistMachineDefinitionsV521(machineDefinitionsV521({ activeOnly: false }).filter((row) => row.code !== clean), `${machine.name} was removed from the active machine library.`);
 }
 
+function attentionColorManagerHtmlV530() {
+  const labels = {
+    new_order: ["New Orders", "New delivery-list content from A+W"],
+    internal_reject: ["Internal Rejects", "A+W reject events that require review"],
+    external_remake: ["External Remakes", "Remake / complaint pieces imported from A+W"],
+    rush: ["Rushes", "Rush / SDI priority pieces imported from A+W"],
+  };
+  const current = new Map((state.manualEditLookups?.attentionColors || []).map((row) => [String(row.value || ""), normalizeGlassVisualColor(row.color || row.category || "")]));
+  const rows = Object.entries(labels).map(([key, [label, description]]) => {
+    const color = current.get(key) || ATTENTION_COLOR_DEFAULTS_V530[key] || "#1766D8";
+    return `<article class="attention-color-row-v530" data-attention-color-row="${escapeHtml(key)}">
+      <div class="attention-color-copy-v530"><i style="--attention-row-color:${escapeHtml(color)}" aria-hidden="true">!</i><span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(description)}</small></span></div>
+      <label class="attention-color-picker-v530"><span>Color</span><input type="color" value="${escapeHtml(color)}" data-attention-color-input="${escapeHtml(key)}"><b data-attention-color-value="${escapeHtml(key)}">${escapeHtml(color)}</b></label>
+      <button type="button" class="app-primary-button" data-attention-color-save="${escapeHtml(key)}">Save</button>
+    </article>`;
+  }).join("");
+  return `<div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066 lookup-manager-v345 attention-color-manager-v530">
+    <section class="attention-color-panel-v530">
+      <header><div><small>Workflow presentation</small><h3>Attention Colors</h3><p>Choose the shared colors used by Scan, date alerts, filters, Print / Export, Manual Edits, notifications, and other priority indicators.</p></div></header>
+      <div class="attention-color-list-v530">${rows}</div>
+      <p class="attention-color-note-v530">These settings change presentation only. They do not alter delivery-list data, review history, or the database schema.</p>
+    </section>
+  </div>`;
+}
+
+async function saveAttentionColorV530(key, color) {
+  const cleanKey = String(key || "").trim();
+  const cleanColor = normalizeGlassVisualColor(color);
+  if (!Object.prototype.hasOwnProperty.call(ATTENTION_COLOR_DEFAULTS_V530, cleanKey) || !cleanColor) throw new Error("Choose a valid attention color.");
+  const payload = await fetchJson("/api/admin/manual-edit-lookups", {
+    method: "POST",
+    body: JSON.stringify({ type: "attention_color", value: cleanKey, color: cleanColor }),
+  });
+  adoptManualEditLookups(payload);
+  state.attentionColorsLoadedV530 = true;
+  applyAttentionColorsV530();
+  renderLookupManagerModal();
+  if (state.page === "scan") renderScanPage();
+  showSaveConfirmation(`${({ new_order: "New Orders", internal_reject: "Internal Rejects", external_remake: "External Remakes", rush: "Rushes" })[cleanKey] || "Attention"} color was saved.`);
+}
+
+function wireAttentionColorManagerV530() {
+  document.querySelectorAll("[data-attention-color-input]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const key = input.dataset.attentionColorInput || "";
+      const value = normalizeGlassVisualColor(input.value) || ATTENTION_COLOR_DEFAULTS_V530[key] || "#1766D8";
+      const label = document.querySelector(`[data-attention-color-value="${CSS.escape(key)}"]`);
+      const row = input.closest("[data-attention-color-row]");
+      if (label) label.textContent = value;
+      row?.style.setProperty("--attention-row-color", value);
+      row?.querySelector(".attention-color-copy-v530 > i")?.style.setProperty("--attention-row-color", value);
+    });
+  });
+  document.querySelectorAll("[data-attention-color-save]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.attentionColorSave || "";
+      const input = document.querySelector(`[data-attention-color-input="${CSS.escape(key)}"]`);
+      button.disabled = true;
+      try { await saveAttentionColorV530(key, input?.value || ""); }
+      catch (error) { showInlineError(error.message || "Unable to save attention color."); }
+      finally { button.disabled = false; }
+    });
+  });
+}
+
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-  const supportedTypes = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "presentation"];
+  const supportedTypes = ["glass_profile", "route", "process", "machine", "station", "stage_definition", "attention_color", "presentation"];
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "glass_profile";
@@ -35591,6 +36253,7 @@ function lookupManagerModalHtml() {
   if (activeType === "machine") return machineLookupManagerHtmlV521();
   if (activeType === "station") return stationLookupManagerHtmlV346();
   if (activeType === "stage_definition") return stageDefinitionManagerHtmlV346();
+  if (activeType === "attention_color") return attentionColorManagerHtmlV530();
   if (activeType === "presentation") return presentationProfileManagerHtmlV355();
   const meta = lookupEditorMeta(activeType);
   const isGlassCost = activeType === "glass_cost";
@@ -35840,10 +36503,11 @@ function renderLookupManagerModal() {
   els.adminModalBody.innerHTML = lookupManagerModalHtml();
   applyLanguageToRoot(els.adminModalBody);
   if (state.lookupManagerActiveType === "glass_profile") syncGlassProfilePreviewV349();
-  else if (state.lookupManagerActiveType !== "machine") syncLookupManagerFormGuidance();
-  filterLookupManagerLibrary(state.lookupManagerSearch || "");
+  else if (!["machine", "attention_color"].includes(state.lookupManagerActiveType)) syncLookupManagerFormGuidance();
+  if (state.lookupManagerActiveType === "attention_color") wireAttentionColorManagerV530();
+  else filterLookupManagerLibrary(state.lookupManagerSearch || "");
   configureAdminModalSectionTabsV345("lookups");
-  enhanceLookupManagerWorkflowV470();
+  if (state.lookupManagerActiveType !== "attention_color") enhanceLookupManagerWorkflowV470();
 }
 
 /**
@@ -37426,9 +38090,9 @@ function manualEditFilterDrawerHtml() {
         <section class="scan-filter-section manual-edit-attention-filter-section">
           <div class="scan-filter-section-heading"><h3>Attention</h3><span>Select one or several special conditions.</span></div>
           <div class="scan-filter-options">
-            ${manualEditFilterButton("attention", "remake", "Remakes")}
+            ${manualEditFilterButton("attention", "remake", "External Remakes")}
             ${manualEditFilterButton("attention", "rush", "Rushes")}
-            ${manualEditFilterButton("attention", "updated", "Updated")}
+            ${manualEditFilterButton("attention", "updated", "New Orders")}
             ${manualEditFilterButton("attention", "reject", "Internal rejects")}
             ${manualEditFilterButton("attention", "manual", "Manual entries")}
           </div>
@@ -45819,6 +46483,7 @@ async function loadAuthenticatedApp(params = new URLSearchParams(window.location
   await Promise.all([
     loadDeliveryLists(params.get("list") || ""),
     ensureGlassVisualLookupLibrary().catch(() => []),
+    ensureAttentionColorLibraryV530().catch(() => ATTENTION_COLOR_DEFAULTS_V530),
   ]);
   if (!params.get("list")) {
     const today = todayKey();
@@ -46176,7 +46841,6 @@ function wireEvents() {
   });
   els.appSidebar?.addEventListener("mouseleave", () => {
     if (isMobileSidebarLayout()) return;
-    els.appSidebar.classList.remove("is-hover-suppressed-v527");
     els.userMenu?.removeAttribute("open");
   });
   els.languageToggleBtn?.addEventListener("click", () => toggleAppLanguage());
@@ -46321,6 +46985,11 @@ function wireEvents() {
   els.statisticsDailyProductionEmailBtn?.addEventListener("click", () => {
     draftDailyProductionEmailV506().catch((error) => showFloatingNotice(error?.message || "Could not build the daily production email.", "error"));
   });
+  els.statisticsProductionActivity?.addEventListener("click", (event) => {
+    const target = event.target.closest?.("[data-production-glass-detail-v536]");
+    if (!target) return;
+    openTodayProductionGlassAuditV536(target.dataset.productionGlassDetailV536 || "");
+  });
   els.statisticsSheetSettingsBtnV527?.addEventListener("click", () => {
     openSheetUsageSettingsV527().catch((error) => showFloatingNotice(error?.message || "Could not load stock sheet settings.", "error"));
   });
@@ -46371,7 +47040,8 @@ function wireEvents() {
   });
   els.statsChartMetricSelect?.addEventListener("change", () => {
     state.homeChartMetric = els.statsChartMetricSelect.value || "glass";
-    if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
+    if (state.homeChartMetric === "production-count-daily") state.homeChartSort = "source";
+    else if (state.homeChartSort === "source") state.homeChartSort = "value-desc";
     state.homeChartSelectedLabel = "";
     renderStatisticsAnalytics();
     if (state.homeChartMetric === "production-count") void ensureStatisticsProductionReportV514();
@@ -46476,7 +47146,7 @@ function wireEvents() {
   });
   els.headerGlobalSearchInput?.addEventListener("input", () => {
     window.clearTimeout(runGlobalSearch._timer);
-    runGlobalSearch._timer = window.setTimeout(() => runGlobalSearch().catch((error) => showInlineError(error.message)), 180);
+    runGlobalSearch._timer = window.setTimeout(() => runGlobalSearch().catch((error) => showInlineError(error.message)), 90);
   });
   els.headerGlobalSearchInput?.addEventListener("focus", () => {
     const query = els.headerGlobalSearchInput?.value.trim() || "";
@@ -46761,9 +47431,20 @@ function wireEvents() {
     if (!clickedDateControl && !clickedDateSelectMenu) closePrintDateCalendar();
   });
 
+  document.getElementById("printFilterModeSwitchV532")?.addEventListener("click", () => {
+    setPrintFilterModeV532(printFilterModeIsExcludeV532() ? "include" : "exclude").catch((error) => showInlineError(error.message, false));
+  });
   els.printRouteOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-route-group]');
     if (!changed) return;
+    if (printFilterModeIsExcludeV532()) {
+      const value = String(changed.value || "");
+      if (value !== "airport") {
+        if (changed.checked) state.printExcludedRoutesV532.add(value); else state.printExcludedRoutesV532.delete(value);
+      }
+      schedulePrintSelectionPreview();
+      return;
+    }
     syncPrintAllRouteChoice(els.printRouteOptions, changed);
     commitPrintRouteSelectionFromControls();
     renderPrintFilterChoices({ preserveSelections: true }).catch((error) => showInlineError(error.message, false));
@@ -46771,27 +47452,53 @@ function wireEvents() {
   els.printStatusOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-status]');
     if (!changed) return;
+    if (printFilterModeIsExcludeV532()) {
+      if (!changed.hasAttribute('data-print-status-all')) {
+        if (changed.checked) state.printExcludedStatusesV532.add(String(changed.value || "")); else state.printExcludedStatusesV532.delete(String(changed.value || ""));
+      }
+      schedulePrintSelectionPreview(); return;
+    }
     syncPrintAllFilterChoice(els.printStatusOptions, changed, 'input[data-print-status-all]', 'input[data-print-status]:not([data-print-status-all])');
+    state.printIncludedStatusesV532 = new Set(selectedPrintStatusValues());
     schedulePrintSelectionPreview();
   });
   els.printAttentionOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-attention]');
     if (!changed) return;
+    if (printFilterModeIsExcludeV532()) {
+      if (!changed.hasAttribute('data-print-attention-all')) {
+        if (changed.checked) state.printExcludedAttentionV532.add(String(changed.value || "")); else state.printExcludedAttentionV532.delete(String(changed.value || ""));
+      }
+      schedulePrintSelectionPreview(); return;
+    }
     syncPrintAllFilterChoice(els.printAttentionOptions, changed, 'input[data-print-attention-all]', 'input[data-print-attention]:not([data-print-attention-all])');
+    state.printIncludedAttentionV532 = new Set(selectedPrintAttentionValues());
     schedulePrintSelectionPreview();
   });
   els.printMachineOptions?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-machine]');
     if (!changed) return;
+    if (printFilterModeIsExcludeV532()) {
+      if (!changed.hasAttribute('data-print-machine-all')) {
+        if (changed.checked) state.printExcludedMachinesV532.add(String(changed.value || "")); else state.printExcludedMachinesV532.delete(String(changed.value || ""));
+      }
+      schedulePrintSelectionPreview(); return;
+    }
     syncPrintAllFilterChoice(els.printMachineOptions, changed, 'input[data-print-machine-all]', 'input[data-print-machine]:not([data-print-machine-all])');
+    state.printIncludedMachinesV532 = new Set(selectedPrintMachineValuesV520());
     schedulePrintSelectionPreview();
   });
   els.printOptionsGlassType?.addEventListener("change", (event) => {
     const changed = event.target.closest('input[data-print-all-glass], input[data-print-glass-type]');
     if (!changed) return;
+    if (printFilterModeIsExcludeV532()) {
+      if (changed.matches('input[data-print-glass-type]')) {
+        const value = String(changed.dataset.printGlassValue || changed.value || "").trim();
+        if (changed.checked) state.printExcludedGlassV532.add(value); else state.printExcludedGlassV532.delete(value);
+      }
+      schedulePrintSelectionPreview(); return;
+    }
     syncPrintAllGlassChoice(changed);
-    // Commit first, then preview from state. This prevents selected glass types
-    // from being compared against a control tree that is being rerendered.
     updatePrintAllGlassState();
     schedulePrintSelectionPreview();
   });
@@ -48370,10 +49077,7 @@ function wireEvents() {
 
       state.manualEditDirty = false;
       showPage(pageButton.dataset.pageTarget);
-      if (!isMobileSidebarLayout() && els.appSidebar?.contains(pageButton)) {
-        els.appSidebar.classList.add("is-hover-suppressed-v527");
-        pageButton.blur();
-      }
+      if (!isMobileSidebarLayout() && els.appSidebar?.contains(pageButton)) pageButton.blur();
       return;
     }
     const supersededFilterButton = event.target.closest("[data-superseded-filter]");
@@ -48847,6 +49551,11 @@ function wireEvents() {
       }
       return;
     }
+    const scanModeToggleV532 = event.target.closest("[data-scan-filter-mode-toggle-v532]");
+    if (scanModeToggleV532) {
+      setScanFilterModeV532(state.scanFilterModeV532 === "exclude" ? "include" : "exclude");
+      return;
+    }
     const filterButton = event.target.closest("[data-filter]");
     if (filterButton) {
       const filter = filterButton.dataset.filter || "all";
@@ -48858,10 +49567,33 @@ function wireEvents() {
       scheduleScanRender();
       return;
     }
+    const excludeScanFilterButton = event.target.closest("[data-exclude-filter]");
+    if (excludeScanFilterButton) {
+      toggleScanExcludeFilterV531(excludeScanFilterButton.dataset.excludeFilter || "");
+      scheduleScanRender();
+      return;
+    }
     const removeScanFilterButton = event.target.closest("[data-remove-scan-filter]");
     if (removeScanFilterButton) {
       state.activeFilters.delete(removeScanFilterButton.dataset.removeScanFilter || "");
       state.pageIndex = 1;
+      syncScanFilterButtons();
+      scheduleScanRender();
+      return;
+    }
+    const removeScanExclusionButton = event.target.closest("[data-remove-scan-exclusion]");
+    if (removeScanExclusionButton) {
+      state.excludedFiltersV531.delete(removeScanExclusionButton.dataset.removeScanExclusion || "");
+      state.pageIndex = 1;
+      syncScanFilterButtons();
+      scheduleScanRender();
+      return;
+    }
+    const removeGlassExclusionButtonV532 = event.target.closest("[data-remove-glass-exclusion-v532]");
+    if (removeGlassExclusionButtonV532) {
+      state.excludedGlassTypeFiltersV532.delete(removeGlassExclusionButtonV532.dataset.removeGlassExclusionV532 || "");
+      state.pageIndex = 1;
+      state.lastGlassFilterSignature = "";
       syncScanFilterButtons();
       scheduleScanRender();
       return;
@@ -48882,7 +49614,10 @@ function wireEvents() {
     }
     if (event.target.closest("[data-clear-scan-filters]")) {
       state.activeFilters.clear();
+      state.excludedFiltersV531.clear();
       state.glassTypeFilters.clear();
+      state.excludedGlassTypeFiltersV532.clear();
+      state.scanFilterModeV532 = "include";
       state.scanSortKey = "";
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
@@ -48893,15 +49628,14 @@ function wireEvents() {
     const glassFilterButton = event.target.closest("[data-glass-filter]");
     if (glassFilterButton) {
       const glassType = glassFilterButton.dataset.glassFilter || "all";
-      if (glassType === "all") {
-        state.glassTypeFilters.clear();
-      } else if (state.glassTypeFilters.has(glassType)) {
-        state.glassTypeFilters.delete(glassType);
-      } else {
-        state.glassTypeFilters.add(glassType);
-      }
+      const targetSet = state.glassTypeFilters;
+      if (glassType === "all") targetSet.clear();
+      else if (targetSet.has(glassType)) targetSet.delete(glassType);
+      else targetSet.add(glassType);
+      state.excludedGlassTypeFiltersV532.clear();
       state.pageIndex = 1;
       state.lastGlassFilterSignature = "";
+      syncScanFilterButtons();
       scheduleScanRender();
       return;
     }
@@ -51048,6 +51782,7 @@ init().catch((error) => {
   let markerBatchCache = { key: "", loadedAt: 0, results: {} };
   const reviewedSignatureByList = new Map();
   const reviewedRejectSignatureByListV529 = new Map();
+  const reviewedPrioritySignatureByListV530 = { remake: new Map(), rush: new Map() };
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -51328,21 +52063,47 @@ init().catch((error) => {
   function showAutomationToast(item) {
     if (!toast || !item) return;
     const type = String(item.type || "notice").toLowerCase();
+    const attention = item?.details?.attentionSummary || {};
+    const attentionLabels = [
+      Number(attention.newOrders || 0) > 0 ? "New Orders" : "",
+      Number(attention.internalRejects || 0) > 0 ? "New Internal Rejects" : "",
+      Number(attention.externalRemakes || 0) > 0 ? "New External Remakes" : "",
+      Number(attention.rushes || 0) > 0 ? "New Rushes" : "",
+    ].filter(Boolean);
     toast.dataset.type = type;
-    toast.innerHTML = `
-      <span class="automation-update-toast-icon" aria-hidden="true">${typeSymbol(type)}</span>
-      <span class="automation-update-toast-copy">
-        <strong>${escapeHtml(item.title || "Delivery lists updated")}</strong>
-        <span>${escapeHtml(item.message || "The delivery-list catalog has been checked.")}</span>
-      </span>
-      <button class="automation-update-toast-view" type="button">View run</button>
-      <button class="automation-update-toast-close gui-close-button" type="button" aria-label="Dismiss notification">×</button>`;
-    toast.querySelector(".automation-update-toast-view")?.addEventListener("click", () => openNotification(item));
+    toast.classList.toggle("is-attention-v530", attentionLabels.length > 0);
+    if (attentionLabels.length) {
+      const attentionColorsV530 = attentionColorMapV530();
+      const primaryAttentionColorV530 = Number(attention.newOrders || 0) > 0 ? attentionColorsV530.new_order
+        : Number(attention.internalRejects || 0) > 0 ? attentionColorsV530.internal_reject
+          : Number(attention.externalRemakes || 0) > 0 ? attentionColorsV530.external_remake
+            : attentionColorsV530.rush;
+      toast.style.setProperty("--automation-attention-color-v530", primaryAttentionColorV530);
+      toast.innerHTML = `
+        <span class="automation-update-toast-icon" aria-hidden="true">!</span>
+        <span class="automation-update-toast-copy">
+          <strong>A+W import</strong>
+          <span>${escapeHtml(attentionLabels.join(" · "))}</span>
+        </span>
+        <button class="automation-update-toast-close gui-close-button" type="button" aria-label="Dismiss notification">×</button>`;
+      window.playAppSound?.(type === "error" || item?.details?.succeeded === false ? "import_failed" : "import_success", { force: true });
+    } else {
+      toast.innerHTML = `
+        <span class="automation-update-toast-icon" aria-hidden="true">${typeSymbol(type)}</span>
+        <span class="automation-update-toast-copy">
+          <strong>${escapeHtml(item.title || "Delivery lists updated")}</strong>
+          <span>${escapeHtml(item.message || "The delivery-list catalog has been checked.")}</span>
+        </span>
+        <button class="automation-update-toast-view" type="button">View run</button>
+        <button class="automation-update-toast-close gui-close-button" type="button" aria-label="Dismiss notification">×</button>`;
+      toast.querySelector(".automation-update-toast-view")?.addEventListener("click", () => openNotification(item));
+      window.playAppSound?.(type === "error" || item?.details?.succeeded === false ? "import_failed" : "import_success", { force: true });
+    }
     toast.querySelector(".automation-update-toast-close")?.addEventListener("click", dismissToast);
     toast.hidden = false;
     requestAnimationFrame(() => toast.classList.add("is-visible"));
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(dismissToast, 20000);
+    toastTimer = window.setTimeout(dismissToast, attentionLabels.length ? 12000 : 20000);
   }
 
   async function refreshNotifications(options = {}) {
@@ -51354,6 +52115,7 @@ init().catch((error) => {
         null,
       );
       const nextId = Number(newest?.id || 0);
+      let automationAttentionShownV530 = false;
       if (nextId > newestAutomationId) {
         const shouldToast = newestAutomationId > 0;
         newestAutomationId = nextId;
@@ -51363,7 +52125,10 @@ init().catch((error) => {
           // the next render cannot reuse a stale "no updates" response.
           flagsByList.clear();
           reviewedSignatureByList.clear();
+          reviewedPrioritySignatureByListV530.remake.clear();
+          reviewedPrioritySignatureByListV530.rush.clear();
           showAutomationToast(newest);
+          automationAttentionShownV530 = Number(newest?.details?.attentionSummary?.internalRejects || 0) > 0;
           document.dispatchEvent(new CustomEvent("dls:delivery-list-import-history-changed", { detail: { notification: newest } }));
           const activeListId = String(state?.activeListId || document.getElementById("deliveryStageSelect")?.value || "").trim();
           if (activeListId) {
@@ -51379,7 +52144,7 @@ init().catch((error) => {
       if (nextRejectId > newestRejectId) {
         const shouldToastReject = newestRejectId > 0;
         newestRejectId = nextRejectId;
-        if (shouldToastReject && nextRejectId > lastSeenId()) showInternalRejectToast(newestReject);
+        if (shouldToastReject && nextRejectId > lastSeenId() && !automationAttentionShownV530) showInternalRejectToast(newestReject);
       }
       if (options.markRead) await markAllRead();
       else renderNotifications();
@@ -51393,25 +52158,44 @@ init().catch((error) => {
 
   function normalizeFlags(payload, listId) {
     const items = Array.isArray(payload?.items) ? payload.items : [];
-    const noticeIds = Array.isArray(payload?.noticeIds)
-      ? payload.noticeIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
-      : items.flatMap((item) => item.userUpdateNoticeIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
-    const rejectIdsV529 = Array.isArray(payload?.rejectIds)
-      ? payload.rejectIds.map(Number).filter((id) => id > 0).sort((a, b) => a - b)
-      : items.flatMap((item) => item.unseenRejectIds || []).map(Number).filter((id) => id > 0).sort((a, b) => a - b);
+    const normalizeIds = (values) => [...new Set((values || []).map(Number).filter((id) => id > 0))].sort((a, b) => a - b);
+    const noticeIds = normalizeIds(Array.isArray(payload?.noticeIds)
+      ? payload.noticeIds
+      : items.flatMap((item) => item.userUpdateNoticeIds || []));
+    const orderNoticeIds = normalizeIds(Array.isArray(payload?.orderNoticeIds)
+      ? payload.orderNoticeIds
+      : items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "order") === "order").flatMap((item) => item.userUpdateNoticeIds || []));
+    const remakeNoticeIds = normalizeIds(Array.isArray(payload?.remakeNoticeIds)
+      ? payload.remakeNoticeIds
+      : items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "") === "remake").flatMap((item) => item.userUpdateNoticeIds || []));
+    const rushNoticeIds = normalizeIds(Array.isArray(payload?.rushNoticeIds)
+      ? payload.rushNoticeIds
+      : items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "") === "rush").flatMap((item) => item.userUpdateNoticeIds || []));
+    const rejectIdsV529 = normalizeIds(Array.isArray(payload?.rejectIds)
+      ? payload.rejectIds
+      : items.flatMap((item) => item.unseenRejectIds || []));
     return {
       listId,
-      pendingLineCount: Number(payload?.pendingLineCount || items.filter((item) => item.hasUnseenUpdate).length || 0),
-      pendingRejectCount: Number(payload?.pendingRejectCount || items.filter((item) => item.hasUnseenReject).length || 0),
-      rejectIds: [...new Set(rejectIdsV529)],
-      rejectSignatureV529: [...new Set(rejectIdsV529)].join(","),
-      newLineCount: Number(payload?.newLineCount || items.filter((item) => item.userUpdateState === "new").length || 0),
-      updatedLineCount: Number(payload?.updatedLineCount || items.filter((item) => item.userUpdateState === "updated").length || 0),
-      totalLineCount: Number(payload?.totalLineCount || items.length || 0),
+      pendingLineCount: Number(payload?.pendingLineCount ?? items.filter((item) => item.hasUnseenUpdate).length ?? 0),
+      pendingOrderCount: Number(payload?.pendingOrderCount ?? items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "order") === "order").length ?? 0),
+      pendingRemakeCount: Number(payload?.pendingRemakeCount ?? items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "") === "remake").length ?? 0),
+      pendingRushCount: Number(payload?.pendingRushCount ?? items.filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "") === "rush").length ?? 0),
+      pendingRejectCount: Number(payload?.pendingRejectCount ?? items.filter((item) => item.hasUnseenReject).length ?? 0),
+      rejectIds: rejectIdsV529,
+      rejectSignatureV529: rejectIdsV529.join(","),
+      newLineCount: Number(payload?.newLineCount ?? items.filter((item) => item.userUpdateState === "new").length ?? 0),
+      updatedLineCount: Number(payload?.updatedLineCount ?? items.filter((item) => item.userUpdateState === "updated").length ?? 0),
+      totalLineCount: Number(payload?.totalLineCount ?? items.length ?? 0),
       listRevision: Number(payload?.listRevision || items[0]?.listRevision || 1),
       isNewStage: Boolean(payload?.isNewStage),
-      noticeIds: [...new Set(noticeIds)],
-      signature: [...new Set(noticeIds)].join(","),
+      noticeIds,
+      signature: noticeIds.join(","),
+      orderNoticeIds,
+      orderSignatureV530: orderNoticeIds.join(","),
+      remakeNoticeIds,
+      remakeSignatureV530: remakeNoticeIds.join(","),
+      rushNoticeIds,
+      rushSignatureV530: rushNoticeIds.join(","),
       items,
     };
   }
@@ -51438,6 +52222,7 @@ init().catch((error) => {
         hasUnseenReject: Boolean(current.hasUnseenReject),
         unseenRejectIds: Array.isArray(current.unseenRejectIds) ? current.unseenRejectIds.map(Number).filter((id) => id > 0) : [],
         hasUnseenUpdate: Boolean(current.hasUnseenUpdate),
+        updateReviewKind: String(current.updateReviewKind || "order"),
         userUpdateState: String(current.userUpdateState || ""),
         userUpdateNoticeIds: Array.isArray(current.userUpdateNoticeIds) ? current.userUpdateNoticeIds.slice() : [],
       };
@@ -51446,6 +52231,8 @@ init().catch((error) => {
     if (options.render !== false && typeof renderScanPage === "function") renderScanPage();
     renderReviewControl(flags);
     renderRejectReviewControlV529(flags);
+    renderPriorityReviewControlsV530(flags);
+    renderReviewAllControlV531(flags);
     document.dispatchEvent(new CustomEvent("dls:line-update-flags-applied", { detail: flags }));
   }
 
@@ -51510,8 +52297,8 @@ init().catch((error) => {
     const stageName = activeList
       ? scanStageLabel(activeList)
       : scanStageLabel({ stage: fallbackItem.stage || state.meta?.stage || "", scanner: fallbackItem.scanner || state.meta?.scanner || "" });
-    const count = Math.max(Number(flags?.pendingLineCount || 0), 0);
-    const newOrders = Math.max(Number(flags?.newLineCount || 0), 0);
+    const count = Math.max(Number(flags?.pendingOrderCount || 0), 0);
+    const newOrders = (flags?.items || []).filter((item) => item.hasUnseenUpdate && String(item.updateReviewKind || "order") === "order" && item.userUpdateState === "new").length;
     if (flags?.isNewStage) {
       return {
         kind: "new-stage",
@@ -51546,33 +52333,207 @@ init().catch((error) => {
     const elements = reviewControlElements();
     const activeListId = String(state?.activeListId || "");
     if (!elements.control) return;
-    if (!flags || !flags.pendingLineCount || String(flags.listId) !== activeListId) {
+    if (!flags || !flags.pendingOrderCount || String(flags.listId) !== activeListId) {
       elements.control.hidden = true;
       return;
     }
 
     const updatedFilterActive = Boolean(state?.activeFilters?.has?.("updated"));
-    const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.signature && Boolean(flags.signature);
+    const reviewComplete = reviewedSignatureByList.get(flags.listId) === flags.orderSignatureV530 && Boolean(flags.orderSignatureV530);
+    const reviewModeActiveV531 = updatedFilterActive && reviewComplete;
     const copy = updateReviewCopy(flags);
     elements.control.dataset.updateKind = copy.kind;
     if (elements.summary) elements.summary.textContent = copy.summary;
     if (elements.review) {
-      const reviewLabel = updatedFilterActive ? "Review Open" : copy.reviewLabel;
+      const reviewLabel = reviewModeActiveV531 ? "Review Open" : copy.reviewLabel;
       elements.review.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="16" r="3"></circle><path d="m19.2 18.2 2 2"></path></svg><span>${escapeHtml(reviewLabel)}</span>`;
-      elements.review.disabled = updatedFilterActive;
+      elements.review.disabled = reviewModeActiveV531;
       elements.review.onclick = () => reviewUpdates(flags);
     }
     if (elements.acknowledge) {
-      elements.acknowledge.hidden = !updatedFilterActive;
-      elements.acknowledge.disabled = !updatedFilterActive || !reviewComplete;
+      elements.acknowledge.hidden = !reviewModeActiveV531;
+      elements.acknowledge.disabled = !reviewModeActiveV531 || !reviewComplete;
       elements.acknowledge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4 4L19 7"></path></svg><span>Mark Reviewed</span>`;
       elements.acknowledge.title = reviewComplete
         ? "Mark the displayed delivery-list changes reviewed for your account"
         : "Review the new delivery-list work first";
       elements.acknowledge.onclick = () => acknowledgeUpdates(flags);
     }
-    elements.control.classList.toggle("is-reviewing", updatedFilterActive);
+    elements.control.classList.toggle("is-reviewing", reviewModeActiveV531);
     elements.control.hidden = false;
+  }
+
+  function reviewPendingCountV531(flags = currentFlags) {
+    return ["pendingOrderCount", "pendingRejectCount", "pendingRemakeCount", "pendingRushCount"].reduce((sum, key) => sum + Math.max(Number(flags?.[key] || 0), 0), 0);
+  }
+
+  function renderReviewAllControlV531(flags = currentFlags) {
+    const toolbar = document.getElementById("scanReviewToolbarV531");
+    const buttonElement = document.getElementById("scanReviewAllBtnV531");
+    const summaryElement = document.getElementById("scanReviewAllSummaryV531");
+    if (!toolbar || !buttonElement) return;
+    const count = reviewPendingCountV531(flags);
+    const active = Boolean(flags && count && String(flags.listId || "") === String(state?.activeListId || ""));
+    toolbar.hidden = !active;
+    if (!active) return;
+    if (summaryElement) {
+      const parts = [
+        [Number(flags.pendingOrderCount || 0), "orders"],
+        [Number(flags.pendingRemakeCount || 0), "remakes"],
+        [Number(flags.pendingRejectCount || 0), "rejects"],
+        [Number(flags.pendingRushCount || 0), "rushes"],
+      ].filter(([value]) => value > 0).map(([value, label]) => `${value} ${label}`);
+      summaryElement.textContent = parts.join(" · ") || `${count} item${count === 1 ? "" : "s"} to review`;
+    }
+    buttonElement.onclick = () => acknowledgeAllReviewsV531(flags);
+  }
+
+  async function acknowledgeAllReviewsV531(flags = currentFlags) {
+    if (!flags?.listId || !reviewPendingCountV531(flags)) return;
+    const buttonElement = document.getElementById("scanReviewAllBtnV531");
+    if (buttonElement) { buttonElement.disabled = true; buttonElement.querySelector("span").textContent = "Clearing..."; }
+    try {
+      const updateKinds = [
+        ["order", flags.orderNoticeIds],
+        ["remake", flags.remakeNoticeIds],
+        ["rush", flags.rushNoticeIds],
+      ];
+      const affectedListIds = new Set([String(flags.listId)]);
+      for (const [reviewKind, noticeIds] of updateKinds) {
+        if (!Array.isArray(noticeIds) || !noticeIds.length) continue;
+        const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
+          method: "POST",
+          body: JSON.stringify({ listId: flags.listId, noticeIds, reviewKind }),
+        });
+        for (const listId of acknowledgement?.acknowledgedListIds || []) affectedListIds.add(String(listId || ""));
+      }
+      if (Array.isArray(flags.rejectIds) && flags.rejectIds.length) {
+        await jsonFetch(REJECT_ACK_ENDPOINT_V529, {
+          method: "POST",
+          body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds }),
+        });
+      }
+      for (const listId of affectedListIds) {
+        if (!listId) continue;
+        flagsByList.delete(listId);
+        reviewedSignatureByList.delete(listId);
+        reviewedRejectSignatureByListV529.delete(listId);
+        reviewedPrioritySignatureByListV530.remake.delete(listId);
+        reviewedPrioritySignatureByListV530.rush.delete(listId);
+        state?.pendingUpdateStages?.delete?.(listId);
+        state?.pendingRejectStagesV529?.delete?.(listId);
+        state?.pendingRemakeStagesV530?.delete?.(listId);
+        state?.pendingRushStagesV530?.delete?.(listId);
+      }
+      SCAN_REVIEW_FILTER_KEYS_V531.forEach((key) => state.activeFilters.delete(key));
+      state.excludedFiltersV531.clear();
+      state.priorityReviewKindV530 = "";
+      state.pageIndex = 1;
+      invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
+      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
+      await refreshPendingUpdateDates({ force: true });
+      if (reviewPendingCountV531(refreshed) > 0) throw new Error("New A+W review items arrived while the review queue was being cleared.");
+      syncScanFilterButtons();
+      if (typeof renderScanPage === "function") renderScanPage();
+      renderReviewAllControlV531(refreshed);
+      if (typeof showSaveConfirmation === "function") showSaveConfirmation("All new review items are marked reviewed for your account.");
+      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId, acknowledgedListIds: [...affectedListIds] } }));
+    } catch (error) {
+      if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
+      if (buttonElement) buttonElement.disabled = false;
+    } finally {
+      if (buttonElement?.isConnected) {
+        const span = buttonElement.querySelector("span");
+        if (span) span.textContent = "Mark All Reviewed";
+      }
+    }
+  }
+
+  function priorityReviewConfigV530(kind) {
+    return kind === "remake"
+      ? { countKey: "pendingRemakeCount", signatureKey: "remakeSignatureV530", noticeKey: "remakeNoticeIds", filter: "remakes", stageMap: "pendingRemakeStagesV530", control: "scanRemakeReviewControlV530", summary: "scanRemakeReviewSummaryV530", review: "scanRemakeReviewBtnV530", acknowledge: "scanRemakeMarkReviewedBtnV530", singular: "External Remake", plural: "External Remakes" }
+      : { countKey: "pendingRushCount", signatureKey: "rushSignatureV530", noticeKey: "rushNoticeIds", filter: "rushes", stageMap: "pendingRushStagesV530", control: "scanRushReviewControlV530", summary: "scanRushReviewSummaryV530", review: "scanRushReviewBtnV530", acknowledge: "scanRushMarkReviewedBtnV530", singular: "Rush", plural: "Rushes" };
+  }
+
+  function renderPriorityReviewControlV530(kind, flags = currentFlags) {
+    const config = priorityReviewConfigV530(kind);
+    const control = document.getElementById(config.control);
+    if (!control) return;
+    const count = Math.max(Number(flags?.[config.countKey] || 0), 0);
+    if (!flags || !count || String(flags.listId) !== String(state?.activeListId || "")) {
+      control.hidden = true;
+      return;
+    }
+    const signature = String(flags?.[config.signatureKey] || "");
+    const filterActive = Boolean(state?.activeFilters?.has?.(config.filter)) && state.priorityReviewKindV530 === kind;
+    const reviewed = reviewedPrioritySignatureByListV530[kind].get(flags.listId) === signature && Boolean(signature);
+    const summaryElement = document.getElementById(config.summary);
+    if (summaryElement) summaryElement.textContent = `${count} ${count === 1 ? config.singular : config.plural} need your review`;
+    const reviewButton = document.getElementById(config.review);
+    if (reviewButton) {
+      reviewButton.disabled = filterActive;
+      reviewButton.querySelector("span").textContent = filterActive ? "Review Open" : `Review ${kind === "remake" ? "Remakes" : "Rushes"}`;
+      reviewButton.onclick = () => {
+        applyScanReviewPresetV531(kind);
+        reviewedPrioritySignatureByListV530[kind].set(flags.listId, signature);
+        if (typeof renderScanPage === "function") renderScanPage();
+        renderReviewControl(flags);
+        renderRejectReviewControlV529(flags);
+        renderPriorityReviewControlsV530(flags);
+      };
+    }
+    const acknowledgeButton = document.getElementById(config.acknowledge);
+    if (acknowledgeButton) {
+      acknowledgeButton.hidden = !filterActive;
+      acknowledgeButton.disabled = !filterActive || !reviewed;
+      acknowledgeButton.onclick = () => acknowledgePriorityV530(kind, flags);
+    }
+    control.classList.toggle("is-reviewing", filterActive);
+    control.hidden = false;
+  }
+
+  function renderPriorityReviewControlsV530(flags = currentFlags) {
+    renderPriorityReviewControlV530("remake", flags);
+    renderPriorityReviewControlV530("rush", flags);
+  }
+
+  async function acknowledgePriorityV530(kind, flags = currentFlags) {
+    const config = priorityReviewConfigV530(kind);
+    const signature = String(flags?.[config.signatureKey] || "");
+    if (!flags?.listId || !signature || reviewedPrioritySignatureByListV530[kind].get(flags.listId) !== signature) {
+      if (typeof showFloatingNotice === "function") showFloatingNotice(`Review the ${config.plural} before marking them reviewed.`, "notice");
+      return;
+    }
+    const buttonElement = document.getElementById(config.acknowledge);
+    if (buttonElement) buttonElement.disabled = true;
+    try {
+      const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify({ listId: flags.listId, noticeIds: flags[config.noticeKey], reviewKind: kind }),
+      });
+      const affectedListIds = Array.isArray(acknowledgement?.acknowledgedListIds)
+        ? acknowledgement.acknowledgedListIds.map((value) => String(value || "")).filter(Boolean)
+        : [flags.listId];
+      affectedListIds.forEach((listId) => {
+        flagsByList.delete(listId);
+        reviewedPrioritySignatureByListV530[kind].delete(listId);
+        state?.[config.stageMap]?.delete?.(listId);
+      });
+      state.activeFilters?.delete?.(config.filter);
+      state.excludedFiltersV531.clear();
+      if (state.priorityReviewKindV530 === kind) state.priorityReviewKindV530 = "";
+      state.pageIndex = 1;
+      invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
+      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
+      await refreshPendingUpdateDates({ force: true });
+      if (Number(refreshed?.[config.countKey] || 0) > 0) throw new Error(`New ${config.plural} arrived while you were reviewing.`);
+      if (typeof renderScanPage === "function") renderScanPage();
+      renderPriorityReviewControlsV530(refreshed);
+      if (typeof showSaveConfirmation === "function") showSaveConfirmation(`${config.plural} are marked reviewed for your account.`);
+    } catch (error) {
+      if (buttonElement) buttonElement.disabled = false;
+      if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
+    }
   }
 
   function rejectReviewControlElementsV529() {
@@ -51595,27 +52556,29 @@ init().catch((error) => {
     }
     const filterActive = Boolean(state?.activeFilters?.has?.("internal-rejects"));
     const reviewed = reviewedRejectSignatureByListV529.get(flags.listId) === flags.rejectSignatureV529 && Boolean(flags.rejectSignatureV529);
+    const reviewModeActiveV531 = filterActive && reviewed;
     elements.control.dataset.updateKind = "internal-rejects-v529";
     if (elements.summary) elements.summary.textContent = state.language === "es"
       ? `${count} rechazo${count === 1 ? " interno necesita" : "s internos necesitan"} su revision`
       : `${count} Internal Reject${count === 1 ? "" : "s"} need your review`;
     if (elements.review) {
-      elements.review.disabled = filterActive;
-      elements.review.querySelector("span").textContent = filterActive ? "Review Open" : "Review Rejects";
+      elements.review.disabled = reviewModeActiveV531;
+      elements.review.querySelector("span").textContent = reviewModeActiveV531 ? "Review Open" : "Review Rejects";
       elements.review.onclick = () => {
-        state?.activeFilters?.add?.("internal-rejects");
-        state.pageIndex = 1;
+        applyScanReviewPresetV531("reject");
         reviewedRejectSignatureByListV529.set(flags.listId, flags.rejectSignatureV529);
         if (typeof renderScanPage === "function") renderScanPage();
+        renderReviewControl(flags);
         renderRejectReviewControlV529(flags);
+        renderPriorityReviewControlsV530(flags);
       };
     }
     if (elements.acknowledge) {
-      elements.acknowledge.hidden = !filterActive;
-      elements.acknowledge.disabled = !filterActive || !reviewed;
+      elements.acknowledge.hidden = !reviewModeActiveV531;
+      elements.acknowledge.disabled = !reviewModeActiveV531 || !reviewed;
       elements.acknowledge.onclick = () => acknowledgeRejectsV529(flags);
     }
-    elements.control.classList.toggle("is-reviewing", filterActive);
+    elements.control.classList.toggle("is-reviewing", reviewModeActiveV531);
     elements.control.hidden = false;
   }
 
@@ -51635,6 +52598,8 @@ init().catch((error) => {
       reviewedRejectSignatureByListV529.delete(flags.listId);
       state?.pendingRejectStagesV529?.delete?.(flags.listId);
       state?.activeFilters?.delete?.("internal-rejects");
+      state.excludedFiltersV531.clear();
+      invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
       const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
       await refreshPendingUpdateDates({ force: true });
       if (typeof renderScanPage === "function") renderScanPage();
@@ -51656,7 +52621,7 @@ init().catch((error) => {
   }
 
   function maybeShowUpdatePrompt(flags) {
-    if (!flags?.pendingLineCount || !flags.signature) return;
+    if (!flags?.pendingOrderCount || !flags.orderSignatureV530) return;
     if (currentPromptListId === flags.listId && document.getElementById("lineUpdateReviewPromptV135")) return;
     closeUpdatePrompt();
     currentPromptListId = flags.listId;
@@ -51708,20 +52673,17 @@ init().catch((error) => {
   }
 
   function reviewUpdates(flags = currentFlags) {
-    if (!flags?.signature) return;
-    if (typeof state === "object") {
-      state.activeFilters?.add?.("updated");
-      state.pageIndex = 1;
-    }
-    reviewedSignatureByList.set(flags.listId, flags.signature);
+    if (!flags?.orderSignatureV530) return;
+    if (typeof state === "object") applyScanReviewPresetV531("order");
+    reviewedSignatureByList.set(flags.listId, flags.orderSignatureV530);
     if (typeof renderScanPage === "function") renderScanPage();
     renderReviewControl(flags);
     nudgeUpdateReviewRowsIntoView();
   }
 
   async function acknowledgeUpdates(flags = currentFlags) {
-    if (!flags?.listId || !flags?.signature) return;
-    if (reviewedSignatureByList.get(flags.listId) !== flags.signature) {
+    if (!flags?.listId || !flags?.orderSignatureV530) return;
+    if (reviewedSignatureByList.get(flags.listId) !== flags.orderSignatureV530) {
       if (typeof showFloatingNotice === "function") showFloatingNotice("Review the delivery-list changes before marking them reviewed.", "notice");
       return;
     }
@@ -51733,7 +52695,7 @@ init().catch((error) => {
     try {
       const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
         method: "POST",
-        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.noticeIds }),
+        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.orderNoticeIds, reviewKind: "order" }),
       });
       const affectedListIds = Array.isArray(acknowledgement?.acknowledgedListIds)
         ? acknowledgement.acknowledgedListIds.map((value) => String(value || "")).filter(Boolean)
@@ -51747,12 +52709,14 @@ init().catch((error) => {
       // refresh below rebuild any marker that still belongs to this user.
       if (typeof renderDeliveryListSelect === "function") renderDeliveryListSelect();
       if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
+      invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
       const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      if (refreshed.pendingLineCount > 0) {
+      if (refreshed.pendingOrderCount > 0) {
         throw new Error("New delivery-list changes arrived while you were reviewing. Review the latest changes before clearing them.");
       }
       if (typeof state === "object") {
         state.activeFilters?.delete?.("updated");
+        state.excludedFiltersV531.clear();
         state.pageIndex = 1;
       }
       if (typeof renderScanPage === "function") renderScanPage();
@@ -51817,13 +52781,25 @@ init().catch((error) => {
     acknowledge: acknowledgeUpdates,
     reviewRejectsV529: () => renderRejectReviewControlV529(currentFlags),
     acknowledgeRejectsV529,
+    renderPriorityReviewsV530: () => renderPriorityReviewControlsV530(currentFlags),
     getCurrent: () => currentFlags,
     getCached: (listId) => flagsByList.get(String(listId || "")) || null,
     clearCache: (listId = "") => listId ? flagsByList.delete(String(listId)) : flagsByList.clear(),
   };
 
-  document.addEventListener("dls:scan-filters-changed", () => { renderReviewControl(currentFlags); renderRejectReviewControlV529(currentFlags); });
-  document.addEventListener("dls:user-line-updates-reviewed", () => renderReviewControl(currentFlags));
+  document.addEventListener("dls:scan-filters-changed", () => {
+    if (!state.activeFilters?.has?.("remakes") && !state.activeFilters?.has?.("rushes")) state.priorityReviewKindV530 = "";
+    renderReviewControl(currentFlags);
+    renderRejectReviewControlV529(currentFlags);
+    renderPriorityReviewControlsV530(currentFlags);
+    renderReviewAllControlV531(currentFlags);
+  });
+  document.addEventListener("dls:user-line-updates-reviewed", () => {
+    renderReviewControl(currentFlags);
+    renderRejectReviewControlV529(currentFlags);
+    renderPriorityReviewControlsV530(currentFlags);
+    renderReviewAllControlV531(currentFlags);
+  });
 
   document.addEventListener("dls:delivery-list-catalog-synced", () => {
     flagsByList.clear();

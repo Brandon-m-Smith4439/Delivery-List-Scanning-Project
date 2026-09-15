@@ -30,6 +30,43 @@ from database.time_utils import normalize_aw_plant_timestamp, normalize_utc_time
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def automation_test_config_payload(working_root: Path) -> dict[str, object]:
+    """Build non-secret maintained defaults when release packages omit local config."""
+    working_root = Path(working_root)
+    return {
+        "Version": "v121",
+        "ProjectRoot": str(ROOT),
+        "WorkingRoot": str(working_root),
+        "DestinationFolder": str(working_root / "Temp Delivery Lists"),
+        "Automation": {"Mode": "sql-export-and-import", "ScheduleEnabled": False, "AllowWebGuiControl": True},
+        "Schedule": {
+            "IncrementalIntervalMinutes": 60,
+            "IncrementalPastDays": 2,
+            "IncrementalFutureDays": 14,
+            "FullPastDays": 7,
+            "FullFutureDays": 90,
+            "FullRefreshTime": "17:00",
+        },
+        "Notifications": {"Enabled": True, "NotifyOnNoChanges": True},
+        "RejectSync": {"Enabled": True, "IncrementalPastDays": 30, "FullPastDays": 365},
+        "ProductionSync": {
+            "Enabled": True,
+            "ScheduledEnabled": True,
+            "IncludeCuttingBookings": True,
+            "CuttingBookingLookbackDays": 120,
+            "OrderLookbackDays": 14,
+            "QueryBatchSize": 60,
+            "QueryTimeoutSeconds": 75,
+            "GenerationHistoryDepth": 4,
+            "CrystalReportFile": "Prodman_CuttingLabel_Optimisation.rpt",
+            "CrystalReportPrintPointId": 846,
+        },
+        "Database": {"Server": "TEST", "Database": "TEST", "AuthenticationMode": "Windows", "QueryTimeoutSeconds": 75},
+        "Runtime": {},
+        "Import": {"Mode": "direct-store"},
+    }
+
+
 def imported_item(order: str, item: str, qty: int, source_id: str) -> dict[str, object]:
     return {
         "sourceId": source_id,
@@ -315,6 +352,7 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(result["sourceRows"], 3)
             self.assertEqual(result["logicalEvents"], 1)
             self.assertEqual(result["insertedSourceRows"], 3)
+            self.assertEqual(result["newInternalRejects"], 1)
 
             listed = store.list_aw_rejects(order_no="238091", item_no="1")["rejects"]
             self.assertEqual(len(listed), 1)
@@ -329,6 +367,7 @@ class ImportConsistencyTests(unittest.TestCase):
             refreshed = [{**row, "replacementJobNumber": "9001", "sourceLastChangedAt": "2026-09-02T09:15:00.0000000"} for row in rows]
             second = store.sync_aw_reject_rows(refreshed)
             self.assertEqual(second["logicalEvents"], 1)
+            self.assertEqual(second["newInternalRejects"], 0)
             with store.connect() as connection:
                 counts = connection.execute(
                     "SELECT (SELECT COUNT(*) FROM aw_reject_events) AS events, (SELECT COUNT(*) FROM aw_reject_source_rows) AS source_rows"
@@ -372,6 +411,7 @@ class ImportConsistencyTests(unittest.TestCase):
             result = store.ensure_aw_internal_reject_mirrors()
             self.assertTrue(result["startupBackfill"])
             self.assertEqual(result["mirroredInternalRejects"], 1)
+            self.assertEqual(result["newInternalRejects"], 0)
             with store.connect() as con:
                 mirror = con.execute("SELECT reason_label, location_label, scan_qty_reduced FROM reject_events WHERE source_type='aw'").fetchone()
             self.assertEqual(mirror["reason_label"], "Broke in Machine")
@@ -381,6 +421,7 @@ class ImportConsistencyTests(unittest.TestCase):
             again = store.ensure_aw_internal_reject_mirrors()
             self.assertEqual(again["sourceRows"], 0)
             self.assertEqual(again["mirroredInternalRejects"], 0)
+            self.assertEqual(again["newInternalRejects"], 0)
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -447,7 +488,7 @@ class ImportConsistencyTests(unittest.TestCase):
             mappings = {(value["kind"], value["sourceCode"]): value for value in store.list_reject_value_mappings()}
             self.assertEqual(mappings[("reason", 141)]["sourceLabel"], "New A+W Reason")
             self.assertEqual(mappings[("location", 18)]["sourceLabel"], "New A+W Location")
-            event = operations.list_rejects()["rejects"][0]
+            event = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]
             self.assertEqual(event["reason_label"], "New A+W Reason")
             self.assertEqual(event["location_label"], "New A+W Location")
 
@@ -459,7 +500,7 @@ class ImportConsistencyTests(unittest.TestCase):
                 "locationLabel": "Renamed A+W Location",
                 "sourceLastChangedAt": "2026-09-02T11:15:00.0000000",
             }])
-            event = operations.list_rejects()["rejects"][0]
+            event = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]
             self.assertEqual(event["reason_label"], "Renamed A+W Reason")
             self.assertEqual(event["location_label"], "Renamed A+W Location")
             mappings = {(value["kind"], value["sourceCode"]): value for value in store.list_reject_value_mappings()}
@@ -506,6 +547,7 @@ class ImportConsistencyTests(unittest.TestCase):
             }
             result = store.sync_aw_reject_rows([row])
             self.assertEqual(result["mirroredInternalRejects"], 1)
+            self.assertEqual(result["newInternalRejects"], 1)
             with store.connect() as connection:
                 states = connection.execute(
                     "SELECT scanned_qty, internal_reject_count FROM line_items WHERE order_no='238091' AND item_no='001'"
@@ -774,7 +816,7 @@ class ImportConsistencyTests(unittest.TestCase):
             }
             result = store.sync_aw_reject_rows([row])
             self.assertEqual(result["mirroredInternalRejects"], 1)
-            internal = operations.list_rejects()["rejects"]
+            internal = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"]
             self.assertEqual(len(internal), 1)
             self.assertEqual(internal[0]["source_type"], "aw")
             self.assertEqual(internal[0]["reason_label"], "Broke in Machine")
@@ -784,21 +826,21 @@ class ImportConsistencyTests(unittest.TestCase):
             # A code-based mapping updates the current mirror and survives an A+W
             # source-label rename because the numeric code remains authoritative.
             store.update_reject_value_mapping("location", 5, "Polisher", "admin")
-            self.assertEqual(operations.list_rejects()["rejects"][0]["location_label"], "Polisher")
+            self.assertEqual(operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]["location_label"], "Polisher")
             refreshed = {
                 **row,
                 "locationLabel": "Grinding Station",
                 "sourceLastChangedAt": "2026-09-02T10:00:00.0000000",
             }
             store.sync_aw_reject_rows([refreshed])
-            self.assertEqual(operations.list_rejects()["rejects"][0]["location_label"], "Polisher")
+            self.assertEqual(operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]["location_label"], "Polisher")
             mapping = next(value for value in store.list_reject_value_mappings() if value["kind"] == "location" and value["sourceCode"] == 5)
             self.assertEqual(mapping["sourceLabel"], "Grinding Station")
             self.assertEqual(mapping["mappedLabel"], "Polisher")
 
             # An individual historical correction is a scanner-side override and
             # must not be erased by source refreshes or later code-map changes.
-            reject_id = int(operations.list_rejects()["rejects"][0]["id"])
+            reject_id = int(operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]["id"])
             operations.update_reject(
                 {
                     "id": reject_id,
@@ -812,7 +854,7 @@ class ImportConsistencyTests(unittest.TestCase):
             )
             store.update_reject_value_mapping("location", 5, "Polisher 2", "admin")
             store.sync_aw_reject_rows([{**refreshed, "locationLabel": "Grinding Updated", "sourceLastChangedAt": "2026-09-02T11:00:00.0000000"}])
-            overridden = operations.list_rejects()["rejects"][0]
+            overridden = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]
             self.assertEqual(overridden["reason_label"], "Reviewed breakage")
             self.assertEqual(overridden["location_label"], "Special Polisher")
             self.assertEqual(int(overridden["qty"]), 2)
@@ -823,16 +865,16 @@ class ImportConsistencyTests(unittest.TestCase):
             reason_bulk = operations.bulk_relabel_rejects("reason", "Reviewed breakage", "Investigated breakage", "admin")
             self.assertEqual(reason_bulk["affectedEvents"], 1)
             self.assertIn(137, reason_bulk["awCodes"])
-            self.assertEqual(operations.list_rejects()["rejects"][0]["reason_label"], "Investigated breakage")
+            self.assertEqual(operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]["reason_label"], "Investigated breakage")
 
             bulk = operations.bulk_relabel_rejects("location", "Special Polisher", "Polisher Bay", "admin")
             self.assertEqual(bulk["affectedEvents"], 1)
             self.assertIn(5, bulk["awCodes"])
-            after_bulk = operations.list_rejects()["rejects"][0]
+            after_bulk = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]
             self.assertEqual(after_bulk["location_label"], "Polisher Bay")
             self.assertEqual(json.loads(after_bulk["manual_override_json"])["location"], "Polisher Bay")
             store.sync_aw_reject_rows([{**refreshed, "locationLabel": "Grinding New Name", "sourceLastChangedAt": "2026-09-02T12:00:00.0000000"}])
-            final_reject = operations.list_rejects()["rejects"][0]
+            final_reject = operations.list_rejects("2026-09-01", "2026-09-03")["rejects"][0]
             self.assertEqual(final_reject["location_label"], "Polisher Bay")
             self.assertEqual(final_reject["reason_label"], "Investigated breakage")
         finally:
@@ -1116,7 +1158,8 @@ class ImportConsistencyTests(unittest.TestCase):
         config_dir.mkdir(parents=True, exist_ok=True)
         source_config = ROOT / "automation" / "sql_delivery_export" / "sql-export.config.json"
         config_path = config_dir / "sql-export.config.json"
-        config_path.write_text(source_config.read_text(encoding="utf-8"), encoding="utf-8")
+        config_payload = json.loads(source_config.read_text(encoding="utf-8")) if source_config.is_file() else automation_test_config_payload(verification_root / "runtime")
+        config_path.write_text(json.dumps(config_payload, indent=2) + "\n", encoding="utf-8")
         base = load_config(ROOT)
         scanner_config = replace(base, root=verification_root, data_dir=verification_root / "data")
         try:
@@ -1159,7 +1202,7 @@ class ImportConsistencyTests(unittest.TestCase):
         state_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         source_config = ROOT / "automation" / "sql_delivery_export" / "sql-export.config.json"
-        config_payload = json.loads(source_config.read_text(encoding="utf-8"))
+        config_payload = json.loads(source_config.read_text(encoding="utf-8")) if source_config.is_file() else automation_test_config_payload(runtime_root)
         config_payload["WorkingRoot"] = str(runtime_root)
         config_path = config_dir / "sql-export.config.json"
         config_path.write_text(json.dumps(config_payload, indent=2) + "\n", encoding="utf-8")
@@ -2382,6 +2425,39 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual([row["order"] for row in store.global_search("hot replacement")], [rush["order"]])
             responsible_results = store.global_search("search tester broke")
             self.assertEqual([row["order"] for row in responsible_results], [missing["order"]])
+
+            # v0.533: completed/inactive work is still historical truth. Smart
+            # Search must not hide it just because the delivery list is no longer
+            # active, and an exact order search must continue to resolve it.
+            with store.connect() as connection:
+                connection.execute(
+                    "UPDATE line_items SET scanned_qty = qty WHERE order_no IN (?, ?)",
+                    (rush["order"], missing["order"]),
+                )
+                connection.execute(
+                    "UPDATE delivery_lists SET status = 'inactive' WHERE delivery_date = ?",
+                    (delivery_date,),
+                )
+                connection.commit()
+            inactive_rush_results = store.global_search("rush")
+            self.assertIn(rush["order"], [row["order"] for row in inactive_rush_results])
+            self.assertIn(missing["order"], [row["order"] for row in inactive_rush_results])
+            self.assertEqual(store.global_search(rush["order"])[0]["order"], rush["order"])
+
+            # Equal-relevance text matches are ordered newest first.
+            newer = imported_item("273099", "1", 1, "v0533-search:newer")
+            newer["customer"] = "ALPHA BUILDERS"
+            store.import_delivery_list(
+                {
+                    "payload": {"deliveryDate": "2026-10-02", "items": [newer]},
+                    "fileName": "Delivery List 10-02-2026.xlsx",
+                    "user": "admin",
+                }
+            )
+            alpha_results = store.global_search("alpha")
+            self.assertGreaterEqual(len(alpha_results), 2)
+            self.assertEqual(alpha_results[0]["order"], newer["order"])
+            self.assertIn(rush["order"], [row["order"] for row in alpha_results])
         finally:
             for suffix in ("", "-shm", "-wal"):
                 candidate = Path(f"{database_path}{suffix}")
@@ -3539,11 +3615,18 @@ class ImportConsistencyTests(unittest.TestCase):
             })
 
             with store.connect() as connection:
-                # One logical imported Order/Item creates notices for synchronized
-                # workflow stages. Move all of those notices onto one controlled
-                # first-seen date so the regression proves stage-copy deduplication.
+                # One logical imported Order/Item creates synchronized stage
+                # rows. Production Count now uses their immutable earliest
+                # created_at_utc, so place that first-import time on a controlled
+                # plant-local reporting day and prove stage-copy deduplication.
+                connection.execute(
+                    "UPDATE line_items SET created_at_utc = '2026-11-05T13:00:00+00:00'"
+                )
                 connection.execute(
                     "UPDATE line_update_notices SET created_at = '2026-11-05T08:00:00+00:00'"
+                )
+                connection.execute(
+                    "UPDATE line_items SET process_state = 'Rush', queue_state = 'Priority Rush' WHERE order_no = '281001'"
                 )
                 rush_notices = connection.execute(
                     "SELECT id, snapshot_json FROM line_update_notices"
@@ -3591,6 +3674,9 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(new_rows_by_order["281001"]["processState"], "Rush")
             self.assertEqual(new_rows_by_order["281001"]["queueState"], "Priority Rush")
             by_glass = {row["glassType"]: row for row in activity["newProduction"]["byGlass"]}
+            self.assertEqual(activity["newProduction"]["byDate"], [{
+                "date": "2026-11-05", "pieces": 11, "itemCount": 2, "orderCount": 2,
+            }])
             self.assertEqual(by_glass['1/4 Mirror']["pieces"], 5)
             self.assertEqual(by_glass['1/4 Mirror']["itemCount"], 1)
             self.assertEqual(by_glass['3/8" Clear Tempered']["pieces"], 6)
@@ -3610,6 +3696,188 @@ class ImportConsistencyTests(unittest.TestCase):
             # it is also excluded from the existing breakage/statistics totals.
             self.assertEqual(report["breakage"]["internalRejects"]["pieces"], 1)
             self.assertEqual(report["breakage"]["internalRejects"]["eventCount"], 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0538_statistics_event_metrics_use_plant_local_day_boundaries(self) -> None:
+        """Event-day Statistics must follow America/New_York rather than UTC midnight."""
+        verification_root = ROOT / "_verification_v0538_statistics_local_day"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            item = imported_item("281038", "1", 2, "v0538-local-day:1")
+            item["customer"] = "LOCAL DAY AUDIT"
+            item["dimensions"] = '24" x 36"'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-12", "items": [item]},
+                "fileName": "Delivery List 11-12-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                list_row = connection.execute(
+                    "SELECT id FROM delivery_lists WHERE delivery_date='2026-11-12' ORDER BY id LIMIT 1"
+                ).fetchone()
+                line_row = connection.execute(
+                    "SELECT id FROM line_items WHERE order_no='281038' AND item_no='001' ORDER BY id LIMIT 1"
+                ).fetchone()
+                list_id = str(list_row["id"])
+                line_id = str(line_row["id"])
+                # 01:00 UTC Nov 6 is 8 PM Nov 5 in Monroe; 05:00 UTC is midnight Nov 6.
+                for stamp, event_type, barcode in (
+                    ("2026-11-06T01:00:00+00:00", "scan", "local-prior-scan"),
+                    ("2026-11-06T01:05:00+00:00", "error", "local-prior-error"),
+                    ("2026-11-06T05:00:00+00:00", "scan", "local-current-scan"),
+                    ("2026-11-06T05:05:00+00:00", "duplicate", "local-current-duplicate"),
+                ):
+                    connection.execute(
+                        """INSERT INTO scan_events
+                           (list_id,line_item_id,barcode,canonical_barcode,user_name,station,event_type,message,reason,qty_delta,created_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (list_id, line_id, barcode, barcode, "Plant Operator", "TC22", event_type, event_type, "", 1 if event_type == "scan" else 0, stamp),
+                    )
+                for stamp in ("2026-11-06T01:10:00+00:00", "2026-11-06T05:10:00+00:00"):
+                    connection.execute(
+                        """INSERT INTO audit_events
+                           (entity_type,entity_id,action,user_name,station,reason,payload_json,created_at)
+                           VALUES ('scan',?,'manual_scan','Plant Operator','TC22','','{}',?)""",
+                        (line_id, stamp),
+                    )
+                for stamp, order_no in (("2026-11-06T01:15:00+00:00", "281038"), ("2026-11-06T05:15:00+00:00", "281039")):
+                    connection.execute(
+                        """INSERT INTO reject_events
+                           (delivery_date,order_no,item_no,qty,customer,product,reason_label,location_label,rejected_at,rejected_by)
+                           VALUES ('2026-11-12',?, '001',1,'LOCAL DAY AUDIT','3/8 Clear Tempered','Scratch','Tempering',?,'Plant Operator')""",
+                        (order_no, stamp),
+                    )
+                connection.commit()
+
+            prior = store.reports_summary({"dateFrom": "2026-11-05", "dateTo": "2026-11-05"})
+            current = store.reports_summary({"dateFrom": "2026-11-06", "dateTo": "2026-11-06"})
+            self.assertEqual(prior["scansByOperator"], [{"user": "Plant Operator", "scans": 1}])
+            self.assertEqual(prior["badScanCount"], 1)
+            self.assertEqual(prior["duplicateScanCount"], 0)
+            self.assertEqual(prior["manualScanCount"], 1)
+            self.assertEqual(prior["breakage"]["internalRejects"]["pieces"], 1)
+            self.assertEqual(current["scansByOperator"], [{"user": "Plant Operator", "scans": 1}])
+            self.assertEqual(current["badScanCount"], 0)
+            self.assertEqual(current["duplicateScanCount"], 1)
+            self.assertEqual(current["manualScanCount"], 1)
+            self.assertEqual(current["breakage"]["internalRejects"]["pieces"], 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0536_production_count_uses_immutable_first_import_and_stable_remake_identity(self) -> None:
+        """Routine review-notice refreshes must not manufacture new production."""
+        verification_root = ROOT / "_verification_v0536_production_first_import"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            mirror = imported_item("281050", "1", 139, "v0536-mirror-original:1")
+            mirror["customer"] = "MIRROR COUNT AUDIT"
+            mirror["product"] = '1/4" Mirror'
+            mirror["dimensions"] = '24" x 36"'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-12", "items": [mirror]},
+                "fileName": "Delivery List 11-12-2026.xlsx",
+                "user": "admin",
+            })
+
+            with store.connect() as connection:
+                # The physical Order/Item really first arrived at 8 PM plant time on Nov 5 (01:00 UTC Nov 6). Simulate
+                # the latest-review ledger being regenerated on Nov 6. v0.535's
+                # notice-based Production Count would have moved all 139 pieces
+                # onto Nov 6; v0.536 must leave them on the immutable first day.
+                connection.execute(
+                    "UPDATE line_items SET created_at_utc = '2026-11-06T01:00:00+00:00' WHERE order_no = '281050'"
+                )
+                connection.execute(
+                    "UPDATE line_update_notices SET created_at = '2026-11-06T14:00:00+00:00', change_type = 'new' WHERE delivery_date = '2026-11-12'"
+                )
+                connection.commit()
+
+            first_day = store.reports_summary({"dateFrom": "2026-11-05", "dateTo": "2026-11-05"})["productionActivity"]
+            refresh_day = store.reports_summary({"dateFrom": "2026-11-06", "dateTo": "2026-11-06"})["productionActivity"]
+            self.assertEqual(first_day["newProduction"]["pieces"], 139)
+            self.assertEqual(first_day["newProduction"]["itemCount"], 1)
+            self.assertEqual(first_day["newProduction"]["byGlass"][0]["glassType"], '1/4 Mirror')
+            self.assertEqual(refresh_day["newProduction"]["pieces"], 0)
+
+            with store.connect() as connection:
+                # A+W corrects that same logical item to External Remake without
+                # preserving the old source-row identity. Current state and the
+                # transition notice must move the item out of New Production,
+                # not count the same 139 pieces in both categories.
+                connection.execute(
+                    "UPDATE line_items SET source_id = 'v0536-mirror-remake:1', process_state = 'External Remake', queue_state = 'RM' WHERE order_no = '281050'"
+                )
+                notices = connection.execute(
+                    "SELECT id, snapshot_json FROM line_update_notices WHERE delivery_date = '2026-11-12'"
+                ).fetchall()
+                for notice in notices:
+                    snapshot = json.loads(str(notice["snapshot_json"] or "{}"))
+                    snapshot["sourceId"] = "v0536-mirror-remake:1"
+                    snapshot["processState"] = "External Remake"
+                    snapshot["queueState"] = "RM"
+                    snapshot["previous"] = {
+                        "sourceId": "v0536-mirror-original:1",
+                        "processState": "New Line",
+                        "queueState": "",
+                    }
+                    connection.execute(
+                        "UPDATE line_update_notices SET created_at = '2026-11-05T15:00:00+00:00', change_type = 'updated', snapshot_json = ? WHERE id = ?",
+                        (json.dumps(snapshot, sort_keys=True, separators=(",", ":")), int(notice["id"])),
+                    )
+                connection.commit()
+
+            corrected = store.reports_summary({"dateFrom": "2026-11-05", "dateTo": "2026-11-05"})["productionActivity"]
+            self.assertEqual(corrected["newProduction"]["pieces"], 0)
+            self.assertEqual(corrected["externalRemakes"]["pieces"], 139)
+            self.assertEqual(corrected["externalRemakes"]["itemCount"], 1)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v0536_production_count_does_not_recount_delivery_date_moves(self) -> None:
+        """Moving the same A+W Order/Item to another delivery date is not a new order."""
+        verification_root = ROOT / "_verification_v0536_production_delivery_move"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            item = imported_item("281060", "1", 3, "v0536-moved-order:1")
+            item["product"] = '1/4" Mirror'
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-12", "items": [item]},
+                "fileName": "Delivery List 11-12-2026.xlsx",
+                "user": "admin",
+            })
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-11-19", "items": [item]},
+                "fileName": "Delivery List 11-19-2026.xlsx",
+                "user": "admin",
+            })
+            with store.connect() as connection:
+                connection.execute(
+                    """UPDATE line_items SET created_at_utc='2026-11-05T15:00:00+00:00', updated_at_utc='2026-11-05T15:00:00+00:00'
+                       WHERE list_id IN (SELECT id FROM delivery_lists WHERE delivery_date='2026-11-12') AND order_no='281060'"""
+                )
+                connection.execute(
+                    """UPDATE line_items SET created_at_utc='2026-11-06T15:00:00+00:00', updated_at_utc='2026-11-06T15:00:00+00:00'
+                       WHERE list_id IN (SELECT id FROM delivery_lists WHERE delivery_date='2026-11-19') AND order_no='281060'"""
+                )
+                connection.execute(
+                    "UPDATE line_update_notices SET created_at='2026-11-06T15:00:00+00:00' WHERE delivery_date='2026-11-19'"
+                )
+                connection.commit()
+
+            first_day = store.reports_summary({"dateFrom": "2026-11-05", "dateTo": "2026-11-05"})["productionActivity"]["newProduction"]
+            moved_day = store.reports_summary({"dateFrom": "2026-11-06", "dateTo": "2026-11-06"})["productionActivity"]["newProduction"]
+            self.assertEqual(first_day["pieces"], 3)
+            self.assertEqual(first_day["itemCount"], 1)
+            self.assertEqual(first_day["rows"][0]["deliveryDate"], "2026-11-19")
+            self.assertEqual(moved_day["pieces"], 0)
+            self.assertEqual(moved_day["itemCount"], 0)
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
@@ -4828,14 +5096,42 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(current_it_by_order["724001"]["qty"], 2)
             self.assertEqual(current_it_by_order["724001"]["sourceReason"], "Airport Outbound; in transit to Indian Trail")
 
+            # v0.537: one scanner trigger counts one physical pane even when the
+            # frozen line expects multiple identical panes. Repeating the same
+            # barcode is valid until the frozen target is reached, then blocked.
             scanned = store.record_inventory_scan(session["id"], first["barcode"], user)
             self.assertTrue(scanned["ok"])
             self.assertTrue(scanned["matchedExpected"])
-            self.assertEqual(scanned["scan"]["qty"], 3)
-            self.assertAlmostEqual(scanned["scan"]["totalSqft"], 54.0)
+            self.assertEqual(scanned["scan"]["qty"], 1)
+            self.assertEqual(scanned["countedQty"], 1)
+            self.assertEqual(scanned["expectedQty"], 3)
+            self.assertEqual(scanned["remainingQty"], 2)
+            self.assertAlmostEqual(scanned["scan"]["totalSqft"], 18.0)
+            partial = store.get_inventory_session_items(session["id"], "reconciliation", user)
+            first_partial = next(row for row in partial["items"] if (row.get("system") or {}).get("order") == "724001")
+            self.assertEqual(first_partial["status"], "partial")
+            self.assertIn("Counted 1/3", first_partial["differences"][0])
+
+            second_scan = store.record_inventory_scan(session["id"], first["barcode"], user)
+            self.assertEqual(second_scan["countedQty"], 2)
+            self.assertEqual(second_scan["remainingQty"], 1)
+            # Scanner corrections undo one counted pane instead of deleting the
+            # aggregate row for all identical pieces.
+            corrected = store.remove_inventory_scan(session["id"], scanned["scan"]["id"], {"reason": "Double trigger correction"}, user)
+            self.assertEqual(corrected["scannedQty"], 1)
+            second_scan = store.record_inventory_scan(session["id"], first["barcode"], user)
+            self.assertEqual(second_scan["countedQty"], 2)
+            third_scan = store.record_inventory_scan(session["id"], first["barcode"], user)
+            self.assertEqual(third_scan["countedQty"], 3)
+            self.assertEqual(third_scan["remainingQty"], 0)
+            self.assertTrue(third_scan["lineComplete"])
+            self.assertEqual(third_scan["scan"]["qty"], 3)
+            self.assertAlmostEqual(third_scan["scan"]["totalSqft"], 54.0)
             duplicate = store.record_inventory_scan(session["id"], first["barcode"], user)
             self.assertFalse(duplicate["ok"])
             self.assertTrue(duplicate["duplicate"])
+            self.assertEqual(duplicate["countedQty"], 3)
+            self.assertEqual(duplicate["expectedQty"], 3)
 
             manual = store.record_inventory_manual_entry(session["id"], {
                 "order": "799999", "item": "1", "jobNr": "MANUAL-1", "customer": "MANUAL FLOOR PIECE",
@@ -4851,7 +5147,7 @@ class ImportConsistencyTests(unittest.TestCase):
             completed = store.complete_inventory_session(session["id"], {"notes": "Physical count complete"}, user)
             self.assertEqual(completed["status"], "completed")
             self.assertEqual(completed["statusCounts"], {
-                "matched": 1, "mismatch": 0, "missingPhysical": 1, "notInSystem": 1,
+                "matched": 1, "mismatch": 0, "partial": 0, "missingPhysical": 1, "notInSystem": 1,
             })
             reconcile = store.get_inventory_session_items(session["id"], "reconciliation", user)
             statuses = [row["status"] for row in reconcile["items"]]
@@ -4879,7 +5175,7 @@ class ImportConsistencyTests(unittest.TestCase):
                 self.assertIn('name="System Snapshot"', workbook_xml)
                 self.assertIn('name="Reconciliation"', workbook_xml)
                 physical_xml = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
-                self.assertIn("Scanned Date/Time", physical_xml)
+                self.assertIn("Scanned Date/Time (ET)", physical_xml)
                 self.assertIn("Total SQFT", physical_xml)
                 self.assertIn("G14CLR", physical_xml)
 
@@ -5264,5 +5560,258 @@ class ImportConsistencyTests(unittest.TestCase):
             shutil.rmtree(verification_root, ignore_errors=True)
 
 
+    def test_v530_attention_colors_category_receipts_and_automation_summary(self) -> None:
+        verification_root = ROOT / "_verification_v530_attention"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                con.execute(
+                    "INSERT INTO users(username,email,display_name,password_hash,active,created_at) VALUES(?,?,?,?,1,?)",
+                    ("v530-reviewer", "v530@example.com", "V530 Reviewer", "x", "2026-09-14T12:00:00+00:00"),
+                )
+                con.commit()
+
+            normal = imported_item("730001", "1", 1, "v0530-normal:1")
+            remake = imported_item("730002", "1", 1, "v0530-remake:1")
+            remake.update({"processState": "External Remake", "queueState": "RM"})
+            rush = imported_item("730003", "1", 1, "v0530-rush:1")
+            # Rush/SDI remains operator-owned: pre-register the work and let the
+            # authoritative A+W import match it through the maintained Priority Work flow.
+            store.create_priority_intake_request({
+                "priorityType": "Rush",
+                "jobNumber": rush["job"],
+                "reason": "V530 automated import attention regression",
+                "responsible": "V530 Test",
+                "emailMode": "none",
+            }, "admin")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-28", "items": [normal, remake, rush]},
+                "fileName": "Delivery List 09-28-2026.xlsx", "user": "admin", "sourceHash": "v530-attention-first",
+            })
+            with store.connect() as con:
+                list_ids = [str(row[0]) for row in con.execute(
+                    "SELECT id FROM delivery_lists WHERE delivery_date=? AND status='active' ORDER BY id",
+                    ("2026-09-28",),
+                ).fetchall()]
+            self.assertTrue(list_ids)
+
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            flags = operations.line_flags(list_ids[0], "v530-reviewer")
+            self.assertEqual(flags["pendingOrderCount"], 1)
+            self.assertEqual(flags["pendingRemakeCount"], 1)
+            self.assertEqual(flags["pendingRushCount"], 1)
+            self.assertTrue(flags["orderNoticeIds"])
+            self.assertTrue(flags["remakeNoticeIds"])
+            self.assertTrue(flags["rushNoticeIds"])
+
+            after_order = operations.acknowledge_line_updates(
+                list_ids[0], flags["orderNoticeIds"], "v530-reviewer", "order"
+            )
+            self.assertEqual(after_order["pendingOrderCount"], 0)
+            self.assertEqual(after_order["pendingRemakeCount"], 1)
+            self.assertEqual(after_order["pendingRushCount"], 1)
+
+            colors = {row["value"]: row["color"] for row in store.get_manual_edit_lookups()["attentionColors"]}
+            self.assertEqual(colors, {
+                "new_order": "#1766D8",
+                "internal_reject": "#F28C28",
+                "external_remake": "#111111",
+                "rush": "#C62828",
+            })
+            saved = store.add_manual_edit_lookup({
+                "type": "attention_color", "value": "internal_reject", "color": "#FF8A1F"
+            }, "admin")
+            saved_colors = {row["value"]: row["color"] for row in saved["attentionColors"]}
+            self.assertEqual(saved_colors["internal_reject"], "#FF8A1F")
+            with store.connect() as con:
+                installed = int(con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0])
+                notification_id = store.create_app_notification(
+                    con,
+                    "success",
+                    "Delivery list update complete",
+                    "Import completed.",
+                    "sql-delivery-automation",
+                    payload={
+                        "source": "sql-delivery-automation",
+                        "succeeded": True,
+                        "affectedListIds": list_ids,
+                        "awRejectSync": {"mirroredInternalRejects": 255, "newInternalRejects": 2},
+                    },
+                )
+                row = con.execute(
+                    "SELECT title,message,payload_json FROM app_notifications WHERE id=?",
+                    (notification_id,),
+                ).fetchone()
+                con.commit()
+            self.assertEqual(installed, 21)
+            details = json.loads(row["payload_json"])
+            self.assertEqual(details["attentionSummary"], {
+                "newOrders": 1,
+                "internalRejects": 2,
+                "externalRemakes": 1,
+                "rushes": 1,
+            })
+            self.assertEqual(row["title"], "A+W import update")
+            self.assertIn("new order", row["message"])
+            self.assertIn("new Internal Reject", row["message"])
+            self.assertIn("new External Remake", row["message"])
+            self.assertIn("new Rush", row["message"])
+
+            # v0.531: an existing ordinary line that newly becomes a remake is
+            # review-worthy, but old priority rows that merely remain present
+            # must not be announced again in the new import summary.
+            normal_as_remake = dict(normal)
+            normal_as_remake.update({"processState": "External Remake", "queueState": "RM"})
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-28", "items": [normal_as_remake, remake, rush]},
+                "fileName": "Delivery List 09-28-2026.xlsx", "user": "admin", "sourceHash": "v531-attention-transition",
+            })
+            with store.connect() as con:
+                transition_id = store.create_app_notification(
+                    con, "success", "Delivery list update complete", "Import completed.", "sql-delivery-automation",
+                    payload={
+                        "source": "sql-delivery-automation", "succeeded": True,
+                        "affectedListIds": list_ids, "startedAt": "2000-01-01T00:00:00+00:00",
+                        "completedAt": "2090-01-01T00:00:00+00:00",
+                        "awRejectSync": {"mirroredInternalRejects": 19, "newInternalRejects": 0},
+                    },
+                )
+                transition_row = con.execute(
+                    "SELECT title,message,payload_json FROM app_notifications WHERE id=?", (transition_id,)
+                ).fetchone()
+                con.commit()
+            transition_details = json.loads(transition_row["payload_json"])
+            self.assertEqual(transition_details["attentionSummary"], {
+                "newOrders": 0, "internalRejects": 0, "externalRemakes": 1, "rushes": 0,
+            })
+            self.assertEqual(transition_row["message"], "1 new External Remake")
+
+            # A later successful run with no line notices in its run window must
+            # not reuse the preceding batch and re-announce stale review items.
+            with store.connect() as con:
+                quiet_id = store.create_app_notification(
+                    con, "success", "Delivery-list check complete", "No source changes.", "sql-delivery-automation",
+                    payload={
+                        "source": "sql-delivery-automation", "succeeded": True,
+                        "affectedListIds": list_ids, "startedAt": "2099-01-01T00:00:00+00:00",
+                        "completedAt": "2099-01-01T01:00:00+00:00",
+                        "awRejectSync": {"mirroredInternalRejects": 255, "newInternalRejects": 0},
+                    },
+                )
+                quiet_row = con.execute(
+                    "SELECT title,message,payload_json FROM app_notifications WHERE id=?", (quiet_id,)
+                ).fetchone()
+                con.commit()
+            quiet_details = json.loads(quiet_row["payload_json"])
+            self.assertEqual(quiet_details["attentionSummary"], {
+                "newOrders": 0, "internalRejects": 0, "externalRemakes": 0, "rushes": 0,
+            })
+            self.assertEqual(quiet_row["title"], "A+W import complete")
+            self.assertEqual(quiet_row["message"], "No new review items were imported.")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v533_remake_review_reopens_only_on_priority_transition(self) -> None:
+        verification_root = ROOT / "_verification_v533_remake_review"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                con.execute(
+                    "INSERT INTO users(username,email,display_name,password_hash,active,created_at) VALUES(?,?,?,?,1,?)",
+                    ("v533-reviewer", "v533@example.com", "V533 Reviewer", "x", "2026-09-14T18:00:00+00:00"),
+                )
+                con.commit()
+
+            normal = imported_item("733101", "1", 1, "v0533-priority-transition:1")
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-01", "items": [normal]},
+                "fileName": "Delivery List 10-01-2026.xlsx", "user": "admin", "sourceHash": "v533-normal-first",
+            })
+            with store.connect() as con:
+                list_id = str(con.execute(
+                    "SELECT id FROM delivery_lists WHERE delivery_date=? AND status='active' ORDER BY id LIMIT 1",
+                    ("2026-10-01",),
+                ).fetchone()[0])
+
+            operations = OperationsFeatureService(store, store.config, verification_root)
+            initial_flags = operations.line_flags(list_id, "v533-reviewer")
+            self.assertEqual(initial_flags["pendingOrderCount"], 1)
+            initial_flags = operations.acknowledge_line_updates(
+                list_id, initial_flags["orderNoticeIds"], "v533-reviewer", "order"
+            )
+            self.assertEqual(initial_flags["pendingLineCount"], 0)
+
+            remake = dict(normal)
+            remake.update({"processState": "External Remake", "queueState": "RM"})
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-01", "items": [remake]},
+                "fileName": "Delivery List 10-01-2026.xlsx", "user": "admin", "sourceHash": "v533-became-remake",
+            })
+            remake_flags = operations.line_flags(list_id, "v533-reviewer")
+            self.assertEqual(remake_flags["pendingOrderCount"], 0)
+            self.assertEqual(remake_flags["pendingRemakeCount"], 1)
+            self.assertTrue(remake_flags["remakeNoticeIds"])
+            remake_flags = operations.acknowledge_line_updates(
+                list_id, remake_flags["remakeNoticeIds"], "v533-reviewer", "remake"
+            )
+            self.assertEqual(remake_flags["pendingLineCount"], 0)
+
+            routine_remake_edit = dict(remake)
+            routine_remake_edit["qty"] = 2
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-01", "items": [routine_remake_edit]},
+                "fileName": "Delivery List 10-01-2026.xlsx", "user": "admin", "sourceHash": "v533-remake-routine-edit",
+            })
+            routine_flags = operations.line_flags(list_id, "v533-reviewer")
+            self.assertEqual(routine_flags["pendingOrderCount"], 0)
+            self.assertEqual(routine_flags["pendingRemakeCount"], 0)
+            self.assertEqual(routine_flags["pendingRushCount"], 0)
+            self.assertEqual(routine_flags["pendingLineCount"], 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class V534BlueXCancellationGeometryTests(unittest.TestCase):
+    def test_large_blue_cross_is_detected_but_single_or_neutral_lines_are_not(self) -> None:
+        width, height = 612.0, 792.0
+        crossed = [
+            {"x1": 45, "y1": 60, "x2": 565, "y2": 735, "width": 5.0, "color": (0.05, 0.35, 0.82)},
+            {"x1": 55, "y1": 725, "x2": 555, "y2": 70, "width": 5.0, "color": (0.05, 0.35, 0.82)},
+        ]
+        self.assertTrue(ProductionFileService._looks_like_blue_cancellation_x_v534(crossed, width, height))
+        self.assertFalse(ProductionFileService._looks_like_blue_cancellation_x_v534(crossed[:1], width, height))
+        neutral = [{**row, "color": (0.2, 0.2, 0.2)} for row in crossed]
+        self.assertFalse(ProductionFileService._looks_like_blue_cancellation_x_v534(neutral, width, height))
+        short = [
+            {"x1": 250, "y1": 300, "x2": 360, "y2": 430, "width": 5.0, "color": (0.05, 0.35, 0.82)},
+            {"x1": 250, "y1": 430, "x2": 360, "y2": 300, "width": 5.0, "color": (0.05, 0.35, 0.82)},
+        ]
+        self.assertFalse(ProductionFileService._looks_like_blue_cancellation_x_v534(short, width, height))
+
+    def test_flattened_pdf_blue_cross_is_detected_without_ocr(self) -> None:
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.generic import DecodedStreamObject, NameObject
+
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=612, height=792)
+        stream = DecodedStreamObject()
+        stream.set_data(
+            b"0.05 0.35 0.82 RG 5 w "
+            b"45 60 m 565 735 l S "
+            b"55 725 m 555 70 l S"
+        )
+        page[NameObject("/Contents")] = writer._add_object(stream)
+        payload = BytesIO()
+        writer.write(payload)
+        payload.seek(0)
+        parsed_page = PdfReader(payload).pages[0]
+        self.assertTrue(ProductionFileService._pdf_page_has_cancellation_x_v534(parsed_page))

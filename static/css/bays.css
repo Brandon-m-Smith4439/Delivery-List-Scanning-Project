@@ -29275,3 +29275,11 @@ body.bay-move-mode .bay-layout-drop-zone {
   right: 5px !important;
   z-index: 6 !important;
 }
+
+/* v0.530 priority indicators in Bay workflows use the shared attention colors. */
+:is(.is-remake,.priority-remake,.bay-priority-remake) { --bay-priority-color-v530: var(--attention-external-remake); }
+:is(.is-rush,.priority-rush,.bay-priority-rush) { --bay-priority-color-v530: var(--attention-rush); }
+.priority-work-card-v347.is-remake,
+.bay-priority-card.is-remake { border-color: var(--attention-external-remake) !important; }
+.priority-work-card-v347.is-rush,
+.bay-priority-card.is-rush { border-color: var(--attention-rush) !important; }

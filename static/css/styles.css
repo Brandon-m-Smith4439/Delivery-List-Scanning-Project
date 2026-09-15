@@ -30420,48 +30420,127 @@ body button.app-primary-button.global-result-action-v475 {
     transition: border-color 90ms ease, background-color 90ms ease, color 90ms ease !important;
   }
 
-  /* Once a page is chosen, keep the rail collapsed until the pointer exits it.
-     This prevents the expanded rail from sitting over the first controls on the
-     destination page while the pointer is still on the selected nav button. */
-  .app-sidebar.is-hover-suppressed-v527,
-  .app-sidebar.is-hover-suppressed-v527:hover {
-    width: var(--app-sidebar-collapsed-width);
-    padding-inline: 9px;
-    box-shadow: 10px 0 30px rgba(4, 24, 60, .16);
+  /* v0.537: desktop navigation remains expanded while the pointer is over the
+     rail, including immediately after selecting a destination page. */
+}
+
+/* ========================================================================== */
+/* v0.530 shared workflow attention colors                                    */
+/* ========================================================================== */
+:root {
+  --attention-new-order: #1766D8;
+  --attention-internal-reject: #F28C28;
+  --attention-external-remake: #111111;
+  --attention-rush: #C62828;
+}
+
+/* The date button now matches the actual menu footprint. Multiple unread
+   categories may be shown side-by-side without widening each dot. */
+.custom-select-shell[data-custom-select-for="deliveryDateSelect"] {
+  width: 260px !important;
+  min-width: 260px !important;
+  max-width: 260px !important;
+}
+.custom-select-shell[data-custom-select-for="deliveryDateSelect"] > .custom-select-trigger {
+  width: 100% !important;
+}
+.custom-select-value-indicator,
+.custom-select-option-indicator {
+  width: auto !important;
+  min-width: 0 !important;
+  height: 20px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+.custom-select-value-indicator[hidden],
+.custom-select-option-indicator[hidden] { display: none !important; }
+.custom-select-indicator-dot-v530 {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(16, 35, 58, .06);
+}
+.custom-select-indicator-dot-v530.is-new { background: var(--attention-new-order); }
+.custom-select-indicator-dot-v530.is-reject { background: var(--attention-internal-reject); }
+.custom-select-indicator-dot-v530.is-remake { background: var(--attention-external-remake); }
+.custom-select-indicator-dot-v530.is-rush { background: var(--attention-rush); }
+
+/* Shared Smart Search priority flags use the same operator-maintained palette. */
+.header-search-results :is(.global-result-flag-v425,.global-result-flag-cell-v430).is-remake {
+  border-color: var(--attention-external-remake) !important;
+  background: var(--attention-external-remake) !important;
+  color: #fff !important;
+}
+.header-search-results :is(.global-result-flag-v425,.global-result-flag-cell-v430).is-rush {
+  border-color: var(--attention-rush) !important;
+  background: var(--attention-rush) !important;
+  color: #fff !important;
+}
+
+@media (max-width: 720px) {
+  .custom-select-shell[data-custom-select-for="deliveryDateSelect"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
   }
-  .app-sidebar.is-hover-suppressed-v527 .brand-icon-collapsed {
-    display: block;
-    opacity: 1;
-    transform: translate(-50%, -50%);
+}
+
+/* v0.530 import attention popups stay intentionally simple; the icon uses the
+   first reported category color while the copy can list several categories. */
+.automation-update-toast.is-attention-v530 {
+  grid-template-columns: 30px minmax(0, 1fr) 28px;
+  border-left: 4px solid var(--automation-attention-color-v530, var(--attention-new-order));
+}
+.automation-update-toast.is-attention-v530 .automation-update-toast-icon {
+  background: var(--automation-attention-color-v530, var(--attention-new-order)) !important;
+  color: #fff !important;
+}
+
+/* v0.531: restore a flowing mobile side-panel transition instead of snapping. */
+.app-sidebar {
+  will-change: width, transform;
+  transition:
+    width 170ms ease,
+    padding 170ms ease,
+    box-shadow 170ms ease,
+    transform 210ms cubic-bezier(.22,.75,.28,1);
+}
+@media (max-width: 960px) {
+  .app-sidebar,
+  .app.is-sidebar-collapsed .app-sidebar {
+    transition: transform 210ms cubic-bezier(.22,.75,.28,1), box-shadow 170ms ease !important;
   }
-  .app-sidebar.is-hover-suppressed-v527 .brand-combined-logo {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(.9);
-  }
-  .app-sidebar.is-hover-suppressed-v527 .app-nav button,
-  body[data-language="es"] .app-sidebar.is-hover-suppressed-v527 .app-nav button {
-    justify-content: center;
-    gap: 0;
-    padding: 0 !important;
-  }
-  .app-sidebar.is-hover-suppressed-v527 .app-nav button > span:last-child,
-  .app-sidebar.is-hover-suppressed-v527 .sidebar-backend-status,
-  .app-sidebar.is-hover-suppressed-v527 .sidebar-user-menu .user-menu-summary-copy {
-    display: none;
-    opacity: 0;
-  }
-  .app-sidebar.is-hover-suppressed-v527 .sidebar-user-menu > summary {
-    width: 46px;
-    min-width: 46px;
-    min-height: 46px !important;
-    display: flex;
-    gap: 0;
-    border: 0 !important;
-    background: transparent !important;
-    padding: 0 !important;
-  }
-  .app-sidebar.is-hover-suppressed-v527 .sidebar-profile-chevron {
+  .sidebar-scrim {
+    display: block !important;
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
+    transition: opacity 190ms ease, visibility 0s linear 190ms;
   }
+  .app.is-sidebar-mobile-open .sidebar-scrim {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 190ms ease, visibility 0s linear 0s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar,
+  .sidebar-scrim { transition-duration: 1ms !important; }
 }

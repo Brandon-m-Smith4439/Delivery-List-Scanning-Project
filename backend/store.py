@@ -57,6 +57,7 @@ from database.time_utils import (
     normalize_utc_timestamp,
     parse_aw_plant_timestamp,
     parse_utc_timestamp as parse_database_utc_timestamp,
+    plant_time_zone,
 )
 
 
@@ -966,6 +967,16 @@ GLASS_COST_PER_SQFT = {
     "1/4 Rainbow Antique Mirror": 20.93,
     "1/4 Hollywood Antique Mirror": 20.93,
     "1/4 Woodford Antique Mirror": 20.93,
+}
+
+
+# v0.530: operator-configurable workflow attention colors. These defaults are
+# overlaid by admin_lookup_values(type='attention_color') without a schema change.
+ATTENTION_COLOR_DEFAULTS_V530 = {
+    "new_order": {"label": "New Orders", "color": "#1766D8"},
+    "internal_reject": {"label": "Internal Rejects", "color": "#F28C28"},
+    "external_remake": {"label": "External Remakes", "color": "#111111"},
+    "rush": {"label": "Rushes", "color": "#C62828"},
 }
 
 
@@ -2481,6 +2492,108 @@ class BaseDeliveryStore:
         Effects: This function reads or changes database records.
         Flow: Validates inputs, performs the requested change, records related state when required, and returns the updated result.
         """
+        payload = dict(payload or {})
+        source = str(payload.get("source") or "").strip().lower()
+        if source == "sql-delivery-automation" and bool(payload.get("succeeded")):
+            affected_ids = [str(value or "").strip() for value in payload.get("affectedListIds") or [] if str(value or "").strip()]
+            affected_ids = list(dict.fromkeys(affected_ids))[:500]
+            summary = {"newOrders": 0, "internalRejects": 0, "externalRemakes": 0, "rushes": 0}
+            if affected_ids:
+                placeholders = ",".join("?" for _ in affected_ids)
+                started_at = str(payload.get("startedAt") or "").strip()
+                completed_at = str(payload.get("completedAt") or "").strip()
+                window_sql = ""
+                query_params: list[Any] = list(affected_ids)
+                if started_at:
+                    window_sql += " AND datetime(created_at) >= datetime(?)"
+                    query_params.append(started_at)
+                if completed_at:
+                    window_sql += " AND datetime(created_at) <= datetime(?)"
+                    query_params.append(completed_at)
+                rows = con.execute(
+                    f"""
+                    WITH latest_notice AS (
+                        SELECT list_id, MAX(id) AS notice_id
+                        FROM line_update_notices
+                        WHERE list_id IN ({placeholders}){window_sql}
+                        GROUP BY list_id
+                    ), latest_batch AS (
+                        SELECT n.list_id, n.source_hash, n.created_at, n.change_token
+                        FROM line_update_notices n
+                        JOIN latest_notice latest ON latest.notice_id = n.id
+                    )
+                    SELECT dl.delivery_date, li.order_no, li.item_no,
+                           COALESCE(li.process_state, '') AS process_state,
+                           COALESCE(li.queue_state, '') AS queue_state,
+                           COALESCE(n.change_type, 'updated') AS change_type,
+                           COALESCE(n.snapshot_json, '{{}}') AS snapshot_json
+                    FROM latest_batch lb
+                    JOIN line_update_notices n
+                      ON n.list_id = lb.list_id
+                     AND n.source_hash = lb.source_hash
+                     AND n.created_at = lb.created_at
+                     AND (lower(COALESCE(lb.source_hash, '')) <> 'manual-entry' OR n.change_token = lb.change_token)
+                    JOIN line_items li ON li.id = n.line_item_id AND li.list_id = n.list_id
+                    JOIN delivery_lists dl ON dl.id = n.list_id
+                    WHERE COALESCE(li.is_deleted, 0) = 0
+                    """,
+                    query_params,
+                ).fetchall()
+                seen = {"newOrders": set(), "externalRemakes": set(), "rushes": set()}
+                for row in rows:
+                    identity = (str(row["delivery_date"] or ""), str(row["order_no"] or ""), str(row["item_no"] or ""))
+                    change_type = str(row["change_type"] or "").strip().lower()
+                    item = {"processState": row["process_state"], "queueState": row["queue_state"]}
+                    try:
+                        snapshot = json.loads(str(row["snapshot_json"] or "{}"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        snapshot = {}
+                    previous = snapshot.get("previous") if isinstance(snapshot, dict) and isinstance(snapshot.get("previous"), dict) else {}
+                    previous_item = {
+                        "remake": previous.get("remake", ""),
+                        "processState": previous.get("processState", previous.get("process_state", "")),
+                        "queueState": previous.get("queueState", previous.get("queue_state", "")),
+                    }
+                    current_remake = is_remake_item(item)
+                    current_rush = is_rush_item(item)
+                    previous_remake = is_remake_item(previous_item)
+                    previous_rush = is_rush_item(previous_item)
+                    # Count only attention work that became new in this exact run:
+                    # a brand-new line, or an updated line that newly transitioned
+                    # into Remake/Rush. Routine refreshes of an existing priority
+                    # line are intentionally excluded from the notification.
+                    if current_remake and (change_type == "new" or not previous_remake):
+                        seen["externalRemakes"].add(identity)
+                    elif current_rush and (change_type == "new" or not previous_rush):
+                        seen["rushes"].add(identity)
+                    elif change_type == "new":
+                        seen["newOrders"].add(identity)
+                summary["newOrders"] = len(seen["newOrders"])
+                summary["externalRemakes"] = len(seen["externalRemakes"])
+                summary["rushes"] = len(seen["rushes"])
+            reject_sync = payload.get("awRejectSync") if isinstance(payload.get("awRejectSync"), dict) else {}
+            # v0.537: ``mirroredInternalRejects`` is a maintenance/write count and
+            # can include every historical event touched by a changed A+W window.
+            # Notifications must announce only logical reject events first seen in
+            # this exact sync, never cache/backfill/update work.
+            summary["internalRejects"] = max(0, int(reject_sync.get("newInternalRejects") or 0))
+            payload["attentionSummary"] = summary
+            labels = []
+            if summary["newOrders"]:
+                labels.append(f"{summary['newOrders']} new order{'s' if summary['newOrders'] != 1 else ''}")
+            if summary["internalRejects"]:
+                labels.append(f"{summary['internalRejects']} new Internal Reject{'s' if summary['internalRejects'] != 1 else ''}")
+            if summary["externalRemakes"]:
+                labels.append(f"{summary['externalRemakes']} new External Remake{'s' if summary['externalRemakes'] != 1 else ''}")
+            if summary["rushes"]:
+                labels.append(f"{summary['rushes']} new Rush{'es' if summary['rushes'] != 1 else ''}")
+            if labels:
+                title = "A+W import update"
+                message = " · ".join(labels)
+            else:
+                title = "A+W import complete"
+                message = "No new review items were imported."
+
         created_at = now_iso()
         expires_at = (
             datetime.now(timezone.utc) + timedelta(hours=max(int(expires_in_hours or 24), 1))
@@ -2497,7 +2610,7 @@ class BaseDeliveryStore:
                 str(notification_type or "notice"),
                 str(title or "Notification"),
                 str(message or ""),
-                json.dumps(payload or {}, separators=(",", ":")),
+                json.dumps(payload, separators=(",", ":")),
                 str(created_by or "system"),
                 created_at,
                 expires_at,
@@ -3789,6 +3902,118 @@ class BaseDeliveryStore:
             "protectedLineCount": len(protected_rows),
         }
 
+    def _superseded_sketch_safety_v534(
+        self,
+        con: Any,
+        delivery_date: str,
+        order_no: str,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Inspect only candidate sketch pages for the maintained blue-X cancellation mark.
+
+        This is intentionally deferred to the Admin superseded-review read path, not
+        the SQL import hot path.  It never walks the whole sketch share: each candidate
+        resolves only its exact order/item pages through ProductionFileService's cache.
+        A blue X means the pane/order should not be produced.  We combine that signal
+        with already-synchronized A+W Cutting evidence so Admin can immediately see
+        when a crossed-out pane appears to have entered production.
+        """
+        clean_order = str(order_no or "").strip()
+        service = getattr(self, "production_files", None)
+        if not clean_order or service is None or not getattr(service, "enabled", False):
+            return {"checked": False, "cancelledItemCount": 0, "cutAfterCancelCount": 0, "items": []}
+
+        item_rows = [dict(item) for item in (items or []) if isinstance(item, dict)][:40]
+
+        # Keep scanner evidence item-specific.  A different item on the same order
+        # must not make a crossed-out pane look as though it was scanned.
+        scanner_by_item: dict[str, int] = {}
+        scanner_rows = con.execute(
+            """
+            SELECT li.source_id, li.order_no, li.item_no, li.scanned_qty,
+                   li.manual_only, li.manual_source, li.protect_from_aw_import
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+              AND dl.delivery_date = ?
+              AND COALESCE(li.is_deleted, 0) = 0
+            """,
+            (str(delivery_date or "").strip(),),
+        ).fetchall()
+        for row in scanner_rows:
+            if (
+                int(row_value(row, "manual_only", 0) or 0)
+                or str(row_value(row, "manual_source", "") or "").strip()
+                or int(row_value(row, "protect_from_aw_import", 0) or 0)
+            ):
+                continue
+            source_key = self.import_order_item_key(row["source_id"], row["order_no"], row["item_no"])
+            if "-" not in source_key:
+                continue
+            source_order, source_item = source_key.rsplit("-", 1)
+            if source_order != clean_order:
+                continue
+            source_item = source_item.zfill(3) if source_item.isdigit() else source_item
+            scanner_by_item[source_item] = scanner_by_item.get(source_item, 0) + int(row["scanned_qty"] or 0)
+
+        cutting_rows = con.execute(
+            """
+            SELECT * FROM aw_cutting_generations
+            WHERE order_no = ?
+            ORDER BY item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC
+            """,
+            (clean_order,),
+        ).fetchall()
+        cutting_by_item: dict[str, list[Any]] = {}
+        for row in cutting_rows:
+            item_no = str(row_value(row, "item_no", "") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            cutting_by_item.setdefault(item_no, []).append(row)
+
+        result_items: list[dict[str, Any]] = []
+        checked = False
+        for item in item_rows:
+            item_no = str(item.get("itemNumber") or item.get("item") or "").strip()
+            if item_no.isdigit():
+                item_no = item_no.zfill(3)
+            if not item_no:
+                continue
+            job = str(item.get("job") or "").strip()
+            try:
+                views = service.sketch_item_views(clean_order, item_no, job)
+                checked = True
+            except Exception:
+                continue
+            cancelled_views = [view for view in views if bool(view.get("sketchCancelled"))]
+            if not cancelled_views:
+                continue
+            cutting_state = self.aw_cutting_state(
+                clean_order,
+                item_no,
+                "",
+                rows=cutting_by_item.get(item_no, []),
+            )
+            cut_complete = bool(cutting_state.get("complete"))
+            first = cancelled_views[0]
+            result_items.append({
+                "itemNumber": item_no,
+                "job": job,
+                "pageNumber": int(first.get("pageNumber") or 0),
+                "sketchName": str(first.get("name") or first.get("relativePath") or ""),
+                "cuttingComplete": cut_complete,
+                "cuttingLabel": str(cutting_state.get("label") or ""),
+                "scannerScannedQty": int(scanner_by_item.get(item_no, 0) or 0),
+            })
+
+        return {
+            "checked": checked,
+            "cancelledItemCount": len(result_items),
+            "cutAfterCancelCount": sum(1 for item in result_items if item.get("cuttingComplete")),
+            "scannerAfterCancelQty": sum(int(item.get("scannerScannedQty") or 0) for item in result_items),
+            "items": result_items,
+        }
+
     def list_superseded_order_reviews(self, status: str = "", include_inactive: bool = False) -> dict[str, Any]:
         """Return the local review queue with evidence and impact for both candidates."""
         clean_status = str(status or "").strip().lower()
@@ -3840,6 +4065,30 @@ class BaseDeliveryStore:
                     str(row["replacement_order_no"] or ""),
                     [str(item.get("itemNumber") or "") for item in replacement_items if isinstance(item, dict)],
                 )
+                original_sketch_safety = self._superseded_sketch_safety_v534(
+                    con, str(row["delivery_date"] or ""), str(row["original_order_no"] or ""),
+                    original_items if isinstance(original_items, list) else [],
+                )
+                replacement_sketch_safety = self._superseded_sketch_safety_v534(
+                    con, str(row["delivery_date"] or ""), str(row["replacement_order_no"] or ""),
+                    replacement_items if isinstance(replacement_items, list) else [],
+                )
+                original_cancelled = int(original_sketch_safety.get("cancelledItemCount") or 0)
+                replacement_cancelled = int(replacement_sketch_safety.get("cancelledItemCount") or 0)
+                if original_cancelled and not replacement_cancelled:
+                    suggested_remove_order_no = str(row["original_order_no"] or "")
+                elif replacement_cancelled and not original_cancelled:
+                    suggested_remove_order_no = str(row["replacement_order_no"] or "")
+                else:
+                    suggested_remove_order_no = str(row["original_order_no"] or "")
+                original_sketch_safety["productionWarning"] = bool(
+                    original_cancelled
+                    and (int(original_sketch_safety.get("cutAfterCancelCount") or 0) > 0 or int(original_sketch_safety.get("scannerAfterCancelQty") or 0) > 0)
+                )
+                replacement_sketch_safety["productionWarning"] = bool(
+                    replacement_cancelled
+                    and (int(replacement_sketch_safety.get("cutAfterCancelCount") or 0) > 0 or int(replacement_sketch_safety.get("scannerAfterCancelQty") or 0) > 0)
+                )
                 approved_remove_order_no = str(row_value(row, "approved_remove_order_no", "") or "").strip()
                 if str(row["status"] or "") == "approved" and not approved_remove_order_no:
                     # v0.245-v0.256 approvals always meant original-order removal.
@@ -3868,6 +4117,9 @@ class BaseDeliveryStore:
                         "originalImpact": original_impact,
                         "replacementImpact": replacement_impact,
                         "liveImpact": original_impact,
+                        "suggestedRemoveOrderNumber": suggested_remove_order_no,
+                        "originalSketchSafetyV534": original_sketch_safety,
+                        "replacementSketchSafetyV534": replacement_sketch_safety,
                     }
                 )
         return {"reviews": reviews, **self.superseded_order_review_summary()}
@@ -5283,6 +5535,7 @@ class BaseDeliveryStore:
                 "sourceRows": 0,
                 "logicalEvents": 0,
                 "mirroredInternalRejects": 0,
+                "newInternalRejects": 0,
                 "actorCorrections": actor_corrections,
                 "startupBackfill": True,
                 "pendingRollbackRetry": bool(retry_pending_rollbacks),
@@ -5364,8 +5617,12 @@ class BaseDeliveryStore:
                 "ok": True,
                 "sourceRows": 0,
                 "logicalEvents": 0,
+                "insertedEvents": 0,
+                "updatedEvents": 0,
                 "insertedSourceRows": 0,
                 "updatedSourceRows": 0,
+                "mirroredInternalRejects": 0,
+                "newInternalRejects": 0,
                 "window": dict(source_window or {}),
             }
 
@@ -5412,6 +5669,12 @@ class BaseDeliveryStore:
                     "SELECT source_external_key FROM reject_events WHERE source_type='aw' AND source_external_key<>''"
                 ).fetchall()
             }
+            existing_event_keys = {
+                str(row_value(row, "event_key", "") or "")
+                for row in preflight_con.execute(
+                    "SELECT event_key FROM aw_reject_events WHERE event_key<>''"
+                ).fetchall()
+            }
 
         fully_unchanged = bool(clean_rows) and len(existing_sources) == len(incoming_source_payloads)
         if fully_unchanged:
@@ -5437,6 +5700,7 @@ class BaseDeliveryStore:
                 "updatedSourceRows": 0,
                 "unchangedSourceRows": len(clean_rows),
                 "mirroredInternalRejects": 0,
+                "newInternalRejects": 0,
                 "operationalRollbacks": 0,
                 "operationalScanQtyReduced": 0,
                 "pendingOperationalRollbacks": 0,
@@ -5451,6 +5715,7 @@ class BaseDeliveryStore:
         inserted_events = 0
         updated_events = 0
         mirrored_internal_rejects = 0
+        new_internal_rejects = 0
         operational_rollbacks = 0
         operational_scan_reduction = 0
         pending_operational_rollbacks = 0
@@ -5582,6 +5847,17 @@ class BaseDeliveryStore:
                     "SELECT delivery_date, order_no, item_no, manual_override_json FROM reject_events WHERE source_type='aw' AND source_external_key=?",
                     (event_key,),
                 ).fetchone()
+                # A truly new Internal Reject requires a new logical event *and*
+                # an entirely new immutable PROD_BREAKAGE ROWID group. Requiring
+                # every source row in the logical group to be unseen prevents a
+                # timestamp/event-key correction on an existing reject (even if
+                # A+W also adds a BOM row) from becoming a false new floor incident.
+                event_source_rows_are_all_new = all(
+                    str(candidate.get("awRowId") or "").strip() not in existing_sources
+                    for candidate in group
+                )
+                if event_key not in existing_event_keys and event_source_rows_are_all_new:
+                    new_internal_rejects += 1
                 if previous_mirror:
                     affected_internal_identities.add((
                         str(previous_mirror["delivery_date"]), str(previous_mirror["order_no"]), str(previous_mirror["item_no"])
@@ -5788,6 +6064,7 @@ class BaseDeliveryStore:
             "updatedSourceRows": updated_source_rows,
             "unchangedSourceRows": unchanged_source_rows,
             "mirroredInternalRejects": mirrored_internal_rejects,
+            "newInternalRejects": new_internal_rejects,
             "operationalRollbacks": operational_rollbacks,
             "operationalScanQtyReduced": operational_scan_reduction,
             "pendingOperationalRollbacks": pending_operational_rollbacks,
@@ -13457,6 +13734,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "process": {},
             "glass_cost": {},
             "glass_color": {},
+            "attention_color": {},
         }
         hidden_values: dict[str, set[str]] = {kind: set() for kind in buckets}
         glass_aliases: list[dict[str, Any]] = []
@@ -13492,7 +13770,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }
             if clean_kind == "glass_cost":
                 next_item["rate"] = round(float(rate), 4) if rate is not None else None
-            if clean_kind == "glass_color":
+            if clean_kind in {"glass_color", "attention_color"}:
                 clean_color = str(color or category or "").strip().upper()
                 next_item["color"] = clean_color if re.fullmatch(r"#[0-9A-F]{6}", clean_color) else ""
             replaceable_sources = {"discovered", "default"}
@@ -13563,6 +13841,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
             for glass_type, rate in GLASS_COST_PER_SQFT.items():
                 add_lookup("glass_cost", glass_type, glass_type, source="default", rate=rate)
+            for attention_key, attention_meta in ATTENTION_COLOR_DEFAULTS_V530.items():
+                add_lookup(
+                    "attention_color",
+                    attention_key,
+                    attention_meta["label"],
+                    attention_meta["color"],
+                    source="default",
+                    color=attention_meta["color"],
+                )
 
             # Import-retired rows remain available for audit/history, but must
             # not repopulate active edit lookups.
@@ -13617,7 +13904,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         rate,
                     )
                     add_lookup("glass_color", row["value"], row["label"], source="default")
-                elif row_type == "glass_color":
+                elif row_type in {"glass_color", "attention_color"}:
                     add_lookup(
                         row_type,
                         row["value"],
@@ -13663,6 +13950,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 key=lambda item: item["label"].lower(),
             ),
             "glassAliases": sorted(glass_aliases, key=lambda item: (item["label"].lower(), item["value"].lower())),
+            "attentionColors": sorted(
+                buckets["attention_color"].values(),
+                key=lambda item: list(ATTENTION_COLOR_DEFAULTS_V530).index(item["value"]) if item["value"] in ATTENTION_COLOR_DEFAULTS_V530 else 99,
+            ),
             "stages": self.get_stage_definitions(),
         }
 
@@ -13676,8 +13967,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         stores the row, then returns the refreshed Lookup Manager libraries.
         """
         lookup_type = str(data.get("type") or "").strip().lower()
-        if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color"} and lookup_type != "stage_definition":
-            raise ValueError("Lookup type must be product, route, process, glass cost, glass color, or stage definition")
+        if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color", "attention_color"} and lookup_type != "stage_definition":
+            raise ValueError("Lookup type must be product, route, process, glass cost, glass color, attention color, or stage definition")
         value = str(data.get("value") or "").strip()
         label = str(data.get("label") or value).strip()
         category = str(data.get("category") or "").strip() if lookup_type in {"route", "stage_definition"} else ""
@@ -13704,6 +13995,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raise ValueError("Glass color must be a six-digit hex color such as #2F80ED")
             category = color
             label = value
+            match_terms = ""
+        elif lookup_type == "attention_color":
+            if value not in ATTENTION_COLOR_DEFAULTS_V530:
+                raise ValueError("Attention color must target new_order, internal_reject, external_remake, or rush")
+            color = str(data.get("color") or data.get("category") or "").strip().upper()
+            if not re.fullmatch(r"#[0-9A-F]{6}", color):
+                raise ValueError("Attention color must be a six-digit hex color such as #F28C28")
+            category = color
+            label = ATTENTION_COLOR_DEFAULTS_V530[value]["label"]
             match_terms = ""
         elif lookup_type == "stage_definition":
             preset = str(data.get("preset") or data.get("category") or "").strip().lower()
@@ -13773,6 +14073,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 audit_payload = {"glassType": value, "costPerSqft": float(category)}
             elif lookup_type == "glass_color":
                 audit_payload = {"glassType": value, "color": category}
+            elif lookup_type == "attention_color":
+                audit_payload = {"attentionType": value, "label": label, "color": category}
             elif lookup_type == "stage_definition":
                 try:
                     stage_meta = json.loads(match_terms or "{}")
@@ -19359,7 +19661,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # Remake reason or responsible name. Preserve that capability while
         # keeping the overwhelmingly common single order/customer/size term on
         # the faster active-row path.
-        include_audit_text = has_priority_terms or (len(sql_terms) > 1 and all(not term.isdigit() for term in sql_terms))
+        # Audit/reason text is needed only for multi-word textual searches. A
+        # flag such as Rush beside an order/customer/size should not force the
+        # expensive audit path; priority annotation verifies the flag after the
+        # ordinary term has already narrowed candidates.
+        include_audit_text = len(sql_terms) > 1 and all(not term.isdigit() for term in sql_terms)
         for term in sql_terms:
             like = f"%{term}%"
             field_checks = [f"LOWER(COALESCE(CAST({column} AS TEXT), '')) LIKE ?" for column in searchable_columns]
@@ -19370,16 +19676,64 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             term_clauses.append("(" + " OR ".join(field_checks) + ")")
             parameters.extend([like] * len(field_checks))
         candidate_predicate = " AND ".join(term_clauses) if term_clauses else "1 = 1"
-        priority_candidate = "(LOWER(COALESCE(li.process_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.process_state, '')) LIKE '%remake%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%remake%' OR EXISTS (SELECT 1 FROM audit_events pae WHERE pae.entity_type = 'line_item' AND pae.entity_id = li.id AND pae.action IN ('mark_rush_sdi','mark_remake_sdi')))"
-        # Only widen to all priority candidates when the operator actually asks
-        # for priority metadata. This removes the most expensive unrelated work
-        # from normal Smart Search while preserving Rush/Remake reason searches.
-        where_candidate = f"(({candidate_predicate}) OR {priority_candidate})" if has_priority_terms or not sql_terms or include_audit_text else f"({candidate_predicate})"
-        candidate_limit = 5000 if not sql_terms else 1200
+        priority_candidate = "(LOWER(COALESCE(li.process_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.process_state, '')) LIKE '%remake%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%rush%' OR LOWER(COALESCE(li.queue_state, '')) LIKE '%remake%' OR priority_audit.entity_id IS NOT NULL)"
+        # v0.533: if an ordinary term is present, let that term narrow the
+        # catalog first and apply Rush/Remake flags after priority annotation.
+        # The previous OR-priority widening made a query such as "273001 Rush"
+        # scan hundreds of unrelated priority rows and could push an older exact
+        # order outside the candidate LIMIT. Flag-only searches still use the
+        # maintained priority audit/source signals so completed Rush/Remake rows
+        # remain discoverable even after their delivery list is inactive.
+        priority_only = not sql_terms
+        widen_for_priority_reason = bool(sql_terms) and include_audit_text
+        needs_priority_audit = priority_only or widen_for_priority_reason
+        if priority_only:
+            where_candidate = priority_candidate
+        elif widen_for_priority_reason:
+            # Matched Priority Work requests keep their reason/responsible text
+            # in the maintained intake audit rather than duplicating it onto the
+            # line item. Widen only this uncommon reason-search path; routine
+            # order/job/customer/size searches remain on the direct candidate
+            # predicate above.
+            where_candidate = f"(({candidate_predicate}) OR {priority_candidate})"
+        else:
+            where_candidate = f"({candidate_predicate})"
+        candidate_limit = 600 if priority_only else (1000 if widen_for_priority_reason else 800)
+        priority_cte = """priority_audit AS (
+                    SELECT DISTINCT entity_id
+                    FROM audit_events
+                    WHERE entity_type = 'line_item'
+                      AND action IN ('mark_rush_sdi', 'mark_remake_sdi')
+                ),""" if needs_priority_audit else ""
+        priority_join = "LEFT JOIN priority_audit ON priority_audit.entity_id = li.id" if needs_priority_audit else ""
 
         with self.connect() as con:
             rows = con.execute(
                 f"""
+                WITH {priority_cte} candidate_ids AS (
+                    SELECT li.id, dl.delivery_date, li.order_no, li.item_no
+                    FROM line_items li
+                    JOIN delivery_lists dl ON dl.id = li.list_id
+                    {priority_join}
+                    LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
+                    LEFT JOIN bays b ON b.id = ba.bay_id
+                    LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
+                    LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
+                    WHERE COALESCE(dl.is_deleted, 0) = 0
+                      AND dl.status <> 'deleted'
+                      AND COALESCE(li.is_deleted, 0) = 0
+                      AND {where_candidate}
+                    GROUP BY li.id, dl.delivery_date, li.order_no, li.item_no
+                    ORDER BY dl.delivery_date DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
+                    LIMIT {candidate_limit}
+                ), latest_positive_scan AS (
+                    SELECT se.line_item_id, MAX(se.id) AS scan_id
+                    FROM scan_events se
+                    JOIN candidate_ids candidate ON candidate.id = se.line_item_id
+                    WHERE se.event_type IN ('scan', 'manual_scan', 'redo')
+                      AND se.qty_delta > 0
+                    GROUP BY se.line_item_id
+                )
                 SELECT li.*, dl.stage, dl.scanner, dl.label, dl.delivery_date,
                        b.bay_code,
                        b.display_name AS bay_display_name,
@@ -19388,33 +19742,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                        r.display_name AS rack_display_name,
                        r.rack_type AS rack_type,
                        r.status AS rack_status,
-                       (
-                           SELECT se.created_at
-                           FROM scan_events se
-                           WHERE se.line_item_id = li.id
-                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
-                             AND se.qty_delta > 0
-                           ORDER BY se.id DESC
-                           LIMIT 1
-                       ) AS last_scan_time,
-                       (
-                           SELECT se.user_name
-                           FROM scan_events se
-                           WHERE se.line_item_id = li.id
-                             AND se.event_type IN ('scan', 'manual_scan', 'redo')
-                             AND se.qty_delta > 0
-                           ORDER BY se.id DESC
-                           LIMIT 1
-                       ) AS last_scan_user
-                FROM line_items li
+                       last_scan.created_at AS last_scan_time,
+                       last_scan.user_name AS last_scan_user
+                FROM candidate_ids candidate
+                JOIN line_items li ON li.id = candidate.id
                 JOIN delivery_lists dl ON dl.id = li.list_id
+                LEFT JOIN latest_positive_scan latest_scan ON latest_scan.line_item_id = li.id
+                LEFT JOIN scan_events last_scan ON last_scan.id = latest_scan.scan_id
                 LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
                 LEFT JOIN bays b ON b.id = ba.bay_id
                 LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
                 LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
-                WHERE dl.status = 'active'
-                  AND COALESCE(li.is_deleted, 0) = 0
-                  AND {where_candidate}
                 ORDER BY dl.delivery_date DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
                 LIMIT {candidate_limit}
                 """,
@@ -19671,8 +20009,44 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # v0.451: flag/reason terms become searchable only after the one shared
         # priority annotation pass; every query term must match the same order.
         annotated_results = self.attach_priority_search_annotations(cleaned_results)
-        matched_results = [result for result in annotated_results if self.global_search_result_matches(result, terms)][:20]
-        return self.attach_cutting_search_states_v513(matched_results)
+        matched_results = [result for result in annotated_results if self.global_search_result_matches(result, terms)]
+
+        # v0.533: rank exact/prefix matches ahead of broad contains matches and
+        # then prefer the newest delivery date. This keeps an exact historical
+        # order searchable without letting it outrank a newer equally-relevant
+        # result merely because SQLite happened to return it first.
+        clean_lower = clean.lower()
+        exact_fields = ("order", "item", "sourceId", "barcode", "job")
+        prefix_fields = exact_fields + ("customer", "product")
+        def relevance(result: dict[str, Any]) -> tuple[int, str, int, int]:
+            values = {key: str(result.get(key) or "").strip().lower() for key in prefix_fields}
+            score = 0
+            if any(value == clean_lower for value in values.values() if value):
+                score += 4000
+            for term in terms:
+                if any(values.get(key) == term for key in exact_fields):
+                    score += 900
+                elif any(values.get(key, "").startswith(term) for key in prefix_fields if values.get(key)):
+                    score += 450
+                else:
+                    score += 100
+                if term == "rush" and bool(result.get("rush")):
+                    score += 700
+                if term == "remake" and bool(result.get("remake")):
+                    score += 700
+            date_key = str(result.get("deliveryDate") or "")
+            try:
+                order_rank = int(re.sub(r"\D", "", str(result.get("order") or "")) or 0)
+            except ValueError:
+                order_rank = 0
+            try:
+                item_rank = int(re.sub(r"\D", "", str(result.get("item") or "")) or 0)
+            except ValueError:
+                item_rank = 0
+            return (score, date_key, order_rank, item_rank)
+
+        matched_results.sort(key=relevance, reverse=True)
+        return self.attach_cutting_search_states_v513(matched_results[:20])
 
     def manual_edit_sibling_rows(self, con: sqlite3.Connection, row: sqlite3.Row) -> list[sqlite3.Row]:
         """Purpose: Run the manual edit sibling rows workflow for the delivery-list scanner.
@@ -20654,17 +21028,37 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "0", "false", "no", "off",
         }
 
-        def date_clause(alias: str = "") -> tuple[str, list[str]]:
-            column = f"{alias}.created_at" if alias else "created_at"
+        def plant_timestamp_clause(column: str) -> tuple[str, list[str]]:
+            """Return index-friendly UTC bounds for one plant-local reporting day.
+
+            Scan, audit, reject, and import timestamps are stored in UTC. Statistics
+            is an operator-facing plant report, so a 00:30 UTC event belongs to the
+            prior America/New_York work day rather than the UTC calendar day.
+            """
             parts: list[str] = []
             params: list[str] = []
             if date_from:
-                parts.append(f"substr({column}, 1, 10) >= ?")
-                params.append(date_from)
+                try:
+                    start_clock = datetime.combine(datetime.fromisoformat(date_from).date(), datetime.min.time())
+                    start_utc = start_clock.replace(tzinfo=plant_time_zone(start_clock)).astimezone(timezone.utc)
+                    parts.append(f"{column} >= ?")
+                    params.append(start_utc.isoformat(timespec="seconds"))
+                except ValueError:
+                    pass
             if date_to:
-                parts.append(f"substr({column}, 1, 10) <= ?")
-                params.append(date_to)
+                try:
+                    next_day = datetime.fromisoformat(date_to).date() + timedelta(days=1)
+                    end_clock = datetime.combine(next_day, datetime.min.time())
+                    end_utc = end_clock.replace(tzinfo=plant_time_zone(end_clock)).astimezone(timezone.utc)
+                    parts.append(f"{column} < ?")
+                    params.append(end_utc.isoformat(timespec="seconds"))
+                except ValueError:
+                    pass
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
+
+        def date_clause(alias: str = "") -> tuple[str, list[str]]:
+            column = f"{alias}.created_at" if alias else "created_at"
+            return plant_timestamp_clause(column)
 
         def delivery_list_date_clause(alias: str = "dl") -> tuple[str, list[str]]:
             # Inventory/production statistics use delivery-list dates because a
@@ -20681,25 +21075,38 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
         def reject_date_clause(alias: str = "re") -> tuple[str, list[str]]:
-            """Use index-friendly ISO timestamp bounds for Internal Rejects.
-
-            Both scanner and maintained A+W mirrors store ISO timestamps. Avoiding
-            ``substr(rejected_at, ...)`` lets SQLite use the v0.487 timestamp index
-            even after a large A+W history sync.
-            """
+            """Use the same plant-local day boundary as scan and audit activity."""
             column = f"{alias}.rejected_at" if alias else "rejected_at"
+            return plant_timestamp_clause(column)
+
+        def production_first_seen_bounds() -> tuple[str, list[str]]:
+            """Return UTC bounds for plant-local first-import dates.
+
+            Scanner timestamps are stored in UTC, while operators read Statistics
+            in Monroe/Charlotte plant time.  The old Production Count compared the
+            first ten UTC characters directly, which also made the metric depend on
+            mutable line-update notices.  Use local-day boundaries against the
+            immutable ``line_items.created_at_utc`` timestamp instead.
+            """
             parts: list[str] = []
             params: list[str] = []
             if date_from:
-                parts.append(f"{column} >= ?")
-                params.append(f"{date_from}T00:00:00")
+                try:
+                    start_clock = datetime.combine(datetime.fromisoformat(date_from).date(), datetime.min.time())
+                    start_utc = start_clock.replace(tzinfo=plant_time_zone(start_clock)).astimezone(timezone.utc)
+                    parts.append("first_seen_at >= ?")
+                    params.append(start_utc.isoformat(timespec="seconds"))
+                except ValueError:
+                    pass
             if date_to:
                 try:
-                    exclusive_to = (datetime.fromisoformat(date_to).date() + timedelta(days=1)).isoformat()
+                    next_day = datetime.fromisoformat(date_to).date() + timedelta(days=1)
+                    end_clock = datetime.combine(next_day, datetime.min.time())
+                    end_utc = end_clock.replace(tzinfo=plant_time_zone(end_clock)).astimezone(timezone.utc)
+                    parts.append("first_seen_at < ?")
+                    params.append(end_utc.isoformat(timespec="seconds"))
                 except ValueError:
-                    exclusive_to = date_to
-                parts.append(f"{column} < ?")
-                params.append(f"{exclusive_to}T00:00:00")
+                    pass
             return (" AND " + " AND ".join(parts), params) if parts else ("", [])
 
         def empty_breakage_bucket() -> dict[str, Any]:
@@ -20729,10 +21136,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
 
         scan_date_sql, scan_params = date_clause()
         audit_date_sql, audit_params = date_clause()
-        notice_date_sql, notice_date_params = date_clause("n")
+        production_first_seen_sql, production_first_seen_params = production_first_seen_bounds()
+        # External Remake transition notices use the same plant-local reporting
+        # day as New Production.  Reuse the UTC boundaries rather than slicing
+        # the stored UTC timestamp text at midnight UTC.
+        notice_date_sql = production_first_seen_sql.replace("first_seen_at", "n.created_at")
+        notice_date_params = list(production_first_seen_params)
         list_date_sql, list_date_params = delivery_list_date_clause("dl")
         reject_date_sql, reject_date_params = reject_date_clause("re")
-        current_month = datetime.now(timezone.utc).date().replace(day=1)
+        current_month = datetime.now(plant_time_zone()).date().replace(day=1)
         next_month = (
             current_month.replace(year=current_month.year + 1, month=1)
             if current_month.month == 12
@@ -20882,6 +21294,62 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 notice_date_params,
             ).fetchall()
 
+            # v0.536: New Production is based on the immutable first time the
+            # logical Order/Item entered the scanner from A+W.  line_update_notices
+            # is intentionally a latest-change review ledger: the importer deletes
+            # a prior notice for the same line when a newer update arrives.  Using
+            # that table for Production Count therefore let routine refreshes,
+            # reactivations, or source-row identity changes make old work appear
+            # newly imported.  Find the minimum persisted line creation timestamp
+            # across synchronized stage copies instead, then return every current
+            # stage row for those logical items so Python can select the richest
+            # current business snapshot without multiplying quantities.
+            production_first_seen_rows = con.execute(
+                f"""
+                WITH logical_first_seen AS (
+                    SELECT TRIM(COALESCE(li.order_no, '')) AS order_no,
+                           TRIM(COALESCE(li.item_no, '')) AS item_no,
+                           MIN(li.created_at_utc) AS first_seen_at
+                    FROM line_items li
+                    WHERE TRIM(COALESCE(li.order_no, '')) <> ''
+                      AND TRIM(COALESCE(li.item_no, '')) <> ''
+                      AND TRIM(COALESCE(li.source_id, '')) <> ''
+                      AND COALESCE(li.manual_only, 0) = 0
+                    GROUP BY TRIM(COALESCE(li.order_no, '')),
+                             TRIM(COALESCE(li.item_no, ''))
+                    HAVING first_seen_at IS NOT NULL
+                           AND first_seen_at <> ''{production_first_seen_sql}
+                )
+                SELECT dl.delivery_date,
+                       dl.status AS list_status,
+                       lf.first_seen_at,
+                       li.id AS line_item_id,
+                       li.source_id,
+                       li.barcode,
+                       li.order_no,
+                       li.item_no,
+                       li.qty,
+                       li.customer,
+                       li.job,
+                       li.product,
+                       li.dimensions,
+                       li.route,
+                       li.process_state,
+                       li.queue_state,
+                       li.updated_at_utc
+                FROM logical_first_seen lf
+                JOIN line_items li
+                  ON TRIM(COALESCE(li.order_no, '')) = lf.order_no
+                 AND TRIM(COALESCE(li.item_no, '')) = lf.item_no
+                 AND COALESCE(li.is_deleted, 0) = 0
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                ORDER BY lf.first_seen_at, lf.order_no, lf.item_no,
+                         CASE WHEN dl.status = 'active' THEN 0 ELSE 1 END,
+                         li.updated_at_utc DESC, dl.delivery_date DESC, li.id
+                """,
+                production_first_seen_params,
+            ).fetchall()
+
             # Pull only fields required for production/breakage analytics, then
             # deduplicate stage copies in Python. This avoids counting the same
             # physical piece once for Staging, Outbound, and its destination.
@@ -20991,15 +21459,106 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 list_date_params,
             ).fetchone()
 
-        # v0.505: Build the "came over during this range" production ledger from
-        # import notices. This is intentionally independent of delivery_date: a
-        # September 10 order first imported on September 3 belongs in September
-        # 3's production count. Stage copies share source lineage and are folded
-        # into one logical Order/Item before pieces/items/orders are counted.
-        production_activity_by_kind: dict[str, dict[tuple[str, str], dict[str, Any]]] = {
+        # v0.536: New Production is the immutable first A+W import of a logical
+        # Order / Item, not the latest Scan review notice. Delivery-date moves do
+        # not create another logical A+W order/item or another production event.  The
+        # review-notice table intentionally replaces older notices for the same
+        # physical row, so using it here could make a routine refresh look like
+        # brand-new production.  External Remake *transitions* still come from
+        # notices because a normal item may legitimately become a remake later.
+        production_activity_by_kind: dict[str, dict[tuple[str, str, str], dict[str, Any]]] = {
             "newProduction": {},
             "externalRemakes": {},
         }
+
+        first_seen_candidates: dict[tuple[str, str], dict[str, Any]] = {}
+        for source_row in production_first_seen_rows:
+            delivery_date = str(row_value(source_row, "delivery_date", "") or "").strip()
+            order_no = str(row_value(source_row, "order_no", "") or "").strip()
+            item_no = str(row_value(source_row, "item_no", "") or "").strip().zfill(3)
+            if not order_no or not item_no:
+                continue
+            identity = (order_no, item_no)
+            candidate = first_seen_candidates.get(identity)
+            if candidate is None:
+                candidate = {
+                    "order": order_no,
+                    "item": item_no,
+                    "qty": 0,
+                    "customer": "",
+                    "job": "",
+                    "product": "",
+                    "dimensions": "",
+                    "route": "",
+                    "deliveryDate": delivery_date,
+                    "firstSeenAt": str(row_value(source_row, "first_seen_at", "") or ""),
+                    "sourceId": "",
+                    "barcode": "",
+                    "processState": "",
+                    "queueState": "",
+                    "reason": "",
+                    "rush": False,
+                    "isRemake": False,
+                    "currentRank": None,
+                }
+                first_seen_candidates[identity] = candidate
+
+            process_state = str(row_value(source_row, "process_state", "") or "").strip()
+            queue_state = str(row_value(source_row, "queue_state", "") or "").strip()
+
+            # Prefer a current active-list copy, then the newest synchronized row.
+            # This keeps delivery-date moves from becoming new production without
+            # letting an older copy's Qty/status overwrite the current A+W state.
+            row_updated_at = str(row_value(source_row, "updated_at_utc", "") or "")
+            row_rank = (
+                1 if str(row_value(source_row, "list_status", "") or "").strip().lower() == "active" else 0,
+                row_updated_at,
+                delivery_date,
+            )
+            current_rank = candidate.get("currentRank")
+            if current_rank is None or row_rank > current_rank:
+                candidate["currentRank"] = row_rank
+                candidate["deliveryDate"] = delivery_date
+                candidate["qty"] = max(int(row_value(source_row, "qty", 0) or 0), 0)
+                candidate["isRemake"] = bool(is_remake_item({
+                    "processState": process_state,
+                    "queueState": queue_state,
+                }))
+                candidate["rush"] = bool(is_rush_item({
+                    "processState": process_state,
+                    "queueState": queue_state,
+                }))
+                for output_key, source_key in (
+                    ("customer", "customer"),
+                    ("job", "job"),
+                    ("product", "product"),
+                    ("dimensions", "dimensions"),
+                    ("route", "route"),
+                    ("sourceId", "source_id"),
+                    ("barcode", "barcode"),
+                    ("processState", "process_state"),
+                    ("queueState", "queue_state"),
+                ):
+                    value = str(row_value(source_row, source_key, "") or "").strip()
+                    if value or not candidate.get(output_key):
+                        candidate[output_key] = value
+
+        for identity, candidate in first_seen_candidates.items():
+            try:
+                activity_date = parse_database_utc_timestamp(candidate.get("firstSeenAt", "")).astimezone(plant_time_zone()).date().isoformat()
+            except (TypeError, ValueError):
+                activity_date = str(candidate.get("firstSeenAt") or "")[:10]
+            candidate["activityDate"] = activity_date
+            # A logical item currently identified as an External Remake is never
+            # counted in New Production. External Remake timing remains notice-
+            # based below so a normal order that becomes a remake on a later day
+            # does not rewrite the historical day on which it first arrived.
+            if candidate.pop("isRemake", False):
+                candidate.pop("currentRank", None)
+                continue
+            candidate.pop("currentRank", None)
+            production_activity_by_kind["newProduction"][(activity_date, *identity)] = candidate
+
         for notice_row in production_activity_notice_rows:
             try:
                 snapshot = json.loads(str(row_value(notice_row, "snapshot_json", "") or "{}"))
@@ -21019,34 +21578,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "processState": previous_snapshot.get("processState", previous_snapshot.get("process_state", "")),
                 "queueState": previous_snapshot.get("queueState", previous_snapshot.get("queue_state", "")),
             })
-            refresh_same_day_new = False
-            if current_is_remake and (change_type == "new" or not previous_is_remake):
-                activity_kind = "externalRemakes"
-            elif change_type == "new" and not current_is_remake:
-                activity_kind = "newProduction"
-            elif change_type == "updated" and not current_is_remake:
-                # v0.506: if A+W revises Qty/details again on the same day an
-                # Order/Item first arrives, Production Count must show the actual
-                # latest piece quantity rather than the first transient snapshot.
-                # Updates on later days do not move or rewrite the original day's
-                # production ledger because the activity-date key will not match.
-                activity_kind = "newProduction"
-                refresh_same_day_new = True
-            else:
+            if not current_is_remake or not (change_type == "new" or not previous_is_remake):
                 continue
 
             created_at = str(row_value(notice_row, "created_at", "") or "")
-            activity_date = created_at[:10]
+            try:
+                activity_date = parse_database_utc_timestamp(created_at).astimezone(plant_time_zone()).date().isoformat()
+            except (TypeError, ValueError):
+                activity_date = created_at[:10]
             order_no = str(snapshot.get("order") or "").strip()
             item_no = str(snapshot.get("item") or "").strip().zfill(3)
-            source_id = str(snapshot.get("sourceId") or "").strip()
             delivery_date = str(snapshot.get("deliveryDate") or row_value(notice_row, "delivery_date", "") or "").strip()
-            fallback_identity = "|".join([
-                delivery_date, order_no, item_no, str(snapshot.get("job") or "").strip(),
-                str(snapshot.get("product") or "").strip(), str(snapshot.get("dimensions") or "").strip(),
-            ])
-            logical_identity = source_id or fallback_identity
-            dedupe_key = (activity_date, logical_identity)
+            if not delivery_date or not order_no or not item_no:
+                continue
+            stable_identity = (activity_date, order_no, item_no)
             activity_row = {
                 "order": order_no,
                 "item": item_no,
@@ -21058,7 +21603,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "route": str(snapshot.get("route") or "").strip(),
                 "deliveryDate": delivery_date,
                 "firstSeenAt": created_at,
-                "sourceId": source_id,
+                "sourceId": str(snapshot.get("sourceId") or "").strip(),
                 "barcode": str(snapshot.get("barcode") or "").strip(),
                 "processState": str(snapshot.get("processState") or "").strip(),
                 "queueState": str(snapshot.get("queueState") or "").strip(),
@@ -21068,31 +21613,29 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     or snapshot.get("reason")
                     or ""
                 ).strip(),
-                # v0.514: reporting detail retains priority identity so the
-                # Production Count table can include/exclude Rush work without
-                # re-querying live line items or changing historical activity.
                 "rush": bool(is_rush_item({
                     "remake": snapshot.get("remake", ""),
                     "processState": snapshot.get("processState", ""),
                     "queueState": snapshot.get("queueState", ""),
                 })),
+                "activityDate": activity_date,
             }
-            existing_activity = production_activity_by_kind[activity_kind].get(dedupe_key)
-            if refresh_same_day_new and existing_activity is None:
-                continue
+            existing_activity = production_activity_by_kind["externalRemakes"].get(stable_identity)
             if (
-                refresh_same_day_new
-                or existing_activity is None
+                existing_activity is None
+                or created_at >= str(existing_activity.get("firstSeenAt") or "")
                 or sum(bool(value) for value in activity_row.values()) > sum(bool(value) for value in existing_activity.values())
             ):
-                production_activity_by_kind[activity_kind][dedupe_key] = activity_row
+                production_activity_by_kind["externalRemakes"][stable_identity] = activity_row
 
-        # If a brand-new notice is immediately overlaid as a remake in the same
-        # import day, classify it only as external remake. Across different days
-        # both events remain valid history: original production first, remake later.
-        remake_keys = set(production_activity_by_kind["externalRemakes"].keys())
+        # A line that first arrived as normal work and was corrected to External
+        # Remake during the same plant-local reporting range belongs only in the
+        # remake bucket. Stable Order / Item identity deliberately ignores both
+        # mutable source-row IDs and delivery-date moves so A+W corrections cannot
+        # double-count the same logical work.
+        remake_identities = set(production_activity_by_kind["externalRemakes"].keys())
         for duplicate_key in list(production_activity_by_kind["newProduction"].keys()):
-            if duplicate_key in remake_keys:
+            if duplicate_key in remake_identities:
                 production_activity_by_kind["newProduction"].pop(duplicate_key, None)
 
         physical_items: dict[tuple[str, str], dict[str, Any]] = {}
@@ -21414,6 +21957,32 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if delivery_date:
                     bucket["deliveryDates"].add(delivery_date)
 
+            date_buckets: dict[str, dict[str, Any]] = {}
+            for row in ordered:
+                activity_date = str(row.get("activityDate") or "").strip()
+                if not activity_date:
+                    continue
+                qty = max(int(row.get("qty") or 0), 0)
+                bucket = date_buckets.setdefault(activity_date, {
+                    "date": activity_date, "pieces": 0, "itemCount": 0, "orders": set(),
+                })
+                bucket["pieces"] += qty
+                bucket["itemCount"] += 1
+                order_no = str(row.get("order") or "").strip()
+                if order_no:
+                    bucket["orders"].add(order_no)
+
+            by_date = [
+                {
+                    "date": str(bucket["date"]),
+                    "pieces": int(bucket["pieces"]),
+                    "itemCount": int(bucket["itemCount"]),
+                    "orderCount": len(bucket["orders"]),
+                }
+                for bucket in date_buckets.values()
+            ]
+            by_date.sort(key=lambda row: str(row["date"]), reverse=True)
+
             by_glass = [
                 {
                     "glassType": str(bucket["glassType"]),
@@ -21436,6 +22005,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "itemCount": len(ordered),
                 "orderCount": len(order_numbers),
                 "byGlass": by_glass,
+                "byDate": by_date,
                 "rows": ordered[:detail_limit] if include_activity_rows else [],
                 "detailTruncated": bool(include_activity_rows and len(ordered) > detail_limit),
             }
@@ -21614,7 +22184,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "internalRejects": internal_reject_activity,
                 "externalRemakes": external_remake_activity,
                 "yieldPercentageExcluded": yield_percentage_excluded,
-                "basis": "first-seen import timestamp for new/remake work; reject incident timestamp for Internal Rejects",
+                "basis": "New Production uses the immutable earliest A+W-imported line creation time per Order/Item in America/New_York, survives delivery-date moves, and excludes current External Remakes; remake transitions use their import-change timestamp; Internal Rejects use reject incident time",
             },
             "breakage": {
                 "costBasis": "USD per square foot",
@@ -28131,7 +28701,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         scan_by_expected = {int(item.get("expectedItemId") or 0): item for item in scans if int(item.get("expectedItemId") or 0)}
         reconciliation: list[dict[str, Any]] = []
         matched_scan_ids: set[int] = set()
-        status_counts = {"matched": 0, "mismatch": 0, "missingPhysical": 0, "notInSystem": 0}
+        status_counts = {"matched": 0, "mismatch": 0, "partial": 0, "missingPhysical": 0, "notInSystem": 0}
+        session_is_open = str(row_value(session_row, "status") or "open") == "open"
         for system_item in expected:
             physical = scan_by_expected.get(int(system_item["id"]))
             if not physical:
@@ -28157,8 +28728,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         same = " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
                     if not same:
                         differences.append(f"{label} differs")
-                status = "matched" if not differences else "mismatch"
-                status_counts["matched" if status == "matched" else "mismatch"] += 1
+                partial_qty = (
+                    session_is_open
+                    and differences == ["Quantity differs"]
+                    and int(physical.get("qty") or 0) < int(system_item.get("qty") or 0)
+                )
+                if partial_qty:
+                    status = "partial"
+                    remaining = max(int(system_item.get("qty") or 0) - int(physical.get("qty") or 0), 0)
+                    differences = [f"Counted {int(physical.get('qty') or 0)}/{int(system_item.get('qty') or 0)}; {remaining} remaining"]
+                    status_counts["partial"] += 1
+                else:
+                    status = "matched" if not differences else "mismatch"
+                    status_counts["matched" if status == "matched" else "mismatch"] += 1
             reconciliation.append({"status": status, "system": system_item, "physical": physical, "differences": differences})
         for physical in scans:
             if int(physical["id"]) in matched_scan_ids:
@@ -28228,7 +28810,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                               AND LOWER(TRIM(e.glass_type))=LOWER(TRIM(s.glass_type))
                               AND LOWER(TRIM(e.item_id))=LOWER(TRIM(s.item_id))
                               AND LOWER(TRIM(e.dimensions))=LOWER(TRIM(s.dimensions)) THEN 1 ELSE 0 END) AS matched,
-                SUM(CASE WHEN s.id IS NOT NULL AND NOT (e.qty=s.qty
+                SUM(CASE WHEN s.id IS NOT NULL AND s.qty<e.qty
+                              AND LOWER(TRIM(e.glass_type))=LOWER(TRIM(s.glass_type))
+                              AND LOWER(TRIM(e.item_id))=LOWER(TRIM(s.item_id))
+                              AND LOWER(TRIM(e.dimensions))=LOWER(TRIM(s.dimensions)) THEN 1 ELSE 0 END) AS partial,
+                SUM(CASE WHEN s.id IS NOT NULL AND NOT (
+                              (e.qty=s.qty OR s.qty<e.qty)
                               AND LOWER(TRIM(e.glass_type))=LOWER(TRIM(s.glass_type))
                               AND LOWER(TRIM(e.item_id))=LOWER(TRIM(s.item_id))
                               AND LOWER(TRIM(e.dimensions))=LOWER(TRIM(s.dimensions))) THEN 1 ELSE 0 END) AS mismatch
@@ -28246,9 +28833,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             cycle_filter = json.loads(str(row_value(session_row, "cycle_filter_json") or "{}"))
         except (TypeError, ValueError, json.JSONDecodeError):
             cycle_filter = {}
+        partial_count = int(row_value(compare, "partial", 0) or 0)
+        completed_status = str(row_value(session_row, "status") or "open") != "open"
         status_counts = {
             "matched": int(row_value(compare, "matched", 0) or 0),
-            "mismatch": int(row_value(compare, "mismatch", 0) or 0),
+            "mismatch": int(row_value(compare, "mismatch", 0) or 0) + (partial_count if completed_status else 0),
+            "partial": 0 if completed_status else partial_count,
             "missingPhysical": int(row_value(compare, "missing_physical", 0) or 0),
             "notInSystem": int(row_value(extra, "not_in_system", 0) or 0),
         }
@@ -28394,6 +28984,14 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             return self._inventory_smart_fill_con(con, order_no, item_no)
 
     def record_inventory_scan(self, session_id: int, raw_scan: str, user: dict[str, Any]) -> dict[str, Any]:
+        """Count exactly one physical piece per scanner trigger.
+
+        Inventory expected rows may represent multiple identical panes. A barcode
+        scan therefore increments the physical count by one until the frozen
+        expected quantity is reached; only then is the same source considered a
+        duplicate. The existing one-row-per-source inventory table is retained so
+        schema 21 stays valid and reconciliation remains lightweight.
+        """
         scan_text = str(raw_scan or "").strip()
         if not scan_text:
             raise ValueError("Scan a piece barcode or enter an exact Order/Item value")
@@ -28411,56 +29009,112 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not matched:
                 con.rollback()
                 return {"ok": False, "manualEntryRequired": True, "scan": scan_text, "canonical": canonical, "message": message}
+
             key = self._inventory_physical_key(matched)
             expected = con.execute(
                 "SELECT * FROM inventory_expected_items WHERE session_id=? AND snapshot_key=?",
                 (session_id, key),
             ).fetchone()
-            duplicate = con.execute(
-                "SELECT * FROM inventory_scans WHERE session_id=? AND (expected_item_id=? OR source_line_item_id=?) ORDER BY id DESC LIMIT 1",
-                (session_id, int(row_value(expected, "id", 0) or 0) if expected else -1, str(row_value(matched, "id") or "")),
-            ).fetchone()
-            if duplicate:
-                con.rollback()
-                existing = self._inventory_public_scan(duplicate)
-                return {"ok": False, "duplicate": True, "message": f"Already scanned at {existing['scannedAt']} by {existing['scannedBy']}.", "existing": existing}
 
             if expected:
                 fields = self._inventory_public_expected(expected)
-                qty = int(fields["qty"])
+                target_qty = max(int(fields.get("qty") or 0), 1)
             else:
                 dimensions = str(row_value(matched, "dimensions") or "")
                 sqft_each = self._inventory_round_sqft(dimensions_square_feet(dimensions))
                 mapping = self._inventory_item_mapping(con, row_value(matched, "product"))
-                qty = max(int(row_value(matched, "qty", 1) or 1), 1)
-                matched_list = con.execute("SELECT delivery_date FROM delivery_lists WHERE id=?", (str(row_value(matched, "list_id") or ""),)).fetchone()
+                target_qty = max(int(row_value(matched, "qty", 1) or 1), 1)
+                matched_list = con.execute(
+                    "SELECT delivery_date FROM delivery_lists WHERE id=?",
+                    (str(row_value(matched, "list_id") or ""),),
+                ).fetchone()
                 fields = {
-                    "jobNr": str(row_value(matched, "job") or ""), "deliveryDate": str(row_value(matched_list, "delivery_date") or ""), "customer": str(row_value(matched, "customer") or ""),
-                    "order": str(row_value(matched, "order_no") or ""), "item": self._inventory_clean_item_no(row_value(matched, "item_no")),
+                    "jobNr": str(row_value(matched, "job") or ""),
+                    "deliveryDate": str(row_value(matched_list, "delivery_date") or ""),
+                    "customer": str(row_value(matched, "customer") or ""),
+                    "order": str(row_value(matched, "order_no") or ""),
+                    "item": self._inventory_clean_item_no(row_value(matched, "item_no")),
                     "glassType": str(mapping.get("glassLabel") or canonical_clear_glass_label(row_value(matched, "product")) or row_value(matched, "product") or ""),
-                    "itemId": str(mapping.get("itemId") or ""), "dimensions": dimensions, "sqftEach": sqft_each,
+                    "itemId": str(mapping.get("itemId") or ""),
+                    "dimensions": dimensions,
+                    "sqftEach": sqft_each,
                 }
-            total_sqft = self._inventory_round_sqft(float(fields.get("sqftEach") or 0) * qty)
-            now = now_iso()
-            cursor = con.execute(
+
+            expected_id = int(row_value(expected, "id", 0) or 0) if expected else None
+            source_line_item_id = str(row_value(matched, "id") or "")
+            existing = con.execute(
                 """
-                INSERT INTO inventory_scans
-                    (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
-                     delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft)
-                VALUES (?, ?, ?, ?, 'scan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT * FROM inventory_scans
+                WHERE session_id=? AND (expected_item_id=? OR source_line_item_id=?)
+                ORDER BY id DESC LIMIT 1
                 """,
-                (session_id, int(row_value(expected, "id", 0) or 0) if expected else None, str(row_value(matched, "id") or ""), canonical or scan_text,
-                 now, actor, fields.get("deliveryDate", ""), fields.get("jobNr", ""), fields.get("customer", ""), fields.get("order", ""), fields.get("item", ""),
-                 fields.get("glassType", ""), fields.get("itemId", ""), fields.get("dimensions", ""), fields.get("sqftEach", 0), qty, total_sqft),
+                (session_id, expected_id if expected_id is not None else -1, source_line_item_id),
+            ).fetchone()
+            counted_qty = max(int(row_value(existing, "qty", 0) or 0), 0) if existing else 0
+            if counted_qty >= target_qty:
+                con.rollback()
+                existing_public = self._inventory_public_scan(existing) if existing else {}
+                return {
+                    "ok": False,
+                    "duplicate": True,
+                    "message": f"Expected quantity already counted ({counted_qty}/{target_qty}).",
+                    "existing": existing_public,
+                    "countedQty": counted_qty,
+                    "expectedQty": target_qty,
+                    "remainingQty": 0,
+                }
+
+            next_qty = counted_qty + 1
+            sqft_each = self._inventory_round_sqft(fields.get("sqftEach") or 0)
+            total_sqft = self._inventory_round_sqft(sqft_each * next_qty)
+            now = now_iso()
+            if existing:
+                scan_id = int(row_value(existing, "id", 0) or 0)
+                con.execute(
+                    """
+                    UPDATE inventory_scans
+                    SET barcode=?, scanned_at=?, scanned_by=?, qty=?, total_sqft=?
+                    WHERE id=?
+                    """,
+                    (canonical or scan_text, now, actor, next_qty, total_sqft, scan_id),
+                )
+            else:
+                cursor = con.execute(
+                    """
+                    INSERT INTO inventory_scans
+                        (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
+                         delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft)
+                    VALUES (?, ?, ?, ?, 'scan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    """,
+                    (session_id, expected_id, source_line_item_id, canonical or scan_text,
+                     now, actor, fields.get("deliveryDate", ""), fields.get("jobNr", ""), fields.get("customer", ""), fields.get("order", ""), fields.get("item", ""),
+                     fields.get("glassType", ""), fields.get("itemId", ""), fields.get("dimensions", ""), sqft_each, self._inventory_round_sqft(sqft_each)),
+                )
+                scan_id = int(cursor.lastrowid)
+
+            remaining_qty = max(target_qty - next_qty, 0)
+            self.insert_audit(
+                con, "inventory_scan", str(scan_id), "inventory_piece_scanned", actor, "", "",
+                {
+                    "sessionId": session_id, "location": location, "matchedExpected": bool(expected),
+                    "barcode": canonical or scan_text, "order": fields.get("order", ""), "item": fields.get("item", ""),
+                    "qtyDelta": 1, "countedQty": next_qty, "expectedQty": target_qty, "remainingQty": remaining_qty,
+                },
             )
-            scan_id = int(cursor.lastrowid)
-            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_piece_scanned", actor, "", "",
-                              {"sessionId": session_id, "location": location, "matchedExpected": bool(expected), "barcode": canonical or scan_text,
-                               "order": fields.get("order", ""), "item": fields.get("item", ""), "qty": qty})
             inserted = con.execute("SELECT * FROM inventory_scans WHERE id=?", (scan_id,)).fetchone()
             scan = self._inventory_public_scan(inserted)
             con.commit()
-        return {"ok": True, "matchedExpected": bool(expected), "message": "Inventory piece matched." if expected else "Piece scanned but it was not in the frozen system snapshot.", "scan": scan, "session": self.get_inventory_session(session_id, user)}
+
+        complete = remaining_qty == 0
+        if expected:
+            result_message = f"Inventory piece matched. Counted {next_qty}/{target_qty}."
+        else:
+            result_message = f"Piece counted {next_qty}/{target_qty}, but it was not in the frozen system snapshot."
+        return {
+            "ok": True, "matchedExpected": bool(expected), "message": result_message, "scan": scan,
+            "countedQty": next_qty, "expectedQty": target_qty, "remainingQty": remaining_qty,
+            "lineComplete": complete, "session": self.get_inventory_session(session_id, user),
+        }
 
     def record_inventory_manual_entry(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
         actor = str(user.get("displayName") or user.get("username") or "").strip()
@@ -28668,6 +29322,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_inventory_session(session_id, user)
 
     def remove_inventory_scan(self, session_id: int, scan_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+        """Undo one scanner-counted piece, or remove one manual aggregate entry."""
         actor = str(user.get("displayName") or user.get("username") or "").strip()
         reason = str(data.get("reason") or "Inventory scan correction").strip()
         with self.connect() as con:
@@ -28680,9 +29335,26 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if not scan:
                 raise ValueError("Inventory scan not found")
             payload = self._inventory_public_scan(scan)
-            con.execute("DELETE FROM inventory_scans WHERE id=?", (scan_id,))
-            self.insert_audit(con, "inventory_scan", str(scan_id), "inventory_scan_removed", actor, "", reason,
-                              {"sessionId": session_id, "removed": payload})
+            entry_type = str(row_value(scan, "entry_type") or "scan").strip().lower()
+            current_qty = max(int(row_value(scan, "qty", 0) or 0), 0)
+            if entry_type == "scan" and current_qty > 1:
+                next_qty = current_qty - 1
+                sqft_each = self._inventory_round_sqft(row_value(scan, "sqft_each", 0))
+                next_total = self._inventory_round_sqft(sqft_each * next_qty)
+                con.execute(
+                    "UPDATE inventory_scans SET qty=?, total_sqft=? WHERE id=?",
+                    (next_qty, next_total, scan_id),
+                )
+                action = "inventory_scan_piece_removed"
+                audit_payload = {
+                    "sessionId": session_id, "scanId": scan_id, "qtyDelta": -1,
+                    "previousQty": current_qty, "countedQty": next_qty, "scan": payload,
+                }
+            else:
+                con.execute("DELETE FROM inventory_scans WHERE id=?", (scan_id,))
+                action = "inventory_scan_removed"
+                audit_payload = {"sessionId": session_id, "removed": payload}
+            self.insert_audit(con, "inventory_scan", str(scan_id), action, actor, "", reason, audit_payload)
             con.commit()
         return self.get_inventory_session(session_id, user)
 
@@ -28701,11 +29373,23 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             session_row = self._inventory_session_row_con(con, session_id)
             self._require_inventory_location(user, str(row_value(session_row, "location") or ""))
             detail = self._inventory_session_detail_con(con, session_row)
+
+        def readable_inventory_time(value: Any) -> str:
+            text = str(value or "").strip()
+            if not text:
+                return ""
+            try:
+                parsed = parse_database_utc_timestamp(text)
+                local = parsed.astimezone(plant_time_zone(parsed))
+                return f"{local:%m/%d/%Y} {local.strftime('%I:%M %p').lstrip('0')}"
+            except (TypeError, ValueError, OverflowError):
+                return text
+
         summary_rows: list[list[Any]] = [
             ["Inventory Session", detail["sessionCode"]], ["Location", detail["locationLabel"]],
             ["Type", "Cycle Inventory" if detail["inventoryType"] == "cycle" else "Full Inventory"],
-            ["Status", detail["status"].title()], ["Started", detail["startedAt"]], ["Started By", detail["startedBy"]],
-            ["Completed", detail["completedAt"]], ["Completed By", detail["completedBy"]], [],
+            ["Status", detail["status"].title()], ["Started", readable_inventory_time(detail["startedAt"])], ["Started By", detail["startedBy"]],
+            ["Completed", readable_inventory_time(detail["completedAt"])], ["Completed By", detail["completedBy"]], [],
             ["System Qty", detail["expectedQty"]], ["Physical Qty", detail["scannedQty"]],
             ["System SQFT", detail["expectedTotalSqft"]], ["Physical SQFT", detail["scannedTotalSqft"]],
             ["Matched", detail["statusCounts"]["matched"]], ["Mismatched", detail["statusCounts"]["mismatch"]],
@@ -28716,9 +29400,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             summary_rows.append([item["glassType"], item["itemId"], item["expectedQty"], item["scannedQty"], item["varianceQty"],
                                  item["expectedSqft"], item["scannedSqft"], item["varianceSqft"]])
 
-        physical_rows = [["Scanned Date/Time", "Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
+        physical_rows = [["Scanned Date/Time (ET)", "Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
         for item in reversed(detail["scans"]):
-            physical_rows.append([item["scannedAt"], item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
+            physical_rows.append([readable_inventory_time(item["scannedAt"]), item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
                                   item["dimensions"], item["sqftEach"], item["qty"], item["totalSqft"], item["entryType"].title(), item["scannedBy"], item["notes"]])
 
         system_rows = [["Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Route", "Bay", "Reason"]]
@@ -28729,7 +29413,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         reconcile_rows = [["Result", "System DD", "Physical DD", "System Job", "Physical Job", "System Customer", "Physical Customer", "System Order", "Physical Order", "System Item", "Physical Item",
                            "System Glass", "Physical Glass", "System Item ID", "Physical Item ID", "System Size", "Physical Size", "System SQFT", "Physical SQFT",
                            "System Qty", "Physical Qty", "System Total SQFT", "Physical Total SQFT", "Difference"]]
-        labels = {"matched": "MATCH", "mismatch": "MISMATCH", "missing_physical": "MISSING PHYSICAL", "not_in_system": "NOT IN SYSTEM"}
+        labels = {"matched": "MATCH", "partial": "PARTIALLY COUNTED", "mismatch": "MISMATCH", "missing_physical": "MISSING PHYSICAL", "not_in_system": "NOT IN SYSTEM"}
         for row in detail["reconciliation"]:
             system_item = row.get("system") or {}
             physical = row.get("physical") or {}
@@ -28762,23 +29446,62 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     style = 0
                     if name in {"Physical Scans", "System Snapshot", "Reconciliation"} and row_index == 1:
                         style = 1
-                    elif name == "Summary" and (row_index == 19):
+                    elif name == "Summary" and row_index == 19:
                         style = 1
+                    elif name == "Summary" and row_index <= 17 and values and col_index == 1:
+                        style = 4
                     elif name == "Reconciliation" and row_index > 1:
                         result = str(values[0] or "")
-                        style = 2 if result == "MATCH" else 3
+                        style = 2 if result == "MATCH" else 4 if result == "PARTIALLY COUNTED" else 3
                     cells.append(cell_xml(row_index, col_index, value, style))
-                row_xml.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+                header_row = (name != "Summary" and row_index == 1) or (name == "Summary" and row_index == 19)
+                row_height = ' ht="24" customHeight="1"' if header_row else ""
+                row_xml.append(f'<row r="{row_index}"{row_height}>{"".join(cells)}</row>')
+
             max_cols = max((len(row) for row in rows), default=1)
-            widths = ''.join(f'<col min="{i}" max="{i}" width="{18 if i > 1 else 22}" customWidth="1"/>' for i in range(1, max_cols + 1))
-            return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>{widths}</cols><sheetData>{''.join(row_xml)}</sheetData><autoFilter ref="A1:{self._inventory_xlsx_column_name(max_cols)}{max(len(rows),1)}"/></worksheet>'''
+            widths: list[float] = []
+            for col_index in range(max_cols):
+                longest = max((len(str(row[col_index] if col_index < len(row) else "")) for row in rows), default=0)
+                widths.append(float(min(max(longest + 2, 10), 32)))
+            preferred = {
+                "Summary": {1: 24, 2: 28},
+                "Physical Scans": {1: 22, 2: 14, 3: 16, 4: 28, 5: 14, 6: 11, 7: 24, 8: 14, 9: 18, 10: 10, 11: 8, 12: 12, 13: 10, 14: 20, 15: 34},
+                "System Snapshot": {1: 14, 2: 16, 3: 28, 4: 14, 5: 11, 6: 24, 7: 14, 8: 18, 9: 10, 10: 8, 11: 12, 12: 12, 13: 10, 14: 40},
+                "Reconciliation": {1: 18, 2: 14, 3: 14, 4: 16, 5: 16, 6: 26, 7: 26, 8: 14, 9: 14, 10: 11, 11: 11, 12: 22, 13: 22, 24: 36},
+            }.get(name, {})
+            for column, minimum in preferred.items():
+                if 1 <= column <= len(widths):
+                    widths[column - 1] = max(widths[column - 1], float(minimum))
+            width_xml = ''.join(
+                f'<col min="{index}" max="{index}" width="{min(width, 48):.1f}" customWidth="1"/>'
+                for index, width in enumerate(widths, start=1)
+            )
+
+            if name == "Summary":
+                sheet_views = '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+                auto_filter = f'<autoFilter ref="A19:{self._inventory_xlsx_column_name(max_cols)}{max(len(rows),19)}"/>' if len(rows) >= 19 else ""
+            else:
+                sheet_views = '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+                auto_filter = f'<autoFilter ref="A1:{self._inventory_xlsx_column_name(max_cols)}{max(len(rows),1)}"/>'
+            return (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                f'{sheet_views}<cols>{width_xml}</cols><sheetData>{"".join(row_xml)}</sheetData>{auto_filter}</worksheet>'
+            )
 
         workbook_sheets = ''.join(f'<sheet name="{xml_escape(name)}" sheetId="{index}" r:id="rId{index}"/>' for index, (name, _rows) in enumerate(sheets, start=1))
         workbook_rels = ''.join(f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>' for index in range(1, len(sheets) + 1))
         content_sheets = ''.join(f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for index in range(1, len(sheets) + 1))
-        styles = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF195C9C"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8F5E9"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFE8E8"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'''
+        styles = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FF173A5E"/><sz val="11"/><name val="Calibri"/></font></fonts>'
+            '<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF195C9C"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8F5E9"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFE8E8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF3FB"/></patternFill></fill></fills>'
+            '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD8E1EA"/></left><right style="thin"><color rgb="FFD8E1EA"/></right><top style="thin"><color rgb="FFD8E1EA"/></top><bottom style="thin"><color rgb="FFD8E1EA"/></bottom><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1"/></cellXfs>'
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+        )
         output = BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("[Content_Types].xml", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>{content_sheets}</Types>''')

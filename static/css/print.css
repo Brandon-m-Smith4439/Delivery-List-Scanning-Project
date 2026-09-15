@@ -10100,3 +10100,121 @@
   flex: 0 0 auto !important;
   white-space: nowrap !important;
 }
+
+/* ========================================================================== */
+/* v0.530 Print / Export attention palette                                    */
+/* ========================================================================== */
+.print-filter-chip-v197.is-status-updated,
+.print-filter-chip-v197.is-attention-updated { --print-chip-border: var(--attention-new-order) !important; --print-chip-color: var(--attention-new-order) !important; --print-chip-active-start: var(--attention-new-order) !important; --print-chip-active-end: var(--attention-new-order) !important; }
+.print-filter-chip-v197.is-attention-reject { --print-chip-border: var(--attention-internal-reject) !important; --print-chip-color: #8a4800 !important; --print-chip-active-start: var(--attention-internal-reject) !important; --print-chip-active-end: var(--attention-internal-reject) !important; }
+.print-filter-chip-v197.is-attention-remake { --print-chip-border: var(--attention-external-remake) !important; --print-chip-color: var(--attention-external-remake) !important; --print-chip-active-start: var(--attention-external-remake) !important; --print-chip-active-end: var(--attention-external-remake) !important; }
+.print-filter-chip-v197.is-attention-rush { --print-chip-border: var(--attention-rush) !important; --print-chip-color: var(--attention-rush) !important; --print-chip-active-start: var(--attention-rush) !important; --print-chip-active-end: var(--attention-rush) !important; }
+.print-paper-attention-v197.is-remake { color: var(--attention-external-remake) !important; }
+.print-paper-attention-v197.is-rush { color: var(--attention-rush) !important; }
+.print-paper-attention-v197.is-reject { color: var(--attention-internal-reject) !important; }
+.print-paper-attention-v197.is-updated { color: var(--attention-new-order) !important; }
+.print-preset-choice-v227.is-attention-remake { --preset-attention-color: var(--attention-external-remake); }
+.print-preset-choice-v227.is-attention-rush { --preset-attention-color: var(--attention-rush); }
+.print-preset-choice-v227.is-attention-reject { --preset-attention-color: var(--attention-internal-reject); }
+.print-preset-choice-v227.is-attention-updated { --preset-attention-color: var(--attention-new-order); }
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227.is-attention-remake:has(input:checked) { border-color: var(--attention-external-remake) !important; background: var(--attention-external-remake) !important; color: #fff !important; }
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227.is-attention-rush:has(input:checked) { border-color: var(--attention-rush) !important; background: var(--attention-rush) !important; color: #fff !important; }
+.print-preset-filter-row-v227.is-attention .print-preset-choice-v227.is-attention-reject:has(input:checked) { border-color: var(--attention-internal-reject) !important; background: var(--attention-internal-reject) !important; color: #fff !important; }
+
+/* ========================================================================== */
+/* v0.532 Print / Export unified Include/Exclude editing mode                 */
+/* ========================================================================== */
+.print-filter-mode-v532 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #d3dee8;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #fbfdff, #f4f8fc);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.78);
+}
+.print-filter-mode-v532 > span { min-width: 0; display: grid; gap: 2px; }
+.print-filter-mode-v532 strong { color: #173c5d; font-size: 10px; font-weight: 900; letter-spacing: .025em; text-transform: uppercase; }
+.print-filter-mode-v532 small { color: #667c90; font-size: 8.5px; line-height: 1.2; }
+.print-filter-mode-switch-v532 {
+  position: relative;
+  min-width: 164px;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid #b9c9d8;
+  border-radius: 999px;
+  background: #e8f0f7;
+  color: #34556f;
+  cursor: pointer;
+  font-size: 8.5px;
+  font-weight: 900;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.print-filter-mode-switch-v532 > span { position: relative; z-index: 2; text-align: center; }
+.print-filter-mode-switch-v532 > i {
+  position: absolute;
+  z-index: 1;
+  left: 3px;
+  top: 3px;
+  width: calc(50% - 3px);
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2f83b8, #17689d);
+  box-shadow: 0 2px 5px rgba(19,82,124,.22);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 160ms ease;
+}
+.print-filter-mode-switch-v532 > span:first-child { color: #fff; }
+.print-filter-mode-switch-v532.is-exclude-v532 { border-color: #899bac; background: #f3f5f7; }
+.print-filter-mode-switch-v532.is-exclude-v532 > i { transform: translateX(100%); background: linear-gradient(180deg, #66798c, #43566a); }
+.print-filter-mode-switch-v532.is-exclude-v532 > span:first-child { color: #566b7e; }
+.print-filter-mode-switch-v532.is-exclude-v532 > span:last-child { color: #fff; }
+.print-filter-mode-switch-v532:focus-visible { outline: 3px solid rgba(23,104,157,.17); outline-offset: 2px; }
+
+/* Exclusion mode is intentionally outline-only. Existing per-category colors
+   still identify the choice, but filled selected states are suppressed. */
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197 {
+  border-style: dashed !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197:has(input:checked) {
+  border-width: 2px !important;
+  border-style: dashed !important;
+  background: #f5f7f9 !important;
+  box-shadow: inset 0 0 0 1px rgba(67,86,106,.055) !important;
+  color: var(--print-chip-color, #314b62) !important;
+}
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197:has(input:checked) > span,
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197:has(input:checked) > b {
+  color: var(--print-chip-color, #314b62) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197.is-machine-choice-v521,
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) {
+  border-color: color-mix(in srgb, var(--print-machine-color, #64748b) 62%, #cbd7df) !important;
+  border-style: dashed !important;
+  background: color-mix(in srgb, var(--print-machine-color, #64748b) 4%, #fff) !important;
+  box-shadow: none !important;
+}
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > span,
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197.is-machine-choice-v521:has(input:checked) > b {
+  color: color-mix(in srgb, var(--print-machine-color, #64748b) 84%, #213b51) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+.print-filter-pane-v238.is-exclude-mode-v532 .print-filter-chip-v197:has(input:disabled) { opacity: .46; }
+
+@media (max-width: 700px) {
+  .print-filter-mode-v532 { align-items: stretch; flex-direction: column; gap: 7px; }
+  .print-filter-mode-switch-v532 { width: 100%; min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .print-filter-mode-switch-v532 > i { transition: none !important; }
+}

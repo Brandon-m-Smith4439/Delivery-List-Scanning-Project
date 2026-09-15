@@ -32,6 +32,8 @@ Technical format: 44.1 kHz, 16-bit PCM, mono WAV. Primary operational cues are m
 | `redo` | `redo.wav` | Redo completed | A forward sweep with a clear ascending endpoint. |
 | `import_start` | `import_start.wav` | Delivery-list import started | A compact rising pulse that signals work is underway. |
 | `import_complete` | `import_complete.wav` | Import completed successfully | A short completion phrase. |
+| `import_success` | `import_success.wav` | A+W import completed successfully | A clean ascending confirmation reserved for successful A+W import runs. |
+| `import_failed` | `import_failed.wav` | A+W import failed | A controlled descending fault cue reserved for failed A+W import runs. |
 | `save` | `save.wav` | Settings or record saved | A compact save confirmation. |
 | `print_ready` | `print_ready.wav` | Print completed | Plays after the browser reports that the print workflow completed, not when the preview opens. |
 | `email_sent` | `email_sent.wav` | Email sent | An outgoing sweep followed by a delivered confirmation. |

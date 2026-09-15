@@ -1,6 +1,6 @@
 {
   "pack": "Barefoot Delivery Scanner Audio Language",
-  "version": "1.3",
+  "version": "1.4",
   "sample_rate_hz": 44100,
   "encoding": "16-bit PCM mono WAV",
   "mastering": "Floor-ready mastered cues; routine interface and destructive-action cues are intentionally restrained below scan, outbound, and fault cues.",
@@ -148,6 +148,18 @@
       "label": "Import completed successfully",
       "description": "A three-note completion phrase that is shorter than a full-truck celebration.",
       "duration_seconds": 0.62
+    },
+    "import_success": {
+      "file": "import_success.wav",
+      "label": "A+W import completed successfully",
+      "description": "A clean ascending three-stage completion cue reserved for successful A+W import runs.",
+      "duration_seconds": 0.64
+    },
+    "import_failed": {
+      "file": "import_failed.wav",
+      "label": "A+W import failed",
+      "description": "A controlled descending three-stage fault cue reserved for failed A+W import runs.",
+      "duration_seconds": 0.68
     },
     "save": {
       "file": "save.wav",

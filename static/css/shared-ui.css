@@ -5325,3 +5325,29 @@ body :is(.notification-center, .notification-center-panel, .line-update-review-p
     grid-column:3 !important;
   }
 }
+
+/* v0.533: shared professional loading language. Determinate feature meters can
+   add app-loading-track-v533 and own the fill width; indeterminate app-loading
+   states use the same blue->green palette and track depth. */
+.app-loading-bar-v529,
+.app-loading-track-v533 {
+  position: relative;
+  overflow: hidden;
+  height: 10px;
+  border: 1px solid #a8c2d6;
+  border-radius: 999px;
+  background: linear-gradient(180deg,#eaf2f8 0%,#d8e5ef 100%);
+  box-shadow: inset 0 1px 3px rgba(18,52,78,.16),0 1px 0 rgba(255,255,255,.9);
+}
+.app-loading-bar-v529::after {
+  inset: 1px auto 1px -42%;
+  width: 42%;
+  background: linear-gradient(90deg,#176fd0 0%,#1b98b8 52%,#35ad69 100%);
+  box-shadow: 0 0 9px rgba(28,117,188,.24),0 0 11px rgba(53,173,105,.17);
+}
+.app-loading-track-v533 > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg,#176fd0 0%,#1b98b8 52%,#35ad69 100%);
+}

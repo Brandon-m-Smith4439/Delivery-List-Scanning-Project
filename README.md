@@ -1,33 +1,75 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.529**. SQLite remains the active/default backend and schema advances to **21** for per-user Internal Reject review receipts, lifecycle-bound manual production progress, and Inventory delivery dates.
+Current maintained release: **v0.538**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
 
-## Install v0.529
+## Install v0.538
 
 1. Stop the server and back up the current project folder. Preserve the live `data/` folder separately.
-2. Inspect `Delivery_List_Scanner_v0.529_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, credentials, verification artifacts, and generated exports.
-3. Extract the ZIP into the existing **v0.528** project root with overwrite enabled. Do not replace the live `data/` folder.
-4. Restart with the maintained launcher. The verified schema-21 migration runs once and preserves existing records; hard-refresh floor browsers (`Ctrl+F5`) and confirm **0.529** in the footer.
-5. Review Internal Reject alerts, Remake/Rush rows, Scan and Print filters, Inventory, Edit Delivery Lists, Lookup Manager, Order Details, Statistics, and tutorials on a controlled delivery date.
+2. Inspect `Delivery_List_Scanner_v0.538_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.537** project root with overwrite enabled. Do not replace the live `data/` folder.
+4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.538**. SQLite remains schema **21** and no migration should run for this release.
+5. On Statistics, choose a historical date with one calendar click and apply it. Confirm the table/chart remains on that historical single day instead of falling back to Today.
+6. Select **Production count by day** in Live Analytics and use Table view to verify historical first-import counts.
+7. Open Scan and verify progress checkpoints use larger count/label/icon text without clipping at desktop and TC22 widths.
 
-### v0.529 behavior
+### v0.538 behavior
 
-- **Internal Reject review is durable and per user.** Each new reject event remains flagged on its delivery date until that operator opens the Reject review and marks the displayed incidents reviewed. A future reject creates a new event and reopens review automatically.
-- **Production progress remains lifecycle-aware.** Manual Edit can advance an item through Cutting, configured fabrication machines, Staging, Outbound, Indian Trail, and Complete. Cut/fabricated progress is retained across normal refreshes and is ignored after a later reject, remake generation, changed Job, or newer A+W generation.
-- **Evidence-backed machines stay available.** Denver and Waterjet cannot disappear from normal detection and filters while their maintained evidence integrations exist. Their saved names, colors, terms, and positions remain configurable.
-- **Inventory records delivery dates.** Manual Inventory entry and Smart Fill retain the delivery date in history and reconciliation. Schema 21 adds the field without resetting prior counts.
-- **Updates remain usable.** A+W/manual update snapshots do not clear the loaded browser catalog; SQLite WAL reads, stale-response ownership, cached date bundles, and bounded background production checks keep scanning and date navigation available during updates.
-- **UI finish pass.** Remakes use one charcoal gradient, Rush uses red, Internal Reject ribbons fade into their item row, filters share flat chip geometry, Print/Export chips stay one line, Lookup editors have labeled Save controls, Manual Edit shows one current-to-next progress summary, and loading surfaces use the shared animated bar.
-- **Order Details and tutorials.** Sketch/label fit and visible maximize controls are retained, and Scan tutorials highlight the moved date selector and demonstrate opening Filters, All Scans, and Order Details before explaining them.
+- **Progress checkpoints are denser and more readable.** Count, stage label, and icon stay in dedicated lanes with larger typography/icons, tighter gaps, and clipping guards so the content remains inside each progress cell.
+- **Historical single-day Statistics works directly.** The first calendar click creates a valid one-day range immediately; a second date can extend that selection into a range.
+- **Production Count is available by day in Live Analytics.** The new table/chart metric uses the same immutable first-import Order/Item ledger as Today’s Production Count and excludes External Remakes.
+- **Event-day Statistics now use plant-local time.** Scan, bad/duplicate scan, manual/action, and Internal Reject activity use America/New_York reporting-day boundaries instead of UTC calendar midnight.
+- **Legitimate zeroes remain zeroes.** Glass quantity, incomplete-list, and Remake metrics no longer fall back to stale browser list data when the backend has correctly returned an empty/zero result.
+- **Monthly Remake boundaries use plant time.** Month rollover follows the operator’s local plant date rather than UTC midnight.
+- **No schema change is required.** SQLite remains schema **21**.
 
-### v0.529 validation
+### Statistics calculation basis
 
-- JavaScript syntax passes, all **18 Python source files** parse, and the complete maintained suite passes **332/332 tests**.
-- An isolated copy migrated to schema **21**, returned `integrity_check: ok`, and reported **0 foreign-key violations**. A repeat startup completed database initialization in **2.68 seconds** without rerunning the one-time migration.
-- A real isolated Chromium workflow opened Scan/Order Details/Print/Inventory/Lookup/Edit/Tutorial surfaces without page or console errors. The cached return to a 50-row delivery date took **49.1 ms**, issued **0** fabrication requests, and showed no Checking Fab placeholder; the alternate date switch measured **106.4 ms** in the final pass.
-- Scan retained all **50 rows** and an enabled barcode field while an update request was held open. The Today Production report API returned its full detail payload in **220-277 ms** across five requests.
-- Desktop (1440x900), vertical tablet (768x1024), and scanner-phone (390x844) captures have **0 px** document overflow. Remake/reject rows, the three-column Order Details layout, visible sketch maximize control, Inventory History/Manual Entry, Print filters, and click-guided Scan tutorial were visually inspected.
-- Production A+W SQL/PowerShell sources, currently disconnected mapped production shares, printers, email delivery, and physical TC22 barcode hardware remain controlled deployment checks.
+- Production Count: immutable first scanner import from A+W by stable Order + Item, grouped on plant-local import day; current External Remakes excluded.
+- Glass quantity / common sizes / workflow-stage and open-work metrics: selected delivery-list dates.
+- Scan/operator/issues/actions/Internal Reject activity: actual event timestamps converted to America/New_York reporting days.
+- External Remake range totals: current active delivery-list rows in the selected delivery-date range.
+- Stock sheets: retained A+W optimization evidence in the selected optimization-date range.
+- Breakage: selected delivery-date production denominator plus plant-local Internal Reject incidents; Yield Percentage remains excluded from reject-loss totals.
+
+### Validation
+
+- JavaScript/Python syntax checks pass, the static/UI contract suite passes **235/235**, and the complete maintained suite passes **347/347**. A production-scale database copy preserves all **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events**, remains schema **21**, passes integrity/foreign-key checks, and reconciles the Statistics aggregate cross-checks documented in `README_CHANGELOG.md`. No live database is packaged or modified.
+
+## Previous release: v0.537
+
+v0.537 made Inventory scans piece-accurate for multi-quantity rows, improved Inventory XLSX formatting, corrected true-new A+W Internal Reject notifications, preserved the hovered desktop side panel, and scoped the Old Bays notice correctly while keeping schema 21.
+
+## Previous release: v0.536
+
+v0.536 corrected Today’s Production Count to durable first-import Order/Item identity, plant-local day boundaries, External Remake suppression, and glass-total audit drill-down while keeping schema 21.
+
+## Previous release: v0.535
+
+v0.535 unified External Remake Glass Type styling, enlarged/reordered progress checkpoints, and strengthened superseded normal/Remake duplicate matching while keeping schema 21.
+
+## Previous release: v0.534
+
+v0.534 added Blue-X cancellation safety evidence, New order-header badges, wider progress checkpoints, full-width FAB progress, progress-aware Scan filtering, delivery-aware Route filtering, and the preceding External Remake Glass Type repair while keeping schema 21.
+
+## Previous release: v0.533
+
+v0.533 added strict normal-to-Remake supersession review, durable fabrication state, completed-history Global Search, include-only filters, consistent review controls, smoother FAB feedback, and the preceding External Remake row treatment while keeping schema 21.
+
+## Previous release: v0.532
+
+v0.532 added numeric Cutting progress, truthful FAB feedback, unified Include/Exclude filtering, stronger Internal Reject presentation, and the preceding External Remake row-layer repair while keeping schema 21.
+
+## Previous release: v0.531
+
+v0.531 added isolated review presets, explicit category exclusions, Review All, faster review-card state, a visible fabrication readiness meter, dedicated A+W import sounds, concise new-item import summaries, and restored mobile sidebar motion while keeping schema 21.
+
+## Previous release: v0.530
+
+v0.530 introduced the shared configurable attention-color palette, independent category review receipts, multi-color date alerts, concise import attention summaries, and current/future fabrication warmup while keeping schema 21.
+
+## Previous release: v0.529
+
+v0.529 added durable per-user Internal Reject review, lifecycle-aware manual production progress, schema-21 Inventory delivery dates, and the preceding UI completion pass.
 
 ## Previous release: v0.528
 

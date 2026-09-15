@@ -1273,6 +1273,151 @@ class ProductionFileService:
         return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:20]
 
     @staticmethod
+    def _looks_like_blue_cancellation_x_v534(segments: list[dict[str, Any]], page_width: float, page_height: float) -> bool:
+        """Return True when two long blue strokes form the shop's cancellation X.
+
+        The A+W sketch convention uses two thick blue diagonal vector strokes across
+        most of the page to mean *do not produce*.  This stays vector/annotation
+        based (no OCR or raster scan) and deliberately requires a large crossed
+        pair so ordinary blue dimensions, leaders, or logos cannot trigger it.
+        """
+        width = max(float(page_width or 0), 1.0)
+        height = max(float(page_height or 0), 1.0)
+        diagonal = (width * width + height * height) ** 0.5
+        candidates: list[dict[str, float]] = []
+        for raw in segments or []:
+            try:
+                x1, y1, x2, y2 = (float(raw[key]) for key in ("x1", "y1", "x2", "y2"))
+                line_width = float(raw.get("width") or 1.0)
+                color = tuple(float(value) for value in (raw.get("color") or (0, 0, 0))[:3])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if len(color) != 3:
+                continue
+            red, green, blue = color
+            # Accept the saturated medium/dark blues used by A+W/Bluebeam while
+            # excluding cyan/gray/black drafting lines.
+            if blue < 0.42 or blue < red * 1.22 or blue < green * 1.03 or blue - red < 0.18:
+                continue
+            dx, dy = x2 - x1, y2 - y1
+            length = (dx * dx + dy * dy) ** 0.5
+            if line_width < 1.25 or length < diagonal * 0.52:
+                continue
+            if abs(dx) < width * 0.42 or abs(dy) < height * 0.42:
+                continue
+            candidates.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2, "dx": dx, "dy": dy})
+
+        def intersection(left: dict[str, float], right: dict[str, float]) -> tuple[float, float] | None:
+            denominator = left["dx"] * right["dy"] - left["dy"] * right["dx"]
+            if abs(denominator) < 1e-8:
+                return None
+            qx = right["x1"] - left["x1"]
+            qy = right["y1"] - left["y1"]
+            t = (qx * right["dy"] - qy * right["dx"]) / denominator
+            u = (qx * left["dy"] - qy * left["dx"]) / denominator
+            if not (0.08 <= t <= 0.92 and 0.08 <= u <= 0.92):
+                return None
+            return left["x1"] + t * left["dx"], left["y1"] + t * left["dy"]
+
+        for index, left in enumerate(candidates):
+            left_slope_sign = 1 if left["dx"] * left["dy"] >= 0 else -1
+            for right in candidates[index + 1:]:
+                right_slope_sign = 1 if right["dx"] * right["dy"] >= 0 else -1
+                if left_slope_sign == right_slope_sign:
+                    continue
+                point = intersection(left, right)
+                if point is None:
+                    continue
+                x, y = point
+                if width * 0.18 <= x <= width * 0.82 and height * 0.18 <= y <= height * 0.82:
+                    return True
+        return False
+
+    @classmethod
+    def _pdf_page_has_cancellation_x_v534(cls, page: Any) -> bool:
+        """Detect the maintained large blue-X cancellation mark on one PDF page."""
+        try:
+            media = page.mediabox
+            page_width = abs(float(media.right) - float(media.left))
+            page_height = abs(float(media.top) - float(media.bottom))
+        except Exception:
+            page_width, page_height = 612.0, 792.0
+        segments: list[dict[str, Any]] = []
+
+        # Bluebeam/Acrobat may retain the X as two Line annotations rather than
+        # flattening it into page content.  These are cheap and authoritative.
+        try:
+            annotations = page.get("/Annots") or []
+        except Exception:
+            annotations = []
+        for reference in annotations:
+            try:
+                annotation = reference.get_object() if hasattr(reference, "get_object") else reference
+                if str(annotation.get("/Subtype") or "") != "/Line":
+                    continue
+                coords = annotation.get("/L") or []
+                color = annotation.get("/C") or []
+                if len(coords) < 4 or len(color) < 3:
+                    continue
+                border = annotation.get("/BS") or {}
+                line_width = float(border.get("/W") or 0) if hasattr(border, "get") else 0.0
+                if not line_width:
+                    legacy_border = annotation.get("/Border") or []
+                    if len(legacy_border) >= 3:
+                        line_width = float(legacy_border[2] or 1.0)
+                segments.append({
+                    "x1": float(coords[0]), "y1": float(coords[1]),
+                    "x2": float(coords[2]), "y2": float(coords[3]),
+                    "width": line_width or 1.0,
+                    "color": tuple(float(value) for value in color[:3]),
+                })
+            except Exception:
+                continue
+
+        # Flattened shop PDFs store the X as ordinary stroked paths. Parse only
+        # the small vector operator stream; images/text are ignored entirely.
+        try:
+            from pypdf.generic import ContentStream  # type: ignore
+
+            contents = page.get_contents()
+            if contents is not None:
+                stream = ContentStream(contents, page.pdf)
+                stroke_color = (0.0, 0.0, 0.0)
+                line_width = 1.0
+                current_point: tuple[float, float] | None = None
+                pending: list[tuple[float, float, float, float]] = []
+                for operands, operator in stream.operations:
+                    op = operator.decode("latin-1") if isinstance(operator, bytes) else str(operator)
+                    if op == "RG" and len(operands) >= 3:
+                        stroke_color = tuple(float(value) for value in operands[:3])
+                    elif op == "G" and operands:
+                        gray = float(operands[0])
+                        stroke_color = (gray, gray, gray)
+                    elif op == "w" and operands:
+                        line_width = float(operands[0])
+                    elif op == "m" and len(operands) >= 2:
+                        current_point = (float(operands[0]), float(operands[1]))
+                    elif op == "l" and len(operands) >= 2 and current_point is not None:
+                        next_point = (float(operands[0]), float(operands[1]))
+                        pending.append((current_point[0], current_point[1], next_point[0], next_point[1]))
+                        current_point = next_point
+                    elif op in {"S", "s", "B", "B*", "b", "b*"}:
+                        for x1, y1, x2, y2 in pending:
+                            segments.append({
+                                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                "width": line_width, "color": stroke_color,
+                            })
+                        pending = []
+                        current_point = None
+                    elif op in {"n", "f", "f*", "F"}:
+                        pending = []
+                        current_point = None
+        except Exception:
+            pass
+
+        return cls._looks_like_blue_cancellation_x_v534(segments, page_width, page_height)
+
+    @staticmethod
     def _pdf_annotation_text(page: Any) -> str:
         """Read operator-entered PDF markup text that ``extract_text`` can miss.
 
@@ -1432,6 +1577,7 @@ class ProductionFileService:
                         continue
                     machine = self._detect_machine(text)
                     sketch_remake = bool(re.search(r"(?<![A-Z0-9])REMAKE(?![A-Z0-9])", text, flags=re.IGNORECASE))
+                    sketch_cancelled = self._pdf_page_has_cancellation_x_v534(page)
                     page_items: set[str] = set()
                     for marker in marker_patterns:
                         for match in marker.finditer(text):
@@ -1445,6 +1591,7 @@ class ProductionFileService:
                                 "pageNumber": page_index + 1,
                                 "machine": machine,
                                 "sketchRemake": sketch_remake,
+                                "sketchCancelled": sketch_cancelled,
                             })
             parse_succeeded = True
         except Exception:
@@ -1477,6 +1624,7 @@ class ProductionFileService:
         item_marker: str = "",
         machine_hint: str = "",
         sketch_remake: bool = False,
+        sketch_cancelled: bool = False,
     ) -> dict[str, Any]:
         row = asset.public()
         if page_number:
@@ -1487,6 +1635,8 @@ class ProductionFileService:
             row["machineHint"] = str(machine_hint)
         if sketch_remake:
             row["sketchRemake"] = True
+        if sketch_cancelled:
+            row["sketchCancelled"] = True
         return row
 
     @staticmethod
@@ -1649,6 +1799,7 @@ class ProductionFileService:
                         item_marker=str(assignment.get("marker") or ""),
                         machine_hint=str(assignment.get("machine") or ""),
                         sketch_remake=bool(assignment.get("sketchRemake")),
+                        sketch_cancelled=bool(assignment.get("sketchCancelled")),
                     ))
             elif self._asset_mentions_item(sketch, order, item):
                 # Backward-compatible support for older item-named TXT/image
@@ -1773,6 +1924,7 @@ class ProductionFileService:
                             "source": source,
                             "sketchMatched": True,
                             "sketchRemake": bool(assignment.get("sketchRemake")),
+                            "sketchCancelled": bool(assignment.get("sketchCancelled")),
                             "assignmentReason": "Exact sketch page identifies the fabrication machine",
                         }
                     matched_source = source
@@ -1809,6 +1961,7 @@ class ProductionFileService:
                 },
                 "sketchMatched": bool(matched_without_machine),
                 "sketchRemake": bool(matched_source and matched_source.get("sketchRemake")),
+                "sketchCancelled": bool(matched_source and matched_source.get("sketchCancelled")),
                 "assignmentReason": str(label_assignment.get("reason") or "A+W Cutting Label requires fabrication"),
                 "labelFabricationSignal": str(label_assignment.get("signal") or ""),
             }
@@ -1818,6 +1971,7 @@ class ProductionFileService:
                 "machine": "", "required": False, "confidence": "item-matched",
                 "source": matched_source, "sketchMatched": True,
                 "sketchRemake": bool(matched_source and matched_source.get("sketchRemake")),
+                "sketchCancelled": bool(matched_source and matched_source.get("sketchCancelled")),
                 "assignmentReason": "Exact sketch page matched the item but did not identify a fabrication machine",
             }
         return {
@@ -1827,6 +1981,7 @@ class ProductionFileService:
             "source": sketches[0].public() if sketches else None,
             "sketchMatched": False,
             "sketchRemake": False,
+            "sketchCancelled": False,
             "assignmentReason": "",
         }
 
@@ -2102,6 +2257,7 @@ class ProductionFileService:
             "labelFabricationSignal": str(assignment.get("labelFabricationSignal") or ""),
             "sketchMatched": bool(assignment.get("sketchMatched")),
             "sketchRemake": bool(assignment.get("sketchRemake")),
+            "sketchCancelled": bool(assignment.get("sketchCancelled")),
             "required": required,
             "enforceable": bool(assigned_code in {"denver", "waterjet"} and enforceable),
             "fabricated": fabricated,

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "529"
+APPLICATION_VERSION = "538"
 # Schema version 21 adds per-user Internal Reject review receipts, durable manual
 # production-progress overrides, and delivery-date identity on physical Inventory scans.
 CURRENT_SCHEMA_VERSION = 21

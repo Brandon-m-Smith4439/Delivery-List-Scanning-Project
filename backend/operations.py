@@ -60,6 +60,57 @@ def row_value(row: Any, key: str, default: Any = "") -> Any:
         return default
 
 
+def line_update_review_kind(process_state: Any = "", queue_state: Any = "") -> str:
+    """Classify one unread import notice into a single review bucket.
+
+    Remake wins when a line carries both Remake and Rush markers. The receipt
+    table is intentionally notice-scoped, so keeping review buckets disjoint
+    prevents reviewing one card from silently clearing a second card.
+    """
+    text = f"{process_state or ''} {queue_state or ''}".upper()
+    if "REMAKE" in text or re.search(r"\bRM\b", text):
+        return "remake"
+    if re.search(r"\b(?:SDI|RUSH)\b", text):
+        return "rush"
+    return "order"
+
+
+def line_update_notice_review_kind(
+    process_state: Any = "",
+    queue_state: Any = "",
+    change_type: Any = "updated",
+    snapshot_json: Any = "",
+) -> str:
+    """Return the review bucket only when this notice creates review work.
+
+    Ordinary new/updated lines remain in the New Orders review queue. External
+    Remakes and Rushes are different: operators review them only when the line is
+    newly imported as that priority type or transitions into it. A later routine
+    edit to an already-known Remake/Rush must not resurrect the priority review
+    card or leak into the ordinary-order bucket.
+    """
+    current_kind = line_update_review_kind(process_state, queue_state)
+    if current_kind == "order":
+        return "order"
+    if str(change_type or "updated").strip().lower() == "new":
+        return current_kind
+    try:
+        snapshot = json.loads(str(snapshot_json or "{}")) if not isinstance(snapshot_json, dict) else snapshot_json
+    except (TypeError, ValueError, json.JSONDecodeError):
+        snapshot = {}
+    previous = snapshot.get("previous") if isinstance(snapshot, dict) and isinstance(snapshot.get("previous"), dict) else {}
+    previous_process = previous.get("processState", previous.get("process_state", ""))
+    previous_queue = previous.get("queueState", previous.get("queue_state", ""))
+    previous_kind = line_update_review_kind(previous_process, previous_queue)
+    previous_remake_marker = str(previous.get("remake", "")).strip().lower() in {"1", "true", "yes", "on"}
+    previous_rush_marker = str(previous.get("rush", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if current_kind == "remake":
+        return "" if previous_kind == "remake" or previous_remake_marker else "remake"
+    if current_kind == "rush":
+        return "" if previous_kind == "rush" or previous_rush_marker else "rush"
+    return "order"
+
+
 class OperationsFeatureService:
     """Coordinate v135 workflows against the scanner's maintained store."""
 
@@ -185,6 +236,8 @@ class OperationsFeatureService:
                        li.id AS line_item_id,
                        li.order_no,
                        li.item_no,
+                       COALESCE(li.process_state, '') AS process_state,
+                       COALESCE(li.queue_state, '') AS queue_state,
                        COALESCE(li.manual_only, 0) AS manual_only,
                        COALESCE(li.manual_source, '') AS manual_source,
                        COALESCE(rr.reject_piece_count, li.internal_reject_count, 0) AS internal_reject_count,
@@ -201,6 +254,7 @@ class OperationsFeatureService:
                        COALESCE(rr.unseen_reject_ids, '') AS unseen_reject_ids,
                        n.id AS notice_id,
                        n.change_type AS change_type,
+                       COALESCE(n.snapshot_json, '{{}}') AS snapshot_json,
                        r.notice_id AS receipt_notice_id
                 FROM requested_lists dl
                 LEFT JOIN line_items li
@@ -240,6 +294,12 @@ class OperationsFeatureService:
                 "listRevision": 1,
                 "isNewStage": False,
                 "noticeIds": [],
+                "pendingOrderCount": 0,
+                "pendingRemakeCount": 0,
+                "pendingRushCount": 0,
+                "orderNoticeIds": [],
+                "remakeNoticeIds": [],
+                "rushNoticeIds": [],
                 "items": [],
             }
             for list_id in clean_ids
@@ -268,6 +328,9 @@ class OperationsFeatureService:
                     "listRevision": int(row["list_revision"] or 1),
                     "manualOnly": bool(row["manual_only"]),
                     "manualSource": str(row["manual_source"] or ""),
+                    "processState": str(row["process_state"] or ""),
+                    "queueState": str(row["queue_state"] or ""),
+                    "updateReviewKind": line_update_review_kind(row["process_state"], row["queue_state"]),
                     "internalRejectCount": int(row["internal_reject_count"] or 0),
                     "rejectEventCount": int(row["reject_event_count"] or 0),
                     "lastRejectId": int(row["last_reject_id"] or 0),
@@ -292,18 +355,30 @@ class OperationsFeatureService:
             notice_id = as_int(row["notice_id"])
             receipt_notice_id = as_int(row["receipt_notice_id"])
             if notice_id > 0 and receipt_notice_id <= 0:
-                target["hasUnseenUpdate"] = True
-                target["userUpdateNoticeIds"].append(notice_id)
-                result["noticeIds"].append(notice_id)
                 change_type = str(row["change_type"] or "updated").lower()
-                if change_type == "new" or not target["userUpdateState"]:
-                    target["userUpdateState"] = change_type
+                review_kind = line_update_notice_review_kind(
+                    row["process_state"], row["queue_state"], change_type, row["snapshot_json"]
+                )
+                if review_kind:
+                    target["updateReviewKind"] = review_kind
+                    target["hasUnseenUpdate"] = True
+                    target["userUpdateNoticeIds"].append(notice_id)
+                    result["noticeIds"].append(notice_id)
+                    result[f"{review_kind}NoticeIds"].append(notice_id)
+                    if change_type == "new" or not target["userUpdateState"]:
+                        target["userUpdateState"] = change_type
 
         for list_id, result in results.items():
             values = list(items_by_list[list_id].values())
             result["items"] = values
             result["totalLineCount"] = len(values)
             result["pendingLineCount"] = sum(1 for item in values if item["hasUnseenUpdate"])
+            result["pendingOrderCount"] = sum(1 for item in values if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "order")
+            result["pendingRemakeCount"] = sum(1 for item in values if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "remake")
+            result["pendingRushCount"] = sum(1 for item in values if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "rush")
+            for review_kind in ("order", "remake", "rush"):
+                key = f"{review_kind}NoticeIds"
+                result[key] = sorted(set(result.get(key) or []))
             result["newLineCount"] = sum(1 for item in values if item["userUpdateState"] == "new")
             result["updatedLineCount"] = sum(1 for item in values if item["userUpdateState"] == "updated")
             result["noticeIds"] = sorted(set(result["noticeIds"]))
@@ -361,8 +436,11 @@ class OperationsFeatureService:
                        n.line_item_id,
                        li.order_no,
                        li.item_no,
+                       COALESCE(li.process_state, '') AS process_state,
+                       COALESCE(li.queue_state, '') AS queue_state,
                        n.id AS notice_id,
                        n.change_type,
+                       COALESCE(n.snapshot_json, '{{}}') AS snapshot_json,
                        dl.revision AS list_revision,
                        totals.total_line_count
                 FROM latest_batches lb
@@ -430,6 +508,12 @@ class OperationsFeatureService:
                 "listRevision": 1,
                 "isNewStage": False,
                 "noticeIds": [],
+                "pendingOrderCount": 0,
+                "pendingRemakeCount": 0,
+                "pendingRushCount": 0,
+                "orderNoticeIds": [],
+                "remakeNoticeIds": [],
+                "rushNoticeIds": [],
                 "items": [],
             }
             for list_id in clean_ids
@@ -447,7 +531,10 @@ class OperationsFeatureService:
                     "lineItemId": line_item_id,
                     "order": str(row["order_no"] or ""),
                     "item": str(row["item_no"] or ""),
-                    "hasUnseenUpdate": True,
+                    "processState": str(row["process_state"] or ""),
+                    "queueState": str(row["queue_state"] or ""),
+                    "updateReviewKind": line_update_review_kind(row["process_state"], row["queue_state"]),
+                    "hasUnseenUpdate": False,
                     "hasUnseenReject": False,
                     "unseenRejectIds": [],
                     "userUpdateState": "",
@@ -455,12 +542,18 @@ class OperationsFeatureService:
                 },
             )
             notice_id = as_int(row["notice_id"])
-            if notice_id > 0:
+            change_type = str(row["change_type"] or "updated").lower()
+            review_kind = line_update_notice_review_kind(
+                row["process_state"], row["queue_state"], change_type, row["snapshot_json"]
+            ) if notice_id > 0 else ""
+            if notice_id > 0 and review_kind:
+                item["updateReviewKind"] = review_kind
+                item["hasUnseenUpdate"] = True
                 item["userUpdateNoticeIds"].append(notice_id)
                 result["noticeIds"].append(notice_id)
-            change_type = str(row["change_type"] or "updated").lower()
-            if change_type == "new" or not item["userUpdateState"]:
-                item["userUpdateState"] = change_type
+                result[f"{review_kind}NoticeIds"].append(notice_id)
+                if change_type == "new" or not item["userUpdateState"]:
+                    item["userUpdateState"] = change_type
 
         for row in reject_rows:
             list_id = str(row["list_id"] or "")
@@ -473,6 +566,7 @@ class OperationsFeatureService:
                     "lineItemId": line_item_id,
                     "order": str(row["order_no"] or ""),
                     "item": str(row["item_no"] or ""),
+                    "updateReviewKind": "order",
                     "hasUnseenUpdate": False,
                     "hasUnseenReject": False,
                     "unseenRejectIds": [],
@@ -490,6 +584,12 @@ class OperationsFeatureService:
             result["items"] = items
             result["noticeIds"] = sorted(set(result["noticeIds"]))
             result["pendingLineCount"] = sum(1 for item in items if item.get("hasUnseenUpdate"))
+            result["pendingOrderCount"] = sum(1 for item in items if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "order")
+            result["pendingRemakeCount"] = sum(1 for item in items if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "remake")
+            result["pendingRushCount"] = sum(1 for item in items if item.get("hasUnseenUpdate") and item.get("updateReviewKind") == "rush")
+            for review_kind in ("order", "remake", "rush"):
+                key = f"{review_kind}NoticeIds"
+                result[key] = sorted(set(result.get(key) or []))
             result["pendingRejectCount"] = sum(1 for item in items if item.get("hasUnseenReject"))
             result["rejectIds"] = sorted({
                 reject_id
@@ -537,7 +637,7 @@ class OperationsFeatureService:
         scanner_text = clean_text(scanner, 120).lower()
         return scanner_text == "airport rd" or stage_text.startswith("staging") or stage_text.startswith("outbound")
 
-    def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str) -> dict[str, Any]:
+    def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str, review_kind: str = "") -> dict[str, Any]:
         """Mark reviewed updates read for one user using the maintained stage scope.
 
         Staging/Outbound are the complete Airport Rd view, so reviewing the current
@@ -548,6 +648,9 @@ class OperationsFeatureService:
         self._require_sqlite()
         clean_list_id = clean_text(list_id, 255)
         requested_ids = sorted({as_int(value) for value in (notice_ids or []) if as_int(value) > 0})
+        clean_review_kind = clean_text(review_kind, 20).lower()
+        if clean_review_kind and clean_review_kind not in {"order", "remake", "rush"}:
+            raise ValueError("reviewKind must be order, remake, or rush")
         if not clean_list_id:
             raise ValueError("listId is required")
         if not requested_ids:
@@ -566,8 +669,11 @@ class OperationsFeatureService:
             placeholders = ",".join("?" for _ in requested_ids)
             rows = con.execute(
                 f"""
-                SELECT n.id, n.change_token, n.delivery_date, n.source_hash, n.created_at
+                SELECT n.id, n.change_token, n.delivery_date, n.source_hash, n.created_at,
+                       COALESCE(li.process_state, '') AS process_state,
+                       COALESCE(li.queue_state, '') AS queue_state
                 FROM line_update_notices n
+                JOIN line_items li ON li.id = n.line_item_id AND li.list_id = n.list_id
                 WHERE n.list_id = ? AND n.id IN ({placeholders})
                 ORDER BY n.id
                 """,
@@ -578,6 +684,11 @@ class OperationsFeatureService:
                 raise ValueError(
                     "The reviewed updates changed before they could be saved. Refresh the list and review the latest updates."
                 )
+            if clean_review_kind and any(
+                line_update_review_kind(row["process_state"], row["queue_state"]) != clean_review_kind
+                for row in rows
+            ):
+                raise ValueError("The reviewed update category changed. Refresh the list and review the latest updates.")
 
             target_ids = list(valid_ids)
             target_list_ids = {clean_list_id}
@@ -590,9 +701,12 @@ class OperationsFeatureService:
                 # new notice rows that remain unread until that same user reviews them.
                 matches = con.execute(
                     """
-                    SELECT n.id, n.list_id
+                    SELECT n.id, n.list_id,
+                           COALESCE(li.process_state, '') AS process_state,
+                           COALESCE(li.queue_state, '') AS queue_state
                     FROM line_update_notices n
                     JOIN delivery_lists dl ON dl.id = n.list_id
+                    JOIN line_items li ON li.id = n.line_item_id AND li.list_id = n.list_id
                     WHERE dl.status = 'active'
                       AND n.delivery_date = ?
                     ORDER BY n.id
@@ -600,10 +714,14 @@ class OperationsFeatureService:
                     (str(selected_list["delivery_date"] or ""),),
                 ).fetchall()
                 if matches:
-                    target_ids = sorted({int(match["id"]) for match in matches})
+                    scoped_matches = [
+                        match for match in matches
+                        if not clean_review_kind or line_update_review_kind(match["process_state"], match["queue_state"]) == clean_review_kind
+                    ]
+                    target_ids = sorted({int(match["id"]) for match in scoped_matches})
                     target_list_ids.update(
                         str(match["list_id"] or "")
-                        for match in matches
+                        for match in scoped_matches
                         if str(match["list_id"] or "")
                     )
 
@@ -626,6 +744,7 @@ class OperationsFeatureService:
                     "acknowledgedNoticeIds": target_ids,
                     "acknowledgedListIds": sorted(value for value in target_list_ids if value),
                     "scope": "airport-delivery-date" if airport_scope else "selected-stage",
+                    "reviewKind": clean_review_kind or "all",
                     "seenAt": seen_at,
                 },
             )

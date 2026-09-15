@@ -1,3 +1,171 @@
+## v0.538 - Statistics Date Accuracy, Historical Production Count, and Progress Readability
+
+- Enlarged Scan progress checkpoint count/label/icon content while reducing internal spacing and preserving dedicated grid lanes so text and icons stay inside the cells on desktop and narrow layouts.
+- Fixed the Statistics custom calendar so the first click is immediately a valid single-day range; a second date optionally extends it into a range. Historical one-day Table reports no longer require a second click or fall back to Today.
+- Added **Production count by day** to Live Analytics. It reuses the corrected immutable first-import Order/Item ledger, returns lightweight daily aggregates, excludes current External Remakes, and defaults to source/date order for Table review.
+- Audited Statistics time bases and corrected scan, bad/duplicate scan, manual/action, and Internal Reject event filters to use America/New_York day boundaries against stored UTC timestamps.
+- Corrected monthly Remake month rollover to use the plant-local current date instead of UTC.
+- Fixed zero-result handling for Glass Quantity, Incomplete Delivery Lists, and Remake statistics so an authoritative backend zero/empty result cannot fall back to stale browser list data.
+- Kept delivery-date metrics on delivery dates and Production Count on first-import date; no schema change was introduced. SQLite remains schema **21**.
+- Advanced the application exactly one step from v0.537 to **v0.538** and advanced cache keys for changed Scan CSS and application JavaScript.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse without bytecode churn, the static/UI contract suite passes **235/235**, and the complete maintained suite passes **347/347**.
+- A production-scale database copy remains at **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events**, reaches schema ledger **21**, passes `integrity_check: ok`, and reports **0** foreign-key violations. No v0.538 migration is added.
+- Cross-total audits pass for Glass Quantity vs Common Glass Sizes, Internal Reject machine/glass breakdowns vs reject totals, External Remake glass breakdowns vs remake totals, and Production Count `byDate` pieces/items vs its aggregate totals. Breakage percentage formulas reconcile to the displayed produced denominators.
+- Production-copy report medians were approximately **48-68 ms** for representative single days and **388 ms** for the full August 2026 aggregate on 22,754 retained lines. August New Production remains **2,381 pieces / 1,837 items**, with daily totals summing exactly to the range aggregate.
+- A real scan at `2026-06-18T00:08:26+00:00` now belongs to the operator's **June 17** plant day. The old UTC-date logic reported 0 scans on June 17 and 12 on June 18; plant-local reporting correctly resolves that sample window to 1 and 11.
+- An isolated fresh v0.538 server returns healthy `/api/health`, reaches schema **21**, passes integrity/foreign-key checks, and is stopped after validation. Managed headless Chromium did not complete localhost rendering, so final desktop/tablet/TC22 visual appearance remains a controlled deployment check.
+
+## v0.537 - Piece-Accurate Inventory, New-IR Notifications, and Navigation Cleanup
+
+- Changed Inventory scanner counting so each successful scanner trigger adds exactly **one physical piece**. Multi-quantity expected lines retain one aggregate `inventory_scans` row, advancing from 1/N through N/N, and further scans are rejected only after the frozen expected quantity is satisfied.
+- Changed scanner-count correction to decrement one physical piece from aggregate scanner rows instead of deleting every counted pane; manual bulk physical entries retain their existing whole-entry removal behavior.
+- Added an open-session `partial` reconciliation state for same-item counts below expected quantity. Operators see `Counted X/Y; N remaining` as pending work; completing the session still converts unresolved partials into mismatches.
+- Kept Inventory isolated from normal delivery scanning: inventory counts do not mutate delivery `line_items.scanned_qty` or append normal `scan_events`, and SQLite `BEGIN IMMEDIATE` serialization prevents concurrent over-count races.
+- Improved Inventory XLSX output with plant-local readable scan/start/completion timestamps, fitted content-aware column widths, frozen header rows, autofilters, polished headers/summary labels, and clearer reconciliation status fills.
+- Corrected automatic A+W notification semantics for Internal Rejects. The operator-facing count now uses `newInternalRejects`, derived from previously unseen logical A+W reject events backed by newly seen immutable source ROWIDs, instead of `mirroredInternalRejects`, which can represent hundreds of historical mirror rewrites in a changed source window.
+- Cache/backfill/reconciliation paths explicitly report zero new Internal Rejects when they only rebuild existing mirrors, preventing historical rejects from being announced as new.
+- Removed the desktop `is-hover-suppressed-v527` navigation behavior so selecting a page no longer collapses the sidebar while the pointer is still hovering over it.
+- Scoped the Bay Map “Review old bays” floating notice to its active page: it closes when the operator changes pages or opens any application modal/GUI.
+- Kept SQLite schema at **21**; v0.537 adds no migration. Advanced the application exactly one step from v0.536 to **v0.537** and advanced cache keys for changed global CSS and application JavaScript.
+
+### Validation
+- JavaScript syntax passes, all project Python sources parse without bytecode churn, and runtime imports report application **v0.537** with SQLite schema **21**.
+- The focused Inventory / A+W Reject / attention regression groups pass, the static/UI contract suite passes **234/234**, and the complete maintained suite passes **345/345**.
+- A generated Inventory XLSX opens successfully with `openpyxl`; Physical Scans uses `Scanned Date/Time (ET)`, readable local timestamps, frozen row 1, and validated content-aware widths (including 24-character timestamp, 28-character customer, and 34-character notes columns).
+- An isolated v0.537 server on a fresh SQLite database returns healthy `/api/health`, reaches migration ledger **21**, passes `integrity_check: ok`, and reports **0** foreign-key violations; the server is stopped after validation.
+- Responsive browser rendering remains a deployment-side check in this managed execution environment; no production database, local config, A+W share, printer, or scanner device is modified by validation.
+
+## v0.536 - Immutable Production Count and Glass Audit
+
+- Corrected **Today’s Production Count** so New Production is no longer derived from `line_update_notices`, which is intentionally a mutable latest-change/review ledger. Routine A+W refreshes can replace an older notice for the same line, so the previous logic could make existing work look newly imported again.
+- New Production now uses the earliest retained `line_items.created_at_utc` for each logical **Order / Item**, folding synchronized stage copies into one item and using the current quantity/business snapshot without multiplying pieces. Delivery-date moves remain the same logical order/item and do not create another production event.
+- Production reporting day boundaries now follow the plant timezone (`America/New_York`) instead of slicing UTC timestamp text, preventing evening imports from moving to the wrong operator day.
+- Current External Remakes are excluded from New Production. External Remake arrival/transition timing remains import-change based, but deduplication uses stable Order / Item identity rather than mutable A+W source-row IDs so a source-ID correction cannot count the same logical item in both buckets.
+- Kept Internal Reject incidents as their existing separate production-activity bucket; reject events do not create additional New Production rows. Yield Percentage exclusions remain unchanged.
+- Added an audit drill-down to every **Today’s Production Count** glass-type row. Operators can open a total such as Mirror and see the exact contributing Order, Item, Qty, Customer, Job Nr., dimensions, Delivery Date, and first import time.
+- Added a regression reproducing the reported **139 Mirror** failure shape: 139 pieces first imported on the prior plant-local day with a review notice regenerated on the following day stay on their immutable first-import day, and the same logical item moves out of New Production if corrected to External Remake under a different source ID.
+- The supplied production database snapshot cannot reproduce the exact September 14 live 139-row set because its retained `line_update_notices` history ends on **2026-08-26**. Recent dates still represented by notices retain their prior totals under the corrected calculation; older dates become reconstructable from retained line creation timestamps instead of disappearing when review notices are purged.
+- The same database proves the notice-rewrite defect occurred in real data: **75 stage notices / 25 logical Order-Items** were dated August 11 while their line creation timestamps were August 10. It also contains logical Order/Items on multiple delivery dates, validating the v0.536 rule that a delivery-date move is not a second new order.
+- Documented the source-timestamp boundary explicitly: the maintained A+W delivery payload does not currently expose a verified native order-created timestamp, so v0.536 measures the first retained scanner ingestion from A+W rather than inventing an unverified A+W field.
+- Kept SQLite schema at **21**; v0.536 adds no migration. Advanced the application exactly one step from v0.535 to **v0.536** and advanced cache keys for changed Statistics CSS and application JavaScript.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse without bytecode churn, and the changed Statistics store imports as application **v0.536** with SQLite schema **21**.
+- The focused Statistics/static regression group passes **318/318**, including the immutable 139-Mirror refresh-day case, External Remake suppression under source-ID changes, plant-local day boundaries, audit-row payloads, and delivery-date move deduplication.
+- The complete maintained test suite passes **344/344**.
+- A copied production database remains at **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events**, reaches migration ledger **21**, passes `integrity_check: ok`, and reports **0** foreign-key violations. No v0.536 migration is added.
+- The isolated application server previously returned a healthy `/api/health`; managed Chromium policy blocked localhost during the final responsive Statistics visual pass, so desktop/tablet/TC22 rendering remains a controlled deployment check rather than being falsely marked verified.
+
+## v0.535 - Remake Identity, Progress Geometry, and Stronger Superseded Matching
+
+- Unified the final Scan Glass Type surface for ordinary and External Remake rows so both use the same lookup-driven soft glass-color card with dark/black text. The External Remake charcoal wash remains behind the card at row level.
+- Reworked Scan progress checkpoint geometry: numeric progress moves to the left, the label stays centered, the larger stage icon moves to the right, the card gains breathing room, and the transition arrow is thicker/darker for clearer workflow direction.
+- Strengthened same-day normal -> External Remake superseded detection. Route no longer participates in duplicate identity because A+W can change route metadata during remake conversion; it is retained as review evidence instead.
+- Superseded detection now creates a review candidate for every exact normal/Remake pairing in a matching physical-job bucket instead of selecting only the newest Remake copy, preventing additional duplicate copies from being hidden.
+- Normalized harmless Job Nr., customer, and product whitespace before exact comparison while continuing to require the same delivery date plus exact Item/product/quantity/dimension set. Detection remains review-only and never auto-deletes an order.
+- Kept SQLite schema at **21**; v0.535 adds no migration. Advanced the application exactly one step from v0.534 to **v0.535** and advanced the release cache keys.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse cleanly, the focused v0.533-v0.535 contracts pass **3/3**, and the complete maintained suite passes **342/342**.
+- An isolated v0.535 server on a fresh SQLite database returned `/api/health`, reached schema ledger **21**, passed `integrity_check: ok`, and reported **0** foreign-key violations; the isolated server was stopped afterward.
+- Native PowerShell is unavailable in this Linux environment, so the changed A+W duplicate-candidate function remains a controlled Windows/A+W import check even though its maintained source contracts pass.
+- The screenshot-driven populated-row visual details remain a deployment check because the isolated database contains no representative External Remake delivery rows.
+
+## v0.534 - Blue-X Safety, Progress Filters, and Scan Readability
+
+- Added maintained large-blue-X PDF cancellation detection for Superseded Orders. Detection checks PDF Line annotations and flattened vector strokes without OCR, then exposes crossed-out sketch evidence in the existing operator review queue rather than auto-deleting anything.
+- Added item-specific production-risk evidence for crossed-out sketches: synchronized A+W Cutting completion plus exact source-owned scanner quantity for the crossed item, avoiding false warnings from unrelated items on the same order.
+- When exactly one candidate in a superseded pair carries the Blue-X mark, the review recommendation suggests that crossed-out candidate for removal; production activity is highlighted prominently for operator investigation.
+- Restored External Remake Glass Type identity to the normal lookup-color appearance by keeping the black wash on the row behind the cell and painting an opaque visual equivalent of the normal white-backed glass gradient with dark navy text above it.
+- Added a `NEW` badge before Job Nr. and a subtle New Order color tint to grouped headers containing unreviewed ordinary New Orders.
+- Enlarged Scan progress checkpoints so stage names and `0/1` / `1/1` counters have dedicated space.
+- Moved the fabrication progress track out of the text column so the real bounded FAB batch progress bar spans the available FAB section width.
+- Replaced the Scan Machine filter group with current visible Progress filters for Cutting, WaterJet, Denver, Staging, and Outbound. Zero-count progress choices are hidden.
+- Kept Route filters delivery-list-aware: a route button is hidden and any stale selection is cleared when the currently loaded list contains no matching pieces.
+- Improved the bulk review control to a clearer **Mark All Reviewed** action with a double-check icon and per-category queue summary.
+- Kept SQLite schema at **21**; v0.534 adds no database migration. Advanced the application exactly one step from v0.533 to **v0.534** and advanced cache keys for changed Scan/Admin CSS and application JavaScript.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse without bytecode churn, the focused v0.534/static regression set passes **234/234**, and the complete maintained suite passes **341/341**.
+- Blue-X coverage includes the long-cross geometry guard plus a synthetic flattened PDF content stream, confirming vector cancellation detection without OCR.
+- An isolated v0.534 server on a fresh SQLite database returned `/api/health`, reached migration ledger **21**, passed `integrity_check: ok`, and reported **0** foreign-key violations.
+- Playwright is installed but the required Chromium executable is unavailable in this execution environment, so desktop/tablet/phone/TC22 screenshots and physical/live operator integrations remain controlled deployment checks. The isolated server was stopped afterward.
+
+## v0.533 - Remake Supersession, Durable Fabrication State, and Faster Global Search
+
+- Added strict same-day normal-order -> External Remake duplicate detection to the maintained A+W superseded-order candidate workflow. Detection requires the same delivery date, Job Nr., customer, route, and exact Item/product/quantity/dimensions set; it only creates a review candidate and never auto-deletes an order.
+- Separated import-review classification so External Remakes/Rushes create their own review work only when newly imported as that priority type or transitioning into it. Routine edits to an already-known priority line no longer reappear as New Orders or recreate the priority review card.
+- Removed operator-facing Exclude-mode selectors from Scan and Print / Export, returning both surfaces to the simpler include-only filter model while keeping review presets isolated.
+- Added matching Review/Mark Reviewed icons to Remake, Internal Reject, and Rush cards and tightened Mark Reviewed typography for compact-card fit.
+- Added bounded browser persistence for fabrication/cutting evidence across tab/page transitions and refreshes; FAB progress waits three seconds before appearing and expands/collapses smoothly instead of shifting Scan abruptly.
+- Increased Internal Reject ribbon fact spacing by another 30% and strengthened the orange fade into the physical piece below by roughly 40%.
+- Reworked Global Search candidate selection so ordinary terms narrow SQL before priority annotation, scan-event lookups are bounded to candidates, completed/inactive non-deleted delivery work remains searchable, and equal-relevance results sort newest first. Completed Rush work therefore remains discoverable by `Rush` and exact order searches.
+- Added the shared thick blue-to-green loading-track treatment for maintained loading surfaces.
+- Repaired External Remake layering again: the black wash is owned by the row, all TDs remain transparent, and an opaque lookup-colored Glass Type identity card sits above it. Reduced the black gradient intensity so table text remains easy to read while the Remake treatment still spans Glass Type through Progress.
+- Kept SQLite schema at **21**; v0.533 adds no database migration. Advanced the application exactly one step from v0.532 to **v0.533** and advanced cache keys for changed Scan CSS, shared UI CSS, and application JavaScript assets.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse without bytecode churn, the focused v0.533/static regression set passes **233/233**, and the complete maintained suite passes **338/338**.
+- A copy of the uploaded production database upgraded through the maintained migrations from schema 11 to **21** with **338 delivery lists / 22,754 line items / 2,080 scan events** preserved, then passed a second idempotent initialization, `integrity_check: ok`, and **0** foreign-key violations.
+- On that upgraded real-scale copy, v0.533 Smart Search measured about **108-113 ms for `Rush`** and **109-117 ms for `Remake`**; the v0.532 implementation on the same copy measured about **301-330 ms** and **305-314 ms** respectively.
+- An isolated v0.533 server on a fresh database returned `/api/health`, initialized schema 21, and passed SQLite integrity/foreign-key checks. Native PowerShell parsing was unavailable in this Linux environment, and headless Chromium stalled before localhost screenshots completed, so the changed automation rule plus responsive/TC22/live-share/scanner/print behavior remain controlled Windows deployment checks. Validation processes were terminated afterward.
+
+## v0.532 - Numeric Cutting, Unified Exclusions, and Fabrication Feedback
+
+- Changed the Scan Cutting checkpoint to the maintained numeric progress convention so pending/completed Cutting displays `0/1` or `1/1` instead of a descriptive CUT value.
+- Enlarged and polished the Scan FAB readiness meter, added accessible progress values, and connected its count/percentage to actual completed bounded A+W fabrication-status batches rather than simulated per-order motion.
+- Corrected first-entry fabrication warmup so foreground A+W checking can start during the Scan-page transition instead of being cancelled before the page becomes active.
+- Replaced the separate Scan exclusion block with one Include/Exclude mode switch. Exclude mode reuses Status, Attention, Route, Machine, and Glass Type controls with dashed-outline styling and preserves mutually exclusive include/exclude state per filter.
+- Added the same Include/Exclude mode to Print / Export. Include selections are preserved while exclusion controls are edited, exact preview/export rows honor exclusions, and the print filter summary calls out excluded criteria.
+- Polished the compact one-row Internal Reject ribbon, widened spacing between incident phrases, and strengthened the orange fade from the ribbon into its physical order row.
+- Repaired External Remake row styling so one black gradient spans the logical row from Glass Type through Progress while cell backgrounds remain transparent and the normal Glass Type color-gradient identity surface stays layered above the black wash.
+- Kept SQLite schema at **21**; v0.532 adds no database migration. Advanced the application exactly one step from v0.531 to **v0.532** and advanced cache keys for the changed Scan CSS, Print CSS, and application JavaScript assets.
+
+### Validation
+- JavaScript syntax passes, all **31** project Python sources parse without bytecode churn, the focused static/UI contract suite passes **230/230**, and the complete maintained suite passes **336/336**.
+- An isolated v0.532 server on a fresh SQLite test database returned `/api/health`, reached migration/schema ledger **21**, passed `integrity_check: ok`, and reported **0** foreign-key violations. No v0.532 migration was created.
+- Headless Chromium timed out before it could render localhost in this environment, so responsive desktop/tablet/phone/TC22 appearance and physical scanner/touch/live-share/print behavior remain deployment checks. The isolated server/browser processes were stopped afterward.
+
+## v0.531 - Review Isolation, Fabrication Readiness, and Import Feedback
+
+- Reworked Scan review actions into isolated include/exclude presets so New Orders, Internal Rejects, External Remakes, and Rushes cannot inherit conflicting attention filters when operators switch review cards.
+- Added explicit **Exclude** controls for all four review categories plus removable exclusion chips; Review Orders automatically includes New Orders while excluding External Remakes; switching to any other review card clears the prior review preset before applying the selected category.
+- Reused the delivery-date colored `!` indicator component inside review cards, added a compact **Review All** action, and reduced Mark Reviewed button geometry so both actions fit cleanly.
+- Eliminated stale reviewed-item flashes by invalidating the synchronized date bundle after acknowledgements and seeding review cards from date-wide line flags before the first Scan paint.
+- Made the Internal Reject ribbon shorter with wider phrase spacing while keeping all incident fields on one row.
+- Corrected one-step/uncut Cutting progress geometry so a lone Cutting checkpoint no longer inherits the two-step progress layout.
+- Added a compact foreground fabrication readiness/progress bar above the Scan list while retaining low-priority sequential current/future warmup and lazy historical dates.
+- Removed the remake black priority wash from the Glass Type cell itself while retaining the row-level remake treatment and normal glass identity styling.
+- Restored smooth mobile sidebar slide/scrim transitions, with reduced-motion support.
+- Added distinct `import_success.wav` and `import_failed.wav` A+W import cues and changed automatic/manual import completion playback to use them.
+- Tightened successful A+W notification summaries so External Remakes/Rushes count only genuinely new imported line notices; successful runs with no new review items state that explicitly.
+- Kept SQLite schema at **21**; v0.531 adds no database migration. Advanced the application exactly one step from v0.530 to **v0.531** and cache-busted every changed CSS/JS runtime asset.
+
+### Validation
+- JavaScript syntax passes, all **31** Python sources parse without bytecode churn, changed backend imports succeed, the v0.531 static/UI contract suite passes **229/229**, the focused A+W attention-summary regression passes **1/1**, and the complete maintained suite passes **335/335**.
+- An isolated v0.531 server started on a fresh test database, returned `/api/health` successfully, remained on schema **21**, passed `integrity_check: ok` with **0** foreign-key violations, and was shut down cleanly. Managed Chromium policy blocks localhost at desktop, vertical/tablet, phone, and TC22 portrait/landscape viewports with `ERR_BLOCKED_BY_ADMINISTRATOR`, so responsive visual/scanner, live A+W shares, printer, and operator-only workflows remain deployment checks.
+
+## v0.530 - Shared Attention Colors, Category Review, and Future Fabrication Warmup
+
+- Changed Internal Reject presentation to the maintained orange attention color and converted the Scan incident ribbon to one compact single row (`REASON: value`, `MACHINE / LOCATION: value`, `QTY: value`, `REJECTED BY: value`, `INCIDENT: value`).
+- Standardized the maintained priority palette across Scan, Manual Edit, Print / Export, Smart Search, reject notifications, statistics/priority surfaces, and date indicators: New Orders blue, Internal Rejects orange, External Remakes black, Rushes red.
+- Added a schema-neutral Lookup Manager **Attention Colors** tab backed by the existing `admin_lookup_values` table so administrators can change all four colors centrally.
+- Split unread import review into independent New Orders, External Remakes, and Rush receipt buckets while retaining the existing per-user Internal Reject event receipts. Airport-wide acknowledgement now clears only the category the operator actually reviewed.
+- Added four smaller Scan review cards with independent Review / Mark Reviewed actions and category colors.
+- Expanded delivery-date alert metadata so one date can show multiple category-specific `!` circles; widened the desktop date selector button to match its dropdown.
+- Enriched successful A+W automation notifications with concise New Orders / Internal Rejects / External Remakes / Rush counts and simplified the popup to category names only. Import-level Internal Reject alerts suppress the overlapping detailed reject toast for that refresh.
+- Added low-priority sequential fabrication prewarming for every current/future delivery date using the existing synchronized date bundle, bounded status batch queue, lifecycle retry windows, and bounded browser cache. Dates before today stay lazy until selected.
+- Kept SQLite schema at **21**; no migration, seed, database reset, or production-data replacement is included.
+- Advanced the application exactly one step to **v0.530** and advanced browser cache keys for every changed CSS/JS asset.
+
+### Validation
+- JavaScript syntax, **37** Python source parses, changed-module imports, the focused v0.530 set (**10/10**), and the complete maintained suite (**334/334**) pass.
+- The uploaded `data/` tree remains byte-for-byte unchanged across **77 files**. An isolated copy upgraded through the existing schema-12-through-21 migrations with `integrity_check: ok`, **0** foreign-key violations, and preserved key table row counts. v0.530 adds no migration.
+- Chromium visual navigation is blocked in this Linux container by managed browser policy (`ERR_BLOCKED_BY_ADMINISTRATOR`), so responsive visual/TC22, external A+W/PowerShell, physical scanner, printer, and email behavior remain controlled deployment checks.
+- Production `data/`, SQLite/WAL/SHM, logs, credentials, verification artifacts, and generated exports remain excluded from both release ZIPs.
+
 ## v0.529 - Internal Reject Review, Production Progress Memory, and UI Completion
 
 - Added schema 21 with per-user Internal Reject review receipts, lifecycle-bound manual Cutting/fabrication overrides, and Inventory scan delivery dates.

@@ -22403,3 +22403,107 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
   .manual-edit-filter-panel { width: calc(100vw - 24px) !important; }
   .manual-edit-progress-field-v529 { grid-column: 1 / -1; max-width: none; }
 }
+
+/* ========================================================================== */
+/* v0.530 Lookup attention colors + Manual Edit priority filters              */
+/* ========================================================================== */
+.manual-edit-attention-filter-section [data-manual-edit-filter-value="updated"] { --manual-attention: var(--attention-new-order); }
+.manual-edit-attention-filter-section [data-manual-edit-filter-value="reject"] { --manual-attention: var(--attention-internal-reject); }
+.manual-edit-attention-filter-section [data-manual-edit-filter-value="remake"] { --manual-attention: var(--attention-external-remake); }
+.manual-edit-attention-filter-section [data-manual-edit-filter-value="rush"] { --manual-attention: var(--attention-rush); }
+.manual-edit-attention-filter-section [data-manual-edit-filter-value]:not([data-manual-edit-filter-value="manual"]) {
+  border-color: color-mix(in srgb, var(--manual-attention) 42%, #cad4de) !important;
+  color: var(--manual-attention) !important;
+}
+.manual-edit-attention-filter-section [data-manual-edit-filter-value]:not([data-manual-edit-filter-value="manual"]).is-active {
+  border-color: var(--manual-attention) !important;
+  background: var(--manual-attention) !important;
+  color: #fff !important;
+}
+
+.attention-color-manager-v530 { max-width: 980px; margin: 0 auto; }
+.attention-color-panel-v530 { padding: 4px; }
+.attention-color-panel-v530 > header { margin-bottom: 14px; }
+.attention-color-panel-v530 > header small { color: #6c8197; font-size: 9px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
+.attention-color-panel-v530 > header h3 { margin: 3px 0 2px; color: #183b60; font-size: 19px; }
+.attention-color-panel-v530 > header p { margin: 0; color: #657a90; font-size: 11px; line-height: 1.45; }
+.attention-color-list-v530 { display: grid; gap: 8px; }
+.attention-color-row-v530 {
+  --attention-row-color: #1766D8;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--attention-row-color) 30%, #d4dee8);
+  border-left: 4px solid var(--attention-row-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--attention-row-color) 4%, white);
+}
+.attention-color-copy-v530 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.attention-color-copy-v530 > i { width: 25px; height: 25px; display: grid; place-items: center; flex: 0 0 25px; border-radius: 50%; background: var(--attention-row-color); color: #fff; font-size: 12px; font-style: normal; font-weight: 950; }
+.attention-color-copy-v530 span { min-width: 0; }
+.attention-color-copy-v530 strong, .attention-color-copy-v530 small { display: block; }
+.attention-color-copy-v530 strong { color: #233b54; font-size: 12px; }
+.attention-color-copy-v530 small { margin-top: 2px; color: #6a7d90; font-size: 9.5px; }
+.attention-color-picker-v530 { display: grid; grid-template-columns: auto auto; align-items: center; gap: 5px 7px; }
+.attention-color-picker-v530 > span { grid-column: 1 / -1; color: #6a7d90; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .07em; }
+.attention-color-picker-v530 input[type="color"] { width: 44px !important; height: 30px !important; min-height: 30px !important; padding: 2px !important; }
+.attention-color-picker-v530 b { min-width: 64px; color: #485d72; font-size: 10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.attention-color-row-v530 > button { min-height: 32px !important; background: var(--attention-row-color) !important; border-color: var(--attention-row-color) !important; }
+.attention-color-note-v530 { margin: 12px 2px 0; color: #75879a; font-size: 9.5px; }
+
+/* Priority Intake / manager request families share the same palette. */
+.priority-work-section-v347.is-remake > header { border-color: var(--attention-external-remake) !important; }
+.priority-work-section-v347.is-remake > header :is(strong,b) { color: var(--attention-external-remake) !important; }
+.priority-work-section-v347.is-rush > header { border-color: var(--attention-rush) !important; }
+.priority-work-section-v347.is-rush > header :is(strong,b) { color: var(--attention-rush) !important; }
+
+@media (max-width: 720px) {
+  .attention-color-row-v530 { grid-template-columns: 1fr auto; }
+  .attention-color-copy-v530 { grid-column: 1 / -1; }
+}
+
+/* ========================================================================== */
+/* v0.534 superseded sketch cancellation evidence                             */
+/* ========================================================================== */
+.superseded-sketch-safety-stack-v534 {
+  display: grid;
+  gap: 7px;
+  margin: 9px 14px 0;
+}
+.superseded-sketch-safety-v534 {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #9fc1e5;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f6faff 0%, #edf5ff 100%);
+  padding: 8px 10px;
+  color: #234c78;
+}
+.superseded-sketch-safety-v534.has-production-warning {
+  border-color: #df8b8b;
+  background: linear-gradient(135deg, #fff8f8 0%, #fff0f0 100%);
+  color: #8b2027;
+  box-shadow: inset 4px 0 0 #c53d46;
+}
+.superseded-sketch-x-v534 {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #2374cf;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 950;
+  line-height: 1;
+}
+.superseded-sketch-safety-v534.has-production-warning .superseded-sketch-x-v534 { background: #c53d46; }
+.superseded-sketch-safety-v534 > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.superseded-sketch-safety-v534 strong { font-size: 10.5px; font-weight: 950; }
+.superseded-sketch-safety-v534 small { font-size: 9px; font-weight: 750; }
+.superseded-sketch-safety-v534 em { color: #65788f; font-size: 8.5px; font-style: normal; line-height: 1.25; }
+.superseded-sketch-safety-v534.has-production-warning em { color: #8a5559; }
