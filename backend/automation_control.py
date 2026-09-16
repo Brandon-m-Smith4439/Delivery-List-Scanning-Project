@@ -778,7 +778,12 @@ class DeliveryAutomationController:
             return normalizer(parsed)
         return parsed
 
-    def _database_import_history_items(self, maximum_rows: int = 5000) -> list[dict[str, Any]]:
+    def _database_import_history_items(
+        self,
+        maximum_rows: int = 5000,
+        imported_from: str = "",
+        imported_to: str = "",
+    ) -> list[dict[str, Any]]:
         """Read normalized import-audit rows from the scanner database."""
         store = self.scanner_store
         if store is None or not callable(getattr(store, "connect", None)):
@@ -790,15 +795,25 @@ class DeliveryAutomationController:
             "id, delivery_date, source_name, row_count, total_qty, status, "
             "imported_by, imported_at, source_path, source_hash, import_kind, change_summary"
         )
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if imported_from:
+            clauses.append("imported_at >= ?")
+            parameters.append(imported_from)
+        if imported_to:
+            clauses.append("imported_at < ?")
+            parameters.append(imported_to)
+        where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with store.connect() as con:
             if database_type in {"azure", "azure_sql", "azure-sql", "sqlserver", "sql_server", "mssql"}:
                 rows = con.execute(
-                    f"SELECT TOP {clean_maximum} {columns} FROM imports ORDER BY id DESC"
+                    f"SELECT TOP {clean_maximum} {columns} FROM imports{where_sql} ORDER BY id DESC",
+                    tuple(parameters),
                 ).fetchall()
             else:
                 rows = con.execute(
-                    f"SELECT {columns} FROM imports ORDER BY id DESC LIMIT ?",
-                    (clean_maximum,),
+                    f"SELECT {columns} FROM imports{where_sql} ORDER BY id DESC LIMIT ?",
+                    (*parameters, clean_maximum),
                 ).fetchall()
 
         items: list[dict[str, Any]] = []
@@ -1350,6 +1365,7 @@ class DeliveryAutomationController:
         date_from: str = "",
         date_to: str = "",
         page_mode: str = "rows",
+        compact: bool = False,
     ) -> dict[str, Any]:
         """Return searchable, filterable, newest-first import audit history.
 
@@ -1382,12 +1398,29 @@ class DeliveryAutomationController:
         # search/filter requests retain the deeper audit scan.
         database_limit = 5000 if filters_requested or clean_page_mode != "control_center" else 1500
         archive_limit = 2000 if filters_requested or clean_page_mode != "control_center" else 250
+        imported_from = ""
+        imported_to = ""
+        if clean_date_from:
+            local_start = datetime.combine(date.fromisoformat(clean_date_from), datetime.min.time()).astimezone()
+            imported_from = local_start.astimezone(timezone.utc).isoformat(timespec="seconds")
+        if clean_date_to:
+            local_end = datetime.combine(
+                date.fromisoformat(clean_date_to) + timedelta(days=1),
+                datetime.min.time(),
+            ).astimezone()
+            imported_to = local_end.astimezone(timezone.utc).isoformat(timespec="seconds")
         try:
-            database_items = self._database_import_history_items(maximum_rows=database_limit)
+            database_items = self._database_import_history_items(
+                maximum_rows=database_limit,
+                imported_from=imported_from,
+                imported_to=imported_to,
+            )
         except TypeError:
             # Compatibility for lightweight test doubles / older controller hooks.
             database_items = self._database_import_history_items()
         latest_items, latest_summary = self._latest_automation_import_items()
+        if clean_date_from == clean_date_to == date.today().isoformat():
+            archive_limit = min(archive_limit, 100)
         try:
             archived_items = self._archived_automation_import_items(maximum_runs=archive_limit)
         except TypeError:
@@ -1685,11 +1718,31 @@ class DeliveryAutomationController:
                 except Exception:
                     lists = []
 
+        if compact:
+            stage_keys = {
+                "listId", "label", "listLabel", "stage", "scanner", "stageProfile", "stagePreset",
+                "route", "routeCode", "totalQty", "originalQty", "originalPieceQty", "previousQty",
+                "oldQty", "beforeQty", "created", "reactivated", "changedLineCount", "changedPieceQty",
+                "updatedPieceQty", "addedPieceQty", "newPieceQty", "removedLineCount", "removedPieceQty",
+                "duplicateManualLineCount", "duplicateManualPieceQty", "importedAt", "checkedAt", "updatedAt",
+            }
+
+            def compact_item(item: dict[str, Any]) -> dict[str, Any]:
+                concise = {key: value for key, value in item.items() if key != "changeSummary"}
+                concise["stageSummaries"] = [
+                    {key: value for key, value in stage.items() if key in stage_keys}
+                    for stage in (item.get("stageSummaries") or [])
+                    if isinstance(stage, dict)
+                ]
+                return concise
+
+            page_items = [compact_item(item) for item in page_items]
+
         return {
             "ok": True,
             "recentImports": page_items,
             "imports": page_items,
-            "latestImportResults": latest_items,
+            "latestImportResults": [] if compact else latest_items,
             "lists": lists,
             "lastCheckedAt": last_checked_at,
             "page": clean_page,

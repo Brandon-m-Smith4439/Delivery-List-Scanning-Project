@@ -1859,6 +1859,11 @@ def main() -> int:
                             "coverage": dict(cutting_sync_request.get("coverage") or {})
                             if isinstance(cutting_sync_request.get("coverage"), dict) else {},
                         },
+                        optimization_plates=[
+                            dict(value)
+                            for value in (cutting_sync_request.get("optimizationPlates") or [])
+                            if isinstance(value, dict)
+                        ],
                     ),
                     "synchronizing A+W Cutting progress",
                 )

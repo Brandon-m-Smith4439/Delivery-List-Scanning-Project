@@ -3728,3 +3728,181 @@
 .statistics-production-count-card-v505.is-internal-reject { border-color: var(--attention-internal-reject) !important; }
 .statistics-production-count-card-v505.is-reject :is(strong,h3),
 .statistics-production-count-card-v505.is-internal-reject :is(strong,h3) { color: var(--attention-internal-reject) !important; }
+
+/* ========================================================================== */
+/* v0.540 compact Today Production Count                                      */
+/* ========================================================================== */
+.statistics-production-count-grid-v505 {
+  grid-template-columns: minmax(0, 2.2fr) minmax(230px, .72fr) !important;
+  gap: 12px !important;
+}
+.statistics-production-new-header-v506 {
+  grid-template-columns: 36px minmax(0, 1fr) !important;
+  padding: 11px 13px 10px !important;
+}
+.statistics-production-new-header-v506 strong { font-size: 26px !important; }
+.statistics-production-new-header-v506 strong > span { font-size: 11px !important; }
+.statistics-production-glass-ledger-v506 { max-height: 330px !important; overflow: auto !important; }
+.statistics-production-glass-columns-v540,
+.statistics-production-glass-row-v506 {
+  display: grid !important;
+  grid-template-columns: minmax(190px, 1fr) 70px 70px 132px 122px 72px !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+.statistics-production-glass-columns-v540 {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 29px;
+  padding: 5px 13px;
+  border-bottom: 1px solid #cfdeea;
+  background: #eef4f9;
+  color: #536d83;
+  font-size: 8.5px;
+  font-weight: 950;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.statistics-production-glass-columns-v540 > span:not(:first-child) { text-align: right; }
+.statistics-production-glass-row-v506 {
+  min-height: 48px !important;
+  padding: 6px 13px !important;
+}
+.statistics-production-glass-name-v539 > strong { color: #143d62; font-size: 11.5px !important; }
+.statistics-production-metric-v540 {
+  display: grid !important;
+  justify-items: end;
+  color: #31516e !important;
+  font-size: 13px !important;
+  font-style: normal;
+  font-weight: 900 !important;
+  text-align: right !important;
+}
+.statistics-production-metric-v540 > small,
+.statistics-production-sheet-cell-v540 > small,
+.statistics-production-delivery-v540 > small { display: none; }
+.statistics-production-sheet-cell-v540 {
+  min-width: 0;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  justify-content: end;
+  gap: 1px 5px;
+  color: #0b5b88 !important;
+  text-align: right !important;
+}
+.statistics-production-sheet-cell-v540 > strong { font-size: 14px; font-weight: 950; }
+.statistics-production-sheet-cell-v540 > em {
+  min-width: 0;
+  overflow: hidden;
+  color: #667d91;
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statistics-production-delivery-v540 {
+  color: #536b80 !important;
+  font-size: 9px !important;
+  font-style: normal;
+  font-weight: 800 !important;
+  text-align: right !important;
+}
+.statistics-sheet-total-v540 {
+  grid-template-columns: minmax(0,1fr) auto !important;
+  margin: 8px 12px 0 !important;
+  padding: 8px 11px !important;
+  border-color: #b9d8ec !important;
+  background: linear-gradient(90deg,#eff8ff,#f8fcff) !important;
+}
+.statistics-sheet-total-v540 > strong { font-size: 22px !important; }
+.statistics-production-side-card-v506 { padding: 11px !important; }
+.statistics-production-side-card-v506 strong { font-size: 25px !important; }
+.statistics-production-machine-ledger-v514 { margin: 8px 12px 12px !important; }
+@media (max-width: 1100px) {
+  .statistics-production-count-grid-v505 { grid-template-columns: 1fr !important; }
+  .statistics-production-side-stack-v506 { grid-template-columns: 1fr 1fr !important; grid-template-rows: none !important; }
+}
+@media (max-width: 760px) {
+  .statistics-production-glass-columns-v540 { display: none !important; }
+  .statistics-production-glass-row-v506 {
+    grid-template-columns: minmax(0, 1fr) repeat(3, minmax(52px,auto)) !important;
+    gap: 7px !important;
+    padding: 8px 10px !important;
+  }
+  .statistics-production-glass-name-v506 { grid-column: 1 / -1; }
+  .statistics-production-metric-v540,
+  .statistics-production-sheet-cell-v540,
+  .statistics-production-delivery-v540 { justify-items: start; text-align: left !important; }
+  .statistics-production-metric-v540 > small,
+  .statistics-production-sheet-cell-v540 > small,
+  .statistics-production-delivery-v540 > small {
+    display: block;
+    color: #7890a4;
+    font-size: 7.5px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .statistics-production-sheet-cell-v540 { grid-template-columns: auto 1fr; }
+  .statistics-production-sheet-cell-v540 > small { grid-column: 1 / -1; }
+  .statistics-production-glass-open-v536 { align-self: end; grid-column: auto !important; text-align: right !important; }
+}
+@media (max-width: 500px) {
+  .statistics-production-side-stack-v506 { grid-template-columns: 1fr !important; }
+  .statistics-production-new-header-v506 strong { font-size: 23px !important; }
+  .statistics-production-glass-row-v506 { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+  .statistics-production-glass-name-v506 { grid-column: 1 / -1; }
+  .statistics-production-glass-open-v536 { text-align: left !important; }
+}
+
+/* v0.540 final production ledger balance and compact attention totals. */
+.statistics-production-count-grid-v505 {
+  grid-template-columns: minmax(0, 2.55fr) minmax(205px, .58fr) !important;
+  align-items: start !important;
+}
+.statistics-production-glass-columns-v540,
+.statistics-production-glass-row-v506 {
+  grid-template-columns: minmax(170px, 1fr) 58px 58px 118px minmax(168px, .72fr) 68px !important;
+  gap: 6px !important;
+}
+.statistics-production-delivery-v540 {
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+  line-height: 1.25 !important;
+}
+.statistics-production-side-stack-v506 {
+  grid-template-rows: auto auto !important;
+  align-content: start;
+  gap: 8px !important;
+}
+.statistics-production-side-card-v506 {
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: 30px minmax(0, 1fr) !important;
+  align-items: start !important;
+  gap: 8px !important;
+  padding: 10px !important;
+}
+.statistics-production-side-card-v506 .statistics-production-count-icon-v505 {
+  width: 30px !important;
+  height: 30px !important;
+}
+.statistics-production-side-card-v506 > div { display: grid; gap: 2px; min-width: 0; }
+.statistics-production-side-card-v506 strong { font-size: 22px !important; line-height: 1 !important; }
+.statistics-production-side-card-v506 p,
+.statistics-production-side-card-v506 em { margin: 0 !important; font-size: 8.5px !important; line-height: 1.3 !important; }
+@media (max-width: 1100px) {
+  .statistics-production-count-grid-v505 { grid-template-columns: 1fr !important; }
+  .statistics-production-side-stack-v506 { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+}
+@media (max-width: 760px) {
+  .statistics-production-glass-row-v506 { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+  .statistics-production-glass-name-v506 { grid-column: 1 / -1 !important; }
+  .statistics-production-delivery-v540 { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .statistics-production-side-stack-v506 { grid-template-columns: 1fr !important; }
+}

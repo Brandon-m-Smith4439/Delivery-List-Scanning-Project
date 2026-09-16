@@ -2122,6 +2122,7 @@ class Handler(SimpleHTTPRequestHandler):
                     date_from=params.get("dateFrom", [""])[0],
                     date_to=params.get("dateTo", [""])[0],
                     page_mode=params.get("pageMode", ["rows"])[0],
+                    compact=params.get("compact", ["0"])[0].strip().lower() in {"1", "true", "yes"},
                 )
             )
             return
@@ -2231,6 +2232,7 @@ class Handler(SimpleHTTPRequestHandler):
                 STORE.list_superseded_order_reviews(
                     status=params.get("status", [""])[0],
                     include_inactive=params.get("includeInactive", ["0"])[0] in {"1", "true", "yes"},
+                    include_sketch_safety=params.get("includeSketchSafety", ["0"])[0] in {"1", "true", "yes"},
                 )
             )
             return
@@ -3181,6 +3183,18 @@ class Handler(SimpleHTTPRequestHandler):
                         user["username"],
                         str(data.get("reason") or ""),
                         str(data.get("removeOrderNumber") or ""),
+                    )
+                )
+                return
+
+            if parsed.path == "/api/admin/superseded-order-reviews/refresh":
+                user = self.require_permission("review_superseded_orders")
+                if not user:
+                    return
+                self.send_json(
+                    STORE.detect_superseded_order_candidates_from_scanner(
+                        str(data.get("deliveryDate") or ""),
+                        user["username"],
                     )
                 )
                 return

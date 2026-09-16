@@ -1,32 +1,30 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.539**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
+Current maintained release: **v0.540**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
 
-## Install v0.539
+## Install v0.540
 
 1. Stop the server and back up the current project folder. Preserve the live `data/` folder separately.
-2. Inspect `Delivery_List_Scanner_v0.539_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
-3. Extract the ZIP into the existing **v0.538** project root with overwrite enabled. Do not replace the live `data/` folder.
-4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.539**. SQLite remains schema **21** and no migration should run for this release.
-5. On Scan, confirm every Progress checkpoint reads as one compact icon + step + quantity line and stays inside the Progress column at desktop and TC22 widths. Confirm External Remake Glass Type text remains dark/readable.
-6. On Statistics, select a historical single day and a multi-day range. Confirm Glass Quantity/Common Sizes follow the selected delivery-date range, Production Count follows the selected first-import activity range, stock-sheet counts sit beside their glass types, and the old **Production Count for Day** option and standalone **Sheet Settings** button are gone.
-7. In Lookup Manager, confirm the new **Sheet Sizes** tab contains stock-sheet size/recipient controls and **Color Manager** centralizes the maintained color workspaces.
-8. In Inventory, use a frozen line with Qty greater than 1. Mix barcode scans and Manual Entry and confirm both advance the same counted quantity, an entry that would exceed the expected Qty is blocked, and the scan result clearly shows success/failure plus current Airport Rd and Indian Trail system presence.
+2. Inspect `Delivery_List_Scanner_v0.540_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.539** project root with overwrite enabled. Do not replace the live `data/` folder.
+4. Restart with the maintained launcher, run one manual A+W update to populate the current physical-plate snapshot, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.540**. SQLite remains schema **21**.
+5. On Scan, confirm compact progress cells keep equal label/count sizing and stage colors, No Fab rows read Cutting -> Staging, remake glass copy is black, and new-order headers/badges use the pulsing yellow treatment.
+6. On Statistics, confirm Today's Production Count has separate Pieces, Items, Stock Sheets, and Delivery columns. Verify 3/8 stock usage against A+W's current plate list and inspect the reported plate sizes.
+7. In Superseded Orders, choose **Refresh checks** and confirm same-date exact normal/remake duplicates appear for review. Confirm either order can be removed, both can be removed, both can be kept, or the decision can remain pending.
+8. Verify Smart Search with order, job, customer, glass, bay, and rack terms. Check Scan, Statistics, Racks, Bay Map, Delivery List Updates, and Superseded Orders at desktop, tablet, phone, and 200% browser zoom.
 
-### v0.539 behavior
+### v0.540 behavior
 
-- **Progress cells now use one owned layout.** Scan progress checkpoints render as icon + step label + count with consistent sizing, clipping guards, and final-authority CSS so old overlapping rules cannot push content outside the Progress column.
-- **External Remake glass labels stay readable.** The Glass Type copy on remake rows is forced back to dark text without disturbing the remake row treatment.
-- **Statistics keeps the selected range on the correct business date basis.** Glass Quantity and Common Glass Sizes remain delivery-date metrics, Production Count remains a first-import activity metric, and event/reject/sheet measures keep their event or optimization date bases.
-- **The redundant Production Count for Day metric is removed.** Historical Production Count remains available through the normal date-range selector and the range-scoped Production Count table.
-- **Stock-sheet usage is easier to audit.** Each Today’s Production Count glass row shows its sheet count inline, and the By Machine section uses a consistent compact card layout.
-- **Sheet-size settings live in Lookup Manager.** The standalone Statistics Sheet Settings button is removed and replaced by a dedicated **Sheet Sizes** tab beside Glass Types.
-- **Color settings are centralized.** Lookup Manager now has a **Color Manager** landing tab for Glass Type, Machine, Attention, and Presentation/branding color workspaces.
-- **Manual Inventory and barcode scans share the same quantity ceiling.** Manual Entry adds only the requested delta to the same physical-count row, combines correctly with scanner counts, and is rejected before the total can exceed the frozen/current known system quantity for that Order/Item.
-- **Manual count corrections are piece-safe.** Smart Fill starts Manual Entry at one piece, and Undo removes only one physical piece from any multi-quantity aggregate even when Manual Entry and barcode scans were mixed.
-- **Inventory scan feedback is explicit.** Successful, blocked, and failed scans show a persistent page result plus the normal app notification/sound. Successful and duplicate-known scans also show current **Airport Rd** and **Indian Trail** system presence and quantity/reason details.
-- **Remake duplicate review is more tolerant of route-only differences.** Same-day normal/remake candidates are grouped by Job + Customer + exact item set; route match is retained as evidence but no longer hides a strong remake duplicate from Superseded Orders review.
-- **No schema change is required.** SQLite remains schema **21**.
+- **Compact progress remains readable.** Scan checkpoints are about 15% shorter, use equal-weight label and quantity text, preserve workflow colors, and omit the redundant No Fab checkpoint from Scan and Smart Search. Order Details still shows No Fab explicitly.
+- **New orders are unmistakable.** Group headers use the pale-yellow new-line treatment and the NEW badge matches the maintained yellow pulse.
+- **Today's Production Count is a compact ledger.** Each glass row exposes Pieces, Items, Stock Sheets, Delivery, and drill-down actions in fixed columns with responsive labels on narrow screens.
+- **Physical sheets come from current A+W plates.** Counts use distinct `PROD_OPTI_PLATES.PLATENR` rows and sizes use source `LENGTH` / `HEIGHT` values in 1/32-inch units. The misleading optimization `SHEETCOUNT` is no longer treated as physical stock usage.
+- **Superseded candidates can be recovered on demand.** Refresh checks compares active scanner orders by delivery date, Job, Customer, and exact item set, then sends normal/remake pairs through the existing approval workflow.
+- **Superseded review is fully manual.** An administrator can remove the first order, remove the second order, remove both, keep both, or defer the decision. The initial dialog paints before slower sketch-safety evidence finishes loading.
+- **Smart Search does less database work.** One normalized row corpus and bounded location checks replace the previous wide joined predicate; obsolete browser requests are canceled and recent exact queries are cached briefly.
+- **Repeated operational pages reuse recent data.** Racks and Bay Map paint from bounded browser caches while refreshing in the background, Bay layout files use an mtime-aware server cache, and the current Delivery List Updates panel requests a compact date-bounded history instead of downloading all retained history.
+- **The individual Bay dialog is easier to operate.** The selected-bay workspace uses a compact responsive grid, clearer order and status hierarchy, and an internally scrolling body that remains usable at 200% browser zoom.
+- **No schema change is required.** SQLite remains schema **21**; the plate snapshot uses existing system metadata storage.
 
 ### Statistics calculation basis
 
@@ -38,9 +36,11 @@ Current maintained release: **v0.539**. SQLite remains the active/default backen
 
 ### Validation
 
-- JavaScript syntax passes; all **31** maintained Python source files compile cleanly; focused Inventory tests pass **6/6**; the static/UI suite passes **237/237**; and the complete maintained suite passes **350/350**.
-- A copied production-scale SQLite database upgrades through the existing schema **11 → 21** migration path with all **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events** preserved, `integrity_check: ok`, and **0** foreign-key violations. v0.539 adds no migration.
-- An isolated v0.539 server returns healthy `/api/health` on a fresh schema-21 database and is shut down after validation. Native PowerShell parsing and final desktop/tablet/TC22 visual confirmation remain deployment checks in this Linux environment.
+- JavaScript syntax passes, maintained Python sources compile cleanly, the static/UI contract suite passes, and the complete maintained suite passes **352/352**.
+- A copied production-scale SQLite database remains at schema **21** with **387 delivery lists / 27,125 line items / 4,146 scan events / 1,478 reject events / 749 imports / 12,344 A+W cutting generations** preserved. `integrity_check` is **ok** and `foreign_key_check` reports **0** violations. v0.540 adds no migration.
+- The copied production data reports the verified 3/8 daily stock usage as **22 physical plates**: **21 at 96 x 130 inches** and **1 at 55 x 96 inches**, replacing the inflated 122-sheet result.
+- An isolated v0.540 server returns healthy application data. Representative warm responses measured about **39 ms** for Racks, **56 ms** for Bay contents, **7 ms** for Bay layout, **31 ms** for initial Superseded review data, **210 ms** for the compact current-day Delivery List Updates payload, **159 ms** for representative Smart Search, and **2.4 seconds** for detailed Today's Production Count on the copied production database.
+- Headless Chromium visual checks passed at **1900x900, 1366x768, 900x1200, 390x844, and 640x360**, including effective 200% zoom. The checked pages have no root horizontal overflow; progress text/counts align, the selected-bay dialog remains internally scrollable, and page-change animations remain enabled.
 
 ## Previous release: v0.538
 

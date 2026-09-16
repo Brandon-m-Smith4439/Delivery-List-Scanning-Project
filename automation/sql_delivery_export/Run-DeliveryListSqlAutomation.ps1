@@ -1271,6 +1271,7 @@ WHERE coverage.OrderNr IS NOT NULL;
     }
 
     $rows = New-Object System.Collections.Generic.List[object]
+    $optimizationPlates = New-Object System.Collections.Generic.List[object]
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     $totalBatches = [int][Math]::Ceiling($orders.Count / [double]$batchSize)
     Write-AutomationLog -Message (
@@ -1698,6 +1699,73 @@ OPTION (RECOMPILE);
         Write-AutomationLog -Message ("A+W production batch {0}/{1} completed. Orders={2} ProductionRows={3} ProcessRows={4} DurationMs={5}." -f $batchNumber,$totalBatches,$batchOrders.Count,$table.Rows.Count,$processTable.Rows.Count,[Math]::Round($batchTimer.Elapsed.TotalMilliseconds))
         $table.Dispose(); $processTable.Dispose()
     }
+    # v0.540: SHEETCOUNT describes optimization demand and can remain far above
+    # the physical stock plates still assigned to the current optimization.
+    # Read each current PROD_OPTI_PLATES row once and retain its exact 1/32-inch
+    # dimensions so Statistics reports the same plate count operators see in A+W.
+    $plateConnection = New-SqlConnection -Config $Config
+    $plateTable = New-Object System.Data.DataTable
+    try {
+        $plateConnection.Open()
+        $plateCommand = $plateConnection.CreateCommand()
+        $plateCommand.CommandTimeout = [Math]::Min($queryTimeout, 90)
+        $plateCommand.CommandText = @"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+;WITH OptimizationDates AS (
+    SELECT o.OPTIMIZATION, o.OPTIDATE, o.LASTCHANGEDATE, 1 AS SourceRank
+    FROM SYSADM.PROD_OPTIMIZATION o
+    WHERE o.OPTIDATE >= DATEADD(day,-@OrderLookbackDays,CAST(GETDATE() AS date))
+    UNION ALL
+    SELECT s.OPTIMIZATION, s.OPTIDATE, s.LASTCHANGEDATE, 2 AS SourceRank
+    FROM SYSADM.PROD_OPTI_STATISTICS s
+    WHERE s.OPTIDATE >= DATEADD(day,-@OrderLookbackDays,CAST(GETDATE() AS date))
+), RankedDates AS (
+    SELECT d.*, ROW_NUMBER() OVER (
+        PARTITION BY d.OPTIMIZATION
+        ORDER BY d.SourceRank, ISNULL(d.LASTCHANGEDATE,d.OPTIDATE) DESC
+    ) AS RN
+    FROM OptimizationDates d
+)
+SELECT p.OPTIMIZATION AS OptimizationNumber,
+       p.PLATENR AS PlateNumber,
+       p.LENGTH AS LengthUnits,
+       p.HEIGHT AS HeightUnits,
+       ISNULL(p.CUT,0) AS PlateCut,
+       ISNULL(p.STOCKBOOKED,0) AS PlateStockBooked,
+       p.LASTCHANGEDATE AS PlateLastChangedAt,
+       LTRIM(RTRIM(ISNULL(p.LASTCHANGEUSER,''))) AS PlateLastChangedUser,
+       CONVERT(nvarchar(64),p.ROWID) AS PlateRowId,
+       d.OPTIDATE AS OptimizationDate
+FROM SYSADM.PROD_OPTI_PLATES p
+INNER JOIN RankedDates d ON d.OPTIMIZATION=p.OPTIMIZATION AND d.RN=1
+ORDER BY p.OPTIMIZATION,p.PLATENR;
+"@
+        $plateLookbackParameter = $plateCommand.Parameters.Add("@OrderLookbackDays", [System.Data.SqlDbType]::Int)
+        $plateLookbackParameter.Value = $orderLookbackDays
+        $plateAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($plateCommand)
+        [void]$plateAdapter.Fill($plateTable)
+        foreach ($plateRow in $plateTable.Rows) {
+            $optimizationPlates.Add([ordered]@{
+                optimizationNumber=[int]$plateRow.OptimizationNumber
+                optimizationDate=$(if ($plateRow.OptimizationDate -eq [DBNull]::Value) { "" } else { ([datetime]$plateRow.OptimizationDate).ToString("o") })
+                plateNumber=[int]$plateRow.PlateNumber
+                lengthUnits=[decimal]$plateRow.LengthUnits
+                heightUnits=[decimal]$plateRow.HeightUnits
+                cut=[int]$plateRow.PlateCut
+                stockBooked=[int]$plateRow.PlateStockBooked
+                lastChangedAt=$(if ($plateRow.PlateLastChangedAt -eq [DBNull]::Value) { "" } else { ([datetime]$plateRow.PlateLastChangedAt).ToString("o") })
+                lastChangedUser=[string]$plateRow.PlateLastChangedUser
+                rowId=[string]$plateRow.PlateRowId
+            })
+        }
+        $plateAdapter.Dispose(); $plateCommand.Dispose()
+        Write-AutomationLog -Message ("A+W current plate snapshot returned {0} physical stock plate row(s)." -f [int]$optimizationPlates.Count)
+    }
+    finally {
+        $plateTable.Dispose()
+        if ($plateConnection.State -ne [System.Data.ConnectionState]::Closed) { $plateConnection.Close() }
+        $plateConnection.Dispose()
+    }
     $timer.Stop()
     $matchedOrderSet = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($productionRow in $rows) {
@@ -1744,8 +1812,8 @@ OPTION (RECOMPILE);
     # Historical SQL spelling retained for contract search only:
     # COALESCE(NULLIF(ji.OPTIMIZATION, 0), seq.OPTIMIZATION)
     return [ordered]@{
-        version="v523-aw-production-6"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
-        orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; orderLookbackDays=$orderLookbackDays; generationHistoryDepth=$generationHistoryDepth; coverage=$coverage; rows=@($rows.ToArray())
+        version="v540-aw-production-7"; source="SYSADM.PROD_JOBITEM+PROD_JOB+PROD_OPTI_SEQUENCE+PROD_OPTIMIZATION+PROD_OPTI_STATISTICS+PROD_OPTI_PLATES+FS_BOOK_HISTORY+ZW_AUFTR_ZEIT";
+        orderCount=[int]$orders.Count; queryBatchSize=$batchSize; cuttingBookingLookbackDays=$cutLookbackDays; orderLookbackDays=$orderLookbackDays; generationHistoryDepth=$generationHistoryDepth; coverage=$coverage; rows=@($rows.ToArray()); optimizationPlates=@($optimizationPlates.ToArray())
     }
 }
 

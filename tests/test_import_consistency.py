@@ -24,7 +24,7 @@ from backend.production_files import ProductionFileService
 from backend.operations import OperationsFeatureService
 from backend.automation_control import DeliveryAutomationController
 from database.migrations import _migration_019_v516_aw_eastern_timestamp_contract, run_sqlite_migrations
-from database.time_utils import normalize_aw_plant_timestamp, normalize_utc_timestamp, parse_aw_plant_timestamp, parse_utc_timestamp
+from database.time_utils import normalize_aw_plant_timestamp, normalize_utc_timestamp, parse_aw_plant_timestamp, parse_utc_timestamp, plant_time_zone
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -4615,7 +4615,7 @@ class ImportConsistencyTests(unittest.TestCase):
 
             # Statistics uses physical first-seen/reject quantities, not multiplied
             # synchronized stage copies or the Rush banner itself.
-            report_day = datetime.now(timezone.utc).date().isoformat()
+            report_day = datetime.now(plant_time_zone()).date().isoformat()
             report = store.reports_summary({"dateFrom": report_day, "dateTo": report_day})
             activity = report["productionActivity"]
             self.assertEqual(activity["newProduction"]["pieces"], 2)
@@ -4886,7 +4886,7 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertGreaterEqual(len(rack_rows), 4)
             rack_codes = [str(row["rack_code"]) for row in rack_rows]
 
-            delivery_date = datetime.now(timezone.utc).date().isoformat()
+            delivery_date = datetime.now(plant_time_zone()).date().isoformat()
             route_specs = [
                 ("CPU", "customer-pickup", "cpu", 1),
                 ("DTC", "dtc", "dtc", 2),
@@ -5311,7 +5311,15 @@ class ImportConsistencyTests(unittest.TestCase):
                 "productDescription": '3/8" Clear Tempered',
                 "cuttingBookingAt": "2026-09-11T08:10:00", "cuttingBookingEmployee": "CUT",
                 "cuttingBookingRowId": "v528-book-2",
-            }])
+            }], optimization_plates=[{
+                "optimizationNumber": 95282,
+                "optimizationDate": "2026-09-11T07:45:00",
+                "plateNumber": plate_number,
+                "lengthUnits": 3072,
+                "heightUnits": 4160,
+                "cut": 1,
+                "stockBooked": 1,
+            } for plate_number in range(1, 7)])
 
             with store.connect() as con:
                 before_rack = int(con.execute("SELECT COUNT(*) FROM rack_items").fetchone()[0])
@@ -5362,6 +5370,54 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+
+    def test_v540_superseded_refresh_recovers_current_exact_remake_pair_idempotently(self) -> None:
+        verification_root = ROOT / "_verification_v540_superseded_refresh"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            normal = imported_item("740001", "1", 1, "v540-normal:1")
+            normal.update({"job": "900100 TEST HOME", "customer": "TEST BUILDER", "product": '1/4" Clear Tempered', "dimensions": '30" x 79"'})
+            remake = imported_item("740002", "1", 1, "v540-remake:1")
+            remake.update({"job": "900100 TEST HOME", "customer": "TEST BUILDER", "product": '1/4" Clear Tempered', "dimensions": '30" x 79"', "processState": "External Remake New Line", "queueState": "RM"})
+            unrelated = imported_item("740003", "1", 1, "v540-unrelated:1")
+            unrelated.update({"job": "900100 TEST HOME", "customer": "TEST BUILDER", "product": '1/4" Clear Tempered', "dimensions": '31" x 79"', "processState": "External Remake New Line", "queueState": "RM"})
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-15", "items": [normal, remake, unrelated]},
+                "fileName": "Delivery List 09-15-2026.xlsx", "user": "admin",
+            })
+
+            first = store.detect_superseded_order_candidates_from_scanner("2026-09-15", "admin")
+            self.assertEqual(first["scannerCandidateCount"], 1)
+            self.assertEqual(first["insertedCount"], 1)
+            reviews = store.list_superseded_order_reviews(status="", include_inactive=True)["reviews"]
+            self.assertEqual(len(reviews), 1)
+            self.assertEqual(reviews[0]["originalOrderNumber"], "740001")
+            self.assertEqual(reviews[0]["replacementOrderNumber"], "740002")
+            self.assertEqual(reviews[0]["status"], "pending")
+
+            second = store.detect_superseded_order_candidates_from_scanner("2026-09-15", "admin")
+            self.assertEqual(second["scannerCandidateCount"], 0)
+            self.assertEqual(second["alreadyReviewedCount"], 1)
+            self.assertEqual(second["insertedCount"], 0)
+
+            decision = store.decide_superseded_order_review(reviews[0]["id"], "remove_both", "admin")
+            self.assertEqual(decision["decision"], "approved")
+            self.assertEqual(decision["approvedRemoveOrderNumber"], "__both__")
+            with store.connect() as con:
+                active = con.execute(
+                    "SELECT COUNT(*) FROM line_items li JOIN delivery_lists dl ON dl.id=li.list_id "
+                    "WHERE dl.delivery_date=? AND li.order_no IN (?,?) AND COALESCE(li.is_deleted,0)=0",
+                    ("2026-09-15", "740001", "740002"),
+                ).fetchone()[0]
+            self.assertEqual(int(active), 0)
+            excluded_orders = {
+                row["orderNumber"] for row in store.approved_superseded_order_exclusion_orders()
+            }
+            self.assertTrue({"740001", "740002"}.issubset(excluded_orders))
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
 
     def test_v524_schema20_inventory_migration_preserves_existing_rows_and_is_idempotent(self) -> None:
         verification_root = ROOT / "_verification_v524_inventory_migration"

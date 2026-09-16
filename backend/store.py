@@ -106,6 +106,7 @@ AW_OPTI_STATUS_BOOKED = 500
 # v0.504: live A+W evidence includes Booked optimization 8286 with raw status 460.
 # Keep both raw codes authoritative; do not normalize the stored source value.
 AW_OPTI_STATUS_BOOKED_CODES = frozenset({460, 500})
+AW_OPTIMIZATION_PLATE_SNAPSHOT_METADATA_KEY = "aw_optimization_plate_snapshot_v540"
 PERMISSIONS = [
     # Delivery-list visibility and floor scanning.
     "view_delivery_lists",
@@ -3697,10 +3698,13 @@ class BaseDeliveryStore:
                     if fingerprint_changed:
                         approved_target_still_present = (
                             status == "approved"
-                            and approved_remove_order_no in {
-                                candidate["originalOrderNumber"],
-                                candidate["replacementOrderNumber"],
-                            }
+                            and (
+                                approved_remove_order_no == "__both__"
+                                or approved_remove_order_no in {
+                                    candidate["originalOrderNumber"],
+                                    candidate["replacementOrderNumber"],
+                                }
+                            )
                         )
                         if approved_target_still_present:
                             # Approval is an explicit order-level decision. New/changed
@@ -3743,22 +3747,31 @@ class BaseDeliveryStore:
                     )
                     updated += 1
                     if status == "approved" and approved_remove_order_no:
-                        remove_items = (
-                            candidate["replacementItems"]
-                            if approved_remove_order_no == candidate["replacementOrderNumber"]
-                            else candidate["originalItems"]
+                        removal_targets = (
+                            [
+                                (candidate["originalOrderNumber"], candidate["originalItems"]),
+                                (candidate["replacementOrderNumber"], candidate["replacementItems"]),
+                            ]
+                            if approved_remove_order_no == "__both__"
+                            else [(
+                                approved_remove_order_no,
+                                candidate["replacementItems"]
+                                if approved_remove_order_no == candidate["replacementOrderNumber"]
+                                else candidate["originalItems"],
+                            )]
                         )
-                        enforced = self._remove_approved_superseded_rows(
-                            con,
-                            int(existing["id"]),
-                            candidate["deliveryDate"],
-                            approved_remove_order_no,
-                            [dict(item) for item in remove_items if isinstance(item, dict)],
-                            user or "sql-auto-import",
-                        )
-                        if int(enforced.get("affectedStageLineCount") or 0) > 0:
-                            enforced_approved_removals += int(enforced.get("removedLineCount") or 0)
-                            enforced_approved_removed_pieces += int(enforced.get("removedPieceQty") or 0)
+                        for target_order, remove_items in removal_targets:
+                            enforced = self._remove_approved_superseded_rows(
+                                con,
+                                int(existing["id"]),
+                                candidate["deliveryDate"],
+                                target_order,
+                                [dict(item) for item in remove_items if isinstance(item, dict)],
+                                user or "sql-auto-import",
+                            )
+                            if int(enforced.get("affectedStageLineCount") or 0) > 0:
+                                enforced_approved_removals += int(enforced.get("removedLineCount") or 0)
+                                enforced_approved_removed_pieces += int(enforced.get("removedPieceQty") or 0)
                 else:
                     status = "approved" if verified_candidate else "pending"
                     decided_at = now if verified_candidate else ""
@@ -3853,6 +3866,142 @@ class BaseDeliveryStore:
             "notificationId": notification_id,
             "errors": errors,
             **summary,
+        }
+
+    def detect_superseded_order_candidates_from_scanner(
+        self,
+        delivery_date: str = "",
+        user: str = "admin",
+    ) -> dict[str, Any]:
+        """Recheck current scanner rows for exact normal-order/remake duplicates.
+
+        This complements the import-time A+W detector. It lets an operator recover
+        candidates already present in the scanner without deleting or changing any
+        order until the existing review workflow explicitly approves a removal.
+        """
+        clean_date = str(delivery_date or "").strip()
+        date_sql = " AND dl.delivery_date = ?" if clean_date else ""
+        date_args: tuple[Any, ...] = (clean_date,) if clean_date else ()
+        with self.connect() as con:
+            rows = con.execute(
+                f"""
+                SELECT dl.delivery_date, li.order_no, li.item_no, li.job, li.customer,
+                       li.product, li.dimensions, li.qty, li.process_state, li.queue_state
+                FROM line_items li
+                JOIN delivery_lists dl ON dl.id = li.list_id
+                WHERE dl.status = 'active'
+                  AND COALESCE(dl.is_deleted, 0) = 0
+                  AND COALESCE(li.is_deleted, 0) = 0{date_sql}
+                ORDER BY dl.delivery_date, li.order_no, li.item_no
+                """,
+                date_args,
+            ).fetchall()
+            existing_rows = con.execute(
+                """SELECT delivery_date, original_order_no, replacement_order_no
+                   FROM superseded_order_reviews WHERE active = 1"""
+            ).fetchall()
+
+        existing_pairs = {
+            (
+                str(row_value(row, "delivery_date", "") or ""),
+                frozenset((
+                    str(row_value(row, "original_order_no", "") or ""),
+                    str(row_value(row, "replacement_order_no", "") or ""),
+                )),
+            )
+            for row in existing_rows
+        }
+
+        def normalized_text(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+        orders: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            order_no = str(row_value(row, "order_no", "") or "").strip()
+            item_no = str(row_value(row, "item_no", "") or "").strip().zfill(3)
+            row_date = str(row_value(row, "delivery_date", "") or "").strip()
+            if not order_no or not item_no or not row_date:
+                continue
+            order = orders.setdefault((row_date, order_no), {
+                "deliveryDate": row_date,
+                "orderNumber": order_no,
+                "job": str(row_value(row, "job", "") or "").strip(),
+                "customer": str(row_value(row, "customer", "") or "").strip(),
+                "remake": False,
+                "items": {},
+            })
+            state_signal = f"{row_value(row, 'process_state', '')} {row_value(row, 'queue_state', '')}"
+            order["remake"] = bool(order["remake"] or re.search(r"\b(remake|rm)\b", state_signal, re.I))
+            item_key = (
+                item_no,
+                normalized_text(row_value(row, "product", "")),
+                round(float(row_value(row, "qty", 0) or 0), 4),
+                normalized_text(row_value(row, "dimensions", "")),
+            )
+            order["items"].setdefault(item_key, {
+                "orderNumber": order_no,
+                "itemNumber": item_no,
+                "job": str(row_value(row, "job", "") or "").strip(),
+                "product": str(row_value(row, "product", "") or "").strip(),
+                "quantity": float(row_value(row, "qty", 0) or 0),
+                "dimensions": str(row_value(row, "dimensions", "") or "").strip(),
+                "remake": bool(re.search(r"\b(remake|rm)\b", state_signal, re.I)),
+            })
+
+        identity_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for order in orders.values():
+            item_signature = tuple(sorted(order["items"].keys()))
+            if not item_signature:
+                continue
+            identity = (
+                order["deliveryDate"],
+                normalized_text(order["job"]),
+                normalized_text(order["customer"]),
+                item_signature,
+            )
+            identity_groups.setdefault(identity, []).append(order)
+
+        candidates: list[dict[str, Any]] = []
+        already_reviewed = 0
+        for identity, matching_orders in identity_groups.items():
+            normal_orders = [order for order in matching_orders if not order["remake"]]
+            remake_orders = [order for order in matching_orders if order["remake"]]
+            for normal_order in normal_orders:
+                for remake_order in remake_orders:
+                    pair_key = (normal_order["deliveryDate"], frozenset((normal_order["orderNumber"], remake_order["orderNumber"])))
+                    if pair_key in existing_pairs:
+                        already_reviewed += 1
+                        continue
+                    identity_label = " | ".join(value for value in (
+                        normal_order["job"], normal_order["customer"], normal_order["deliveryDate"]
+                    ) if value)
+                    candidates.append({
+                        "candidateKey": f"{normal_order['deliveryDate']}|scanner-review|{normal_order['orderNumber']}|{remake_order['orderNumber']}",
+                        "deliveryDate": normal_order["deliveryDate"],
+                        "headerIdentity": identity_label,
+                        "originalOrderNumber": normal_order["orderNumber"],
+                        "replacementOrderNumber": remake_order["orderNumber"],
+                        "confidence": "high",
+                        "evidence": {
+                            "rule": "v0.540-current-scanner-exact-duplicate-3",
+                            "source": "current scanner rows",
+                            "sameDeliveryDate": True,
+                            "sameJob": True,
+                            "sameCustomer": True,
+                            "sameItemSet": True,
+                            "replacementMarkedRemake": True,
+                        },
+                        "originalItems": list(normal_order["items"].values()),
+                        "replacementItems": list(remake_order["items"].values()),
+                    })
+
+        result = self.sync_superseded_order_candidates(candidates, user=user)
+        return {
+            **result,
+            "scannerOrderCount": len(orders),
+            "scannerCandidateCount": len(candidates),
+            "alreadyReviewedCount": already_reviewed,
+            "deliveryDate": clean_date,
         }
 
     def _superseded_review_live_impact(self, con: Any, delivery_date: str, order_no: str, item_numbers: list[str]) -> dict[str, Any]:
@@ -4014,7 +4163,12 @@ class BaseDeliveryStore:
             "items": result_items,
         }
 
-    def list_superseded_order_reviews(self, status: str = "", include_inactive: bool = False) -> dict[str, Any]:
+    def list_superseded_order_reviews(
+        self,
+        status: str = "",
+        include_inactive: bool = False,
+        include_sketch_safety: bool = False,
+    ) -> dict[str, Any]:
         """Return the local review queue with evidence and impact for both candidates."""
         clean_status = str(status or "").strip().lower()
         allowed = {"pending", "approved", "keep_both", "review_later"}
@@ -4065,13 +4219,27 @@ class BaseDeliveryStore:
                     str(row["replacement_order_no"] or ""),
                     [str(item.get("itemNumber") or "") for item in replacement_items if isinstance(item, dict)],
                 )
-                original_sketch_safety = self._superseded_sketch_safety_v534(
-                    con, str(row["delivery_date"] or ""), str(row["original_order_no"] or ""),
-                    original_items if isinstance(original_items, list) else [],
+                unchecked_safety = {
+                    "checked": False,
+                    "pending": bool(getattr(self.production_files, "enabled", False)),
+                    "cancelledItemCount": 0,
+                    "cutAfterCancelCount": 0,
+                    "scannerAfterCancelQty": 0,
+                    "items": [],
+                }
+                original_sketch_safety = (
+                    self._superseded_sketch_safety_v534(
+                        con, str(row["delivery_date"] or ""), str(row["original_order_no"] or ""),
+                        original_items if isinstance(original_items, list) else [],
+                    )
+                    if include_sketch_safety else dict(unchecked_safety)
                 )
-                replacement_sketch_safety = self._superseded_sketch_safety_v534(
-                    con, str(row["delivery_date"] or ""), str(row["replacement_order_no"] or ""),
-                    replacement_items if isinstance(replacement_items, list) else [],
+                replacement_sketch_safety = (
+                    self._superseded_sketch_safety_v534(
+                        con, str(row["delivery_date"] or ""), str(row["replacement_order_no"] or ""),
+                        replacement_items if isinstance(replacement_items, list) else [],
+                    )
+                    if include_sketch_safety else dict(unchecked_safety)
                 )
                 original_cancelled = int(original_sketch_safety.get("cancelledItemCount") or 0)
                 replacement_cancelled = int(replacement_sketch_safety.get("cancelledItemCount") or 0)
@@ -4158,37 +4326,45 @@ class BaseDeliveryStore:
             original_order = str(row["original_order_no"] or "").strip()
             replacement_order = str(row["replacement_order_no"] or "").strip()
             remove_order = str(row_value(row, "approved_remove_order_no", "") or "").strip() or original_order
-            if remove_order not in {original_order, replacement_order}:
+            if remove_order not in {original_order, replacement_order, "__both__"}:
                 remove_order = original_order
-            items_json = row["replacement_items_json"] if remove_order == replacement_order else row["original_items_json"]
-            kept_order = original_order if remove_order == replacement_order else replacement_order
-            try:
-                items = json.loads(str(items_json or "[]"))
-            except Exception:
-                items = []
-            for item in items if isinstance(items, list) else []:
-                if not isinstance(item, dict):
-                    continue
-                order_no = str(item.get("orderNumber") or remove_order or "").strip()
-                item_no = str(item.get("itemNumber") or "").strip().zfill(3)
-                delivery_date = str(row["delivery_date"] or "").strip()
-                key = (delivery_date, order_no, item_no)
-                if not all(key) or key in seen:
-                    continue
-                seen.add(key)
-                entries.append(
-                    {
-                        "deliveryDate": delivery_date,
-                        "orderNumber": order_no,
-                        "itemNumber": item_no,
-                        "reviewId": int(row["id"]),
-                        "replacementOrderNumber": replacement_order,
-                        "keptOrderNumber": kept_order,
-                        "approvedBy": str(row["decided_by"] or ""),
-                        "reason": str(row["decision_reason"] or "").strip()
-                        or f"Approved superseded-order removal; kept order {kept_order}.",
-                    }
-                )
+            targets = (
+                [(original_order, row["original_items_json"], ""), (replacement_order, row["replacement_items_json"], "")]
+                if remove_order == "__both__"
+                else [(
+                    remove_order,
+                    row["replacement_items_json"] if remove_order == replacement_order else row["original_items_json"],
+                    original_order if remove_order == replacement_order else replacement_order,
+                )]
+            )
+            for target_order, items_json, kept_order in targets:
+                try:
+                    items = json.loads(str(items_json or "[]"))
+                except Exception:
+                    items = []
+                for item in items if isinstance(items, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    order_no = str(item.get("orderNumber") or target_order or "").strip()
+                    item_no = str(item.get("itemNumber") or "").strip().zfill(3)
+                    delivery_date = str(row["delivery_date"] or "").strip()
+                    key = (delivery_date, order_no, item_no)
+                    if not all(key) or key in seen:
+                        continue
+                    seen.add(key)
+                    entries.append(
+                        {
+                            "deliveryDate": delivery_date,
+                            "orderNumber": order_no,
+                            "itemNumber": item_no,
+                            "reviewId": int(row["id"]),
+                            "replacementOrderNumber": replacement_order,
+                            "keptOrderNumber": kept_order,
+                            "approvedBy": str(row["decided_by"] or ""),
+                            "reason": str(row["decision_reason"] or "").strip()
+                            or ("Approved removal of both reviewed orders." if not kept_order else f"Approved superseded-order removal; kept order {kept_order}."),
+                        }
+                    )
         return entries
 
     def approved_superseded_order_exclusion_orders(self) -> list[dict[str, Any]]:
@@ -4214,25 +4390,28 @@ class BaseDeliveryStore:
             original_order = str(row["original_order_no"] or "").strip()
             replacement_order = str(row["replacement_order_no"] or "").strip()
             remove_order = str(row_value(row, "approved_remove_order_no", "") or "").strip() or original_order
-            if remove_order not in {original_order, replacement_order}:
+            if remove_order not in {original_order, replacement_order, "__both__"}:
                 remove_order = original_order
             delivery_date = str(row["delivery_date"] or "").strip()
-            key = (delivery_date, remove_order)
-            if not all(key) or key in seen:
-                continue
-            seen.add(key)
-            kept_order = original_order if remove_order == replacement_order else replacement_order
-            entries.append(
-                {
-                    "deliveryDate": delivery_date,
-                    "orderNumber": remove_order,
-                    "reviewId": int(row["id"]),
-                    "keptOrderNumber": kept_order,
-                    "approvedBy": str(row["decided_by"] or ""),
-                    "reason": str(row["decision_reason"] or "").strip()
-                    or f"Approved superseded-order removal; kept order {kept_order}.",
-                }
-            )
+            targets = [(original_order, ""), (replacement_order, "")] if remove_order == "__both__" else [(
+                remove_order, original_order if remove_order == replacement_order else replacement_order
+            )]
+            for target_order, kept_order in targets:
+                key = (delivery_date, target_order)
+                if not all(key) or key in seen:
+                    continue
+                seen.add(key)
+                entries.append(
+                    {
+                        "deliveryDate": delivery_date,
+                        "orderNumber": target_order,
+                        "reviewId": int(row["id"]),
+                        "keptOrderNumber": kept_order,
+                        "approvedBy": str(row["decided_by"] or ""),
+                        "reason": str(row["decision_reason"] or "").strip()
+                        or ("Approved removal of both reviewed orders." if not kept_order else f"Approved superseded-order removal; kept order {kept_order}."),
+                    }
+                )
         return entries
 
     def preserved_superseded_order_items(self) -> list[dict[str, Any]]:
@@ -4517,13 +4696,14 @@ class BaseDeliveryStore:
             "approve": "approved",
             "approved": "approved",
             "approve_removal": "approved",
+            "remove_both": "approved",
             "keep": "keep_both",
             "keep_both": "keep_both",
             "review_later": "review_later",
             "later": "review_later",
         }
         if clean_action not in status_map:
-            raise ValueError("Decision must be approve removal, keep both, or review later.")
+            raise ValueError("Decision must remove one, remove both, keep both, or review later.")
         next_status = status_map[clean_action]
         clean_reason = str(reason or "").strip()[:1000]
         with self.connect() as con:
@@ -4543,21 +4723,34 @@ class BaseDeliveryStore:
                 replacement_items = []
             selected_remove_order = ""
             selected_remove_items: list[dict[str, Any]] = []
+            removal_targets: list[tuple[str, list[dict[str, Any]]]] = []
             kept_order = ""
             if next_status == "approved":
-                selected_remove_order = str(remove_order_number or "").strip() or original_order
-                if selected_remove_order not in {original_order, replacement_order}:
-                    raise ValueError("Choose either candidate order as the superseded-order removal target.")
-                if selected_remove_order == replacement_order:
-                    selected_remove_items = [dict(item) for item in replacement_items if isinstance(item, dict)]
-                    kept_order = original_order
+                if clean_action == "remove_both":
+                    selected_remove_order = "__both__"
+                    removal_targets = [
+                        (original_order, [dict(item) for item in original_items if isinstance(item, dict)]),
+                        (replacement_order, [dict(item) for item in replacement_items if isinstance(item, dict)]),
+                    ]
                 else:
-                    selected_remove_items = [dict(item) for item in original_items if isinstance(item, dict)]
-                    kept_order = replacement_order
+                    selected_remove_order = str(remove_order_number or "").strip() or original_order
+                    if selected_remove_order not in {original_order, replacement_order}:
+                        raise ValueError("Choose either candidate order as the superseded-order removal target.")
+                    if selected_remove_order == replacement_order:
+                        selected_remove_items = [dict(item) for item in replacement_items if isinstance(item, dict)]
+                        kept_order = original_order
+                    else:
+                        selected_remove_items = [dict(item) for item in original_items if isinstance(item, dict)]
+                        kept_order = replacement_order
+                    removal_targets = [(selected_remove_order, selected_remove_items)]
             now = now_iso()
             if not clean_reason:
                 if next_status == "approved":
-                    clean_reason = f"Approved exact removal of order {selected_remove_order}; kept order {kept_order}."
+                    clean_reason = (
+                        f"Approved exact removal of both orders {original_order} and {replacement_order}."
+                        if selected_remove_order == "__both__"
+                        else f"Approved exact removal of order {selected_remove_order}; kept order {kept_order}."
+                    )
                 elif next_status == "keep_both":
                     clean_reason = "Both A+W orders are valid and should remain on the delivery list."
                 else:
@@ -4573,14 +4766,23 @@ class BaseDeliveryStore:
             )
             removal = {"removedLineCount": 0, "removedPieceQty": 0, "affectedStageLineCount": 0, "affectedStagePieceQty": 0, "affectedListIds": [], "stageSummaries": []}
             if next_status == "approved":
-                removal = self._remove_approved_superseded_rows(
-                    con,
-                    int(review_id),
-                    str(row["delivery_date"] or ""),
-                    selected_remove_order,
-                    selected_remove_items,
-                    user,
-                )
+                affected_lists: set[str] = set()
+                stage_summaries: list[dict[str, Any]] = []
+                for target_order, target_items in removal_targets:
+                    target_removal = self._remove_approved_superseded_rows(
+                        con,
+                        int(review_id),
+                        str(row["delivery_date"] or ""),
+                        target_order,
+                        target_items,
+                        user,
+                    )
+                    for key in ("removedLineCount", "removedPieceQty", "affectedStageLineCount", "affectedStagePieceQty"):
+                        removal[key] = int(removal.get(key) or 0) + int(target_removal.get(key) or 0)
+                    affected_lists.update(str(value) for value in (target_removal.get("affectedListIds") or []) if str(value))
+                    stage_summaries.extend(dict(value) for value in (target_removal.get("stageSummaries") or []) if isinstance(value, dict))
+                removal["affectedListIds"] = sorted(affected_lists)
+                removal["stageSummaries"] = stage_summaries
                 if int(removal.get("removedPieceQty") or 0) > 0:
                     run_id = f"superseded-review-{review_id}-{int(time.time() * 1000)}"
                     stage_summaries = list(removal.get("stageSummaries") or [])
@@ -4603,6 +4805,7 @@ class BaseDeliveryStore:
                         "changedListIds": list(removal.get("affectedListIds") or []),
                         "supersededReviewId": int(review_id),
                         "removedOrderNumber": selected_remove_order,
+                        "removedOrderNumbers": [target[0] for target in removal_targets],
                         "keptOrderNumber": kept_order,
                     }
                     con.execute(
@@ -4614,7 +4817,7 @@ class BaseDeliveryStore:
                         """,
                         (
                             str(row["delivery_date"] or ""),
-                            f"Superseded review: removed order {selected_remove_order}",
+                            f"Superseded review: removed {'both orders' if selected_remove_order == '__both__' else 'order ' + selected_remove_order}",
                             user,
                             now,
                             f"superseded-review-{review_id}",
@@ -6168,6 +6371,7 @@ class BaseDeliveryStore:
         rows: Iterable[dict[str, Any]],
         user: str = "automation",
         source_window: dict[str, Any] | None = None,
+        optimization_plates: Iterable[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Upsert A+W production batch/optimization generations for Cutting progress.
 
@@ -6248,6 +6452,31 @@ class BaseDeliveryStore:
         inserted = 0
         updated = 0
         unchanged = 0
+        clean_plates: list[dict[str, Any]] = []
+        seen_plates: set[tuple[int, int]] = set()
+        if optimization_plates is not None:
+            for raw_plate in optimization_plates:
+                if not isinstance(raw_plate, dict):
+                    continue
+                optimization = int(raw_plate.get("optimizationNumber") or raw_plate.get("optimization") or 0)
+                plate_number = int(raw_plate.get("plateNumber") or raw_plate.get("plate") or 0)
+                identity = (optimization, plate_number)
+                if optimization <= 0 or plate_number <= 0 or identity in seen_plates:
+                    continue
+                seen_plates.add(identity)
+                clean_plates.append({
+                    "optimizationNumber": optimization,
+                    "optimizationDate": normalize_aw_plant_timestamp(raw_plate.get("optimizationDate")),
+                    "plateNumber": plate_number,
+                    "lengthUnits": float(raw_plate.get("lengthUnits") or raw_plate.get("length") or 0),
+                    "heightUnits": float(raw_plate.get("heightUnits") or raw_plate.get("height") or 0),
+                    "cut": bool(int(raw_plate.get("cut") or 0)),
+                    "stockBooked": bool(int(raw_plate.get("stockBooked") or 0)),
+                    "lastChangedAt": normalize_aw_plant_timestamp(raw_plate.get("lastChangedAt")),
+                    "lastChangedUser": str(raw_plate.get("lastChangedUser") or "").strip(),
+                    "rowId": str(raw_plate.get("rowId") or "").strip(),
+                })
+
         with self.connect() as con:
             for (order_no, item_no, key_index, batch), generation_rows in grouped.items():
                 ranked = sorted(
@@ -6498,6 +6727,23 @@ class BaseDeliveryStore:
                         (order_no, item_no, key_index, batch, *values, now, now, now),
                     )
                     inserted += 1
+            if optimization_plates is not None:
+                plate_snapshot = {
+                    "version": "v540-aw-optimization-plates-1",
+                    "source": "SYSADM.PROD_OPTI_PLATES",
+                    "syncedAt": now,
+                    "coverage": dict((source_window or {}).get("coverage") or {})
+                    if isinstance((source_window or {}).get("coverage"), dict) else {},
+                    "rows": sorted(
+                        clean_plates,
+                        key=lambda value: (int(value["optimizationNumber"]), int(value["plateNumber"])),
+                    ),
+                }
+                self.set_system_metadata_value(
+                    con,
+                    AW_OPTIMIZATION_PLATE_SNAPSHOT_METADATA_KEY,
+                    json.dumps(plate_snapshot, sort_keys=True, separators=(",", ":")),
+                )
         return {
             "ok": True,
             "sourceRows": len(clean_rows),
@@ -6505,6 +6751,7 @@ class BaseDeliveryStore:
             "inserted": inserted,
             "updated": updated,
             "unchanged": unchanged,
+            "optimizationPlateCount": len(clean_plates) if optimization_plates is not None else None,
             "coverage": dict((source_window or {}).get("coverage") or {})
             if isinstance((source_window or {}).get("coverage"), dict) else {},
             "syncedAt": now,
@@ -19646,14 +19893,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         # terms narrow SQLite candidates first; flag terms are checked only after
         # the maintained priority annotator resolves Rush/Remake/Missing Glass.
         sql_terms = self.global_search_sql_terms(terms)
-        searchable_columns = (
-            "li.order_no", "li.item_no", "li.source_id", "li.barcode", "li.customer",
-            "li.job", "li.route", "li.source_route", "li.product", "li.dimensions",
-            "li.process_state", "li.queue_state", "li.suggested_bay", "li.priority_delivery_date",
-            "CAST(li.qty AS TEXT)", "CAST(li.scanned_qty AS TEXT)", "dl.stage", "dl.scanner",
-            "dl.label", "dl.delivery_date", "b.bay_code", "b.display_name", "ba.status",
-            "r.rack_code", "r.display_name", "r.rack_type", "r.status",
-        )
+        # v0.540: build one core corpus per row instead of evaluating nearly
+        # thirty separate LOWER(CAST(...)) predicates across joined location
+        # rows. Locations remain searchable through indexed correlated checks,
+        # avoiding the large join/group fan-out that delayed ordinary lookups.
+        core_search_corpus = "LOWER(" + " || ' ' || ".join((
+            "COALESCE(li.order_no,'')", "COALESCE(li.item_no,'')", "COALESCE(li.source_id,'')",
+            "COALESCE(li.barcode,'')", "COALESCE(li.customer,'')", "COALESCE(li.job,'')",
+            "COALESCE(li.route,'')", "COALESCE(li.source_route,'')", "COALESCE(li.product,'')",
+            "COALESCE(li.dimensions,'')", "COALESCE(li.process_state,'')", "COALESCE(li.queue_state,'')",
+            "COALESCE(li.suggested_bay,'')", "COALESCE(li.priority_delivery_date,'')",
+            "CAST(li.qty AS TEXT)", "CAST(li.scanned_qty AS TEXT)", "COALESCE(dl.stage,'')",
+            "COALESCE(dl.scanner,'')", "COALESCE(dl.label,'')", "COALESCE(dl.delivery_date,'')",
+        )) + ")"
         term_clauses: list[str] = []
         parameters: list[str] = []
         has_priority_terms = len(sql_terms) != len(terms)
@@ -19668,7 +19920,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         include_audit_text = len(sql_terms) > 1 and all(not term.isdigit() for term in sql_terms)
         for term in sql_terms:
             like = f"%{term}%"
-            field_checks = [f"LOWER(COALESCE(CAST({column} AS TEXT), '')) LIKE ?" for column in searchable_columns]
+            field_checks = [
+                f"{core_search_corpus} LIKE ?",
+                """EXISTS (
+                    SELECT 1 FROM bay_assignments search_ba
+                    LEFT JOIN bays search_b ON search_b.id=search_ba.bay_id
+                    WHERE search_ba.line_item_id=li.id
+                      AND search_ba.status NOT IN ('Cleared','Cancelled')
+                      AND LOWER(COALESCE(search_b.bay_code,'') || ' ' || COALESCE(search_b.display_name,'') || ' ' || COALESCE(search_ba.status,'')) LIKE ?
+                )""",
+                """EXISTS (
+                    SELECT 1 FROM rack_items search_ri
+                    JOIN racks search_r ON search_r.id=search_ri.rack_id
+                    WHERE search_ri.line_item_id=li.id AND search_ri.status='Active' AND search_r.active=1
+                      AND LOWER(COALESCE(search_r.rack_code,'') || ' ' || COALESCE(search_r.display_name,'') || ' ' || COALESCE(search_r.rack_type,'') || ' ' || COALESCE(search_r.status,'')) LIKE ?
+                )""",
+            ]
             # v0.474: correlated audit text is omitted for ordinary single-term
             # lookups so Smart Search can paint routine order searches sooner.
             if include_audit_text:
@@ -19715,15 +19982,10 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     FROM line_items li
                     JOIN delivery_lists dl ON dl.id = li.list_id
                     {priority_join}
-                    LEFT JOIN bay_assignments ba ON ba.line_item_id = li.id AND ba.status NOT IN ('Cleared', 'Cancelled')
-                    LEFT JOIN bays b ON b.id = ba.bay_id
-                    LEFT JOIN rack_items ri ON ri.line_item_id = li.id AND ri.status = 'Active'
-                    LEFT JOIN racks r ON r.id = ri.rack_id AND r.active = 1
                     WHERE COALESCE(dl.is_deleted, 0) = 0
                       AND dl.status <> 'deleted'
                       AND COALESCE(li.is_deleted, 0) = 0
                       AND {where_candidate}
-                    GROUP BY li.id, dl.delivery_date, li.order_no, li.item_no
                     ORDER BY dl.delivery_date DESC, CAST(li.order_no AS INTEGER), CAST(li.item_no AS INTEGER)
                     LIMIT {candidate_limit}
                 ), latest_positive_scan AS (
@@ -21392,6 +21654,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 raw_sheet_settings = json.loads(self.system_metadata_value(con, "statistics_sheet_usage_settings_v527") or "{}")
             except (TypeError, ValueError, json.JSONDecodeError):
                 raw_sheet_settings = {}
+            try:
+                raw_plate_snapshot = json.loads(
+                    self.system_metadata_value(con, AW_OPTIMIZATION_PLATE_SNAPSHOT_METADATA_KEY) or "{}"
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raw_plate_snapshot = {}
             sheet_profiles = raw_sheet_settings.get("profiles") if isinstance(raw_sheet_settings, dict) else {}
             if not isinstance(sheet_profiles, dict):
                 sheet_profiles = {}
@@ -22094,7 +22362,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             })
 
         profile_by_glass = {str(key).strip().lower(): value for key, value in sheet_profiles.items() if isinstance(value, dict)}
-        optimization_sheets: dict[int, dict[str, Any]] = {}
+        optimization_glass: dict[int, dict[str, Any]] = {}
+        plate_glass_counts: dict[tuple[int, int], dict[str, int]] = {}
         for aw_row in aw_sheet_rows:
             optimization = int(row_value(aw_row, "optimization_number", 0) or 0)
             if optimization <= 0:
@@ -22109,32 +22378,92 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 cut_evidence = {}
             if not isinstance(label_context, dict):
                 label_context = {}
-            sheet_count = max(int(cut_evidence.get("optimizationSheetCount") or 0), 0)
-            if sheet_count <= 0:
-                continue
             raw_glass = str(label_context.get("productDescription") or "Other Glass").strip() or "Other Glass"
             glass_type, _unused_rate = glass_cost_profile(raw_glass, effective_glass_costs, effective_glass_aliases)
-            bucket = optimization_sheets.setdefault(optimization, {
+            bucket = optimization_glass.setdefault(optimization, {
                 "optimization": optimization,
                 "createdAt": str(row_value(aw_row, "optimization_date", "") or ""),
-                "sheets": 0,
                 "glassCounts": {},
             })
-            bucket["sheets"] = max(int(bucket.get("sheets") or 0), sheet_count)
-            bucket["glassCounts"][glass_type] = int(bucket["glassCounts"].get(glass_type) or 0) + 1
+            assignments = [value for value in (cut_evidence.get("sequenceAssignments") or []) if isinstance(value, dict)]
+            weight = max(len(assignments), 1)
+            bucket["glassCounts"][glass_type] = int(bucket["glassCounts"].get(glass_type) or 0) + weight
+            for assignment in assignments:
+                plate_number = int(assignment.get("plateNumber") or 0)
+                if plate_number <= 0:
+                    continue
+                plate_counts = plate_glass_counts.setdefault((optimization, plate_number), {})
+                plate_counts[glass_type] = int(plate_counts.get(glass_type) or 0) + 1
+
+        def aw_plate_sheet_size(length_units: Any, height_units: Any) -> str:
+            """Format A+W's 1/32-inch plate dimensions without hiding source precision."""
+            def dimension_text(raw_value: Any) -> str:
+                value = max(float(raw_value or 0), 0.0) / 32.0
+                whole = int(value)
+                numerator = int(round((value - whole) * 32))
+                if numerator >= 32:
+                    whole += 1
+                    numerator = 0
+                if numerator:
+                    divisor = 1
+                    for candidate in (16, 8, 4, 2):
+                        if numerator % candidate == 0:
+                            divisor = candidate
+                            break
+                    numerator //= divisor
+                    denominator = 32 // divisor
+                    return f'{whole} {numerator}/{denominator}"' if whole else f'{numerator}/{denominator}"'
+                return f'{whole}"'
+
+            dimensions = sorted((max(float(length_units or 0), 0.0), max(float(height_units or 0), 0.0)))
+            if dimensions[0] <= 0 or dimensions[1] <= 0:
+                return "Size unavailable"
+            return f"{dimension_text(dimensions[0])} x {dimension_text(dimensions[1])}"
+
+        snapshot_rows = raw_plate_snapshot.get("rows") if isinstance(raw_plate_snapshot, dict) else []
+        if not isinstance(snapshot_rows, list):
+            snapshot_rows = []
+        physical_plates: dict[tuple[int, int], dict[str, Any]] = {}
+        for raw_plate in snapshot_rows:
+            if not isinstance(raw_plate, dict):
+                continue
+            optimization = int(raw_plate.get("optimizationNumber") or 0)
+            plate_number = int(raw_plate.get("plateNumber") or 0)
+            created_at = str(raw_plate.get("optimizationDate") or "")
+            created_date = created_at[:10]
+            if optimization <= 0 or plate_number <= 0:
+                continue
+            if date_from and created_date < date_from:
+                continue
+            if date_to and created_date > date_to:
+                continue
+            physical_plates[(optimization, plate_number)] = dict(raw_plate)
+
+        optimization_sheets: dict[tuple[int, str], dict[str, Any]] = {}
+        for (optimization, plate_number), plate in physical_plates.items():
+            glass_bucket = optimization_glass.get(optimization) or {}
+            optimization_counts = glass_bucket.get("glassCounts") if isinstance(glass_bucket.get("glassCounts"), dict) else {}
+            glass_counts = plate_glass_counts.get((optimization, plate_number)) or optimization_counts
+            glass_type = sorted(glass_counts, key=lambda name: (-int(glass_counts[name]), name.lower()))[0] if glass_counts else "Other Glass"
+            sheet_size = aw_plate_sheet_size(plate.get("lengthUnits"), plate.get("heightUnits"))
+            bucket = optimization_sheets.setdefault((optimization, sheet_size), {
+                "optimization": optimization,
+                "createdAt": str(plate.get("optimizationDate") or glass_bucket.get("createdAt") or ""),
+                "sheets": 0,
+                "glassType": glass_type,
+                "sheetSize": sheet_size,
+                "mixedGlass": len(glass_counts) > 1,
+            })
+            bucket["sheets"] = int(bucket.get("sheets") or 0) + 1
 
         sheet_usage_rows: list[dict[str, Any]] = []
-        for optimization, bucket in optimization_sheets.items():
-            glass_counts = bucket.pop("glassCounts", {})
-            glass_type = sorted(glass_counts, key=lambda name: (-int(glass_counts[name]), name.lower()))[0] if glass_counts else "Other Glass"
+        for (_optimization, _sheet_size), bucket in optimization_sheets.items():
+            glass_type = str(bucket.get("glassType") or "Other Glass")
             profile = profile_by_glass.get(glass_type.lower()) or {}
             emails = profile.get("emails") if isinstance(profile.get("emails"), list) else []
             sheet_usage_rows.append({
                 **bucket,
-                "glassType": glass_type,
-                "sheetSize": str(profile.get("sheetSize") or "Size not configured").strip(),
                 "emails": [str(value).strip() for value in emails if str(value).strip()],
-                "mixedGlass": len(glass_counts) > 1,
             })
         sheet_usage_rows.sort(key=lambda row: (str(row.get("createdAt") or ""), int(row.get("optimization") or 0)), reverse=True)
         sheet_usage_by_glass: dict[tuple[str, str], int] = {}
@@ -22168,10 +22497,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "glassSizeFrequencyByType": glass_size_frequency_by_type,
             "sheetUsage": {
                 "totalSheets": sum(int(row.get("sheets") or 0) for row in sheet_usage_rows),
-                "optimizationCount": len(sheet_usage_rows),
+                "optimizationCount": len({int(row.get("optimization") or 0) for row in sheet_usage_rows}),
                 "byGlass": sheet_usage_summary,
                 "rows": sheet_usage_rows if include_activity_rows else [],
-                "basis": "A+W optimization SHEETCOUNT, counted once per optimization",
+                "snapshotAvailable": bool(snapshot_rows),
+                "syncedAt": str(raw_plate_snapshot.get("syncedAt") or "") if isinstance(raw_plate_snapshot, dict) else "",
+                "basis": "Current A+W PROD_OPTI_PLATES rows, one distinct PLATENR per optimization; LENGTH and HEIGHT provide the stock size",
             },
             "monthlyRemakeCount": int(monthly_remake_row["row_count"] or 0),
             "monthlyRemakeQty": int(monthly_remake_row["qty"] or 0),
@@ -22937,7 +23268,15 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         layout_path = self.config.root / "data" / "indian-trail-bay-layout.json"
         if not layout_path.exists():
             return {"bays": [], "cells": [], "sections": [], "grid": {"minRow": 1, "maxRow": 1, "minCol": 1, "maxCol": 1}}
-        return json.loads(layout_path.read_text(encoding="utf-8"))
+        # The physical layout changes rarely, while every Bay Map visit reads
+        # it. Keep the parsed document in memory and invalidate it with the
+        # file's nanosecond mtime so network-backed/virus-scanned deployments do
+        # not repeatedly stall page entry on the same small JSON file.
+        layout_mtime = layout_path.stat().st_mtime_ns
+        if getattr(self, "_bay_layout_cache_mtime_v540", None) != layout_mtime:
+            self._bay_layout_cache_v540 = json.loads(layout_path.read_text(encoding="utf-8"))
+            self._bay_layout_cache_mtime_v540 = layout_mtime
+        return self._bay_layout_cache_v540
 
 
     def _bay_event_retention_cutoff(self, retention_days: int = BAY_EVENT_RETENTION_DAYS) -> str:

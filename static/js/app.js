@@ -121,6 +121,8 @@ const state = {
   globalSearchLastQuery: "",
   globalSearchLastResults: [],
   globalSearchRequestId: 0,
+  globalSearchAbortControllerV540: null,
+  globalSearchCacheV540: new Map(),
   // v0.474: fabrication status hydrates asynchronously so neither Scan nor
   // Smart Search waits on network-share/PDF work before painting results.
   fabricationStatusCacheV474: new Map(),
@@ -230,6 +232,8 @@ const state = {
   bayGroupColumns: {},
   racks: [],
   rackSummary: null,
+  racksLoadedAtV540: 0,
+  racksRefreshPromiseV540: null,
   selectedRackCode: "T",
   selectedScanRackCode: NO_RACK_SELECTION,
   selectedOutboundRackCode: "",
@@ -287,6 +291,8 @@ const state = {
   bayLayout: null,
   bays: [],
   bayEvents: [],
+  bayMapLoadedAtV540: 0,
+  bayMapRefreshPromiseV540: null,
   bayAllScansPage: 1,
   bayAllScansTotalPages: 1,
   bayAllScansTotal: 0,
@@ -351,6 +357,7 @@ const state = {
   allPermissions: [],
   adminRecentImports: [],
   supersededOrderReviews: [],
+  supersededSketchSafetyPromiseV540: null,
   supersededReviewSummary: { pendingSupersededOrderReviews: 0, approvedSupersededOrderReviews: 0, keptSupersededOrderReviews: 0 },
   supersededReviewFilter: "open",
   adminListSearchTimer: null,
@@ -10369,7 +10376,6 @@ function scanDateWideProgressStepsV485(item = {}) {
     fabrication.timestamp = fabricationProgressTimestampV511(fabricationStatus || {});
     fabrication.rank = machineProgressRankV521(fabrication.label || fabricationStatus?.machineCode || fabricationStatus?.machine || "");
   }
-  const fabricationSlot = fabrication || (noFab ? { ...noFabProgressStepV512(), rank: 0 } : null);
   const stages = item.workflowStagesV485.map((stage) => ({
     label: stage.label || scanStageLabelV485(stage.preset),
     scanned: Math.max(0, Number(stage.scanned || 0)),
@@ -10380,7 +10386,7 @@ function scanDateWideProgressStepsV485(item = {}) {
     timestamp: stage.lastScannedAt || "",
     rank: workflowProgressStageRankV477(stage),
   }));
-  const steps = [{ ...cutting, rank: -10 }, ...(fabricationSlot ? [fabricationSlot] : []), ...stages]
+  const steps = [{ ...cutting, rank: -10 }, ...(fabrication ? [fabrication] : []), ...stages]
     .sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0));
   return { steps, noFab, fabricationStatus };
 }
@@ -11837,14 +11843,29 @@ function stagingLists() {
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
 async function refreshRacksPage() {
+  const options = arguments[0] || {};
   if (!hasAnyPermission(["view_racks", "scan_racks", "manage_racks"])) return;
-  if (state.backend) {
-    const payload = await fetchJson("/api/racks");
-    state.racks = payload.racks || [];
-    state.rackSummary = payload.summary || null;
+  const hasCachedView = state.racks.length > 0 || Boolean(state.rackSummary);
+  if (hasCachedView) {
+    renderRacksPage();
+    scheduleRackHeadingHitTargetRepair();
   }
-  renderRacksPage();
-  scheduleRackHeadingHitTargetRepair();
+  if (!state.backend) return;
+  const fresh = !options.force && hasCachedView && (Date.now() - Number(state.racksLoadedAtV540 || 0) < 20_000);
+  if (fresh) return;
+  if (state.racksRefreshPromiseV540) return state.racksRefreshPromiseV540;
+  state.racksRefreshPromiseV540 = fetchJson("/api/racks")
+    .then((payload) => {
+      state.racks = payload.racks || [];
+      state.rackSummary = payload.summary || null;
+      state.racksLoadedAtV540 = Date.now();
+      if (state.page === "racks") {
+        renderRacksPage();
+        scheduleRackHeadingHitTargetRepair();
+      }
+    })
+    .finally(() => { state.racksRefreshPromiseV540 = null; });
+  return state.racksRefreshPromiseV540;
 }
 
 /**
@@ -17019,15 +17040,15 @@ function renderStatisticsProductionActivityV506() {
     ? glassRows.map((row) => {
         const glassName = String(row.glassType || "Other Glass").trim() || "Other Glass";
         const sheets = sheetUsageByGlassV539.get(glassName.toLowerCase());
-        const sheetLabel = sheets
-          ? `${Number(sheets.sheets || 0)} stock sheet${Number(sheets.sheets || 0) === 1 ? "" : "s"}${sheets.sizes.size ? ` · ${[...sheets.sizes].join(" / ")}` : ""}`
-          : "No stock-sheet usage in this range";
+        const sheetCount = Number(sheets?.sheets || 0);
+        const sheetSizes = sheets?.sizes?.size ? [...sheets.sizes].join(" / ") : "";
         return `
         <button type="button" class="statistics-production-glass-row-v506 statistics-production-glass-drill-v536" data-production-glass-detail-v536="${escapeHtml(glassName)}" title="View the exact Order/Item rows behind this total">
-          <span class="statistics-production-glass-name-v506 statistics-production-glass-name-v539"><strong>${escapeHtml(glassName)}</strong><small>${escapeHtml(sheetLabel)}</small></span>
-          <strong>${escapeHtml(Number(row.pieces || 0))}<small> pcs</small></strong>
-          <span>${escapeHtml(Number(row.itemCount || 0))} item${Number(row.itemCount || 0) === 1 ? "" : "s"}</span>
-          <em>DD ${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
+          <span class="statistics-production-glass-name-v506 statistics-production-glass-name-v539"><strong>${escapeHtml(glassName)}</strong></span>
+          <strong class="statistics-production-metric-v540"><small>Pieces</small>${escapeHtml(Number(row.pieces || 0))}</strong>
+          <span class="statistics-production-metric-v540"><small>Items</small>${escapeHtml(Number(row.itemCount || 0))}</span>
+          <span class="statistics-production-sheet-cell-v540"><small>Stock sheets</small><strong>${escapeHtml(sheetCount)}</strong><em>${escapeHtml(sheetSizes || (sheetUsageV527.snapshotAvailable ? "No plates" : "Sync needed"))}</em></span>
+          <em class="statistics-production-delivery-v540"><small>Delivery</small>${escapeHtml(productionDeliveryDatesV506(row.deliveryDates))}</em>
           <span class="statistics-production-glass-open-v536" aria-hidden="true">View rows →</span>
         </button>`;
       }).join("")
@@ -17056,8 +17077,11 @@ function renderStatisticsProductionActivityV506() {
           <p>${escapeHtml(Number(newWork.itemCount || 0))} item${Number(newWork.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(newWork.orderCount || 0))} order${Number(newWork.orderCount || 0) === 1 ? "" : "s"} · External Remakes excluded</p>
         </div>
       </header>
-      <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">${glassMarkup}</div>
-      <div class="statistics-sheet-total-v527"><span>Stock sheets used</span><strong>${escapeHtml(Number(sheetUsageV527.totalSheets || 0))}</strong><small>${escapeHtml(Number(sheetUsageV527.optimizationCount || 0))} A+W optimization${Number(sheetUsageV527.optimizationCount || 0) === 1 ? "" : "s"}</small></div>
+      <div class="statistics-production-glass-ledger-v506" aria-label="New production pieces by glass type">
+        <div class="statistics-production-glass-columns-v540" aria-hidden="true"><span>Glass type</span><span>Pieces</span><span>Items</span><span>Stock sheets</span><span>Delivery</span><span></span></div>
+        ${glassMarkup}
+      </div>
+      <div class="statistics-sheet-total-v527 statistics-sheet-total-v540"><span>Physical stock sheets used</span><strong>${escapeHtml(Number(sheetUsageV527.totalSheets || 0))}</strong><small>${sheetUsageV527.snapshotAvailable ? `${escapeHtml(Number(sheetUsageV527.optimizationCount || 0))} current A+W optimization${Number(sheetUsageV527.optimizationCount || 0) === 1 ? "" : "s"} · exact plate sizes` : "Run an A+W update to load the current plate snapshot"}</small></div>
       <div class="statistics-production-machine-ledger-v514" aria-label="Today’s new production by machine"><header><span>By machine</span><small>New orders only</small></header>${machineMarkupV514}</div>
     </article>
     <div class="statistics-production-side-stack-v506">
@@ -21841,13 +21865,27 @@ async function runGlobalSearch() {
   const query = els.headerGlobalSearchInput?.value.trim() || "";
   const requestId = ++state.globalSearchRequestId;
   if (query.length < 2) {
+    state.globalSearchAbortControllerV540?.abort();
+    state.globalSearchAbortControllerV540 = null;
     state.globalSearchLastQuery = "";
     state.globalSearchLastResults = [];
     renderGlobalSearchResults([]);
     return [];
   }
+  const cacheKey = query.toLowerCase();
+  const cached = state.globalSearchCacheV540.get(cacheKey);
+  if (cached && Date.now() - Number(cached.at || 0) < 30000) {
+    state.globalSearchLastQuery = query;
+    state.globalSearchLastResults = cached.results;
+    renderGlobalSearchResults(cached.results);
+    hydrateFabricationStatusesV474(cached.results, { context: "search" }).catch(() => {});
+    return cached.results;
+  }
+  state.globalSearchAbortControllerV540?.abort();
+  const controller = new AbortController();
+  state.globalSearchAbortControllerV540 = controller;
   const [payload] = await Promise.all([
-    fetchJson(`/api/search?q=${encodeURIComponent(query)}`),
+    fetchJson(`/api/search?q=${encodeURIComponent(query)}`, { signal: controller.signal }),
     ensureGlassVisualLookupLibrary().catch(() => []),
   ]);
   const results = payload.results || [];
@@ -21856,6 +21894,10 @@ async function runGlobalSearch() {
   }
   state.globalSearchLastQuery = query;
   state.globalSearchLastResults = results;
+  state.globalSearchCacheV540.set(cacheKey, { at: Date.now(), results });
+  while (state.globalSearchCacheV540.size > 30) {
+    state.globalSearchCacheV540.delete(state.globalSearchCacheV540.keys().next().value);
+  }
   renderGlobalSearchResults(results);
   // v0.474: keep keystroke-to-result latency tied to SQLite only; fabrication
   // evidence arrives as a single asynchronous batch after the cards are visible.
@@ -22119,8 +22161,6 @@ function globalSearchProgressStepsV513(result = {}, fabrication = null) {
       rank: machineProgressRankV521(machine),
       partial: fabricationCompletion.state === "partial",
     });
-  } else if (fabricationNoFabConfirmedV481(fabrication || {}, { loaded: Boolean(fabrication) })) {
-    steps.push({ ...noFabProgressStepV512(), rank: 0 });
   }
 
   const stageRows = Array.isArray(result.progressStages) ? result.progressStages : [];
@@ -22286,20 +22326,40 @@ async function refreshBayRouteSummary() {
  * Effects: Updates visible dom state.
  * Flow: Requests current data, updates shared state, and invokes the existing renderer for affected controls.
  */
-async function refreshBayMapPage() {
+async function refreshBayMapPage(options = {}) {
   if (!hasAnyPermission(["view_bays", "view_indian_trail"])) return;
+  const hasCachedView = Boolean(state.bayLayout) && state.bays.length > 0;
+  if (hasCachedView) renderBayMapPage();
   if (state.backend) {
-    const [layout, baysPayload, summary, eventsPayload] = await Promise.all([
+    const fresh = !options.force && hasCachedView && (Date.now() - Number(state.bayMapLoadedAtV540 || 0) < 15_000);
+    if (fresh) return;
+    if (state.bayMapRefreshPromiseV540) return state.bayMapRefreshPromiseV540;
+    state.bayMapRefreshPromiseV540 = Promise.all([
       fetchJson("/api/indian-trail/layout"),
       fetchJson("/api/indian-trail/bays"),
       hasPermission("view_indian_trail") ? fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`) : Promise.resolve(null),
       fetchJson("/api/indian-trail/events?page=1&pageSize=6"),
-    ]);
-    state.bayLayout = layout;
-    state.bays = baysPayload.bays || [];
-    state.bayEvents = eventsPayload.events || [];
-    renderIndianTrailSummary(summary);
-    renderBayRouteFlow(summary);
+    ]).then(([layout, baysPayload, summary, eventsPayload]) => {
+      state.bayLayout = layout;
+      state.bays = baysPayload.bays || [];
+      state.bayEvents = eventsPayload.events || [];
+      state.bayMapLoadedAtV540 = Date.now();
+      renderIndianTrailSummary(summary);
+      renderBayRouteFlow(summary);
+      if (state.page === "bays") {
+        renderBayMapPage();
+        if (state.selectedBayCode) void loadBayJobDetails(state.selectedBayCode);
+        maybeShowStaleBayAlert().catch(() => {});
+      }
+    }).finally(() => { state.bayMapRefreshPromiseV540 = null; });
+    // Cached Bay Map content is already painted above. Let the page-entry
+    // animation finish immediately while this live refresh quietly replaces
+    // it; the first uncached visit still waits for its required data.
+    if (hasCachedView) {
+      state.bayMapRefreshPromiseV540.catch((error) => showInlineError(error.message));
+      return;
+    }
+    return state.bayMapRefreshPromiseV540;
   } else {
     const response = await fetch("data/indian-trail-bay-layout.json");
     state.bayLayout = await response.json();
@@ -34336,9 +34396,9 @@ function supersededOrderReviewCardHtml(review = {}) {
   const suggestedOrder = String(review.suggestedRemoveOrderNumber || originalOrder);
   const suggestedKeepOrder = suggestedOrder === originalOrder ? replacementOrder : originalOrder;
   const approvedRemoveOrder = String(review.approvedRemoveOrderNumber || "");
-  const selectedRemoveOrder = approvedRemoveOrder || suggestedOrder;
+  const selectedRemoveOrder = approvedRemoveOrder && approvedRemoveOrder !== "__both__" ? approvedRemoveOrder : suggestedOrder;
   const decisionCopy = review.decidedAt
-    ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))}${approvedRemoveOrder ? ` · removed order ${escapeHtml(approvedRemoveOrder)}` : ""} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
+    ? `<small>Decision: ${escapeHtml(supersededReviewStatusLabel(status))}${approvedRemoveOrder === "__both__" ? " · removed both orders" : approvedRemoveOrder ? ` · removed order ${escapeHtml(approvedRemoveOrder)}` : ""} by ${escapeHtml(review.decidedBy || "unknown")} · ${escapeHtml(formatDisplayDate(review.decidedAt))}</small>`
     : `<small>Detected ${escapeHtml(formatDisplayDate(review.lastSeenAt || review.detectedAt || ""))}</small>`;
   const sketchSafetyMarkupV534 = (orderNumber, safety = {}, impact = {}) => {
     const cancelled = Math.max(Number(safety.cancelledItemCount || 0), 0);
@@ -34421,6 +34481,7 @@ function supersededOrderReviewCardHtml(review = {}) {
     ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
     <footer class="superseded-review-actions">
       <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve removal of order ${escapeHtml(selectedRemoveOrder)}</button>
+      <button type="button" class="danger superseded-remove-both-v540" data-superseded-decision="remove_both" data-review-id="${escapeHtml(review.id)}">Remove both orders</button>
       <button type="button" class="secondary" data-superseded-decision="keep_both" data-review-id="${escapeHtml(review.id)}">Keep both</button>
       <button type="button" class="secondary" data-superseded-decision="review_later" data-review-id="${escapeHtml(review.id)}">Review later</button>
     </footer>
@@ -34437,13 +34498,13 @@ function supersededOrderReviewModalHtml() {
   const summary = state.supersededReviewSummary || {};
   return `<div class="superseded-review-shell">
     <section class="superseded-review-hero">
-      <div><span>Superseded-order safety review</span><strong>Approve only the order that should disappear.</strong><p>The suggested removal is preselected. The retained order stays active and the approved source order is suppressed from future imports.</p></div>
+      <div><span>Superseded-order safety review</span><strong>Approve only the order that should disappear.</strong><p>The suggested removal is preselected. The retained order stays active and the approved source order is suppressed from future imports.</p><button type="button" class="secondary superseded-review-refresh-v540" data-superseded-refresh-v540>Refresh checks</button></div>
       <div class="superseded-review-kpis"><span><small>Needs review</small><strong>${Number(summary.pendingSupersededOrderReviews || 0)}</strong></span><span><small>Approved</small><strong>${Number(summary.approvedSupersededOrderReviews || 0)}</strong></span><span><small>Kept</small><strong>${Number(summary.keptSupersededOrderReviews || 0)}</strong></span></div>
     </section>
     <nav class="superseded-review-tabs" aria-label="Superseded-order review filters">
       ${[["open", "Needs review"], ["approved", "Approved"], ["keep_both", "Keep both"], ["all", "All"]].map(([value, label]) => `<button type="button" class="${filter === value ? "is-active" : ""}" aria-pressed="${filter === value}" data-superseded-filter="${value}">${label}</button>`).join("")}
     </nav>
-    <div class="superseded-review-list" data-superseded-review-list-v361>${reviews.length ? reviews.map(supersededOrderReviewCardHtml).join("") : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>The next automatic SQL window will add candidates when A+W shows a likely replacement pair.</span></div>`}</div>
+    <div class="superseded-review-list" data-superseded-review-list-v361>${reviews.length ? reviews.map(supersededOrderReviewCardHtml).join("") : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>Use Refresh checks to re-run exact duplicate detection against the current scanner orders.</span></div>`}</div>
   </div>`;
 }
 
@@ -34463,10 +34524,29 @@ function renderSupersededReviewFilterV361() {
   const list = els.adminModalBody?.querySelector("[data-superseded-review-list-v361]");
   if (list) list.innerHTML = reviews.length
     ? reviews.map(supersededOrderReviewCardHtml).join("")
-    : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>The next automatic SQL window will add candidates when A+W shows a likely replacement pair.</span></div>`;
+    : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>Use Refresh checks to re-run exact duplicate detection against the current scanner orders.</span></div>`;
 }
 
-async function loadSupersededOrderReviews() {
+async function hydrateSupersededSketchSafetyV540() {
+  if (state.supersededSketchSafetyPromiseV540) return state.supersededSketchSafetyPromiseV540;
+  state.supersededSketchSafetyPromiseV540 = fetchJson("/api/admin/superseded-order-reviews?includeSketchSafety=1")
+    .then((payload) => {
+      state.supersededOrderReviews = payload.reviews || state.supersededOrderReviews;
+      if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
+        renderSupersededReviewFilterV361();
+        applyLanguageToRoot(els.adminModalBody);
+      }
+      return payload;
+    })
+    .catch((error) => {
+      console.warn("Superseded-order sketch safety could not be hydrated:", error);
+      return null;
+    })
+    .finally(() => { state.supersededSketchSafetyPromiseV540 = null; });
+  return state.supersededSketchSafetyPromiseV540;
+}
+
+async function loadSupersededOrderReviews(options = {}) {
   const payload = await fetchJson("/api/admin/superseded-order-reviews");
   state.supersededOrderReviews = payload.reviews || [];
   state.supersededReviewSummary = {
@@ -34475,6 +34555,7 @@ async function loadSupersededOrderReviews() {
     keptSupersededOrderReviews: Number(payload.keptSupersededOrderReviews || 0),
   };
   renderSupersededReviewCount();
+  if (options.hydrateSketchSafety !== false) window.setTimeout(() => { void hydrateSupersededSketchSafetyV540(); }, 0);
   return payload;
 }
 
@@ -34499,6 +34580,20 @@ async function decideSupersededOrderReview(reviewId, action) {
       danger: true,
     });
     if (!confirmed) return;
+  } else if (action === "remove_both") {
+    const originalImpact = review.originalImpact || {};
+    const replacementImpact = review.replacementImpact || {};
+    const rowCount = Number(originalImpact.activeLineCount || 0) + Number(replacementImpact.activeLineCount || 0);
+    const pieceCount = Number(originalImpact.pieceQty || 0) + Number(replacementImpact.pieceQty || 0);
+    const scannedCount = Number(originalImpact.scannedQty || 0) + Number(replacementImpact.scannedQty || 0);
+    const confirmed = await confirmWebAppAction({
+      title: `Remove both orders ${review.originalOrderNumber} and ${review.replacementOrderNumber}?`,
+      message: "Both reviewed A+W orders will be removed from every active stage and suppressed from future imports.",
+      details: `${rowCount} active stage row(s), ${pieceCount} piece(s), ${scannedCount} already scanned. No order in this review pair will be retained.`,
+      confirmLabel: "Remove Both Orders",
+      danger: true,
+    });
+    if (!confirmed) return;
   }
   await fetchJson("/api/admin/superseded-order-reviews/decision", {
     method: "POST",
@@ -34514,6 +34609,30 @@ async function decideSupersededOrderReview(reviewId, action) {
   state.adminTodayImportLoaded = false;
   await refreshAdminTodayImportRuns({ render: false });
   renderAdminDeliveryLists();
+}
+
+async function refreshSupersededOrderReviewsV540() {
+  const button = els.adminModalBody?.querySelector("[data-superseded-refresh-v540]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Checking current orders...";
+  }
+  const payload = await fetchJson("/api/admin/superseded-order-reviews/refresh", {
+    method: "POST",
+    body: JSON.stringify(requestContext()),
+  });
+  await loadSupersededOrderReviews();
+  if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
+    els.adminModalBody.innerHTML = supersededOrderReviewModalHtml();
+    applyLanguageToRoot(els.adminModalBody);
+    await loadModalActionHistory("supersededOrders", "admin").catch(() => {});
+  }
+  showFloatingNotice(
+    Number(payload.scannerCandidateCount || 0) > 0
+      ? `${Number(payload.scannerCandidateCount || 0)} new superseded-order match${Number(payload.scannerCandidateCount || 0) === 1 ? "" : "es"} found.`
+      : "Superseded-order checks are current.",
+    "success",
+  );
 }
 
 const ADMIN_MODAL_PROFILES = {
@@ -45554,15 +45673,23 @@ async function refreshAdminTodayImportRuns({ render = true } = {}) {
   });
   const today = todayKey();
   try {
+    const todayHistoryQuery = new URLSearchParams({
+      page: "1",
+      pageSize: "250",
+      dateFrom: today,
+      dateTo: today,
+      pageMode: "control_center",
+      compact: "1",
+    });
     const [notificationPayload, firstHistoryPage] = await Promise.all([
       fetchJson("/api/notifications/history?limit=500"),
-      fetchJson("/api/admin/delivery-automation/recent-imports?page=1&pageSize=2000"),
+      fetchJson(`/api/admin/delivery-automation/recent-imports?${todayHistoryQuery.toString()}`),
     ]);
     const historyPageCount = Math.max(Number(firstHistoryPage.totalPages || 1), 1);
     const additionalHistoryPages = historyPageCount > 1
       ? await Promise.all(
           Array.from({ length: historyPageCount - 1 }, (_value, index) => (
-            fetchJson(`/api/admin/delivery-automation/recent-imports?page=${index + 2}&pageSize=2000`)
+            fetchJson(`/api/admin/delivery-automation/recent-imports?page=${index + 2}&pageSize=250&dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&pageMode=control_center&compact=1`)
           )),
         )
       : [];
@@ -47231,7 +47358,9 @@ function wireEvents() {
   });
   els.headerGlobalSearchInput?.addEventListener("input", () => {
     window.clearTimeout(runGlobalSearch._timer);
-    runGlobalSearch._timer = window.setTimeout(() => runGlobalSearch().catch((error) => showInlineError(error.message)), 90);
+    runGlobalSearch._timer = window.setTimeout(() => runGlobalSearch().catch((error) => {
+      if (error?.name !== "AbortError") showInlineError(error.message);
+    }), 180);
   });
   els.headerGlobalSearchInput?.addEventListener("focus", () => {
     const query = els.headerGlobalSearchInput?.value.trim() || "";
@@ -49173,6 +49302,12 @@ function wireEvents() {
       return;
     }
 
+    if (event.target.closest("[data-superseded-refresh-v540]")) {
+      event.preventDefault();
+      refreshSupersededOrderReviewsV540().catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
     const supersededDecisionButton = event.target.closest("[data-superseded-decision][data-review-id]");
     if (supersededDecisionButton) {
       decideSupersededOrderReview(
@@ -50802,6 +50937,7 @@ init().catch((error) => {
     const params = new URLSearchParams({
       page: String(importHistoryState.page),
       pageMode: "control_center",
+      compact: "1",
     });
     if (importHistoryState.query) params.set("q", importHistoryState.query);
     if (importHistoryState.classification) params.set("classification", importHistoryState.classification);

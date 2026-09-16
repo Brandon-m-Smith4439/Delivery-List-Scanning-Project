@@ -1,3 +1,24 @@
+## v0.540 - Physical Sheet Accuracy, Superseded Refresh, and Compact Progress
+- Reduced Scan progress checkpoint height by about 15%, equalized label/count sizing, restored workflow colors, and kept remake glass-type copy black.
+- Removed No Fab from Scan and Smart Search progress flow while retaining it in Order Details.
+- Changed new-order group headers and pulsing NEW badges to the maintained yellow new-line treatment.
+- Rebuilt Today's Production Count as a compact column ledger with Stock Sheets immediately after Items and exact A+W plate sizes.
+- Replaced inflated optimization `SHEETCOUNT` totals with distinct current `PROD_OPTI_PLATES.PLATENR` counts; `LENGTH` and `HEIGHT` retain exact source sizes.
+- Added a Superseded Orders **Refresh checks** action that detects current exact normal/remake duplicates already present in scanner data without auto-deleting either order.
+- Added explicit Superseded review actions to remove either candidate, remove both, keep both, or review later; initial review data now paints before slower sketch-safety evidence is hydrated.
+- Reworked SQLite Smart Search candidate matching to avoid joined-row fan-out, cancel obsolete browser requests, and reuse a short bounded query cache.
+- Added bounded Racks and Bay Map browser caches, an mtime-aware Bay layout cache, and compact date-bounded Delivery List Updates payloads so repeated navigation paints quickly without removing page transitions.
+- Rebuilt the individual Bay dialog into a compact responsive workspace that remains internally scrollable and usable at 200% browser zoom.
+- Tightened the Scan date selector and placed attention markers directly after the date, hid route filters with no rows on the selected list, and polished the review cards above the Scan table.
+- Advanced the application exactly one step from v0.539 to **v0.540** and kept SQLite schema **21**.
+
+### Validation
+- JavaScript syntax and maintained Python compilation pass; the complete maintained test suite passes **352/352**.
+- A copied production database remains at schema **21** with **387 delivery lists / 27,125 line items / 4,146 scan events / 1,478 reject events / 749 imports / 12,344 A+W cutting generations** preserved. `integrity_check` is **ok** and `foreign_key_check` reports **0** violations.
+- Physical A+W plate evidence reconciles the reported 3/8 usage to **22 sheets**: **21 at 96 x 130 inches** plus **1 at 55 x 96 inches**.
+- Representative warm copied-data responses measured about **39 ms** for Racks, **56 ms** for Bay contents, **7 ms** for Bay layout, **31 ms** for the initial Superseded payload, **210 ms** for current-day compact Delivery List Updates, **159 ms** for Smart Search, and **2.4 seconds** for detailed Today's Production Count.
+- Headless Chromium checks passed at **1900x900, 1366x768, 900x1200, 390x844, and 640x360**, including effective 200% zoom, with no root horizontal overflow on the audited pages.
+
 ## v0.539 - Progress Geometry, Statistics Range Accuracy, and Lookup Navigation
 - Reworked Scan-page progress checkpoint markup so each step reads in one compact line as icon → label → quantity, keeps consistent sizing, and no longer clips outside the Progress column.
 - Added final-authority Scan CSS overrides for the progress column so later overlapping rules cannot shrink, wrap, or push progress content outside its cells.

@@ -1358,8 +1358,6 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   }
 }
 
-
-
 @media (max-width: 500px) {
 .scan-filter-glance {
     order: 4;
@@ -9069,4 +9067,266 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
   .scan-page .delivery-table .scan-progress-copy-v539 > b { font-size: 11.4px !important; }
   .scan-page .delivery-table .scan-progress-copy-v539 > strong { font-size: 10.6px !important; }
   .scan-page .delivery-table .scan-progress-arrow-v539 { flex-basis: 10px !important; width: 10px !important; font-size: 14px !important; }
+}
+
+/* ========================================================================== */
+/* v0.540 compact, color-faithful progress and visible new-order headers       */
+/* ========================================================================== */
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  height: 32px !important;
+  min-height: 32px !important;
+  gap: 5px !important;
+  padding: 4px 7px !important;
+  border-radius: 9px !important;
+}
+.scan-page .delivery-table .scan-progress-step-v475 > .global-result-chip-icon-v433,
+.scan-page .delivery-table .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+  flex-basis: 15px !important;
+  width: 15px !important;
+  height: 15px !important;
+  min-width: 15px !important;
+  max-width: 15px !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 { gap: 5px !important; }
+.scan-page .delivery-table .scan-progress-copy-v539 > b,
+.scan-page .delivery-table .scan-progress-copy-v539 > strong {
+  color: var(--progress-step-color) !important;
+  -webkit-text-fill-color: var(--progress-step-color) !important;
+  font-size: 11.25px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+}
+.scan-page .delivery-table .scan-progress-arrow-v539 {
+  flex-basis: 12px !important;
+  width: 12px !important;
+  font-size: 15px !important;
+}
+.scan-order-group-v477.has-new-order-v534 > td > div,
+.mobile-order-group-header-v477.has-new-order-v534 {
+  background: linear-gradient(90deg, #fff3c7 0%, #fffaf0 62%, #fff 100%) !important;
+  box-shadow: inset 4px 0 0 #e6b536 !important;
+}
+.scan-order-group-new-v534 {
+  border-color: #dcae2d !important;
+  background: #fff0ad !important;
+  color: #523d00 !important;
+  box-shadow: 0 0 0 0 rgba(230,181,54,.32) !important;
+  animation: new-line-glow 2.4s ease-in-out infinite !important;
+}
+.scan-page .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484,
+.scan-page .scan-order-item-v477:is(.is-priority-remake-v480,.is-priority-both-v480) .scan-glass-type-copy-v484 * {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+@media (max-width: 760px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480 {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 3px 5px !important;
+  }
+  .scan-page .delivery-table .scan-progress-copy-v539 > b,
+  .scan-page .delivery-table .scan-progress-copy-v539 > strong { font-size: 10.5px !important; }
+}
+
+/* v0.540 final scan geometry: equal type sizes, safe descenders, compact width,
+   and date attention dots immediately following the selected date. */
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-flow-line-v485 {
+  justify-content: flex-start !important;
+  gap: 5px !important;
+}
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480 {
+  flex: 0 0 108px !important;
+  width: 108px !important;
+  max-width: 108px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 4px 6px !important;
+  overflow: visible !important;
+}
+.scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex: 0 0 108px !important;
+  width: 108px !important;
+  max-width: 108px !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 {
+  align-items: center !important;
+  gap: 5px !important;
+  overflow: visible !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 > b,
+.scan-page .delivery-table .scan-progress-copy-v539 > strong {
+  font-size: 11.75px !important;
+  line-height: 1.28 !important;
+  overflow: visible !important;
+}
+/* The legacy Cutting-specific selector is more specific than the shared
+   count rule. Override it at the same specificity so Cutting 1/1 cannot fall
+   back to the old 7.5px treatment. */
+.scan-page .delivery-table .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 .scan-progress-copy-v539 > strong {
+  max-width: none !important;
+  font-size: 11.75px !important;
+  line-height: 1.28 !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 > b {
+  text-overflow: clip !important;
+}
+.scan-page .delivery-table .scan-progress-step-v475.is-cutting-step-v511.is-complete-v475 {
+  --progress-step-color: #168c58 !important;
+}
+.scan-page .delivery-table .scan-progress-step-v475.is-cutting-step-v511:not(.is-complete-v475) {
+  --progress-step-color: #0f80a8 !important;
+}
+.scan-page .delivery-table .scan-progress-arrow-v539 {
+  flex: 0 0 20px !important;
+  width: 20px !important;
+  font-size: 20px !important;
+  font-weight: 950 !important;
+  line-height: 1.1 !important;
+  transform: scaleX(1.16) !important;
+}
+
+.scan-order-group-v477.has-new-order-v534 > td {
+  position: relative;
+  background: linear-gradient(90deg, #fff3c7 0%, #fffaf0 62%, #fff 100%) !important;
+}
+.scan-order-group-v477.has-new-order-v534 > td::before,
+.mobile-order-group-header-v477.has-new-order-v534::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: #e6b536;
+}
+.scan-order-group-v477.has-new-order-v534 > td > div,
+.mobile-order-group-header-v477.has-new-order-v534 {
+  position: relative;
+  box-shadow: none !important;
+}
+
+.scan-page .scanner-panel-date-select-v196,
+.scan-page .scanner-panel-date-select-v196 .custom-select-shell[data-custom-select-for="deliveryDateSelect"] {
+  width: 170px !important;
+  min-width: 170px !important;
+  max-width: 170px !important;
+}
+.scan-page .scanner-panel-date-select-v196 button.custom-select-trigger {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  padding: 0 19px 0 7px !important;
+}
+.scan-page .scanner-panel-date-select-v196 .custom-select-value {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: 78px !important;
+  line-height: 38px !important;
+  text-align: left !important;
+}
+.scan-page .scanner-panel-date-select-v196 .custom-select-value-indicator {
+  position: static !important;
+  inset: auto !important;
+  flex: 0 0 auto !important;
+  translate: none !important;
+  justify-content: flex-start !important;
+  gap: 3px !important;
+}
+.scan-page .scanner-panel-date-select-v196 .custom-select-indicator-dot-v530 {
+  width: 17px !important;
+  height: 17px !important;
+  flex-basis: 17px !important;
+  font-size: 9px !important;
+}
+
+.scan-review-grid-v530 .scan-update-review-control {
+  grid-template-columns: 28px minmax(0, 1fr) !important;
+  align-content: start;
+  min-height: 86px;
+  padding: 8px 9px !important;
+}
+.scan-review-grid-v530 .scan-review-indicator-v531 {
+  width: 25px !important;
+  height: 25px !important;
+  border-radius: 50% !important;
+  color: #fff !important;
+  background: var(--review-color) !important;
+  font-size: 11px !important;
+}
+.scan-review-grid-v530 .scan-update-review-copy {
+  align-self: center;
+  font-weight: 800 !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions { align-self: end; }
+
+@media (max-width: 1100px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+  .scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+    flex-basis: 102px !important;
+    width: 102px !important;
+    max-width: 102px !important;
+  }
+}
+@media (min-width: 761px) and (max-width: 1500px) {
+  .scan-page .delivery-table th:nth-child(7),
+  .scan-page .delivery-table td:nth-child(7) { width: 9.5% !important; }
+  .scan-page .delivery-table th:nth-child(8),
+  .scan-page .delivery-table td:nth-child(8) { width: 34% !important; }
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+  .scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+    flex: 0 0 94px !important;
+    width: 94px !important;
+    max-width: 94px !important;
+    padding-inline: 4px !important;
+  }
+  .scan-page .delivery-table .scan-progress-step-v475 > .global-result-chip-icon-v433,
+  .scan-page .delivery-table .scan-progress-step-v475 > .cutting-progress-spinner-v498 {
+    flex-basis: 13px !important;
+    width: 13px !important;
+    min-width: 13px !important;
+    max-width: 13px !important;
+    height: 13px !important;
+  }
+  .scan-page .delivery-table .scan-progress-copy-v539 { gap: 3px !important; }
+  .scan-page .delivery-table .scan-progress-copy-v539 > b,
+  .scan-page .delivery-table .scan-progress-copy-v539 > strong,
+  .scan-page .delivery-table .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 .scan-progress-copy-v539 > strong {
+    font-size: 11px !important;
+    line-height: 1.3 !important;
+  }
+  .scan-page .delivery-table .scan-progress-arrow-v539 {
+    flex-basis: 16px !important;
+    width: 16px !important;
+    font-size: 18px !important;
+  }
+}
+@media (max-width: 760px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+  .scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    height: 33px !important;
+    min-height: 33px !important;
+  }
+  .scan-page .delivery-table .scan-progress-copy-v539 > b,
+  .scan-page .delivery-table .scan-progress-copy-v539 > strong { font-size: 10.75px !important; line-height: 1.3 !important; }
+  .scan-page .delivery-table .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 .scan-progress-copy-v539 > strong {
+    font-size: 10.75px !important;
+    line-height: 1.3 !important;
+  }
+  .scan-page .delivery-table .scan-progress-arrow-v539 { flex-basis: 16px !important; width: 16px !important; font-size: 18px !important; }
+  .scan-page .scanner-panel-date-select-v196,
+  .scan-page .scanner-panel-date-select-v196 .custom-select-shell[data-custom-select-for="deliveryDateSelect"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
 }
