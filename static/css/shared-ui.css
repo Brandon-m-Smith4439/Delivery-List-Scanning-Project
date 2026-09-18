@@ -4014,7 +4014,6 @@ body button.app-primary-button.production-detail-action-v480:hover {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
-[data-check-fab-v522] { min-height: 44px; }
 .production-generated-sketch-caption-v516 b { color: #8a4c2e !important; }
 
 /* At common 15- to 17-inch workstation widths, keep sketch and label together
@@ -5234,10 +5233,8 @@ body button.icon-print-btn:is(#_sharedPrintA, *):is(#_sharedPrintB, *):is(#_shar
   font-size: 9px;
   white-space: nowrap;
 }
-.production-item-actions-v521 .is-check-fab-v527 { margin-left: 0 !important; }
 @media (max-width: 760px) {
   .production-item-actions-v521 .production-fab-memory-v522 { width: 100%; margin-left: 0; }
-  .production-item-actions-v521 .is-check-fab-v527 { margin-left: auto !important; }
 }
 
 /* ========================================================================== */
@@ -5350,4 +5347,61 @@ body :is(.notification-center, .notification-center-panel, .line-update-review-p
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg,#176fd0 0%,#1b98b8 52%,#35ad69 100%);
+}
+
+/* ========================================================================== */
+/* v0.543 Order Details progress refresh                                      */
+/* ========================================================================== */
+.production-progress-section-v519 > .production-progress-heading-v543 {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:7px;
+}
+.production-progress-section-v519 > .production-progress-heading-v543 > small {
+  margin:0 !important;
+}
+.production-progress-refresh-v543 {
+  display:inline-grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  flex:0 0 28px;
+  padding:0;
+  border:1px solid #b7cce0;
+  border-radius:8px;
+  background:linear-gradient(180deg,#fff,#edf4fa);
+  color:#155b91;
+  box-shadow:0 1px 3px rgba(15,55,86,.10);
+  cursor:pointer;
+}
+.production-progress-refresh-v543:hover:not(:disabled) {
+  border-color:#76a9cf;
+  background:#f5faff;
+  color:#0d4775;
+}
+.production-progress-refresh-v543:focus-visible {
+  outline:2px solid #3182ce;
+  outline-offset:2px;
+}
+.production-progress-refresh-v543:disabled {
+  cursor:wait;
+  opacity:.68;
+}
+.production-progress-refresh-v543 svg {
+  width:15px;
+  height:15px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.production-progress-refresh-v543.is-loading svg {
+  animation:production-progress-refresh-spin-v543 .85s linear infinite;
+}
+@keyframes production-progress-refresh-spin-v543 { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) {
+  .production-progress-refresh-v543.is-loading svg { animation:none; }
 }

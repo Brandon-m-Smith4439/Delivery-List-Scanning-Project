@@ -45,11 +45,12 @@ const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
 const SCAN_DATE_CACHE_LIMIT_V526 = 5;
 const FABRICATION_AUTO_RETRY_MS_V526 = 10 * 60 * 1000;
+const FABRICATION_TODAY_RETRY_MS_V542 = 60 * 1000;
 const FUTURE_FABRICATION_CACHE_LIMIT_V530 = 96;
 const FABRICATION_MEMORY_STORAGE_KEY_V533 = "delivery-scanner:fabrication-memory:v1";
 const FABRICATION_MEMORY_MAX_ENTRIES_V533 = 1800;
 const FABRICATION_MEMORY_MAX_AGE_MS_V533 = 24 * 60 * 60 * 1000;
-const FABRICATION_LOAD_DELAY_MS_V533 = 3000;
+const FABRICATION_LOAD_DELAY_MS_V533 = 1000;
 const FABRICATION_LOAD_COLLAPSE_MS_V533 = 360;
 const ATTENTION_COLOR_DEFAULTS_V530 = Object.freeze({
   new_order: "#1766D8",
@@ -368,7 +369,7 @@ const state = {
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
-  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], glassAliases: [], attentionColors: [], stages: [] },
+  manualEditLookups: { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], glassAliases: [], attentionColors: [], inventoryItemMappings: [], stages: [] },
   attentionColorsLoadedV530: false,
   attentionColorsPromiseV530: null,
   lookupGlassCombineTargetV360: "",
@@ -426,6 +427,8 @@ const state = {
   // Count table owns its own detailed selected-range report and inclusion state.
   statisticsTodayProductionReportV514: null,
   statisticsTodayProductionLoadingV514: false,
+  statisticsTodayProductionLoadedAtV542: 0,
+  statisticsTodayProductionRefreshTimerV542: 0,
   statisticsProductionReportV514: null,
   statisticsProductionReportRangeV514: "",
   statisticsProductionReportLoadingV514: false,
@@ -8943,6 +8946,15 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     state.meta = meta;
     state.activeListId = String(meta.id || representative.list?.id || "");
     state.items = projectedItems;
+    // Keep date activation self-contained so reference/offline harnesses do not
+    // need the wider Statistics date helper merely to switch Scan dates.
+    const todayClockV542 = new Date();
+    const todayDateKeyV542 = `${todayClockV542.getFullYear()}-${String(todayClockV542.getMonth() + 1).padStart(2, "0")}-${String(todayClockV542.getDate()).padStart(2, "0")}`;
+    const todayDateActivationV542 = date === todayDateKeyV542
+      && (previousDate !== date || String(state.scanDateWideDateV485 || "") !== date);
+    if (todayDateActivationV542 && typeof invalidateIncompleteTodayFabricationV542 === "function") {
+      invalidateIncompleteTodayFabricationV542(date, projectedItems);
+    }
     state.rushMoveReferences = records.flatMap((record) => record.payload?.rushMoveReferences || []);
     state.recent = recent;
     state.errors = errors;
@@ -10487,6 +10499,20 @@ function scanProgressMarkupV475(item = {}) {
   const flow = `${progressStepHtmlV475(pair.previous, "previous")}${pair.previous && pair.next ? '<i class="scan-progress-arrow-v539" aria-hidden="true">→</i>' : ""}${progressStepHtmlV475(pair.next, "next")}`;
   const layoutClassV531 = pair.previous && pair.next ? "is-paired-v486" : "is-single-v531";
   return `<span class="scan-progress-stack-v475 scan-progress-stack-v476 scan-progress-flow-v481 scan-progress-flow-v485 ${layoutClassV531}" style="${escapeHtml(style)}"><span class="scan-progress-flow-line-v485">${flow}</span></span>`;
+}
+
+/** Refresh only visible progress cells after one fabrication batch completes. */
+function refreshVisibleScanProgressV540(keys = []) {
+  if (state.page !== "scan") return;
+  const affected = new Set((keys || []).map((value) => String(value || "")).filter(Boolean));
+  const itemsById = new Map((state.items || []).map((item) => [String(item?.id || ""), item]));
+  for (const row of document.querySelectorAll(".scan-order-item-v477[data-id]")) {
+    if (!row.getClientRects().length) continue;
+    const item = itemsById.get(String(row.dataset.id || ""));
+    if (!item || (affected.size && !affected.has(fabricationStatusItemKeyV521(item)))) continue;
+    const progressCell = row.lastElementChild;
+    if (progressCell) progressCell.innerHTML = scanProgressMarkupV475(item);
+  }
 }
 
 /** Return the compact current scanner stage for legacy/mobile callers. */
@@ -16880,7 +16906,10 @@ async function hydrateProductionActivityMachinesV514(report) {
 async function ensureTodayProductionReportV514({ force = false } = {}) {
   const today = todayKey() || dateInputValue(new Date());
   if (!state.backend || !hasPermission("view_reports")) return state.statisticsTodayProductionReportV514;
-  if (!force && state.statisticsTodayProductionReportV514?.dateKeyV514 === today) return state.statisticsTodayProductionReportV514;
+  const reportAgeV542 = Date.now() - Number(state.statisticsTodayProductionLoadedAtV542 || 0);
+  if (!force && state.statisticsTodayProductionReportV514?.dateKeyV514 === today && reportAgeV542 < 60_000) {
+    return state.statisticsTodayProductionReportV514;
+  }
   if (state.statisticsTodayProductionLoadingV514) return state.statisticsTodayProductionReportV514;
   state.statisticsTodayProductionLoadingV514 = true;
   if (state.page === "statistics") renderStatisticsProductionActivityV506();
@@ -16888,6 +16917,7 @@ async function ensureTodayProductionReportV514({ force = false } = {}) {
     const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
     report.dateKeyV514 = today;
     state.statisticsTodayProductionReportV514 = report;
+    state.statisticsTodayProductionLoadedAtV542 = Date.now();
     // Machine evidence enriches the already visible report. Do not hold the
     // production count behind network-share fabrication probes.
     void hydrateProductionActivityMachinesV514(report).then(() => {
@@ -16895,7 +16925,10 @@ async function ensureTodayProductionReportV514({ force = false } = {}) {
     }).catch(() => {});
     return report;
   } catch (_error) {
-    if (force) state.statisticsTodayProductionReportV514 = null;
+    if (force) {
+      state.statisticsTodayProductionReportV514 = null;
+      state.statisticsTodayProductionLoadedAtV542 = 0;
+    }
     return state.statisticsTodayProductionReportV514;
   } finally {
     state.statisticsTodayProductionLoadingV514 = false;
@@ -20464,6 +20497,7 @@ async function processScanInternal(rawScan, options = {}) {
         rackCode: rackCodeForScan(rackSelection),
         outboundOverride: Boolean(options.outboundOverride),
         destinationOverride: Boolean(options.destinationOverride),
+        fabricationOverride: Boolean(options.fabricationOverride),
         isManual: Boolean(options.isManual),
         scanQty: Math.max(1, Math.trunc(Number(options.scanQty || 1))),
         crossDateListId: options.crossDateListId || "",
@@ -20489,6 +20523,23 @@ async function processScanInternal(rawScan, options = {}) {
       });
     } else {
       state.lastScan = payload.lastScan || state.lastScan;
+    }
+    if (payload.fabricationOverrideRequired || payload.fabricationGate?.blockStaging) {
+      scanFlash("notice", "scan_warning");
+      renderScanPage();
+      if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
+      const gate = payload.fabricationGate || {};
+      const machine = String(gate.machine || gate.actualMachine || gate.assignedMachine || "the assigned fabrication machine");
+      const approved = await confirmWebAppAction({
+        title: `Override ${machine} fabrication?`,
+        message: String(gate.message || `No completed ${machine} evidence was found. Scanning into Staging will mark Cutting and ${machine} complete for this piece.`),
+        details: "This override is saved against the current piece lifecycle and recorded in Action History. A later reject or remake requires new production progress.",
+        confirmLabel: "Override and scan",
+        cancelLabel: "Do not scan",
+        danger: true,
+      });
+      if (approved) await processScan(scanText, { ...options, fabricationOverride: true });
+      return;
     }
     const outboundRackDeparture = Boolean(
       (targetPresetV485 === "airport_outbound" || (!workflowTargetV485 && isOutboundScanContext())) &&
@@ -21464,16 +21515,39 @@ function syncFabricationRevisionV522(revision = "") {
   if (state.page === "scan") void warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items);
 }
 
-function requestFabricationBatchV522(items, forceCheck = false) {
+function requestFabricationBatchV522(items, forceCheck = false, foreground = false, refreshIncomplete = false) {
   const run = () => fetchJson("/api/production-files/status-batch", {
-    method: "POST", body: JSON.stringify({ items, forceCheck }),
+    method: "POST", body: JSON.stringify({ items, forceCheck, refreshIncomplete }),
   });
-  // One background status request per browser; manual item checks remain
-  // responsive and are coalesced per order by the server.
-  if (forceCheck) return run();
+  // Current-date work must not wait behind speculative future-date prewarming.
+  // The server coalesces production-file checks, so foreground Scan work can
+  // safely run alongside this browser's queued background prewarm.
+  if (forceCheck || foreground) return run();
   const pending = (state.fabricationRequestQueueV522 || Promise.resolve()).then(run, run);
   state.fabricationRequestQueueV522 = pending.catch(() => {});
   return pending;
+}
+
+function fabricationAutomaticRetrySecondsV542(deliveryDate = "", reportedSeconds = 0) {
+  const date = String(deliveryDate || "").trim();
+  const reported = Math.max(0, Number(reportedSeconds || 0));
+  if (date && date === todayKey()) return FABRICATION_TODAY_RETRY_MS_V542 / 1000;
+  return Math.max(FABRICATION_AUTO_RETRY_MS_V526 / 1000, reported);
+}
+
+function invalidateIncompleteTodayFabricationV542(deliveryDate = "", rows = []) {
+  const date = String(deliveryDate || "").trim();
+  if (!date || date !== todayKey()) return;
+  let changed = false;
+  for (const row of rows || []) {
+    const key = fabricationStatusItemKeyV521(row);
+    if (!key) continue;
+    const cached = state.fabricationStatusCacheV474.get(key);
+    if (cached?.fabricated === true) continue;
+    if (state.fabricationStatusCacheV474.delete(key)) changed = true;
+    if (state.productionProgressCheckedV522.delete(key)) changed = true;
+  }
+  if (changed) scheduleFabricationMemorySaveV533();
 }
 
 async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onProgress = null } = {}) {
@@ -21492,8 +21566,13 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     const cached = state.fabricationStatusCacheV474.get(key);
     const progressCheck = state.productionProgressCheckedV522.get(key) || {};
     const automaticScanContextV526 = context === "scan" || context === "prewarm" || context === "future-prewarm";
-    const minimumRetrySecondsV526 = automaticScanContextV526 ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 0;
-    const retrySeconds = Math.max(minimumRetrySecondsV526, Number(cached?.retryAfterSeconds || 0));
+    const rowDeliveryDateV542 = String(row?.deliveryDate || state.meta?.deliveryDate || "");
+    const minimumRetrySecondsV526 = automaticScanContextV526
+      ? fabricationAutomaticRetrySecondsV542(rowDeliveryDateV542)
+      : 0;
+    const retrySeconds = automaticScanContextV526
+      ? fabricationAutomaticRetrySecondsV542(rowDeliveryDateV542, cached?.retryAfterSeconds)
+      : Math.max(0, Number(cached?.retryAfterSeconds || 0));
     const checkedAtMs = Date.parse(cached?.checkedAt || "");
     // Some pending status payloads historically reached Scan without checkedAt.
     // The successful batch timestamp is authoritative enough to enforce the
@@ -21504,16 +21583,21 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     // A missing payload is not permission to retry on every render. Failed or
     // incomplete share responses still record an attempt below, so Scan waits
     // for the same bounded retry window before asking again.
+    const missingRetrySecondsV542 = automaticScanContextV526
+      ? fabricationAutomaticRetrySecondsV542(rowDeliveryDateV542, progressCheck.retryAfterSeconds)
+      : Math.max(minimumRetrySecondsV526, Number(progressCheck.retryAfterSeconds || 0));
     const fabricationDue = cached
       ? (retrySeconds > 0 && cachedAge >= retrySeconds * 1000)
-      : (!progressCheck.at || cachedAge >= Math.max(minimumRetrySecondsV526, Number(progressCheck.retryAfterSeconds || 0)) * 1000);
+      : (!progressCheck.at || cachedAge >= missingRetrySecondsV542 * 1000);
     if (cached && fabricationDue) state.fabricationStatusCacheV474.delete(key);
     const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
     const cuttingComplete = Boolean(cuttingProgressPresentationV498(cutting).complete);
-    const progressRetrySeconds = Math.max(
-      automaticScanContextV526 ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
-      Number(progressCheck.retryAfterSeconds || state.productionFileSettings?.cacheMinutes * 60 || 300),
-    );
+    const progressRetrySeconds = automaticScanContextV526
+      ? fabricationAutomaticRetrySecondsV542(
+          rowDeliveryDateV542,
+          progressCheck.retryAfterSeconds || state.productionFileSettings?.cacheMinutes * 60 || 300,
+        )
+      : Math.max(60, Number(progressCheck.retryAfterSeconds || state.productionFileSettings?.cacheMinutes * 60 || 300));
     const cuttingDue = !cuttingComplete && (!progressCheck.at || Date.now() - Number(progressCheck.at) >= progressRetrySeconds * 1000);
     if ((!fabricationDue && !cuttingDue) || state.fabricationStatusPendingV474.has(key)) continue;
     state.fabricationStatusPendingV474.add(key);
@@ -21566,11 +21650,13 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
       const cached = state.fabricationStatusCacheV474.get(key);
       if (cached?.fabricated === true) return false;
       const progress = state.productionProgressCheckedV522.get(key) || {};
-      const retrySeconds = Math.max(
-        ["scan", "prewarm", "future-prewarm"].includes(context) ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
-        Number(cached?.retryAfterSeconds || 0),
-        Number(progress.retryAfterSeconds || 0),
-      );
+      const rowDeliveryDateV542 = String(chunk.find((entry) => entry.key === key)?.deliveryDate || state.meta?.deliveryDate || "");
+      const retrySeconds = ["scan", "prewarm", "future-prewarm"].includes(context)
+        ? fabricationAutomaticRetrySecondsV542(
+            rowDeliveryDateV542,
+            Math.max(Number(cached?.retryAfterSeconds || 0), Number(progress.retryAfterSeconds || 0)),
+          )
+        : Math.max(60, Number(cached?.retryAfterSeconds || 0), Number(progress.retryAfterSeconds || 0));
       const statusCheckedAt = Date.parse(cached?.checkedAt || "");
       const checkedAt = Number.isFinite(statusCheckedAt) ? statusCheckedAt : Number(progress.at || 0);
       return !checkedAt || Date.now() - checkedAt >= retrySeconds * 1000;
@@ -21582,7 +21668,14 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     let chunkPublishedV527 = false;
     try {
       const epoch = Number(state.fabricationStatusEpochV522 || 0);
-      const payload = await requestFabricationBatchV522(requestedChunkV527);
+      const refreshIncompleteV542 = ["scan", "prewarm"].includes(context)
+        && requestedChunkV527.some((row) => String(row.deliveryDate || "") === todayKey());
+      const payload = await requestFabricationBatchV522(
+        requestedChunkV527,
+        false,
+        ["scan", "prewarm"].includes(context),
+        refreshIncompleteV542,
+      );
       const currentEpoch = epoch === Number(state.fabricationStatusEpochV522 || 0);
       if (!currentEpoch) window.setTimeout(() => warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items), 50);
       const resultsV527 = currentEpoch ? payload.results || [] : [];
@@ -21590,16 +21683,25 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
       // Mark every requested piece, including a piece omitted from a partial
       // response. Otherwise its next Scan repaint would immediately issue the
       // same production-share request again.
-      if (currentEpoch) requestedChunkV527.forEach(({ key }) => state.productionProgressCheckedV522.set(key, {
+      if (currentEpoch) requestedChunkV527.forEach(({ key, deliveryDate }) => state.productionProgressCheckedV522.set(key, {
         at: attemptedAtV527,
-        retryAfterSeconds: Math.max(FABRICATION_AUTO_RETRY_MS_V526 / 1000, Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0)),
+        retryAfterSeconds: fabricationAutomaticRetrySecondsV542(
+          deliveryDate,
+          state.productionProgressCheckedV522.get(key)?.retryAfterSeconds,
+        ),
       }));
       for (const result of resultsV527) {
         const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job, result.status?.evidenceAfter));
         state.fabricationStatusCacheV474.set(key, result.status || {});
         if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(key, result.cutting);
+        const resultDeliveryDateV542 = String(
+          result.deliveryDate || requestedChunkV527.find((entry) => entry.key === key)?.deliveryDate || state.meta?.deliveryDate || "",
+        );
         state.productionProgressCheckedV522.set(key, {
-          at: Date.now(), retryAfterSeconds: Number(result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300),
+          at: Date.now(),
+          retryAfterSeconds: ["scan", "prewarm", "future-prewarm"].includes(context)
+            ? fabricationAutomaticRetrySecondsV542(resultDeliveryDateV542, result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300)
+            : Number(result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300),
         });
         const updateRows = (values) => {
           for (const row of values || []) {
@@ -21609,7 +21711,13 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
             state.fabricationStatusCacheV474.set(currentKey, result.status || {});
             if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(currentKey, result.cutting);
             state.productionProgressCheckedV522.set(currentKey, {
-              at: Date.now(), retryAfterSeconds: Number(result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300),
+              at: Date.now(),
+              retryAfterSeconds: ["scan", "prewarm", "future-prewarm"].includes(context)
+                ? fabricationAutomaticRetrySecondsV542(
+                    String(row?.deliveryDate || resultDeliveryDateV542),
+                    result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300,
+                  )
+                : Number(result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300),
             });
           }
         };
@@ -21624,17 +21732,27 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
       // share must not turn Scan/Search into an error path or block their paint.
       // Remember the failed attempt so a render cannot become a tight retry loop.
       const attemptedAtV527 = Date.now();
-      requestedChunkV527.forEach(({ key }) => state.productionProgressCheckedV522.set(key, {
+      requestedChunkV527.forEach(({ key, deliveryDate }) => state.productionProgressCheckedV522.set(key, {
         at: attemptedAtV527,
-        retryAfterSeconds: Math.max(
-          ["scan", "prewarm", "future-prewarm"].includes(context) ? FABRICATION_AUTO_RETRY_MS_V526 / 1000 : 60,
-          Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0),
-        ),
+        retryAfterSeconds: ["scan", "prewarm", "future-prewarm"].includes(context)
+          ? fabricationAutomaticRetrySecondsV542(deliveryDate, state.productionProgressCheckedV522.get(key)?.retryAfterSeconds)
+          : Math.max(60, Number(state.productionProgressCheckedV522.get(key)?.retryAfterSeconds || 0)),
       }));
     } finally {
       chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
     }
     if (typeof scheduleFabricationMemorySaveV533 === "function") scheduleFabricationMemorySaveV533();
+    const publishedForCurrentDateV540 = requestedChunkV527.some(
+      (row) => String(row.deliveryDate || "") === String(state.meta?.deliveryDate || ""),
+    );
+    if (chunkPublishedV527 && publishedForCurrentDateV540 && state.page === "scan") {
+      const publishedKeysV540 = requestedChunkV527.map(({ key }) => key);
+      const publishVisibleProgressV541 = () => {
+        if (typeof refreshVisibleScanProgressV540 === "function") refreshVisibleScanProgressV540(publishedKeysV540);
+      };
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(publishVisibleProgressV541);
+      else publishVisibleProgressV541();
+    }
     if (typeof onProgress === "function") {
       try { onProgress(Math.min(offset + chunk.length, candidates.length), candidates.length); } catch (_progressError) {}
     }
@@ -21670,7 +21788,14 @@ function rememberFabricationDeliveryV521(deliveryDate = "", rows = []) {
     state.fabricationDeliveryCacheV521.delete(oldestDate);
     const retainedKeys = new Set([...state.fabricationDeliveryCacheV521.values()].flatMap((set) => [...set]));
     for (const key of evictedKeys) {
-      if (!retainedKeys.has(key)) state.fabricationStatusCacheV474.delete(key);
+      if (!retainedKeys.has(key)) {
+        // Status, Cutting evidence, and freshness are one cache record. Keeping
+        // freshness after eviction suppressed the replacement check when an
+        // operator revisited an older delivery date.
+        state.fabricationStatusCacheV474.delete(key);
+        state.productionProgressCheckedV522.delete(key);
+        state.cuttingStatusCacheV522.delete(key);
+      }
     }
   }
 }
@@ -21682,16 +21807,19 @@ function fabricationRowNeedsRefreshV532(row = {}, now = Date.now()) {
   if (!key || state.fabricationStatusPendingV474.has(key)) return false;
   const cached = state.fabricationStatusCacheV474.get(key);
   const progress = state.productionProgressCheckedV522.get(key) || {};
-  const retryMs = Math.max(
-    FABRICATION_AUTO_RETRY_MS_V526,
-    Number(cached?.retryAfterSeconds || 0) * 1000,
-    Number(progress.retryAfterSeconds || 0) * 1000,
+  const deliveryDateV542 = String(row?.deliveryDate || state.meta?.deliveryDate || "");
+  const retryMs = [cached?.retryAfterSeconds, progress.retryAfterSeconds].reduce(
+    (current, value) => Math.max(current, Number(value || 0)),
+    0,
   );
+  const automaticRetryMsV542 = deliveryDateV542 === todayKey()
+    ? FABRICATION_TODAY_RETRY_MS_V542
+    : Math.max(FABRICATION_AUTO_RETRY_MS_V526, retryMs * 1000);
   const cachedAt = Date.parse(cached?.checkedAt || "");
   const checkedAt = Number.isFinite(cachedAt) ? cachedAt : Number(progress.at || 0);
-  const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= retryMs);
+  const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= automaticRetryMsV542);
   const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
-  const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= retryMs);
+  const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= automaticRetryMsV542);
   return fabricationDue || cuttingDue;
 }
 
@@ -21805,9 +21933,28 @@ function setFabricationLoadProgressV531(date, completed, total, active, message 
 async function warmFabricationDeliveryV521(deliveryDate = "", rows = [], { background = false } = {}) {
   const date = String(deliveryDate || "").trim();
   if (!date) return;
-  const existing = state.fabricationWarmByDateV526.get(date);
-  if (existing) return existing;
   const source = Array.isArray(rows) ? rows.slice() : [];
+  const existing = state.fabricationWarmByDateV526.get(date);
+  if (existing) {
+    const attachedToCurrentDateV540 = !background && String(state.meta?.deliveryDate || "") === date;
+    if (attachedToCurrentDateV540) {
+      const remainingV540 = source.filter((row) => fabricationRowNeedsRefreshV532(row)).length;
+      if (remainingV540) {
+        setFabricationLoadProgressV531(date, 0, remainingV540, true, `Checking ${remainingV540} fabrication items`);
+      }
+    }
+    await existing.catch(() => {});
+    // A rapid date change can pause a foreground warm while its final request
+    // drains. If the operator has already returned, immediately finish the
+    // remaining rows instead of treating that old promise as a completed warm.
+    if (attachedToCurrentDateV540 && fabricationRowsNeedRefreshV527(source)) {
+      return warmFabricationDeliveryV521(date, source, { background: false });
+    }
+    if (attachedToCurrentDateV540) {
+      setFabricationLoadProgressV531(date, source.length, source.length, false, `${source.length} fabrication items ready`);
+    }
+    return;
+  }
   rememberFabricationDeliveryV521(date, source);
   const now = Date.now();
   const refreshRows = source.filter((row) => fabricationRowNeedsRefreshV532(row, now));
@@ -21852,11 +21999,15 @@ async function warmFabricationDeliveryV521(deliveryDate = "", rows = [], { backg
 function monitorPendingProductionProgressV522() {
   if (!state.backend || document.hidden || appModalUiIsOpen() || !state.meta?.deliveryDate || !Array.isArray(state.items) || !state.items.length) return;
   const now = Date.now();
-  if (now - Number(state.productionProgressMonitorAtV522 || 0) < FABRICATION_AUTO_RETRY_MS_V526) return;
+  const activeDateV542 = String(state.meta?.deliveryDate || "");
+  const monitorIntervalV542 = activeDateV542 === todayKey()
+    ? FABRICATION_TODAY_RETRY_MS_V542
+    : FABRICATION_AUTO_RETRY_MS_V526;
+  if (now - Number(state.productionProgressMonitorAtV522 || 0) < monitorIntervalV542) return;
   state.productionProgressMonitorAtV522 = now;
-  // The compact catalog may still refresh every ten seconds for list changes,
-  // but production-share polling is a separate ten-minute concern. The date
-  // warm lock also prevents a large delivery from overlapping itself.
+  // Today's production changes while operators are scanning, so incomplete FAB
+  // is refreshed once per minute. Historical/future dates retain the ten-minute
+  // low-I/O cadence. The date warm lock prevents overlapping the same date.
   void warmFabricationDeliveryV521(state.meta.deliveryDate, state.items);
 }
 
@@ -22334,24 +22485,35 @@ async function refreshBayMapPage(options = {}) {
     const fresh = !options.force && hasCachedView && (Date.now() - Number(state.bayMapLoadedAtV540 || 0) < 15_000);
     if (fresh) return;
     if (state.bayMapRefreshPromiseV540) return state.bayMapRefreshPromiseV540;
-    state.bayMapRefreshPromiseV540 = Promise.all([
+    const critical = Promise.all([
       fetchJson("/api/indian-trail/layout"),
       fetchJson("/api/indian-trail/bays"),
-      hasPermission("view_indian_trail") ? fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`) : Promise.resolve(null),
-      fetchJson("/api/indian-trail/events?page=1&pageSize=6"),
-    ]).then(([layout, baysPayload, summary, eventsPayload]) => {
+    ]).then(([layout, baysPayload]) => {
       state.bayLayout = layout;
       state.bays = baysPayload.bays || [];
-      state.bayEvents = eventsPayload.events || [];
       state.bayMapLoadedAtV540 = Date.now();
-      renderIndianTrailSummary(summary);
-      renderBayRouteFlow(summary);
       if (state.page === "bays") {
         renderBayMapPage();
         if (state.selectedBayCode) void loadBayJobDetails(state.selectedBayCode);
         maybeShowStaleBayAlert().catch(() => {});
       }
-    }).finally(() => { state.bayMapRefreshPromiseV540 = null; });
+    });
+    state.bayMapRefreshPromiseV540 = critical.finally(() => { state.bayMapRefreshPromiseV540 = null; });
+    // Route totals and recent activity are supplemental to the physical map.
+    // Load them independently so a slow summary/history query never delays the
+    // first usable Bay Map paint or its page-entry transition.
+    Promise.allSettled([
+      hasPermission("view_indian_trail") ? fetchJson(`/api/indian-trail/summary${indianTrailDateQuery()}`) : Promise.resolve(null),
+      fetchJson("/api/indian-trail/events?page=1&pageSize=6"),
+    ]).then(([summaryResult, eventsResult]) => {
+      const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
+      if (eventsResult.status === "fulfilled") state.bayEvents = eventsResult.value.events || [];
+      if (summary) {
+        renderIndianTrailSummary(summary);
+        renderBayRouteFlow(summary);
+      }
+      if (state.page === "bays" && eventsResult.status === "fulfilled") renderBayRecentActivity();
+    }).catch(() => {});
     // Cached Bay Map content is already painted above. Let the page-entry
     // animation finish immediately while this live refresh quietly replaces
     // it; the first uncached visit still waits for its required data.
@@ -22521,7 +22683,7 @@ function restartBayTruckAnimation() {
   const truck = root?.querySelector(".transit-moving-truck");
   if (!truck || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
   if (root?.classList.contains("has-transit-glass-v467")) {
-    requestAnimationFrame(() => requestAnimationFrame(() => startBayTransitAnimationV467()));
+    scheduleBayTransitAnimationV540();
     return;
   }
   truck.style.animation = "none";
@@ -22533,6 +22695,20 @@ function restartBayTruckAnimation() {
       truck.style.removeProperty("opacity");
     });
   });
+}
+
+/** Start the decorative glass transfer after the usable Bay Map has painted. */
+function scheduleBayTransitAnimationV540(profile = state.bayTransitAnimationProfileV467) {
+  const start = () => {
+    if (state.page === "bays" && !document.hidden) startBayTransitAnimationV467(profile);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(start, { timeout: 350 });
+    } else {
+      window.setTimeout(start, 90);
+    }
+  }));
 }
 
 /**
@@ -22665,7 +22841,7 @@ function renderBayRouteFlow(summary) {
   `;
 
   if (inTransitQty > 0) {
-    requestAnimationFrame(() => requestAnimationFrame(() => startBayTransitAnimationV467(transitAnimation)));
+    scheduleBayTransitAnimationV540(transitAnimation);
   }
 
   const miniRoute = document.getElementById("bayPanelRouteMini");
@@ -27920,24 +28096,17 @@ function cuttingLabelRouteTextV504(value = "") {
 
 function cuttingGenerationPresentationV500(generation = {}) {
   if (String(generation.state || "").trim()) return cuttingProgressPresentationV498(generation);
-  const quantity = Number(generation.quantity || 0);
-  const cutQuantity = Number(generation.cutQuantity || 0);
   const statusCode = Number(generation.optimizationStatusCode || 0);
-  const assignments = (Array.isArray(generation.sequenceAssignments) ? generation.sequenceAssignments : []).filter((row) => row && typeof row === "object");
-  const expectedAssignments = quantity > 0 ? Math.max(1, Math.round(quantity)) : assignments.length;
-  const allAssignmentsCut = assignments.length >= expectedAssignments
-    && assignments.every((row) => Boolean(row.plateCut) && Boolean(row.plateStockBooked));
-  const singleLegacyPlateCut = !assignments.length && quantity <= 1
-    && Boolean(generation.optimizationPlateCut) && Boolean(generation.optimizationPlateStockBooked);
-  const cutComplete = Boolean(generation.cutCompletedAt)
-    || statusCode === 460
-    || statusCode === 500
-    || allAssignmentsCut
-    || singleLegacyPlateCut
-    || (quantity > 0 && cutQuantity >= quantity);
-  if (cutComplete) return cuttingProgressPresentationV498({ ...generation, state: "cut" });
-  if (statusCode === 200) return cuttingProgressPresentationV498({ ...generation, state: "released" });
-  if (statusCode === 100 || Number(generation.optimization || 0) > 0) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
+  const statusLabel = String(generation.optimizationStatusLabel || "").trim().toLowerCase();
+  // v0.544: optimization lifecycle is authoritative. CUT/STOCKBOOKED, MENGE_CUT,
+  // and historical booking timestamps stay visible as diagnostics, but they do
+  // not promote a current Optimized/Released optimization to Cut.
+  const booked = statusLabel === "booked" || statusCode === 460 || statusCode === 500;
+  const released = statusLabel === "released" || statusCode === 200;
+  const optimized = statusLabel === "optimized" || statusCode === 100 || Number(generation.optimization || 0) > 0;
+  if (booked) return cuttingProgressPresentationV498({ ...generation, state: "cut" });
+  if (released) return cuttingProgressPresentationV498({ ...generation, state: "released" });
+  if (optimized) return cuttingProgressPresentationV498({ ...generation, state: "optimized" });
   if (Number(generation.batchStatusCode || 0) === 400) return cuttingProgressPresentationV498({ ...generation, state: "batch_active" });
   return cuttingProgressPresentationV498({ ...generation, state: "unknown" });
 }
@@ -28129,8 +28298,8 @@ function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
   const cutting = item.cutting || {};
   const generationPlan = cuttingLabelGenerationPlanV502(item);
   const requestedTotal = Math.max(1, Number(generationPlan.total || 1));
-  const sourceNote = cutting.inferredFromFabrication
-    ? `Cut confirmed by downstream ${String(cutting.fabricationMachine || "fabrication").trim()} evidence.`
+  const sourceNote = cutting.downstreamFabricationObserved
+    ? `Downstream ${String(cutting.fabricationMachine || "fabrication").trim()} evidence observed; A+W Cutting completion still requires Booked.`
     : cutting.dataAvailable === false ? "No synchronized A+W cutting generation is stored yet." : "A+W production evidence";
   const itemKey = String(item.item || "");
   const selector = requestedTotal > 1
@@ -28215,9 +28384,11 @@ function formatOperationalTimestampV511(value) {
 
 function cuttingProgressTimestampV511(cutting = {}) {
   const stateName = String(cutting.state || "").trim();
-  if (stateName === "cut") return cutting.cutCompletedAt || cutting.optimizationPlateLastChangedAt || cutting.optimizationLastChangedAt || cutting.batchLastChangedAt || "";
-  if (stateName === "released" || stateName === "optimized") return cutting.optimizationPlateLastChangedAt || cutting.optimizationLastChangedAt || cutting.optimizationDate || "";
-  if (stateName === "batch_active") return cutting.batchLastChangedAt || cutting.batchCreatedAt || "";
+  // v0.545: a timestamp under the Cutting checkpoint means completion time.
+  // Optimized/Released/batched work is not cut, so do not show a date there.
+  // For a Booked optimization prefer the physical booking time, then the
+  // optimization status-change timestamp as the synchronized fallback.
+  if (stateName === "cut") return cutting.cutCompletedAt || cutting.optimizationLastChangedAt || "";
   return "";
 }
 
@@ -28339,8 +28510,7 @@ function productionItemActionsV476(files = {}, orderFiles = {}, item = {}) {
   if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-production-open-asset-v470="${escapeHtml(program.id)}">${globalSearchIconV433("denver")}<span>Program</span></button>`);
   if (item.order && item.item) {
     const checkedAt = formatFabricationCheckedAtV527(files.fabrication?.checkedAt);
-    if (checkedAt) actions.push(`<small class="production-fab-memory-v522">Fab checked ${escapeHtml(checkedAt)}</small>`);
-    actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480 is-check-fab-v527" data-check-fab-v522 data-order="${escapeHtml(item.order)}" data-item="${escapeHtml(item.item)}">${globalSearchIconV433("denver")}<span>Check Fab</span></button>`);
+    if (checkedAt) actions.push(`<small class="production-fab-memory-v522">Progress checked ${escapeHtml(checkedAt)}</small>`);
   }
   return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
 }
@@ -28500,7 +28670,10 @@ function renderOrderDetailV470(payload = {}) {
             <div class="production-item-sketch-v476 production-item-sketch-v518">${productionLoaded ? productionSketchVisualV476(files.sketches, itemLabel, { order: payload.order || item.order, item: item.item, itemData: item, payload, fabrication, referenceGeometry: files.referenceGeometry }) : `<div class="production-sketch-visual-v476 is-loading"><i></i><span>Loading sketch…</span></div>`}</div>
             <div class="production-item-cutting-label-v512 production-item-cutting-label-v518">${orderDetailCuttingLabelsV501(item, payload)}</div>
             <div class="production-item-main-v476 production-item-main-v480 production-item-main-v481 production-item-main-v518 production-item-main-v519">
-              <section class="production-progress-section-v476 production-progress-section-v518 production-progress-section-v519"><small>PROGRESS</small>${orderDetailProgressV476(item, fabrication, { productionLoaded })}</section>
+              <section class="production-progress-section-v476 production-progress-section-v518 production-progress-section-v519">
+                <header class="production-progress-heading-v543"><small>PROGRESS</small><button type="button" class="production-progress-refresh-v543" data-refresh-progress-v543 data-order="${escapeHtml(item.order || payload.order || "")}" data-item="${escapeHtml(item.item || "")}" title="Refresh progress and fabrication" aria-label="Refresh progress and fabrication for item ${escapeHtml(item.item || "")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.3 6.8L4 9M5.8 15A7 7 0 0 0 17.7 17.2L20 15"/></svg></button></header>
+                ${orderDetailProgressV476(item, fabrication, { productionLoaded })}
+              </section>
               ${orderDetailAwInformationV516(item)}
               ${priorityDetail}
               <footer class="production-item-actions-v476 production-item-actions-v480 production-item-actions-v481 production-item-actions-v516 production-item-actions-v518 production-item-actions-v519 production-item-actions-v520 production-item-actions-v521">${productionLoaded ? productionItemActionsV476(files, orderFiles, item) : `<span>Loading files…</span>`}</footer>
@@ -28521,10 +28694,12 @@ function mergeOrderProductionDetailV507(core = {}, production = {}) {
     let cutting = { ...(item.cutting || {}) };
     const fabrication = productionFiles.fabrication || {};
     if (fabrication.fabricated === true && !cutting.complete) {
+      // v0.545: production-file hydration may confirm Denver/WaterJet, but
+      // Order Details must preserve the authoritative A+W optimization state.
+      // Only Booked completes Cutting; Optimized/Released remain incomplete.
       cutting = {
         ...cutting,
-        state: "cut", label: "Cut", complete: true, released: false, needsRecutting: false,
-        inferredFromFabrication: true, evidenceSource: "downstream_fabrication",
+        downstreamFabricationObserved: true,
         fabricationMachine: String(fabrication.actualMachine || fabrication.machine || ""),
       };
     }
@@ -28770,22 +28945,24 @@ document.addEventListener("dblclick", (event) => {
   openOrderDetailV470(order, { focusItem: row.dataset.itemV477 || "" }).catch((error) => showInlineError(error.message, true));
 });
 
-async function checkOrderItemFabV522(button) {
+async function refreshOrderItemProgressV543(button) {
   if (button.disabled) return;
   const order = String(button.dataset.order || "");
   const itemNumber = String(button.dataset.item || "");
   const item = (state.orderDetailRenderedPayloadV507?.items || []).find((row) => String(row.item) === itemNumber);
   if (!item || !order) return;
   button.disabled = true;
-  const label = button.querySelector("span");
-  if (label) label.textContent = "Checking…";
+  button.classList.add("is-loading");
   state.fabricationStatusEpochV522 = Number(state.fabricationStatusEpochV522 || 0) + 1;
   try {
-    const payload = await requestFabricationBatchV522([{...item, order, key: fabricationStatusItemKeyV521({...item, order})}], true);
-    const checkedResult = payload.results?.[0] || {};
+    const [corePayload, fabPayload] = await Promise.all([
+      fetchOrderDetailCoreV507(order, true),
+      requestFabricationBatchV522([{...item, order, key: fabricationStatusItemKeyV521({...item, order})}], true, true),
+    ]);
+    const checkedResult = fabPayload.results?.[0] || {};
     const status = checkedResult.status;
-    if (!status) throw new Error("This piece is no longer available to check. Reopen its order to refresh access and details.");
-    syncFabricationRevisionV522(payload.fabricationRevision);
+    if (!status) throw new Error("This piece is no longer available to refresh. Reopen its order to refresh access and details.");
+    syncFabricationRevisionV522(fabPayload.fabricationRevision);
     for (const row of state.items || []) {
       if (String(row.order) !== order || Number(row.item) !== Number(itemNumber)) continue;
       if (checkedResult.cutting) row.cutting = { ...(row.cutting || {}), ...checkedResult.cutting };
@@ -28805,22 +28982,22 @@ async function checkOrderItemFabV522(button) {
       state.productionProgressCheckedV522.set(key, { at: Date.now(), retryAfterSeconds: Number(checkedResult.progressRetryAfterSeconds || 300) });
     }
     if (state.orderDetailOpenOrderV474 === order && !document.getElementById("productionExplorerPanelV470")?.hidden) {
-      const current = cachedOrderDetailPayloadV507(order);
-      if (current) renderOrderDetailV470(current);
+      const productionPayload = state.orderDetailProductionCacheV507.get(order)?.payload;
+      renderOrderDetailV470(productionPayload ? mergeOrderProductionDetailV507(corePayload, productionPayload) : corePayload);
     }
-    showFloatingNotice(status.checkUnavailable ? "Production source unavailable. Previous evidence is retained; check again when the share is online." : `Fab checked: ${status.label || "Status updated"}`, status.checkUnavailable ? "notice" : "success");
+    showFloatingNotice(status.checkUnavailable ? "Production source unavailable. Scanner progress refreshed; previous fabrication evidence was retained." : `Progress refreshed: ${status.label || "Status updated"}`, status.checkUnavailable ? "notice" : "success");
     if (state.page === "scan") scheduleScanRender();
   } catch (error) {
-    showFloatingNotice(`Fab check failed: ${error.message}`, "error");
+    showFloatingNotice(`Progress refresh failed: ${error.message}`, "error");
   } finally {
     button.disabled = false;
-    if (label) label.textContent = "Check Fab";
+    button.classList.remove("is-loading");
   }
 }
 
 document.addEventListener("click", (event) => {
-  const checkFab = event.target.closest("[data-check-fab-v522]");
-  if (checkFab) { void checkOrderItemFabV522(checkFab); return; }
+  const refreshProgress = event.target.closest("[data-refresh-progress-v543]");
+  if (refreshProgress) { void refreshOrderItemProgressV543(refreshProgress); return; }
   if (event.target.closest("[data-production-close-sketch-v479]")) {
     closeProductionSketchLightboxV479();
     return;
@@ -31093,9 +31270,11 @@ function renderPrintDocumentPreview(preview = {}) {
   if (!els.printDocumentPaper) return;
   const orientation = String(els.printOrientation?.value || "portrait") === "landscape" ? "landscape" : "portrait";
   const copies = Math.max(Number(els.printCopies?.value || 1), 1);
-  const sheets = Array.isArray(preview.previewSheets) && preview.previewSheets.length
-    ? preview.previewSheets
-    : buildLocalPrintSheets(printFilteredRows());
+  const sheets = preview.noResults === true
+    ? []
+    : Array.isArray(preview.previewSheets) && preview.previewSheets.length
+      ? preview.previewSheets
+      : buildLocalPrintSheets(printFilteredRows());
   const pages = [];
   for (const sheet of sheets) {
     const chunks = paginatePrintSheetRows(sheet.rows || [], orientation);
@@ -31469,6 +31648,7 @@ function adoptManualEditLookups(payload = {}) {
     glassColors: Array.isArray(payload.glassColors) ? payload.glassColors : [],
     glassAliases: Array.isArray(payload.glassAliases) ? payload.glassAliases : [],
     attentionColors: Array.isArray(payload.attentionColors) ? payload.attentionColors : (state.manualEditLookups?.attentionColors || []),
+    inventoryItemMappings: Array.isArray(payload.inventoryItemMappings) ? payload.inventoryItemMappings : [],
     stages: Array.isArray(payload.stages) ? payload.stages : [],
   };
   state.manualEditLookupsLoaded = true;
@@ -31897,12 +32077,15 @@ function openPrintOptions(context = {}) {
   state.printGlassFamilies = [];
   state.printGlassRuleTypes = [];
   state.printAllGlass = true;
-  setPrintFilterLoadingState();
-  renderEmptyPrintSelectionPreview();
 
+  // Reveal the shell before any filter/library work. The old empty-preview path
+  // could synchronously paginate the full local dataset and make this button
+  // feel unresponsive for ~2 seconds on large delivery days.
   if (els.printOptionsBackdrop) els.printOptionsBackdrop.hidden = false;
   if (els.printOptionsPanel) els.printOptionsPanel.hidden = false;
   updateModalScrollLock();
+  setPrintFilterLoadingState();
+  renderEmptyPrintSelectionPreview();
 
   const initialPreset = defaultPrintPresetName();
   renderPrintPresetOptions(initialPreset);
@@ -31949,6 +32132,19 @@ document.addEventListener("dls:delivery-list-catalog-synced", () => {
   if (printWorkspaceNeedsDetailReload()) void restorePrintWorkspaceAfterInactivity();
 });
 
+// A completed A+W/catalog update can publish today's plate snapshot after the
+// Statistics page was already opened. Invalidate the one-minute card cache and
+// refresh it immediately only while Statistics is visible.
+document.addEventListener("dls:delivery-list-catalog-synced", () => {
+  state.statisticsTodayProductionLoadedAtV542 = 0;
+  if (state.page === "statistics" && hasPermission("view_reports")) {
+    window.clearTimeout(state.statisticsTodayProductionRefreshTimerV542);
+    state.statisticsTodayProductionRefreshTimerV542 = window.setTimeout(() => {
+      ensureTodayProductionReportV514({ force: true }).catch(() => {});
+    }, 180);
+  }
+});
+
 /** Clamp and render the copies increment box. */
 function setPrintCopies(value, refresh = true) {
   const copies = Math.max(1, Math.min(Number(value || 1), 10));
@@ -31983,8 +32179,8 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260915-v0.539", window.location.href).href,
-    new URL("static/css/print.css?v=20260914-v0.532", window.location.href).href,
+    new URL("static/css/styles.css?v=20260916-v0.542", window.location.href).href,
+    new URL("static/css/print.css?v=20260916-v0.542", window.location.href).href,
   ];
 }
 
@@ -34371,18 +34567,24 @@ function supersededReviewDimensions(item = {}) {
 }
 
 function supersededReviewItemRows(items = []) {
-  if (!items.length) return `<tr><td colspan="6">No item evidence was returned.</td></tr>`;
+  if (!items.length) return `<div class="superseded-review-item-empty-v544">No item evidence was returned.</div>`;
   return items.map((item) => {
-    const batches = [item.productionBatch1, item.productionBatch2, item.productionBatch3].map((value) => Number(value || 0)).join("/");
+    const legacyBatch = [item.productionBatch1, item.productionBatch2, item.productionBatch3].map((value) => Number(value || 0)).find((value) => value > 0) || 0;
+    const batch = String(item.batch || legacyBatch || "").trim();
+    const optimization = Number(item.optimization || 0);
+    const cuttingLabel = String(item.cuttingLabel || item.cuttingState || "").trim() || "No production evidence";
     const dimensions = supersededReviewDimensions(item);
-    return `<tr>
-      <td>${escapeHtml(item.itemNumber || "")}</td>
-      <td><span class="glass-tone-inline" ${glassToneAttributes(item.product || item.job || "Glass")}>${escapeHtml(item.product || item.job || "")}</span></td>
-      <td>${escapeHtml(dimensions)}</td>
-      <td>${escapeHtml(item.quantity ?? 0)}</td>
-      <td>${escapeHtml(`${item.orderStatus ?? 0}/${item.itemStatus ?? 0}`)}</td>
-      <td>${escapeHtml(batches)}</td>
-    </tr>`;
+    const job = String(item.job || "").trim();
+    const product = String(item.product || "").trim() || "Glass";
+    return `<article class="superseded-review-item-v544">
+      <header><strong>Item ${escapeHtml(item.itemNumber || "—")}</strong><span>Qty ${escapeHtml(item.quantity ?? 0)}</span></header>
+      <div class="superseded-review-item-grid-v544">
+        <span class="is-product"><small>Glass / Job</small><b class="glass-tone-inline" ${glassToneAttributes(product)}>${escapeHtml(product)}</b>${job ? `<em>${escapeHtml(job)}</em>` : ""}</span>
+        <span><small>Size</small><b>${escapeHtml(dimensions)}</b></span>
+        <span><small>A+W Status</small><b>${escapeHtml(`${item.orderStatus ?? 0}/${item.itemStatus ?? 0}`)}</b></span>
+        <span class="is-production"><small>Production</small><span class="superseded-review-production-pills-v544"><i><em>Batch</em><b>${escapeHtml(batch || "—")}</b></i><i><em>Optimization</em><b>${optimization ? escapeHtml(optimization) : "—"}</b></i><i class="is-cutting"><em>Cutting</em><b>${escapeHtml(cuttingLabel)}</b></i></span></span>
+      </div>
+    </article>`;
   }).join("");
 }
 
@@ -34465,11 +34667,11 @@ function supersededOrderReviewCardHtml(review = {}) {
       <div class="superseded-review-compare">
         <section>
           <h3>Original candidate · ${escapeHtml(originalOrder)}</h3>
-          <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.originalItems)}</tbody></table>
+          <div class="superseded-review-item-list-v544">${supersededReviewItemRows(review.originalItems)}</div>
         </section>
         <section>
           <h3>Replacement candidate · ${escapeHtml(replacementOrder)}</h3>
-          <table><thead><tr><th>Item</th><th>Product / Job</th><th>Dimensions</th><th>Qty</th><th>Status</th><th>Batches</th></tr></thead><tbody>${supersededReviewItemRows(review.replacementItems)}</tbody></table>
+          <div class="superseded-review-item-list-v544">${supersededReviewItemRows(review.replacementItems)}</div>
         </section>
       </div>
     </details>
@@ -34927,6 +35129,7 @@ function configureAdminModalSectionTabsV345(kind) {
     workspaceBadge.textContent = String(glassProfileCount);
     if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
     insertTab("lookup:sheet_sizes", "Sheet Sizes", Object.keys(state.lookupSheetUsageSettingsV529?.profiles || {}).length);
+    insertTab("lookup:inventory_item_id", "Item IDs", (lookups.inventoryItemMappings || []).length);
     insertTab("lookup:route", "Routes", (lookups.routes || []).length);
     insertTab("lookup:process", "Process States", (lookups.processes || []).length);
     insertTab("lookup:machine", "Machines", machineDefinitionsV521({ activeOnly: false }).length);
@@ -34959,7 +35162,7 @@ function setAdminModalSection(section = "workspace") {
     renderCustomerEmailModal();
   } else if (!historySelected && section.startsWith("lookup:")) {
     const type = section.split(":", 2)[1] || "glass_profile";
-    state.lookupManagerActiveType = ["glass_profile", "sheet_sizes", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
+    state.lookupManagerActiveType = ["glass_profile", "sheet_sizes", "inventory_item_id", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
     state.lookupManagerSearch = "";
     renderLookupManagerModal();
   } else if (!historySelected && section.startsWith("scanPage:")) {
@@ -35283,6 +35486,7 @@ function lookupBucketForType(type) {
   if (clean === "glass_cost") return "glassCosts";
   if (clean === "glass_color") return "glassColors";
   if (clean === "stage_definition") return "stages";
+  if (clean === "inventory_item_id") return "inventoryItemMappings";
   if (clean === "station") return "stations";
   return "products";
 }
@@ -35328,6 +35532,18 @@ function lookupEditorMeta(type) {
       labelPlaceholder: "#2F80ED",
       example: "3/8 Clear Annealed → Visual color",
       className: "glass-colors",
+    };
+  }
+  if (clean === "inventory_item_id") {
+    return {
+      type: "inventory_item_id",
+      title: "Inventory Item ID",
+      explanation: "Maps a physical glass type to the maintained Inventory Item ID used by Inventory scanning, Smart Fill, reconciliation, and Excel exports.",
+      valueLabel: "Item ID",
+      valuePlaceholder: "G38SATINCLR",
+      labelPlaceholder: "3/8 Acid Etch",
+      example: "G38SATINCLR → 3/8 Acid Etch",
+      className: "inventory-item-ids-v546",
     };
   }
   if (clean === "route") {
@@ -35425,6 +35641,7 @@ function lookupGlassGroupsV347(items = []) {
 function lookupRowHtmlV347(meta, item, visualColorMap = null) {
   const isGlassCost = meta.type === "glass_cost";
   const isGlassColor = meta.type === "glass_color";
+  const isInventoryItemId = meta.type === "inventory_item_id";
   const hasRate = item.rate !== null && item.rate !== "" && Number.isFinite(Number(item.rate));
   const rate = hasRate ? Number(item.rate) : 0;
   const costText = hasRate ? `$${rate.toFixed(2)} / SQFT` : "Cost not configured";
@@ -35443,9 +35660,14 @@ function lookupRowHtmlV347(meta, item, visualColorMap = null) {
           ? `<span><b>Cost per SQFT:</b> ${escapeHtml(costText)}</span>${!hasRate ? "<small>Add a cost so breakage dollars can be calculated for this glass.</small>" : ""}`
           : isGlassColor
             ? `<span class="lookup-glass-color-row-v312"><i style="--lookup-glass-color:${escapeHtml(glassColor)}" aria-hidden="true"></i><b>${escapeHtml(glassColor)}</b><small>${normalizeGlassVisualColor(item.color) ? "Custom color" : "Automatic default"}</small></span>`
-            : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
-               ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
-               ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
+            : isInventoryItemId
+              ? `<span><b>Item ID:</b> ${escapeHtml(item.itemId || item.value || "")}</span>
+                 <small><b>Glass type:</b> ${escapeHtml(item.glassLabel || item.label || "")}</small>
+                 ${item.description ? `<small><b>Description:</b> ${escapeHtml(item.description)}</small>` : ""}
+                 ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`
+              : `<span><b>Saved value:</b> ${escapeHtml(item.value || "")}</span>
+                 ${item.category ? `<small><b>Category:</b> ${escapeHtml(item.category)}</small>` : ""}
+                 ${item.matchTerms ? `<small><b>Match terms:</b> ${escapeHtml(item.matchTerms)}</small>` : ""}`}
       </div>
       <div class="lookup-row-actions-v346">
         <button type="button" class="icon-only icon-pencil" data-lookup-use-type="${escapeHtml(meta.type)}" data-lookup-use-value="${escapeHtml(item.value || "")}" title="Edit ${escapeHtml(item.label || item.value || "lookup value")}" aria-label="Edit ${escapeHtml(item.label || item.value || "lookup value")}"></button>
@@ -35460,6 +35682,7 @@ function lookupListHtml(type, items = []) {
   const isGlassCost = meta.type === "glass_cost";
   const isGlassColor = meta.type === "glass_color";
   const isGlassLibrary = ["product", "glass_cost", "glass_color"].includes(meta.type);
+  const isInventoryItemId = meta.type === "inventory_item_id";
   const visualColorMap = isGlassColor ? buildGlassVisualColorMap(items.map((item) => item.value || item.label)) : null;
   const libraryRows = visibleItems.length
     ? (isGlassLibrary
@@ -35476,8 +35699,8 @@ function lookupListHtml(type, items = []) {
       <header>
         ${lookupLibraryIconHtml(meta.type)}
         <div>
-          <h3>${escapeHtml(isGlassLibrary ? "Glass type" : meta.title)} library</h3>
-          <p>${escapeHtml(isGlassLibrary ? "Organized into Annealed, Mirror, and Tempered groups for faster scanning." : meta.explanation)}</p>
+          <h3>${escapeHtml(isGlassLibrary ? "Glass type" : isInventoryItemId ? "Inventory Item ID" : meta.title)} library</h3>
+          <p>${escapeHtml(isGlassLibrary ? "Organized into Annealed, Mirror, and Tempered groups for faster scanning." : isInventoryItemId ? "Maintain the Item ID used to identify each physical glass type during inventory." : meta.explanation)}</p>
         </div>
         <strong data-lookup-visible-count>${escapeHtml(visibleItems.length)} / ${escapeHtml(items.length)}</strong>
       </header>
@@ -35490,7 +35713,7 @@ function lookupListHtml(type, items = []) {
         </div>
         <div class="lookup-search-field-v351">
           <span class="search-icon" aria-hidden="true"></span>
-          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : isGlassColor ? "Search glass types or colors..." : meta.type === "route" ? "Search routes..." : meta.type === "process" ? "Search process states..." : "Search lookup values..."}">
+          <input id="lookupManagerSearchInput" type="search" autocomplete="off" value="${escapeHtml(state.lookupManagerSearch || "")}" placeholder="${isGlassCost ? "Search glass types or costs..." : isGlassColor ? "Search glass types or colors..." : isInventoryItemId ? "Search glass types or Item IDs..." : meta.type === "route" ? "Search routes..." : meta.type === "process" ? "Search process states..." : "Search lookup values..."}">
           <button type="button" data-lookup-search-clear-v351 aria-label="Clear lookup search" ${state.lookupManagerSearch ? "" : "disabled"}>Clear</button>
         </div>
       </div>
@@ -36449,7 +36672,7 @@ function colorManagerHtmlV539() {
 
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-  const supportedTypes = ["glass_profile", "sheet_sizes", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"];
+  const supportedTypes = ["glass_profile", "sheet_sizes", "inventory_item_id", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"];
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "glass_profile";
@@ -36464,6 +36687,7 @@ function lookupManagerModalHtml() {
   const meta = lookupEditorMeta(activeType);
   const isGlassCost = activeType === "glass_cost";
   const isGlassColor = activeType === "glass_color";
+  const isInventoryItemId = activeType === "inventory_item_id";
 
   return `
     <div class="lookup-manager-shell lookup-manager-modern lookup-manager-v066 lookup-manager-v345">
@@ -36479,12 +36703,13 @@ function lookupManagerModalHtml() {
 
           <form id="manualLookupForm" class="lookup-manager-form lookup-guided-form">
             <input id="lookupTypeInput" type="hidden" value="${escapeHtml(activeType)}">
+            <input id="lookupOriginalValueInput" type="hidden" value="">
 
             <div class="lookup-form-grid">
               <label>
                 <span>${escapeHtml(meta.valueLabel)}</span>
                 <input id="lookupValueInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.valuePlaceholder)}">
-                <small>${isGlassCost || isGlassColor ? "Use the exact glass/product wording that should match imported delivery-list data." : "This is the exact value saved to the delivery-list item."}</small>
+                <small>${isGlassCost || isGlassColor ? "Use the exact glass/product wording that should match imported delivery-list data." : isInventoryItemId ? "Use the maintained stock Item ID exactly as it appears in the inventory reference." : "This is the exact value saved to the delivery-list item."}</small>
               </label>
               ${isGlassCost ? `
                 <label>
@@ -36500,23 +36725,23 @@ function lookupManagerModalHtml() {
                 </label>
               ` : `
                 <label>
-                  <span>Display label</span>
+                  <span>${isInventoryItemId ? "Glass type" : "Display label"}</span>
                   <input id="lookupLabelInput" type="text" autocomplete="off" placeholder="${escapeHtml(meta.labelPlaceholder)}">
-                  <small>This is the cleaner wording users see in dropdowns.</small>
+                  <small>${isInventoryItemId ? "Physical/base glass wording used to resolve inventory pieces. Heat-treatment suffixes are not required." : "This is the cleaner wording users see in dropdowns."}</small>
                 </label>
               `}
             </div>
 
-            <div class="lookup-route-fields" data-lookup-route-fields ${activeType === "route" ? "" : "hidden"}>
+            <div class="lookup-route-fields" data-lookup-route-fields ${["route", "inventory_item_id"].includes(activeType) ? "" : "hidden"}>
               <label>
-                <span>Route category</span>
-                <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="Pickup, delivery, branch">
-                <small>Optional grouping note for administrators.</small>
+                <span>${isInventoryItemId ? "Description" : "Route category"}</span>
+                <input id="lookupCategoryInput" type="text" autocomplete="off" placeholder="${isInventoryItemId ? '3/8&quot; CLEAR SATIN GLASS 10MM SF' : 'Pickup, delivery, branch'}">
+                <small>${isInventoryItemId ? "Optional A+W/inventory description for reference." : "Optional grouping note for administrators."}</small>
               </label>
               <label>
                 <span>Match terms</span>
-                <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="CPU-Air, customer pickup, will call">
-                <small>Optional alternate wording, separated by commas.</small>
+                <input id="lookupMatchTermsInput" type="text" autocomplete="off" placeholder="${isInventoryItemId ? 'ACID ETCH; SATIN CLEAR' : 'CPU-Air, customer pickup, will call'}">
+                <small>${isInventoryItemId ? "Optional alternate glass wording, separated by commas or semicolons." : "Optional alternate wording, separated by commas."}</small>
               </label>
             </div>
 
@@ -36525,7 +36750,7 @@ function lookupManagerModalHtml() {
               <div>
                 <small>Preview before saving</small>
                 <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
-                <span><b>${isGlassCost || isGlassColor ? "Glass type" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
+                <span><b>${isGlassCost || isGlassColor ? "Glass type" : isInventoryItemId ? "Item ID" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
                 <p data-lookup-preview-note>${escapeHtml(meta.explanation)}</p>
               </div>
             </aside>
@@ -36561,7 +36786,7 @@ function syncLookupManagerFormGuidance() {
   const previewLabel = document.querySelector("[data-lookup-preview-label]");
   const previewNote = document.querySelector("[data-lookup-preview-note]");
 
-  if (routeFields) routeFields.hidden = type !== "route";
+  if (routeFields) routeFields.hidden = !["route", "inventory_item_id"].includes(type);
   if (previewValue) previewValue.textContent = value;
   if (previewLabel) {
     if (type === "glass_cost") {
@@ -36723,18 +36948,20 @@ function renderLookupManagerModal() {
  * Flow: Finds the requested row by type/value, activates the matching tab, re-renders once, then fills and focuses the editor for an upsert save.
  */
 function useLookupInEditor(type, value) {
-  const cleanType = ["product", "route", "process", "glass_cost", "glass_color", "stage_definition"].includes(type) ? type : "product";
+  const cleanType = ["product", "route", "process", "glass_cost", "glass_color", "inventory_item_id", "stage_definition"].includes(type) ? type : "product";
   const item = lookupItemsForType(cleanType).find((entry) => String(entry.value || "") === String(value || ""));
   if (!item) return;
 
   state.lookupManagerActiveType = cleanType;
   renderLookupManagerModal();
+  const originalInput = document.getElementById("lookupOriginalValueInput");
   const valueInput = document.getElementById("lookupValueInput");
   const labelInput = document.getElementById("lookupLabelInput");
   const categoryInput = document.getElementById("lookupCategoryInput");
   const matchInput = document.getElementById("lookupMatchTermsInput");
   const costInput = document.getElementById("lookupCostInput");
   const colorInput = document.getElementById("lookupColorInput");
+  if (originalInput) originalInput.value = item.value || "";
   if (valueInput) valueInput.value = item.value || "";
   if (labelInput) labelInput.value = item.label || item.value || "";
   if (categoryInput) categoryInput.value = item.category || "";
@@ -36752,7 +36979,7 @@ function useLookupInEditor(type, value) {
  * Flow: Clears all editable fields, restores contextual guidance, and returns focus to the saved-value field.
  */
 function clearLookupManagerForm() {
-  ["lookupValueInput", "lookupLabelInput", "lookupCategoryInput", "lookupMatchTermsInput", "lookupCostInput"].forEach((id) => {
+  ["lookupOriginalValueInput", "lookupValueInput", "lookupLabelInput", "lookupCategoryInput", "lookupMatchTermsInput", "lookupCostInput"].forEach((id) => {
     const input = document.getElementById(id);
     if (input) input.value = "";
   });
@@ -36812,6 +37039,7 @@ function filterLookupManagerLibrary(query) {
  */
 async function saveManualEditLookup() {
   const type = document.getElementById("lookupTypeInput")?.value || "";
+  const originalValue = document.getElementById("lookupOriginalValueInput")?.value.trim() || "";
   const value = document.getElementById("lookupValueInput")?.value.trim() || "";
   const label = document.getElementById("lookupLabelInput")?.value.trim() || value;
   const category = document.getElementById("lookupCategoryInput")?.value.trim() || "";
@@ -36823,7 +37051,14 @@ async function saveManualEditLookup() {
     throw new Error(["glass_cost", "glass_color"].includes(type) ? "Glass type is required." : "Lookup value is required.");
   }
 
-  const request = { type, value, label, category, matchTerms };
+  const request = { type, value, label, category, matchTerms, originalValue };
+  if (type === "inventory_item_id") {
+    if (!label) throw new Error("Glass type is required for the Inventory Item ID.");
+    request.itemId = value;
+    request.glassLabel = label;
+    request.description = category;
+    request.originalItemId = originalValue;
+  }
   if (type === "glass_cost") {
     const rate = Number(costText);
     if (!costText || !Number.isFinite(rate) || rate < 0) {
@@ -36859,7 +37094,9 @@ async function saveManualEditLookup() {
     ? `${value} material cost was saved to the Lookup Manager.`
     : type === "glass_color"
       ? `${value} visual color was saved to the Lookup Manager.`
-      : `${label || value} was saved to the Lookup Manager.`);
+      : type === "inventory_item_id"
+        ? `${label} Item ID ${value.toUpperCase()} was saved to the Lookup Manager.`
+        : `${label || value} was saved to the Lookup Manager.`);
 }
 
 /** Remove one Lookup Manager row through the shared tombstone workflow. */
@@ -36868,13 +37105,16 @@ async function removeManualEditLookupV346(type, value, label = value) {
   const cleanValue = String(value || "").trim();
   if (!cleanType || !cleanValue) return;
   const stageRemoval = cleanType === "stage_definition";
+  const inventoryMappingRemoval = cleanType === "inventory_item_id";
   const confirmed = await confirmWebAppAction({
     title: stageRemoval ? `Remove stage ${label}?` : `Remove ${label}?`,
     message: stageRemoval
       ? "Future imports will stop creating this stage definition. Existing delivery-list records remain available until removed intentionally."
-      : "This value will be removed from the active Lookup Manager library. Historical delivery-list rows are not rewritten.",
+      : inventoryMappingRemoval
+        ? "This Item ID mapping will stop being used by future Inventory snapshots and Smart Fill. Historical inventory sessions are not rewritten."
+        : "This value will be removed from the active Lookup Manager library. Historical delivery-list rows are not rewritten.",
     details: stageRemoval ? "You can restore the stage later by saving the same stage key again." : "A discovered/default value is hidden with an administrator tombstone so it does not immediately reappear from historical imports.",
-    confirmLabel: stageRemoval ? "Remove Stage" : "Remove Value",
+    confirmLabel: stageRemoval ? "Remove Stage" : inventoryMappingRemoval ? "Remove Item ID" : "Remove Value",
     danger: true,
   });
   if (!confirmed) return;

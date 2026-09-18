@@ -187,3 +187,97 @@
   .inventory-system-presence-v539 { grid-template-columns: 1fr; }
   .inventory-system-presence-pill-v539 { padding: 7px 8px; }
 }
+
+/* ========================================================================== */
+/* v0.548 Inventory session actions, start controls, and Manual Entry close   */
+/* ========================================================================== */
+/* Keep the active-session command bar above the sticky Inventory tabs so its
+   Export / Finish / Cancel actions remain the hit-test owner while operators
+   work at the bottom of long Inventory views. At desktop/tablet widths the
+   command bar also stays available below the application header. */
+.inventory-workspace {
+  --inventory-session-sticky-top-v548: calc(var(--app-header-height, 76px) + 8px);
+}
+
+.inventory-session-header {
+  position: sticky;
+  top: var(--inventory-session-sticky-top-v548);
+  z-index: 8;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.inventory-session-actions {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.inventory-session-actions :is(button, a) {
+  pointer-events: auto;
+}
+
+/* The session command bar now owns the sticky position. Keeping the view tabs
+   in normal flow prevents the two sticky surfaces from overlapping each other
+   and stealing pointer input at long-scroll positions. */
+.inventory-workspace > .inventory-tabs {
+  position: relative;
+  top: auto;
+  z-index: 3;
+}
+
+.inventory-page {
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+
+/* Location, Count Type, and Start Inventory are one normalized control row at
+   normal desktop/tablet widths. Cycle-specific fields naturally flow into the
+   next row using the same dimensions. */
+.inventory-start-controls {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
+.inventory-start-controls > label,
+.inventory-start-controls > button {
+  min-width: 0;
+  width: 100%;
+}
+
+.inventory-start-controls select,
+.inventory-start-button {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  border-radius: 9px;
+}
+
+/* Shared close controls own their coordinates through CSS variables and
+   !important rules. Set those variables here instead of competing with them. */
+.inventory-manual-close {
+  --gui-close-position: absolute;
+  --gui-close-top: 14px;
+  --gui-close-right: 14px;
+  --gui-close-bottom: auto;
+  --gui-close-left: auto;
+  --gui-close-z-index: 6;
+}
+
+@media (max-width: 1050px) and (min-width: 721px) {
+  .inventory-start-controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .inventory-session-header {
+    position: relative;
+    top: auto;
+  }
+
+  .inventory-start-controls {
+    grid-template-columns: 1fr;
+  }
+}

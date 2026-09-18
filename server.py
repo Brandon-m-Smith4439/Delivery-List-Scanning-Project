@@ -3229,8 +3229,9 @@ class Handler(SimpleHTTPRequestHandler):
                 # constrained to active list stages this user can already view.
                 raw_items = STORE.filter_accessible_production_status_requests(user, raw_items)
                 force_check = data.get("forceCheck") is True
+                refresh_incomplete = data.get("refreshIncomplete") is True
                 if force_check and len(raw_items) != 1:
-                    self.send_json({"error": "Check Fab accepts one piece at a time."}, HTTPStatus.BAD_REQUEST)
+                    self.send_json({"error": "Progress refresh accepts one piece at a time."}, HTTPStatus.BAD_REQUEST)
                     return
                 label_hints = STORE.aw_fabrication_hints_for_requests(raw_items)
                 results = []
@@ -3289,21 +3290,22 @@ class Handler(SimpleHTTPRequestHandler):
                             order, item, job, allow_content_read=True, evidence_after=evidence_after,
                             label_hint=cutting,
                             force_check=force_check,
+                            refresh_missing=refresh_incomplete,
                         )
                     cutting.pop("lifecycleRevision", None)
                     if status.get("fabricated") is True and not cutting.get("complete"):
-                        # Verified downstream fabrication also proves that this
-                        # lifecycle passed Cutting, even if the next scheduled
-                        # A+W synchronization has not published its booking yet.
+                        # v0.545: downstream Denver/WaterJet completion is useful
+                        # diagnostic evidence, but it must never promote A+W Cutting.
+                        # The current optimization itself must be Booked.
                         cutting.update({
-                            "state": "cut", "label": "Cut", "complete": True,
-                            "inferredFromFabrication": True,
+                            "downstreamFabricationObserved": True,
                             "fabricationMachine": status.get("actualMachine") or status.get("machine") or "Fabrication",
                         })
                     cutting["irregularities"] = STORE.aw_cutting_irregularities(cutting)
                     cutting["irregular"] = bool(cutting["irregularities"])
                     results.append({
                         "key": request_key, "order": order, "item": item, "job": job,
+                        "deliveryDate": str(row.get("deliveryDate") or ""),
                         "status": status, "cutting": cutting,
                         "progressRetryAfterSeconds": service.cache_seconds,
                     })

@@ -1,46 +1,80 @@
 # Delivery List Scanner
 
-Current maintained release: **v0.540**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
+Current maintained release: **v0.548**. SQLite remains the active/default backend and schema remains **21**; this release adds no database migration.
 
-## Install v0.540
+## Install v0.548
 
 1. Stop the server and back up the current project folder. Preserve the live `data/` folder separately.
-2. Inspect `Delivery_List_Scanner_v0.540_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
-3. Extract the ZIP into the existing **v0.539** project root with overwrite enabled. Do not replace the live `data/` folder.
-4. Restart with the maintained launcher, run one manual A+W update to populate the current physical-plate snapshot, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.540**. SQLite remains schema **21**.
-5. On Scan, confirm compact progress cells keep equal label/count sizing and stage colors, No Fab rows read Cutting -> Staging, remake glass copy is black, and new-order headers/badges use the pulsing yellow treatment.
-6. On Statistics, confirm Today's Production Count has separate Pieces, Items, Stock Sheets, and Delivery columns. Verify 3/8 stock usage against A+W's current plate list and inspect the reported plate sizes.
-7. In Superseded Orders, choose **Refresh checks** and confirm same-date exact normal/remake duplicates appear for review. Confirm either order can be removed, both can be removed, both can be kept, or the decision can remain pending.
-8. Verify Smart Search with order, job, customer, glass, bay, and rack terms. Check Scan, Statistics, Racks, Bay Map, Delivery List Updates, and Superseded Orders at desktop, tablet, phone, and 200% browser zoom.
+2. Inspect `Delivery_List_Scanner_v0.548_Changed_Files.zip`; it contains project-root-relative changed files and excludes databases, logs, local configuration, credentials, verification artifacts, and generated exports.
+3. Extract the ZIP into the existing **v0.547** project root with overwrite enabled. Do not replace the live `data/` folder.
+4. Restart with the maintained launcher, hard-refresh floor browsers (`Ctrl+F5`), and confirm **0.548**. SQLite remains schema **21** and no migration should run for this release.
+5. Start or reopen an Inventory session with enough rows to scroll, move to the bottom of the Inventory page, and confirm **Export Excel**, **Finish Inventory**, and **Cancel** remain visible/clickable in the active session command bar.
+6. Return to **New Inventory** and confirm **Location**, **Count Type**, and **Start Inventory** are aligned to the same control height; verify the mobile layout still stacks them one per row.
+7. Open **Manual Entry** and confirm its shared X close control is in the upper-right corner, closes only that dialog, and background scrolling remains locked while the modal is open.
 
-### v0.540 behavior
+### v0.548 behavior
 
-- **Compact progress remains readable.** Scan checkpoints are about 15% shorter, use equal-weight label and quantity text, preserve workflow colors, and omit the redundant No Fab checkpoint from Scan and Smart Search. Order Details still shows No Fab explicitly.
-- **New orders are unmistakable.** Group headers use the pale-yellow new-line treatment and the NEW badge matches the maintained yellow pulse.
-- **Today's Production Count is a compact ledger.** Each glass row exposes Pieces, Items, Stock Sheets, Delivery, and drill-down actions in fixed columns with responsive labels on narrow screens.
-- **Physical sheets come from current A+W plates.** Counts use distinct `PROD_OPTI_PLATES.PLATENR` rows and sizes use source `LENGTH` / `HEIGHT` values in 1/32-inch units. The misleading optimization `SHEETCOUNT` is no longer treated as physical stock usage.
-- **Superseded candidates can be recovered on demand.** Refresh checks compares active scanner orders by delivery date, Job, Customer, and exact item set, then sends normal/remake pairs through the existing approval workflow.
-- **Superseded review is fully manual.** An administrator can remove the first order, remove the second order, remove both, keep both, or defer the decision. The initial dialog paints before slower sketch-safety evidence finishes loading.
-- **Smart Search does less database work.** One normalized row corpus and bounded location checks replace the previous wide joined predicate; obsolete browser requests are canceled and recent exact queries are cached briefly.
-- **Repeated operational pages reuse recent data.** Racks and Bay Map paint from bounded browser caches while refreshing in the background, Bay layout files use an mtime-aware server cache, and the current Delivery List Updates panel requests a compact date-bounded history instead of downloading all retained history.
-- **The individual Bay dialog is easier to operate.** The selected-bay workspace uses a compact responsive grid, clearer order and status hierarchy, and an internally scrolling body that remains usable at 200% browser zoom.
-- **No schema change is required.** SQLite remains schema **21**; the plate snapshot uses existing system metadata storage.
+- **Inventory session actions stay usable throughout long counts.** The active session command bar remains above Inventory content while operators work at the bottom of long Physical Scans/Reconciliation/System views, and it owns pointer input over the Inventory tabs so **Export Excel**, **Finish Inventory**, and **Cancel** remain clickable.
+- **Inventory start controls are normalized.** Location, Count Type, and Start Inventory share one aligned three-column control row at desktop/tablet widths with matching 44px control heights; mobile remains one-column and touch-sized.
+- **Manual Entry close placement is corrected.** The shared GUI close system now receives Inventory-specific top-right positioning variables, so the X renders in the upper-right corner instead of falling into normal flow on the left.
+- **No data/schema behavior changed.** Inventory counts, Item ID mappings, generated Excel content, and SQLite schema remain unchanged at schema **21**.
+- **The unrelated standalone `Inventory.xlsx` is not part of this workflow.** Inventory spreadsheet behavior continues to refer only to the XLSX generated by the web app during or after a physical Inventory session.
+
+
+### Validation
+
+- JavaScript syntax passes and all project Python sources parse without bytecode churn; runtime version remains application **548** / SQLite schema **21**.
+- Focused Inventory regressions pass **9/9**, the static/UI contract suite passes **246/246**, and the complete maintained suite passes **368/368**.
+- A local Chromium file-based interaction probe did not complete in this environment, so the exact sticky-session hit testing still needs one floor-browser confirmation. The automated contracts verify the Inventory session command bar owns the sticky/stacking layer, the Inventory tabs no longer compete for that layer, the start controls share the intended geometry, and the Manual Entry X uses the shared top-right positioning variables.
+- No database or Inventory data workflow changed in v0.548; no database migration or production-database upgrade test is required for this UI-only release.
 
 ### Statistics calculation basis
 
 - Production Count: immutable first scanner import from A+W by stable Order + Item, grouped on plant-local import day; current External Remakes are excluded from new production.
 - Glass Quantity / Common Glass Sizes / workflow-stage/open-work metrics / active External Remake range totals: selected delivery-list dates.
 - Scan/operator/issues/actions/Internal Reject activity: actual event timestamps converted to America/New_York reporting days.
-- Stock sheets: retained A+W optimization evidence in the selected optimization-date range.
+- Stock sheets: current retained A+W physical optimization plate snapshot filtered by optimization date, one distinct plate per optimization/plate number.
 - Breakage: selected delivery-date production denominator plus plant-local Internal Reject incidents; Yield Percentage remains excluded from reject-loss totals.
 
 ### Validation
 
-- JavaScript syntax passes, maintained Python sources compile cleanly, the static/UI contract suite passes, and the complete maintained suite passes **352/352**.
-- A copied production-scale SQLite database remains at schema **21** with **387 delivery lists / 27,125 line items / 4,146 scan events / 1,478 reject events / 749 imports / 12,344 A+W cutting generations** preserved. `integrity_check` is **ok** and `foreign_key_check` reports **0** violations. v0.540 adds no migration.
-- The copied production data reports the verified 3/8 daily stock usage as **22 physical plates**: **21 at 96 x 130 inches** and **1 at 55 x 96 inches**, replacing the inflated 122-sheet result.
-- An isolated v0.540 server returns healthy application data. Representative warm responses measured about **39 ms** for Racks, **56 ms** for Bay contents, **7 ms** for Bay layout, **31 ms** for initial Superseded review data, **210 ms** for the compact current-day Delivery List Updates payload, **159 ms** for representative Smart Search, and **2.4 seconds** for detailed Today's Production Count on the copied production database.
-- Headless Chromium visual checks passed at **1900x900, 1366x768, 900x1200, 390x844, and 640x360**, including effective 200% zoom. The checked pages have no root horizontal overflow; progress text/counts align, the selected-bay dialog remains internally scrollable, and page-change animations remain enabled.
+- JavaScript syntax passes; all **37** project Python sources parse without bytecode churn and changed runtime modules import as application **547** / schema **21**.
+- Focused Inventory Item ID/default/export regressions pass **3/3**, the static/UI contract suite passes **245/245**, and the complete maintained suite passes **367/367**.
+- A generated Inventory XLSX was opened and validated with spreadsheet tooling: all four maintained sheets (**Summary**, **Physical Scans**, **System Snapshot**, **Reconciliation**) contain the current `G38SATINCLR` and `18CDSWG` mappings, omit the simulated stale `LEGACY18` ID, retain filters/frozen headers where maintained, and keep readable column widths.
+- An isolated copy of the bundled production-scale SQLite database upgraded through the existing numbered migrations from schema ledger **11 → 21** after a byte-for-byte verified backup while preserving **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events / 663 imports / 64 bay assignments**. `integrity_check` returned **ok**, `foreign_key_check` returned **0** violations, and the runtime default repair exposed **3/8 Acid Etch → G38SATINCLR** plus **1/8 Clear → 18CDSWG**.
+- No live database, standalone Inventory workbook, or generated Inventory export is packaged with v0.547.
+
+## Previous release: v0.547
+
+v0.547 corrected the app-generated Inventory XLSX so current Lookup Manager Item IDs are resolved at export time while frozen inventory history remains immutable.
+
+## Previous release: v0.546
+
+v0.546 added Lookup Manager Item ID maintenance and corrected the maintained defaults for 3/8 Acid Etch and 1/8 Clear while keeping schema 21.
+
+## Previous release: v0.545
+
+v0.545 removed the final Order Details fabrication-to-Cutting promotion paths and enforced completion-only Cutting timestamps while keeping schema 21.
+
+## Previous release: v0.544
+
+v0.544 made Booked the sole Cutting-completion authority, prevented reoptimized work from inheriting older Cut state, and redesigned Superseded evidence into compact scroll-free cards while keeping schema 21.
+
+## Previous release: v0.543
+
+v0.543 added production-divergence Superseded detection, live Batch/Optimization/Cutting evidence, current-sequence reoptimization selection, stronger Internal Reject gradient treatment, and the Order Details Progress refresh control while keeping schema 21.
+
+## Previous release: v0.542
+
+v0.542 added zoom-safe Scan layout ownership, stronger current-day FAB refresh, faster Print/Export opening, Remake preview parity, and bounded Today Production Count freshness while keeping schema 21.
+
+## Previous release: v0.541
+
+v0.541 improved FAB date-switch reliability, added audited Staging fabrication override, increased/centered progress checkpoints, and removed the Bay Map assignment N+1 read while keeping schema 21.
+
+## Previous release: v0.540
+
+v0.540 corrected physical stock-sheet counting, added on-demand Superseded refresh, compacted progress, improved Smart Search and repeated Bay/Rack loads, and kept schema 21.
 
 ## Previous release: v0.538
 

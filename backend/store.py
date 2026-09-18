@@ -103,8 +103,9 @@ PASSWORD_RESET_MINUTES = 30
 AW_OPTI_STATUS_OPTIMIZED = 100
 AW_OPTI_STATUS_RELEASED = 200
 AW_OPTI_STATUS_BOOKED = 500
-# v0.504: live A+W evidence includes Booked optimization 8286 with raw status 460.
-# Keep both raw codes authoritative; do not normalize the stored source value.
+# Live A+W sources have reported Booked through both raw 460 and 500. These
+# codes identify the Booked optimization state only; plate flags, cut quantity,
+# or a retained older generation must never promote Optimized/Released to Cut.
 AW_OPTI_STATUS_BOOKED_CODES = frozenset({460, 500})
 AW_OPTIMIZATION_PLATE_SNAPSHOT_METADATA_KEY = "aw_optimization_plate_snapshot_v540"
 PERMISSIONS = [
@@ -978,6 +979,27 @@ ATTENTION_COLOR_DEFAULTS_V530 = {
     "internal_reject": {"label": "Internal Rejects", "color": "#F28C28"},
     "external_remake": {"label": "External Remakes", "color": "#111111"},
     "rush": {"label": "Rushes", "color": "#C62828"},
+}
+
+
+# v0.546: inventory Item IDs are maintained independently from delivery-list
+# glass-profile heat-treatment labels. The mapping table intentionally uses the
+# stock/base glass wording operators recognize during physical inventory. These
+# two repairs correct legacy seed labels without changing schema or overwriting a
+# later operator edit.
+INVENTORY_ITEM_MAPPING_DEFAULTS_V546 = {
+    "G38SATINCLR": {
+        "glassLabel": "3/8 Acid Etch",
+        "legacyLabels": {"3/8 Clear Satin"},
+        "description": '3/8" CLEAR SATIN GLASS 10MM SF',
+        "matchTerms": ["3/8 ACID ETCH", "ACID ETCH", "3/8 CLEAR SATIN", "SATIN CLEAR", "CLEAR SATIN", "G38SATINCLR"],
+    },
+    "18CDSWG": {
+        "glassLabel": "1/8 Clear",
+        "legacyLabels": {"1/8 Clear DS B-Grade Glass"},
+        "description": '1/8" CLEAR DS B-GRADE GLASS',
+        "matchTerms": ["1/8 CLEAR", "1/8 CLEAR DS", "B-GRADE GLASS", "B GRADE GLASS", "18CDSWG"],
+    },
 }
 
 
@@ -2812,12 +2834,112 @@ class BaseDeliveryStore:
             }
         hint_key = f"{identity['order']}:{identity['item']}:{identity['job']}"
         hints = self.aw_fabrication_hints_for_requests([{**identity, "key": hint_key}])
-        status = service.fabrication_status(
-            identity["order"], identity["item"], identity["job"], refresh_missing=True,
-            evidence_after=identity["lastRejectedAt"],
-            label_hint=hints.get(hint_key),
+        hint = dict(hints.get(hint_key) or {})
+        if hint.get("manualMachineComplete") is True:
+            machine_code = str(hint.get("manualMachineCode") or "fabrication").strip().lower() or "fabrication"
+            machine_row = next(
+                (
+                    entry for entry in service.settings_snapshot().get("machines", [])
+                    if str(entry.get("code") or "").strip().lower() == machine_code
+                ),
+                {},
+            )
+            machine_name = str(machine_row.get("name") or machine_code.replace("-", " ").title() or "Fabrication")
+            status = {
+                "machine": machine_name,
+                "machineCode": machine_code,
+                "assignedMachine": machine_name,
+                "assignedMachineCode": machine_code,
+                "actualMachine": machine_name,
+                "actualMachineCode": machine_code,
+                "fabricated": True,
+                "required": True,
+                "enforceable": True,
+                "blockStaging": False,
+                "label": f"Fabricated - {machine_name}",
+                "manualProgressOverride": True,
+                "checkedAt": str(hint.get("manualProgressUpdatedAt") or now_iso()),
+            }
+        else:
+            status = service.fabrication_status(
+                identity["order"], identity["item"], identity["job"], refresh_missing=True,
+                evidence_after=identity["lastRejectedAt"],
+                label_hint=hint,
+            )
+        return {**identity, **status, "cuttingKeyIndex": int(hint.get("keyIndex") or 0)}
+
+    def record_fabrication_scan_override(
+        self,
+        con: sqlite3.Connection,
+        row: sqlite3.Row,
+        list_id: str,
+        preflight: dict[str, Any],
+        user: str,
+        station: str,
+    ) -> None:
+        """Persist an operator-confirmed next-stage scan as lifecycle-safe production evidence."""
+        list_row = con.execute("SELECT delivery_date FROM delivery_lists WHERE id=?", (list_id,)).fetchone()
+        delivery_date = str(row_value(list_row, "delivery_date", "") or "").strip()
+        order_no = str(row_value(row, "order_no", "") or "").strip()
+        raw_item = str(row_value(row, "item_no", "") or "").strip()
+        item_no = raw_item.zfill(3) if raw_item.isdigit() else raw_item
+        job = str(row_value(row, "job", "") or "").strip()
+        reject_cutoff = str(row_value(row, "last_rejected_at", "") or preflight.get("lastRejectedAt") or "").strip()
+        machine_signal = str(
+            preflight.get("actualMachineCode")
+            or preflight.get("machineCode")
+            or preflight.get("assignedMachineCode")
+            or preflight.get("actualMachine")
+            or preflight.get("machine")
+            or preflight.get("assignedMachine")
+            or "fabrication"
+        ).strip().lower()
+        compact_machine = re.sub(r"[^a-z0-9]+", "", machine_signal)
+        if compact_machine in {"wj", "waterjet"}:
+            machine_code = "waterjet"
+        elif compact_machine in {"denver", "denvercnc"}:
+            machine_code = "denver"
+        else:
+            machine_code = re.sub(r"[^a-z0-9_-]+", "-", machine_signal).strip("-")[:40] or "fabrication"
+        changed_at = now_iso()
+        remake_marker = 1 if is_remake_item({
+            "job": job,
+            "processState": row_value(row, "process_state", ""),
+            "queueState": row_value(row, "queue_state", ""),
+        }) else 0
+        con.execute(
+            """INSERT INTO manual_production_progress_overrides
+               (delivery_date, order_no, item_no, job, remake_marker, cutting_complete,
+                machine_code, machine_complete, cutting_key_index, reject_cutoff, updated_by, updated_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?, 1, ?, ?, ?, ?)
+               ON CONFLICT(delivery_date, order_no, item_no) DO UPDATE SET
+                 job=excluded.job, remake_marker=excluded.remake_marker,
+                 cutting_complete=1, machine_code=excluded.machine_code, machine_complete=1,
+                 cutting_key_index=excluded.cutting_key_index, reject_cutoff=excluded.reject_cutoff,
+                 updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+            (
+                delivery_date, order_no, item_no, job, remake_marker, machine_code,
+                int(preflight.get("cuttingKeyIndex") or 0), reject_cutoff, user, changed_at,
+            ),
         )
-        return {**identity, **status}
+        self.insert_audit(
+            con,
+            "line_item",
+            str(row["id"] or ""),
+            "staging_fabrication_override",
+            user,
+            station,
+            f"Next-stage scan confirmed {machine_code} fabrication override",
+            {
+                "listId": list_id,
+                "order": order_no,
+                "item": item_no,
+                "machineCode": machine_code,
+                "deliveryDate": delivery_date,
+                "rejectCutoff": reject_cutoff,
+                "cuttingKeyIndex": int(preflight.get("cuttingKeyIndex") or 0),
+            },
+        )
 
     def latest_internal_reject_at(self, order_no: str, item_no: str = "") -> str:
         """Return the newest reject cutoff used to invalidate old fabrication evidence."""
@@ -3578,6 +3700,12 @@ class BaseDeliveryStore:
             "productionBatch1": safe_int(item.get("productionBatch1")),
             "productionBatch2": safe_int(item.get("productionBatch2")),
             "productionBatch3": safe_int(item.get("productionBatch3")),
+            "batch": str(item.get("batch") or item.get("currentBatch") or "").strip(),
+            "optimization": safe_int(item.get("optimization") or item.get("optimizationNumber")),
+            "optimizationStatusCode": safe_int(item.get("optimizationStatusCode")),
+            "cuttingState": str(item.get("cuttingState") or "").strip(),
+            "cuttingLabel": str(item.get("cuttingLabel") or "").strip(),
+            "cuttingComplete": bool(item.get("cuttingComplete")),
         }
 
     def _normalize_superseded_review_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
@@ -3868,6 +3996,46 @@ class BaseDeliveryStore:
             **summary,
         }
 
+    def _superseded_cutting_evidence_map(
+        self,
+        con: Any,
+        order_numbers: Iterable[str],
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        """Return current A+W Cutting evidence for candidate Order/Item pairs in one batched read."""
+        clean_orders = sorted({str(value or "").strip() for value in order_numbers if str(value or "").strip()})
+        grouped: dict[tuple[str, str], list[Any]] = {}
+        for offset in range(0, len(clean_orders), 400):
+            chunk = clean_orders[offset:offset + 400]
+            if not chunk:
+                continue
+            placeholders = ",".join("?" for _ in chunk)
+            rows = con.execute(
+                f"""SELECT * FROM aw_cutting_generations
+                    WHERE order_no IN ({placeholders})
+                    ORDER BY order_no, item_no, key_index DESC, batch_creation_at DESC, batch_job_number DESC""",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                order_no = str(row_value(row, "order_no", "") or "").strip()
+                item_no = str(row_value(row, "item_no", "") or "").strip()
+                if item_no.isdigit():
+                    item_no = item_no.zfill(3)
+                grouped.setdefault((order_no, item_no), []).append(row)
+
+        evidence: dict[tuple[str, str], dict[str, Any]] = {}
+        for identity, rows in grouped.items():
+            cutting = self.aw_cutting_state(identity[0], identity[1], rows=rows)
+            evidence[identity] = {
+                "batch": str(cutting.get("batch") or "").strip(),
+                "optimization": int(cutting.get("optimization") or 0),
+                "optimizationStatusCode": int(cutting.get("optimizationStatusCode") or 0),
+                "cuttingState": str(cutting.get("state") or "").strip(),
+                "cuttingLabel": str(cutting.get("label") or "").strip(),
+                "cuttingComplete": bool(cutting.get("complete")),
+                "keyIndex": int(cutting.get("keyIndex") or 0),
+            }
+        return evidence
+
     def detect_superseded_order_candidates_from_scanner(
         self,
         delivery_date: str = "",
@@ -3886,7 +4054,7 @@ class BaseDeliveryStore:
             rows = con.execute(
                 f"""
                 SELECT dl.delivery_date, li.order_no, li.item_no, li.job, li.customer,
-                       li.product, li.dimensions, li.qty, li.process_state, li.queue_state
+                       li.product, li.dimensions, li.qty, li.scanned_qty, li.process_state, li.queue_state
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id = li.list_id
                 WHERE dl.status = 'active'
@@ -3900,6 +4068,8 @@ class BaseDeliveryStore:
                 """SELECT delivery_date, original_order_no, replacement_order_no
                    FROM superseded_order_reviews WHERE active = 1"""
             ).fetchall()
+            scanner_order_numbers = {str(row_value(row, "order_no", "") or "").strip() for row in rows}
+            cutting_evidence = self._superseded_cutting_evidence_map(con, scanner_order_numbers)
 
         existing_pairs = {
             (
@@ -3938,7 +4108,7 @@ class BaseDeliveryStore:
                 round(float(row_value(row, "qty", 0) or 0), 4),
                 normalized_text(row_value(row, "dimensions", "")),
             )
-            order["items"].setdefault(item_key, {
+            item_snapshot = order["items"].setdefault(item_key, {
                 "orderNumber": order_no,
                 "itemNumber": item_no,
                 "job": str(row_value(row, "job", "") or "").strip(),
@@ -3946,7 +4116,32 @@ class BaseDeliveryStore:
                 "quantity": float(row_value(row, "qty", 0) or 0),
                 "dimensions": str(row_value(row, "dimensions", "") or "").strip(),
                 "remake": bool(re.search(r"\b(remake|rm)\b", state_signal, re.I)),
+                "scannedQty": 0,
             })
+            item_snapshot["scannedQty"] = max(
+                int(item_snapshot.get("scannedQty") or 0),
+                int(row_value(row, "scanned_qty", 0) or 0),
+            )
+
+        for order in orders.values():
+            production_score = 0
+            production_item_count = 0
+            for item in order["items"].values():
+                item_no = str(item.get("itemNumber") or "").strip()
+                item_evidence = cutting_evidence.get((str(order["orderNumber"]), item_no), {})
+                item.update(item_evidence)
+                score = 0
+                if bool(item_evidence.get("cuttingComplete")):
+                    score = 4
+                elif str(item_evidence.get("batch") or "").strip() or int(item_evidence.get("optimization") or 0) > 0:
+                    score = 2
+                elif int(item.get("scannedQty") or 0) > 0:
+                    score = 1
+                production_score += score
+                if score > 0:
+                    production_item_count += 1
+            order["productionScore"] = production_score
+            order["productionItemCount"] = production_item_count
 
         identity_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for order in orders.values():
@@ -3962,6 +4157,7 @@ class BaseDeliveryStore:
             identity_groups.setdefault(identity, []).append(order)
 
         candidates: list[dict[str, Any]] = []
+        candidate_pairs: set[tuple[str, frozenset[str]]] = set()
         already_reviewed = 0
         for identity, matching_orders in identity_groups.items():
             normal_orders = [order for order in matching_orders if not order["remake"]]
@@ -3972,6 +4168,9 @@ class BaseDeliveryStore:
                     if pair_key in existing_pairs:
                         already_reviewed += 1
                         continue
+                    if pair_key in candidate_pairs:
+                        continue
+                    candidate_pairs.add(pair_key)
                     identity_label = " | ".join(value for value in (
                         normal_order["job"], normal_order["customer"], normal_order["deliveryDate"]
                     ) if value)
@@ -3989,10 +4188,57 @@ class BaseDeliveryStore:
                             "sameJob": True,
                             "sameCustomer": True,
                             "sameItemSet": True,
+                            "exactItemOverlapCount": len(normal_order["items"]),
                             "replacementMarkedRemake": True,
                         },
                         "originalItems": list(normal_order["items"].values()),
                         "replacementItems": list(remake_order["items"].values()),
+                    })
+
+            # v0.543: exact normal/normal duplicates also require review when one
+            # copy has entered production and the other has no production evidence.
+            # This catches A+W duplicate orders whose header identity differs and
+            # therefore cannot be found by the legacy header/remake-only rules.
+            for left_index, left_order in enumerate(normal_orders):
+                for right_order in normal_orders[left_index + 1:]:
+                    pair_key = (left_order["deliveryDate"], frozenset((left_order["orderNumber"], right_order["orderNumber"])))
+                    if pair_key in existing_pairs:
+                        already_reviewed += 1
+                        continue
+                    if pair_key in candidate_pairs:
+                        continue
+                    left_score = int(left_order.get("productionScore") or 0)
+                    right_score = int(right_order.get("productionScore") or 0)
+                    if not ((left_score == 0 and right_score > 0) or (right_score == 0 and left_score > 0)):
+                        continue
+                    unproduced = left_order if left_score == 0 else right_order
+                    produced = right_order if left_score == 0 else left_order
+                    candidate_pairs.add(pair_key)
+                    identity_label = " | ".join(value for value in (
+                        unproduced["job"], unproduced["customer"], unproduced["deliveryDate"]
+                    ) if value)
+                    candidates.append({
+                        "candidateKey": f"{unproduced['deliveryDate']}|scanner-production-duplicate|{unproduced['orderNumber']}|{produced['orderNumber']}",
+                        "deliveryDate": unproduced["deliveryDate"],
+                        "headerIdentity": identity_label,
+                        "originalOrderNumber": unproduced["orderNumber"],
+                        "replacementOrderNumber": produced["orderNumber"],
+                        "confidence": "high",
+                        "evidence": {
+                            "rule": "v0.543-current-scanner-normal-production-divergence-1",
+                            "source": "current scanner rows + synchronized A+W production evidence",
+                            "sameDeliveryDate": True,
+                            "sameJob": True,
+                            "sameCustomer": True,
+                            "sameItemSet": True,
+                            "exactItemOverlapCount": len(unproduced["items"]),
+                            "bothNormalOrders": True,
+                            "originalHasProductionEvidence": False,
+                            "replacementHasProductionEvidence": True,
+                            "replacementProductionItemCount": int(produced.get("productionItemCount") or 0),
+                        },
+                        "originalItems": list(unproduced["items"].values()),
+                        "replacementItems": list(produced["items"].values()),
                     })
 
         result = self.sync_superseded_order_candidates(candidates, user=user)
@@ -4193,6 +4439,33 @@ class BaseDeliveryStore:
                 """,
                 params,
             ).fetchall()
+            review_orders = {
+                str(value or "").strip()
+                for row in rows
+                for value in (row_value(row, "original_order_no", ""), row_value(row, "replacement_order_no", ""))
+                if str(value or "").strip()
+            }
+            review_cutting = self._superseded_cutting_evidence_map(con, review_orders)
+
+            def enrich_items(items: Any, order_no: str) -> list[dict[str, Any]]:
+                enriched: list[dict[str, Any]] = []
+                for raw_item in items if isinstance(items, list) else []:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    item = dict(raw_item)
+                    item_no = str(item.get("itemNumber") or item.get("item") or "").strip()
+                    if item_no.isdigit():
+                        item_no = item_no.zfill(3)
+                    live = review_cutting.get((str(order_no or "").strip(), item_no), {})
+                    if live:
+                        item.update(live)
+                    if not str(item.get("batch") or "").strip():
+                        fallback_batch = next((int(item.get(key) or 0) for key in ("productionBatch1", "productionBatch2", "productionBatch3") if int(item.get(key) or 0) > 0), 0)
+                        if fallback_batch:
+                            item["batch"] = str(fallback_batch)
+                    enriched.append(item)
+                return enriched
+
             reviews: list[dict[str, Any]] = []
             for row in rows:
                 try:
@@ -4207,6 +4480,8 @@ class BaseDeliveryStore:
                     replacement_items = json.loads(str(row["replacement_items_json"] or "[]"))
                 except Exception:
                     replacement_items = []
+                original_items = enrich_items(original_items, str(row["original_order_no"] or ""))
+                replacement_items = enrich_items(replacement_items, str(row["replacement_order_no"] or ""))
                 original_impact = self._superseded_review_live_impact(
                     con,
                     str(row["delivery_date"] or ""),
@@ -6590,23 +6865,11 @@ class BaseDeliveryStore:
                         for row in sorted(generation_rows, key=lambda value: (int(value.get("bomId") or 0), str(value.get("sourceRowId") or "")))
                     ],
                 }
-                incoming_quantity = float(source_payload["cutEvidence"].get("quantity") or 0)
-                incoming_cut_quantity = float(source_payload["cutEvidence"].get("cutQuantity") or 0)
-                incoming_assignments = source_payload["cutEvidence"].get("sequenceAssignments") or []
-                incoming_plates_complete = bool(incoming_assignments) and all(
-                    bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
-                    for row in incoming_assignments if isinstance(row, dict)
-                ) and len(incoming_assignments) >= max(1, int(round(incoming_quantity)))
+                # v0.544: the optimization lifecycle is authoritative. Physical
+                # plate/cut-quantity/book-history fields remain useful diagnostics,
+                # but only a Booked optimization means Cutting is complete.
                 incoming_complete = bool(
-                    booking_row.get("cutCompletedAt")
-                    or int(optimization_row.get("optimizationStatusCode") or 0) in AW_OPTI_STATUS_BOOKED_CODES
-                    or (incoming_quantity > 0 and incoming_cut_quantity >= incoming_quantity)
-                    or incoming_plates_complete
-                    or (
-                        not incoming_assignments and incoming_quantity <= 1
-                        and source_payload["cutEvidence"].get("plateCut")
-                        and source_payload["cutEvidence"].get("plateStockBooked")
-                    )
+                    int(optimization_row.get("optimizationStatusCode") or 0) in AW_OPTI_STATUS_BOOKED_CODES
                 )
                 if incoming_complete:
                     source_payload["progressMemory"] = {
@@ -6656,43 +6919,9 @@ class BaseDeliveryStore:
                     "source_row_count", "source_payload_json",
                 )) if existing else None
                 if existing:
+                    # Do not carry a prior Booked memory into a newer Optimized or
+                    # Released snapshot. Current optimization status is authoritative.
                     previous = self._aw_cutting_public_row(existing)
-                    previous_assignments = [row for row in (previous.get("sequenceAssignments") or []) if isinstance(row, dict)]
-                    previous_quantity = float(previous.get("quantity") or 0)
-                    previous_cut_quantity = float(previous.get("cutQuantity") or 0)
-                    previous_plates_complete = bool(previous_assignments) and all(
-                        bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))
-                        for row in previous_assignments
-                    ) and len(previous_assignments) >= max(1, int(round(previous_quantity)))
-                    previous_complete = bool(
-                        previous.get("rememberedCutting")
-                        or previous.get("cutCompletedAt")
-                        or int(previous.get("optimizationStatusCode") or 0) in AW_OPTI_STATUS_BOOKED_CODES
-                        or (previous_quantity > 0 and previous_cut_quantity >= previous_quantity)
-                        or previous_plates_complete
-                        or (
-                            not previous_assignments and previous_quantity <= 1
-                            and previous.get("optimizationPlateCut") and previous.get("optimizationPlateStockBooked")
-                        )
-                    )
-                    if previous_complete:
-                        previous_confirmed_at = str(
-                            previous.get("cutFirstConfirmedAt")
-                            or previous.get("cutCompletedAt")
-                            or previous.get("optimizationLastChangedAt")
-                            or previous.get("batchLastChangedAt")
-                            or previous.get("batchCreatedAt")
-                            or ""
-                        )
-                        source_payload["progressMemory"] = {
-                            "cutComplete": True,
-                            "cutFirstConfirmedAt": previous_confirmed_at,
-                            "rule": "reset-only-on-reject-or-remake",
-                        }
-                        payload_json = json.dumps(source_payload, sort_keys=True, separators=(",", ":"))
-                        mutable_values = list(values)
-                        mutable_values[19] = payload_json
-                        values = tuple(mutable_values)
                 if existing_values == values:
                     unchanged += 1
                     continue
@@ -6813,59 +7042,20 @@ class BaseDeliveryStore:
         optimization_status = int(current.get("optimizationStatusCode") or 0)
         batch_status = int(current.get("batchStatusCode") or 0)
         has_current_generation = not reject_epoch or batch_epoch > reject_epoch
-        # A positive Cutting observation is a physical milestone. A+W can archive
-        # or rebatch a pane and later return a less complete-looking row, so search
-        # every retained row in the current KEYINDEX lifecycle. A newer KEYINDEX
-        # (remake) or evidence after a reject starts a new lifecycle and therefore
-        # cannot inherit the old cut result.
-        current_key_index = int(current.get("keyIndex") or 0)
+        # v0.544: completion belongs to the current optimization only. An older
+        # Booked optimization in the same KEYINDEX remains visible in history but
+        # cannot make a newer Optimized or Released optimization appear cut.
+        current_is_booked = optimization_status in AW_OPTI_STATUS_BOOKED_CODES
+        cut_evidence_source = f"optimization_status_{optimization_status}" if current_is_booked else ""
 
-        def cutting_evidence(candidate: dict[str, Any]) -> str:
-            candidate_batch_epoch = self._aw_cutting_timestamp_epoch(candidate.get("batchCreatedAt"))
-            has_generation = not reject_epoch or candidate_batch_epoch > reject_epoch
-            cut_epoch = self._aw_cutting_timestamp_epoch(candidate.get("cutCompletedAt"))
-            if cut_epoch and (not reject_epoch or cut_epoch > reject_epoch):
-                return "automatic_cutting_booking"
-            if not has_generation:
-                return ""
-            memory_epoch = self._aw_cutting_timestamp_epoch(candidate.get("cutFirstConfirmedAt"))
-            candidate_status = int(candidate.get("optimizationStatusCode") or 0)
-            # A+W exposes Booked through verified status codes 460 and 500.
-            # Historical v0.498 contract: optimization_status == AW_OPTI_STATUS_BOOKED
-            # v0.504 generalized contract: optimization_status in AW_OPTI_STATUS_BOOKED_CODES
-            if candidate_status in AW_OPTI_STATUS_BOOKED_CODES:
-                return f"optimization_status_{candidate_status}"
-            source_quantity = float(candidate.get("quantity") or 0)
-            source_cut_quantity = float(candidate.get("cutQuantity") or 0)
-            assignments = [row for row in (candidate.get("sequenceAssignments") or []) if isinstance(row, dict)]
-            completed_assignments = [row for row in assignments if bool(row.get("plateCut")) and bool(row.get("plateStockBooked"))]
-            expected = max(1, int(round(source_quantity))) if source_quantity > 0 else len(assignments)
-            all_plates_complete = bool(assignments) and len(assignments) >= expected and len(completed_assignments) == len(assignments)
-            single_plate_complete = (
-                not assignments and source_quantity <= 1
-                and bool(candidate.get("optimizationPlateCut"))
-                and bool(candidate.get("optimizationPlateStockBooked"))
-            )
-            if all_plates_complete or single_plate_complete:
-                return "optimization_plate_cut"
-            if source_quantity > 0 and source_cut_quantity >= source_quantity:
-                return "prod_jobitem_cut_quantity"
-            if candidate.get("rememberedCutting") and (not reject_epoch or memory_epoch > reject_epoch):
-                return "remembered_cutting_completion"
-            return ""
-
-        lifecycle_history = [row for row in history if int(row.get("keyIndex") or 0) == current_key_index]
-        cut_evidence_row = next((row for row in lifecycle_history if cutting_evidence(row)), None)
-        cut_evidence_source = cutting_evidence(cut_evidence_row) if cut_evidence_row else ""
-
-        if cut_evidence_source:
-            state = "cut"
-            label = "Cut"
-            complete = True
-        elif reject_epoch and not has_current_generation:
+        if reject_epoch and not has_current_generation:
             state = "needs_recut"
             label = "Needs Recutting"
             complete = False
+        elif current_is_booked:
+            state = "cut"
+            label = "Cut"
+            complete = True
         elif optimization_status == AW_OPTI_STATUS_RELEASED:
             state = "released"
             label = "Cutting"
@@ -6891,9 +7081,9 @@ class BaseDeliveryStore:
             "needsRecutting": state == "needs_recut",
             "evidenceAfter": str(last_rejected_at or ""),
             "history": history,
-            "evidenceSource": cut_evidence_source or str(current.get("evidenceSource") or ""),
-            "rememberedCutting": bool(cut_evidence_row is not None and cut_evidence_row is not history[0]),
-            "cutEvidenceBatch": str((cut_evidence_row or {}).get("batch") or ""),
+            "evidenceSource": cut_evidence_source,
+            "rememberedCutting": False,
+            "cutEvidenceBatch": str(current.get("batch") or "") if current_is_booked else "",
         })
         current["irregularities"] = self.aw_cutting_irregularities(current)
         current["irregular"] = bool(current["irregularities"])
@@ -7369,26 +7559,16 @@ class BaseDeliveryStore:
                 item["productionFiles"] = item_assets
                 fabrication = item_assets.get("fabrication") if isinstance(item_assets, dict) else {}
                 cutting = item.get("cutting") if isinstance(item.get("cutting"), dict) else {}
-                # v0.501 consistency guard: verified Denver/Waterjet completion is
-                # downstream of Cutting. If current-generation fabrication evidence
-                # exists (production_files already rejects evidence older than the
-                # latest Internal Reject), Cutting cannot truthfully display NOT
-                # OPTIMIZED merely because the A+W production enrichment row is
-                # missing or late. Preserve the raw A+W history and mark the source.
+                # v0.544: downstream Denver/WaterJet evidence is useful context but
+                # does not own the A+W Cutting lifecycle. Keep the machine evidence
+                # attached for diagnosis while Optimized/Released stays incomplete
+                # until the current optimization itself becomes Booked.
                 if isinstance(fabrication, dict) and fabrication.get("fabricated") is True and not cutting.get("complete"):
                     cutting = dict(cutting)
                     cutting.update({
-                        "state": "cut",
-                        "label": "Cut",
-                        "complete": True,
-                        "released": False,
-                        "needsRecutting": False,
-                        "inferredFromFabrication": True,
-                        "evidenceSource": "downstream_fabrication",
+                        "downstreamFabricationObserved": True,
                         "fabricationMachine": str(fabrication.get("actualMachine") or fabrication.get("machine") or ""),
                     })
-                    cutting["irregularities"] = self.aw_cutting_irregularities(cutting)
-                    cutting["irregular"] = bool(cutting["irregularities"])
                     item["cutting"] = cutting
         return {
             "order": clean_order,
@@ -9052,6 +9232,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.repair_manual_assign_bay_visibility(con)
                 self.seed_bay_auto_assign_settings(con)
                 self.seed_racks(con)
+                self.ensure_inventory_item_mapping_defaults(con)
                 self.repair_route_stage_memberships_if_needed(con)
             self.ensure_aw_internal_reject_mirrors()
             self.refresh_stage_definition_cache()
@@ -13985,6 +14166,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         }
         hidden_values: dict[str, set[str]] = {kind: set() for kind in buckets}
         glass_aliases: list[dict[str, Any]] = []
+        inventory_item_mappings: list[dict[str, Any]] = []
 
         def add_lookup(
             kind: str,
@@ -14049,6 +14231,31 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ORDER BY type, label, value
                 """
             ).fetchall()
+
+            for mapping_row in self._inventory_mapping_rows(con):
+                try:
+                    mapping_terms = json.loads(str(row_value(mapping_row, "match_terms_json", "[]") or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    mapping_terms = []
+                if not isinstance(mapping_terms, list):
+                    mapping_terms = []
+                item_id = str(row_value(mapping_row, "item_id", "") or "").strip()
+                glass_label = str(row_value(mapping_row, "glass_label", "") or "").strip()
+                if not item_id or not glass_label:
+                    continue
+                inventory_item_mappings.append({
+                    "type": "inventory_item_id",
+                    "value": item_id,
+                    "itemId": item_id,
+                    "label": glass_label,
+                    "glassLabel": glass_label,
+                    "category": str(row_value(mapping_row, "description", "") or "").strip(),
+                    "description": str(row_value(mapping_row, "description", "") or "").strip(),
+                    "matchTerms": "; ".join(str(term or "").strip() for term in mapping_terms if str(term or "").strip()),
+                    "matchTermsList": [str(term or "").strip() for term in mapping_terms if str(term or "").strip()],
+                    "sortOrder": int(row_value(mapping_row, "sort_order", 0) or 0),
+                    "source": "maintained",
+                })
 
             # v0.360: glass_alias rows are schema-neutral administrator links.
             # They never rewrite imported product text; callers can resolve the
@@ -14201,6 +14408,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 buckets["attention_color"].values(),
                 key=lambda item: list(ATTENTION_COLOR_DEFAULTS_V530).index(item["value"]) if item["value"] in ATTENTION_COLOR_DEFAULTS_V530 else 99,
             ),
+            "inventoryItemMappings": sorted(inventory_item_mappings, key=lambda item: (int(item.get("sortOrder") or 0), item["glassLabel"].lower(), item["itemId"].lower())),
             "stages": self.get_stage_definitions(),
         }
 
@@ -14214,6 +14422,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         stores the row, then returns the refreshed Lookup Manager libraries.
         """
         lookup_type = str(data.get("type") or "").strip().lower()
+        if lookup_type == "inventory_item_id":
+            return self.upsert_inventory_item_mapping(data, user)
         if lookup_type not in {"product", "route", "process", "glass_cost", "glass_color", "attention_color"} and lookup_type != "stage_definition":
             raise ValueError("Lookup type must be product, route, process, glass cost, glass color, attention color, or stage definition")
         value = str(data.get("value") or "").strip()
@@ -14422,6 +14632,87 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "",
                 "",
                 {"glassType": value, "label": label, "costPerSqft": rate, "color": color},
+            )
+            con.commit()
+        return self.get_manual_edit_lookups()
+
+    def upsert_inventory_item_mapping(self, data: dict[str, Any], user: str) -> dict[str, list[dict[str, Any]]]:
+        """Create or edit one physical-inventory glass-to-Item-ID mapping."""
+        item_id = str(data.get("itemId") or data.get("value") or "").strip().upper()[:80]
+        original_item_id = str(data.get("originalItemId") or data.get("originalValue") or "").strip().upper()[:80]
+        glass_label = " ".join(str(data.get("glassLabel") or data.get("label") or "").split())[:255]
+        description = " ".join(str(data.get("description") or data.get("category") or "").split())[:500]
+        raw_terms = data.get("matchTerms") if data.get("matchTerms") is not None else data.get("match_terms")
+        if isinstance(raw_terms, list):
+            terms = [" ".join(str(value or "").split()).strip() for value in raw_terms]
+        else:
+            terms = [" ".join(value.split()).strip() for value in re.split(r"[;,\n]+", str(raw_terms or ""))]
+        terms = list(dict.fromkeys(value for value in terms if value))
+        if not item_id:
+            raise ValueError("Inventory Item ID is required")
+        if not glass_label:
+            raise ValueError("Glass type is required for the Inventory Item ID")
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            existing_label = con.execute(
+                """SELECT item_id FROM inventory_item_mappings
+                   WHERE active = 1 AND LOWER(glass_label) = LOWER(?) AND item_id <> ?
+                   ORDER BY sort_order, item_id LIMIT 1""",
+                (glass_label, item_id),
+            ).fetchone()
+            if existing_label and str(row_value(existing_label, "item_id", "") or "").upper() != original_item_id:
+                raise ValueError(f"{glass_label} already uses Item ID {row_value(existing_label, 'item_id', '')}. Edit that mapping instead.")
+            existing_item = con.execute(
+                "SELECT item_id, glass_label, sort_order, created_at FROM inventory_item_mappings WHERE item_id = ?",
+                (item_id,),
+            ).fetchone()
+            if existing_item:
+                existing_glass = str(row_value(existing_item, "glass_label", "") or "").strip()
+                if existing_glass and existing_glass.lower() != glass_label.lower() and original_item_id != item_id:
+                    raise ValueError(f"Item ID {item_id} is already assigned to {existing_glass}")
+                sort_order = int(row_value(existing_item, "sort_order", 0) or 0)
+                if sort_order <= 0:
+                    max_row = con.execute("SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM inventory_item_mappings").fetchone()
+                    sort_order = int(row_value(max_row, "max_sort", 0) or 0) + 1
+            else:
+                max_row = con.execute("SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM inventory_item_mappings").fetchone()
+                sort_order = int(row_value(max_row, "max_sort", 0) or 0) + 1
+            if original_item_id and original_item_id != item_id:
+                con.execute(
+                    "UPDATE inventory_item_mappings SET active = 0, updated_at = ? WHERE item_id = ?",
+                    (now, original_item_id),
+                )
+            con.execute(
+                """
+                INSERT INTO inventory_item_mappings
+                    (item_id, glass_label, description, match_terms_json, sort_order, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET
+                    glass_label = excluded.glass_label,
+                    description = excluded.description,
+                    match_terms_json = excluded.match_terms_json,
+                    sort_order = excluded.sort_order,
+                    active = 1,
+                    updated_at = excluded.updated_at
+                """,
+                (item_id, glass_label, description, json.dumps(terms, separators=(",", ":")), sort_order, now, now),
+            )
+            self.insert_audit(
+                con,
+                "inventory_item_mapping",
+                item_id,
+                "upsert_inventory_item_mapping",
+                user,
+                "",
+                "",
+                {
+                    "itemId": item_id,
+                    "originalItemId": original_item_id,
+                    "glassLabel": glass_label,
+                    "description": description,
+                    "matchTerms": terms,
+                },
             )
             con.commit()
         return self.get_manual_edit_lookups()
@@ -14646,6 +14937,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         untouched for audit and operational safety.
         """
         clean_type = str(lookup_type or "").strip().lower()
+        if clean_type == "inventory_item_id":
+            clean_value = str(value or "").strip().upper()[:80]
+            if not clean_value:
+                raise ValueError("Inventory Item ID is required")
+            with self.connect() as con:
+                con.execute("BEGIN IMMEDIATE")
+                row = con.execute("SELECT glass_label FROM inventory_item_mappings WHERE item_id = ?", (clean_value,)).fetchone()
+                if not row:
+                    raise ValueError("Inventory Item ID mapping was not found")
+                con.execute("UPDATE inventory_item_mappings SET active = 0, updated_at = ? WHERE item_id = ?", (now_iso(), clean_value))
+                self.insert_audit(con, "inventory_item_mapping", clean_value, "remove_inventory_item_mapping", user, "", "", {"itemId": clean_value, "glassLabel": str(row_value(row, "glass_label", "") or "")})
+                con.commit()
+            return self.get_manual_edit_lookups()
         if clean_type not in {"product", "route", "process", "glass_cost", "glass_color", "stage_definition"}:
             raise ValueError("Unsupported lookup type")
         clean_value = str(value or "").strip()
@@ -18598,6 +18902,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         user = request_user_name(scan_request)
         station = request_station(scan_request)
         is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
+        fabrication_override_requested = str(scan_request.get("fabricationOverride") or "").lower() in {"1", "true", "yes"}
         requested_scan_qty = request_scan_quantity(scan_request)
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
@@ -18658,8 +18963,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 fabrication_preflight
                 and str(fabrication_preflight.get("lineItemId") or "") == str(row["id"] or "")
                 and fabrication_preflight.get("blockStaging")
+                and not fabrication_override_requested
             ):
-                machine = str(fabrication_preflight.get("machine") or "the assigned fabrication machine")
+                machine = str(
+                    fabrication_preflight.get("machine")
+                    or fabrication_preflight.get("assignedMachine")
+                    or "the assigned fabrication machine"
+                )
                 message = "Fabrication required before Staging"
                 reason = f"This item is assigned to {machine}, but no completed fabrication evidence was found. Send it to {machine} before scanning it into Staging."
                 last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "error", message, reason)
@@ -18675,8 +18985,9 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 )
                 con.commit()
                 payload = self._get_payload(con, list_id, last)
-                payload["fabricationGate"] = fabrication_preflight
+                payload["fabricationGate"] = dict(fabrication_preflight)
                 payload["fabricationGate"]["message"] = reason
+                payload["fabricationOverrideRequired"] = True
                 return payload
 
             remaining_qty = max(int(row["qty"] or 0) - int(row["scanned_qty"] or 0), 0)
@@ -18784,6 +19095,19 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 if mismatch:
                     destination_override = rack_destination
 
+            fabrication_override_confirmed = bool(
+                fabrication_override_requested
+                and fabrication_preflight
+                and str(fabrication_preflight.get("lineItemId") or "") == str(row["id"] or "")
+                and fabrication_preflight.get("blockStaging")
+            )
+            # Save fabrication evidence only after every downstream scan gate has
+            # accepted this scan. A rack/destination rejection must not create a
+            # machine-complete override for a scan that never completed.
+            if fabrication_override_confirmed:
+                self.record_fabrication_scan_override(
+                    con, row, list_id, fabrication_preflight, user, station,
+                )
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (scan_qty, row["id"]))
             if rack_for_scan:
                 con.execute(
@@ -22931,43 +23255,60 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             "payload": payload,
         }
 
-    def bay_from_row(self, con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    def active_bay_assignment_rows(
+        self,
+        con: sqlite3.Connection,
+        bay_ids: Iterable[int] | None = None,
+    ) -> list[sqlite3.Row]:
+        """Load active Bay Map assignments in one query, including latest scan facts."""
+        clean_ids = sorted({int(value) for value in (bay_ids or []) if int(value) > 0})
+        bay_clause = ""
+        params: tuple[Any, ...] = ()
+        if clean_ids:
+            bay_clause = f" AND ba.bay_id IN ({','.join('?' for _ in clean_ids)})"
+            params = tuple(clean_ids)
+        return con.execute(
+            f"""
+            SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
+                   li.dimensions, li.product, li.job, li.process_state, li.queue_state,
+                   li.priority_delivery_date, li.priority_direct_to_truck,
+                   dl.delivery_date, dl.stage, bss.snoozed_until,
+                   latest_scan.created_at AS last_scanned_at,
+                   latest_scan.station AS last_scanned_station
+            FROM bay_assignments ba
+            JOIN line_items li ON li.id = ba.line_item_id
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            LEFT JOIN bay_stale_snoozes bss ON bss.assignment_id = ba.id
+            LEFT JOIN (
+                SELECT se.line_item_id, se.created_at, se.station
+                FROM scan_events se
+                JOIN (
+                    SELECT line_item_id, MAX(id) AS event_id
+                    FROM scan_events
+                    WHERE qty_delta > 0 AND line_item_id IS NOT NULL
+                    GROUP BY line_item_id
+                ) newest ON newest.event_id = se.id
+            ) latest_scan ON latest_scan.line_item_id = li.id
+            WHERE ba.status NOT IN ('Cleared', 'Cancelled')
+              AND COALESCE(li.is_deleted, 0) = 0
+              {bay_clause}
+            ORDER BY ba.bay_id, ba.assigned_at DESC
+            """,
+            params,
+        ).fetchall()
+
+    def bay_from_row(
+        self,
+        con: sqlite3.Connection,
+        row: sqlite3.Row,
+        assignments: Iterable[sqlite3.Row] | None = None,
+    ) -> dict[str, Any]:
         """Purpose: Run the bay from row workflow for the delivery-list scanner.
 
         Effects: This function reads or changes database records.
         Flow: Normalizes inputs, executes the named responsibility, and returns the result expected by its callers.
         """
-        assignments = con.execute(
-            """
-            SELECT ba.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.customer,
-                   li.dimensions, li.product, li.job, li.process_state, li.queue_state,
-                   li.priority_delivery_date, li.priority_direct_to_truck,
-                   dl.delivery_date, dl.stage, bss.snoozed_until,
-                   (
-                    SELECT se.created_at
-                    FROM scan_events se
-                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
-                    ORDER BY se.created_at DESC, se.id DESC
-                    LIMIT 1
-                   ) AS last_scanned_at,
-                   (
-                    SELECT se.station
-                    FROM scan_events se
-                    WHERE se.line_item_id = li.id AND se.qty_delta > 0
-                    ORDER BY se.created_at DESC, se.id DESC
-                    LIMIT 1
-                   ) AS last_scanned_station
-            FROM bay_assignments ba
-            JOIN line_items li ON li.id = ba.line_item_id
-            JOIN delivery_lists dl ON dl.id = li.list_id
-            LEFT JOIN bay_stale_snoozes bss ON bss.assignment_id = ba.id
-            WHERE ba.bay_id = ?
-              AND ba.status NOT IN ('Cleared', 'Cancelled')
-              AND COALESCE(li.is_deleted, 0) = 0
-            ORDER BY ba.assigned_at DESC
-            """,
-            (row["id"],),
-        ).fetchall()
+        assignments = list(assignments) if assignments is not None else self.active_bay_assignment_rows(con, [int(row["id"])])
         assigned_qty = sum(int(item["assigned_qty"] or 0) for item in assignments)
         has_physical_assignment = any(str(item["status"] or "") not in {"PreAssigned"} for item in assignments)
         all_preassigned = bool(assignments) and not has_physical_assignment
@@ -23093,7 +23434,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 ORDER BY COALESCE(layout_col, 9999), COALESCE(layout_row, 9999), sort_order, bay_code
                 """
             ).fetchall()
-            return [self.bay_from_row(con, row) for row in rows]
+            assignment_rows = self.active_bay_assignment_rows(con, [int(row["id"]) for row in rows])
+            assignments_by_bay: dict[int, list[sqlite3.Row]] = {}
+            for assignment in assignment_rows:
+                assignments_by_bay.setdefault(int(assignment["bay_id"]), []).append(assignment)
+            return [self.bay_from_row(con, row, assignments_by_bay.get(int(row["id"]), [])) for row in rows]
 
 
     def get_bay_job_details(self, bay_code: str) -> dict[str, Any]:
@@ -28573,6 +28918,61 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         except (TypeError, ValueError):
             return 0.0
 
+    def ensure_inventory_item_mapping_defaults(self, con: Any) -> None:
+        """Repair only the two legacy inventory mappings corrected in v0.546.
+
+        Existing operator edits are never overwritten. A missing default is inserted;
+        an existing row is updated only when its label still matches the legacy seed
+        shipped by schema 20. Deactivated rows stay deactivated.
+        """
+        try:
+            max_sort_row = con.execute("SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM inventory_item_mappings").fetchone()
+        except Exception:
+            return
+        next_sort = int(row_value(max_sort_row, "max_sort", 0) or 0) + 1
+        now = now_iso()
+        for item_id, meta in INVENTORY_ITEM_MAPPING_DEFAULTS_V546.items():
+            existing = con.execute(
+                "SELECT item_id, glass_label, active, sort_order FROM inventory_item_mappings WHERE item_id = ?",
+                (item_id,),
+            ).fetchone()
+            terms_json = json.dumps(meta["matchTerms"], separators=(",", ":"))
+            if existing is None:
+                con.execute(
+                    """
+                    INSERT INTO inventory_item_mappings
+                        (item_id, glass_label, description, match_terms_json, sort_order, active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                    """,
+                    (item_id, meta["glassLabel"], meta["description"], terms_json, next_sort, now, now),
+                )
+                next_sort += 1
+                continue
+            if not int(row_value(existing, "active", 0) or 0):
+                continue
+            current_label = " ".join(str(row_value(existing, "glass_label", "") or "").split()).strip()
+            legacy_labels = {str(value).strip().lower() for value in meta["legacyLabels"]}
+            if current_label.lower() not in legacy_labels:
+                continue
+            conflict = con.execute(
+                """
+                SELECT item_id FROM inventory_item_mappings
+                WHERE active = 1 AND LOWER(glass_label) = LOWER(?) AND item_id <> ?
+                LIMIT 1
+                """,
+                (meta["glassLabel"], item_id),
+            ).fetchone()
+            if conflict:
+                continue
+            con.execute(
+                """
+                UPDATE inventory_item_mappings
+                SET glass_label = ?, description = ?, match_terms_json = ?, updated_at = ?
+                WHERE item_id = ?
+                """,
+                (meta["glassLabel"], meta["description"], terms_json, now, item_id),
+            )
+
     def _inventory_mapping_rows(self, con: Any) -> list[Any]:
         return con.execute(
             """
@@ -29935,6 +30335,49 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             session_row = self._inventory_session_row_con(con, session_id)
             self._require_inventory_location(user, str(row_value(session_row, "location") or ""))
             detail = self._inventory_session_detail_con(con, session_row)
+            # v0.547: exported Item IDs follow the currently maintained Lookup
+            # Manager mapping even when the inventory session was started before
+            # that mapping was added or edited. The frozen session rows remain
+            # unchanged for audit/reconciliation history; only the generated XLSX
+            # presentation is refreshed here.
+            export_mappings = []
+            for row in self._inventory_mapping_rows(con):
+                try:
+                    match_terms = json.loads(str(row_value(row, "match_terms_json") or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    match_terms = []
+                export_mappings.append({
+                    "itemId": str(row_value(row, "item_id") or "").strip(),
+                    "glassLabel": str(row_value(row, "glass_label") or "").strip(),
+                    "description": str(row_value(row, "description") or "").strip(),
+                    "matchTerms": [str(value or "").strip() for value in match_terms if str(value or "").strip()],
+                })
+
+        def export_item_id(glass_type: Any, stored_item_id: Any = "") -> str:
+            """Resolve current maintained Item ID for XLSX presentation only."""
+            raw_glass = " ".join(str(glass_type or "").split()).strip()
+            stored = str(stored_item_id or "").strip()
+            if not raw_glass:
+                return stored
+            upper = raw_glass.upper()
+            compact = " ".join(re.sub(r"[^A-Z0-9/]+", " ", upper).split())
+            for mapping in export_mappings:
+                item_id = str(mapping.get("itemId") or "").strip()
+                label = str(mapping.get("glassLabel") or "").strip()
+                if upper in {item_id.upper(), label.upper()}:
+                    return item_id or stored
+            best: tuple[int, str] | None = None
+            for mapping in export_mappings:
+                item_id = str(mapping.get("itemId") or "").strip()
+                candidates = [mapping.get("glassLabel"), mapping.get("description"), *(mapping.get("matchTerms") or [])]
+                for candidate in candidates:
+                    normalized = " ".join(re.sub(r"[^A-Z0-9/]+", " ", str(candidate or "").upper()).split())
+                    if not normalized or normalized not in compact:
+                        continue
+                    score = len(normalized)
+                    if best is None or score > best[0]:
+                        best = (score, item_id)
+            return best[1] if best and best[1] else stored
 
         def readable_inventory_time(value: Any) -> str:
             text = str(value or "").strip()
@@ -29958,18 +30401,34 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             ["Missing Physical", detail["statusCounts"]["missingPhysical"]], ["Not In System", detail["statusCounts"]["notInSystem"]], [],
             ["Glass Type", "Item ID", "System Qty", "Physical Qty", "Qty Variance", "System SQFT", "Physical SQFT", "SQFT Variance"],
         ]
-        for item in detail["glassTotals"]:
-            summary_rows.append([item["glassType"], item["itemId"], item["expectedQty"], item["scannedQty"], item["varianceQty"],
-                                 item["expectedSqft"], item["scannedSqft"], item["varianceSqft"]])
+        export_totals: dict[tuple[str, str], dict[str, Any]] = {}
+        for source_name, items in (("expected", detail["expectedItems"]), ("scanned", detail["scans"])):
+            for item in items:
+                glass_type = str(item.get("glassType") or "Unmapped")
+                current_item_id = export_item_id(glass_type, item.get("itemId", ""))
+                key = (glass_type, current_item_id)
+                target = export_totals.setdefault(key, {
+                    "glassType": glass_type, "itemId": current_item_id,
+                    "expectedQty": 0, "expectedSqft": 0.0, "scannedQty": 0, "scannedSqft": 0.0,
+                })
+                target[f"{source_name}Qty"] += int(item.get("qty") or 0)
+                target[f"{source_name}Sqft"] += float(item.get("totalSqft") or 0)
+        for item in sorted(export_totals.values(), key=lambda value: (str(value["glassType"]), str(value["itemId"]))):
+            expected_sqft = self._inventory_round_sqft(item["expectedSqft"])
+            scanned_sqft = self._inventory_round_sqft(item["scannedSqft"])
+            summary_rows.append([
+                item["glassType"], item["itemId"], item["expectedQty"], item["scannedQty"], item["scannedQty"] - item["expectedQty"],
+                expected_sqft, scanned_sqft, self._inventory_round_sqft(scanned_sqft - expected_sqft),
+            ])
 
         physical_rows = [["Scanned Date/Time (ET)", "Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Entry", "Scanned By", "Notes"]]
         for item in reversed(detail["scans"]):
-            physical_rows.append([readable_inventory_time(item["scannedAt"]), item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"],
+            physical_rows.append([readable_inventory_time(item["scannedAt"]), item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], export_item_id(item["glassType"], item["itemId"]),
                                   item["dimensions"], item["sqftEach"], item["qty"], item["totalSqft"], item["entryType"].title(), item["scannedBy"], item["notes"]])
 
         system_rows = [["Delivery Date", "Job Nr.", "Customer", "Order Number", "Item Number", "Glass Type", "Item ID", "Size", "SQFT", "Qty", "Total SQFT", "Route", "Bay", "Reason"]]
         for item in detail["expectedItems"]:
-            system_rows.append([item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], item["itemId"], item["dimensions"],
+            system_rows.append([item["deliveryDate"], item["jobNr"], item["customer"], item["order"], item["item"], item["glassType"], export_item_id(item["glassType"], item["itemId"]), item["dimensions"],
                                 item["sqftEach"], item["qty"], item["totalSqft"], item["route"], item["bayCode"], item["sourceReason"]])
 
         reconcile_rows = [["Result", "System DD", "Physical DD", "System Job", "Physical Job", "System Customer", "Physical Customer", "System Order", "Physical Order", "System Item", "Physical Item",
@@ -29983,7 +30442,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 labels.get(row["status"], row["status"].upper()), system_item.get("deliveryDate", ""), physical.get("deliveryDate", ""), system_item.get("jobNr", ""), physical.get("jobNr", ""),
                 system_item.get("customer", ""), physical.get("customer", ""), system_item.get("order", ""), physical.get("order", ""),
                 system_item.get("item", ""), physical.get("item", ""), system_item.get("glassType", ""), physical.get("glassType", ""),
-                system_item.get("itemId", ""), physical.get("itemId", ""), system_item.get("dimensions", ""), physical.get("dimensions", ""),
+                export_item_id(system_item.get("glassType", ""), system_item.get("itemId", "")), export_item_id(physical.get("glassType", ""), physical.get("itemId", "")), system_item.get("dimensions", ""), physical.get("dimensions", ""),
                 system_item.get("sqftEach", ""), physical.get("sqftEach", ""), system_item.get("qty", ""), physical.get("qty", ""),
                 system_item.get("totalSqft", ""), physical.get("totalSqft", ""), "; ".join(row.get("differences") or []),
             ])
@@ -30435,6 +30894,7 @@ class AzureSqlDeliveryStore(SQLiteDeliveryStore):
             self.repair_manual_assign_bay_visibility(con)
             self.seed_bay_auto_assign_settings(con)
             self.seed_racks(con)
+            self.ensure_inventory_item_mapping_defaults(con)
             self.repair_route_stage_memberships_if_needed(con)
         self.refresh_stage_definition_cache()
         self.cleanup_old_bay_events(force=True)

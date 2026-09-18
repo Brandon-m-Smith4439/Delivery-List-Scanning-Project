@@ -10218,3 +10218,32 @@
 @media (prefers-reduced-motion: reduce) {
   .print-filter-mode-switch-v532 > i { transition: none !important; }
 }
+
+/* ========================================================================== */
+/* v0.542 Print preview parity                                                */
+/* ========================================================================== */
+/* The printed remake sheet already uses .5in inner padding so content sits
+   inside the dashed border. Preview had a legacy .1in override, which moved the
+   title/table through that border even though paper output was correct. */
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview.remake,
+.print-preview-page-shell-v443.is-landscape > .delivery-print-sheet-v203.is-preview.remake {
+  padding: .5in !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview.remake .sheet-footer {
+  left: .5in !important;
+  bottom: .14in !important;
+}
+
+/* Keep the work-check heading literal in preview. The physical print already
+   has enough room; this preview-only ownership prevents modal ellipsis rules
+   from turning "Check" into "Che...". */
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview .check-col {
+  width: 6.5% !important;
+}
+.print-preview-page-shell-v443 > .delivery-print-sheet-v203.is-preview th:nth-child(8) {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  font-size: 10.75px !important;
+  padding-inline: 2px !important;
+}

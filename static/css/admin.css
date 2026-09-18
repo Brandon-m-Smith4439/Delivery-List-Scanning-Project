@@ -22533,3 +22533,159 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
 @media (max-width: 560px) {
   .superseded-review-actions { grid-template-columns: 1fr !important; }
 }
+
+/* ========================================================================== */
+/* v0.544 Superseded review evidence cards                                    */
+/* ========================================================================== */
+.superseded-review-compare section {
+  overflow: hidden;
+}
+
+.superseded-review-item-list-v544 {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.superseded-review-item-v544 {
+  min-width: 0;
+  border: 1px solid #dce5f1;
+  border-radius: 9px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.superseded-review-item-v544 > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e8eef6;
+  background: #f8fbff;
+}
+
+.superseded-review-item-v544 > header strong {
+  color: #123f77;
+  font-size: 10.5px;
+  font-weight: 950;
+}
+
+.superseded-review-item-v544 > header span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #edf3fb;
+  color: #4a617c;
+  padding: 2px 6px;
+  font-size: 8.5px;
+  font-weight: 900;
+}
+
+.superseded-review-item-grid-v544 {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.35fr) minmax(92px, .8fr) minmax(72px, .55fr);
+  gap: 7px 10px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.superseded-review-item-grid-v544 > span {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.superseded-review-item-grid-v544 > span > small,
+.superseded-review-production-pills-v544 i > em {
+  color: #6c7d91;
+  font-size: 7.5px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.superseded-review-item-grid-v544 > span > b,
+.superseded-review-item-grid-v544 > span > em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.superseded-review-item-grid-v544 > span > b {
+  color: #1b334f;
+  font-size: 9.5px;
+  font-weight: 900;
+}
+
+.superseded-review-item-grid-v544 > span > em {
+  color: #61748a;
+  font-size: 8.5px;
+  font-style: normal;
+  line-height: 1.25;
+}
+
+.superseded-review-item-grid-v544 .is-production {
+  grid-column: 1 / -1;
+}
+
+.superseded-review-production-pills-v544 {
+  display: grid;
+  grid-template-columns: minmax(82px, .7fr) minmax(96px, .85fr) minmax(130px, 1.45fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.superseded-review-production-pills-v544 i {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid #d8e3f0;
+  border-radius: 7px;
+  background: #f7faff;
+  padding: 5px 7px;
+  font-style: normal;
+}
+
+.superseded-review-production-pills-v544 i > b {
+  min-width: 0;
+  color: #173f69;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.superseded-review-production-pills-v544 i.is-cutting {
+  border-color: #c6d9cd;
+  background: #f3fbf6;
+}
+
+.superseded-review-item-empty-v544 {
+  border: 1px dashed #d3deeb;
+  border-radius: 8px;
+  padding: 10px;
+  color: #6b7a8d;
+  font-size: 9.5px;
+  text-align: center;
+}
+
+@media (max-width: 1150px) {
+  .superseded-review-compare {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .superseded-review-item-grid-v544 {
+    grid-template-columns: minmax(0, 1fr) minmax(82px, .6fr);
+  }
+  .superseded-review-item-grid-v544 .is-product,
+  .superseded-review-item-grid-v544 .is-production {
+    grid-column: 1 / -1;
+  }
+  .superseded-review-production-pills-v544 {
+    grid-template-columns: 1fr;
+  }
+}

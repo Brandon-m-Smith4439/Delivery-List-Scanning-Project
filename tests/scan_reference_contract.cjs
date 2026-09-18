@@ -61,11 +61,12 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
    productionProgressCheckedV522:new Map([[fabricationKey,{at:Date.now(),retryAfterSeconds:60}]]),cuttingStatusCacheV522:new Map(),
    fabricationStatusPendingV474:new Set(),fabricationStatusBatchTokenV474:0,fabricationStatusEpochV522:0,productionFileSettings:{cacheMinutes:1},
    items:[],globalSearchLastResults:[],orderDetailProductionCacheV507:new Map(),orderDetailRenderedPayloadV507:null};
-  const cadenceContext=vm.createContext({state:cadenceState,document:{hidden:false},Date,Number,Math,Array,String,Boolean,Map,Set,console,FABRICATION_AUTO_RETRY_MS_V526:600000,
+  const cadenceContext=vm.createContext({state:cadenceState,document:{hidden:false},Date,Number,Math,Array,String,Boolean,Map,Set,console,FABRICATION_AUTO_RETRY_MS_V526:600000,FABRICATION_TODAY_RETRY_MS_V542:60000,
    hasAnyPermission:()=>true,fabricationRevisionV521:()=>'',fabricationStatusKeyV474:()=>fabricationKey,cuttingProgressPresentationV498:()=>({complete:false}),
    isRemakeItem:(row)=>Boolean(row?.remake),
    requestFabricationBatchV522:async()=>{fabricationRequests++;return {results:[{key:fabricationKey,status:{fabricated:false,retryAfterSeconds:300},cutting:{},progressRetryAfterSeconds:300}]}},
-   fabricationStatusItemKeyV521:()=>fabricationKey,window:{setTimeout},scheduleScanRender:()=>{},printWorkspaceIsVisible:()=>false});
+   fabricationStatusItemKeyV521:()=>fabricationKey,todayKey:()=> '2026-09-16',window:{setTimeout},scheduleScanRender:()=>{},printWorkspaceIsVisible:()=>false});
+ vm.runInContext(definition('fabricationAutomaticRetrySecondsV542'),cadenceContext);
  vm.runInContext(definition('hydrateFabricationStatusesV474'),cadenceContext);
  const cadenceRow={order:'926001',item:'001',job:'J',product:'Glass'};
  await cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
@@ -138,6 +139,24 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
     fabricationStatusItemKeyV521:()=>remakeKey});
   vm.runInContext(definition('isRemakeItem'),remakeContext);
   assert.equal(remakeContext.isRemakeItem({order:'238200',item:'001'}),true,'Sketch REMAKE evidence must flag the item as a remake');
+
+
+  // v0.545: production-file hydration may confirm downstream fabrication, but
+  // it must never rewrite the authoritative current A+W optimization state.
+  const detailContext=vm.createContext({Map,String,Boolean,Number,Array,
+    normalizedOrderDetailItemV477:(value)=>String(value||'').replace(/^0+/,''),
+  });
+  vm.runInContext(definition('cuttingProgressTimestampV511'),detailContext);
+  vm.runInContext(definition('mergeOrderProductionDetailV507'),detailContext);
+  const optimizedCore={items:[{item:'001',cutting:{state:'optimized',complete:false,optimizationStatusLabel:'Optimized',optimizationLastChangedAt:'2026-09-17T09:15:00'}}]};
+  const fabricatedProduction={productionLoaded:true,items:[{item:'001',productionFiles:{fabrication:{fabricated:true,actualMachine:'Denver CNC'}}}]};
+  const optimizedMerged=detailContext.mergeOrderProductionDetailV507(optimizedCore,fabricatedProduction);
+  assert.equal(optimizedMerged.items[0].cutting.state,'optimized');
+  assert.equal(optimizedMerged.items[0].cutting.complete,false);
+  assert.equal(optimizedMerged.items[0].cutting.downstreamFabricationObserved,true);
+  assert.equal(detailContext.cuttingProgressTimestampV511(optimizedMerged.items[0].cutting),'','Optimized Cutting must not show a completion time');
+  assert.equal(detailContext.cuttingProgressTimestampV511({state:'released',optimizationLastChangedAt:'2026-09-17T09:20:00'}),'','Released Cutting must not show a completion time');
+  assert.equal(detailContext.cuttingProgressTimestampV511({state:'cut',cutCompletedAt:'2026-09-17T09:30:00',optimizationLastChangedAt:'2026-09-17T09:29:00'}),'2026-09-17T09:30:00');
 
   console.log('Scan ownership, cancellation, date cache, fabrication cadence and reference geometry behavior passed.');
 })().catch(error=>{console.error(error);process.exitCode=1});

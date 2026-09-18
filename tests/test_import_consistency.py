@@ -2907,6 +2907,90 @@ class ImportConsistencyTests(unittest.TestCase):
             if verification_root.exists():
                 shutil.rmtree(verification_root)
 
+    def test_v0541_staging_fabrication_override_waits_for_success_and_is_audited(self) -> None:
+        """A confirmed Staging override must save only after rack/destination gates accept the scan."""
+        verification_root = ROOT / "_verification_v0541_fabrication_override"
+        if verification_root.exists():
+            shutil.rmtree(verification_root)
+        verification_root.mkdir()
+        hardware_dir = verification_root / "Hardware Lists"
+        sketches_dir = verification_root / "Sketches"
+        programs_dir = verification_root / "Programs"
+        completed_wj_dir = verification_root / "Completed WJ"
+        for folder in (hardware_dir, sketches_dir, programs_dir, completed_wj_dir):
+            folder.mkdir()
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as connection:
+                store.seed_racks(connection)
+                racks = connection.execute(
+                    "SELECT id, rack_code FROM racks WHERE active = 1 ORDER BY id LIMIT 2"
+                ).fetchall()
+                self.assertGreaterEqual(len(racks), 2)
+                open_rack = str(racks[0]["rack_code"])
+                blocked_rack = str(racks[1]["rack_code"])
+                connection.execute("UPDATE racks SET status='Completed' WHERE id=?", (racks[1]["id"],))
+                connection.commit()
+
+            config = replace(
+                store.config,
+                hardware_lists_dir=hardware_dir,
+                sketches_dir=sketches_dir,
+                programs_dir=programs_dir,
+                completed_wj_dir=completed_wj_dir,
+            )
+            store.production_files = ProductionFileService(config)
+            item = imported_item("279471", "1", 1, "v0541-fabrication-override:1")
+            item["job"] = "88279471 FAB OVERRIDE"
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-10-19", "items": [item]},
+                "fileName": "Delivery List 10-19-2026.xlsx",
+                "user": "admin",
+            })
+            (sketches_dir / "279471-001 Sketch.txt").write_text("Assigned Machine: Denver CNC", encoding="utf-8")
+            store.production_files = ProductionFileService(config)
+
+            blocked = store.record_scan({
+                "listId": "2026-10-19-staging-airport",
+                "barcode": item["barcode"],
+                "rackCode": blocked_rack,
+                "fabricationOverride": True,
+                "user": "admin",
+                "station": "Airport Rd",
+            })
+            self.assertFalse(blocked["lastScan"]["ok"])
+            with store.connect() as connection:
+                saved = connection.execute(
+                    "SELECT COUNT(*) FROM manual_production_progress_overrides WHERE order_no=? AND item_no=?",
+                    ("279471", "001"),
+                ).fetchone()[0]
+            self.assertEqual(int(saved), 0)
+
+            overridden = store.record_scan({
+                "listId": "2026-10-19-staging-airport",
+                "barcode": item["barcode"],
+                "rackCode": open_rack,
+                "fabricationOverride": True,
+                "user": "admin",
+                "station": "Airport Rd",
+            })
+            self.assertTrue(overridden["lastScan"]["ok"])
+            self.assertNotIn("fabricationGate", overridden)
+            override_hints = store.aw_fabrication_hints_for_requests([{
+                "order": "279471", "item": "001", "job": item["job"],
+                "deliveryDate": "2026-10-19", "key": "override-check",
+            }])
+            self.assertTrue(override_hints["override-check"]["manualMachineComplete"])
+            self.assertEqual(override_hints["override-check"]["manualMachineCode"], "denver")
+            with store.connect() as connection:
+                audit = connection.execute(
+                    "SELECT id FROM audit_events WHERE action='staging_fabrication_override' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                self.assertIsNotNone(audit)
+        finally:
+            if verification_root.exists():
+                shutil.rmtree(verification_root)
+
     def test_v0470_waterjet_and_unavailable_share_safety(self) -> None:
         """Waterjet completion is recognized while unavailable shares never create false scan blocks."""
         verification_root = ROOT / "_verification_v0470_waterjet"
@@ -3967,9 +4051,9 @@ class ImportConsistencyTests(unittest.TestCase):
             store.production_files = FabricatedProductionFiles()
             fabricated_detail = store.get_order_detail("238221", include_production=True)
             fabricated_cutting = fabricated_detail["items"][0]["cutting"]
-            self.assertEqual(fabricated_cutting["state"], "cut")
-            self.assertTrue(fabricated_cutting["complete"])
-            self.assertTrue(fabricated_cutting["inferredFromFabrication"])
+            self.assertEqual(fabricated_cutting["state"], "optimized")
+            self.assertFalse(fabricated_cutting["complete"])
+            self.assertTrue(fabricated_cutting["downstreamFabricationObserved"])
             self.assertEqual(fabricated_cutting["fabricationMachine"], "Denver CNC")
 
             no_generation = store.aw_cutting_irregularities({"complete": True, "batch": "", "optimization": 0})
@@ -4013,18 +4097,19 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(unchanged["unchanged"], 2)
             self.assertEqual(unchanged["updated"], 0)
 
-            # Once Cutting is positively observed, a later incomplete-looking
-            # source snapshot in the same physical KEYINDEX lifecycle cannot
-            # erase it. A reject cutoff or a newer remake KEYINDEX still resets it.
+            # v0.544: the current optimization status is authoritative. An older
+            # Booked observation stays in retained history but cannot keep a
+            # current Optimized state marked Cut.
             regressed_rows = [dict(row) for row in booked_rows]
             regressed_rows[1].update({
                 "optimizationStatusCode": 100, "cuttingBookingAt": "",
                 "cuttingBookingEmployee": "", "cuttingBookingRowId": "", "cutQuantity": 0,
             })
             store.sync_aw_cutting_rows(regressed_rows)
-            remembered_cut = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
-            self.assertTrue(remembered_cut["complete"])
-            self.assertEqual(remembered_cut["evidenceSource"], "remembered_cutting_completion")
+            current_optimized = store.aw_cutting_state("238221", "1", "2026-09-02T10:55:27")
+            self.assertFalse(current_optimized["complete"])
+            self.assertEqual(current_optimized["state"], "optimized")
+            self.assertEqual(current_optimized["evidenceSource"], "")
             rejected_again = store.aw_cutting_state("238221", "1", "2026-09-03T08:00:00")
             self.assertFalse(rejected_again["complete"])
             self.assertEqual(rejected_again["state"], "needs_recut")
@@ -4040,9 +4125,8 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(remake_state["keyIndex"], 3)
 
             # v0.502 regression from the live 238330 probe: the newest remake
-            # generation can prove physical Cutting through PROD_OPTI_PLATES
-            # CUT/STOCKBOOKED and MENGE_CUT even if a cached lifecycle status or
-            # Automatic Cutting booking is absent from the synchronized row.
+            # v0.544: physical-looking plate/cut-quantity evidence is diagnostic
+            # only. Without a current Booked optimization, the pane is not Cut.
             probe_rows = [{
                 "sourceRowId": "238330-current", "orderNr": "238330", "itemNr": "1", "bomId": 0,
                 "keyIndex": 1, "batchJobNumber": "9179", "batchStatusCode": 500,
@@ -4062,8 +4146,8 @@ class ImportConsistencyTests(unittest.TestCase):
             probe_sync = store.sync_aw_cutting_rows(probe_rows)
             self.assertEqual(probe_sync["generations"], 1)
             probe_state = store.aw_cutting_state("238330", "1", "2026-09-03T07:50:00")
-            self.assertEqual(probe_state["state"], "cut")
-            self.assertTrue(probe_state["complete"])
+            self.assertEqual(probe_state["state"], "optimized")
+            self.assertFalse(probe_state["complete"])
             self.assertEqual(probe_state["optimization"], 8366)
             self.assertEqual(probe_state["optimizationSequence"], 4)
             self.assertEqual(probe_state["optimizationPlateNumber"], 1)
@@ -4074,7 +4158,7 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(probe_state["sequenceAssignments"][0]["sequence"], 4)
             self.assertEqual(probe_state["sequenceAssignments"][0]["plateNumber"], 1)
             self.assertEqual(probe_state["processRows"][1]["edgeData"], "11110000")
-            self.assertEqual(probe_state["evidenceSource"], "optimization_plate_cut")
+            self.assertEqual(probe_state["evidenceSource"], "")
             post_probe_reject = store.aw_cutting_state("238330", "1", "2026-09-03T10:00:00")
             self.assertEqual(post_probe_reject["state"], "needs_recut")
             self.assertFalse(post_probe_reject["complete"])
@@ -5419,6 +5503,99 @@ class ImportConsistencyTests(unittest.TestCase):
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 
+    def test_v543_superseded_detects_exact_normal_duplicate_with_production_divergence(self) -> None:
+        verification_root = ROOT / "_verification_v543_superseded_normal_duplicate"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            items = []
+            for order, source_prefix in (("743001", "v543-uncut"), ("743002", "v543-cut")):
+                first = imported_item(order, "1", 1, f"{source_prefix}:1")
+                first.update({"job": "89198368 ROSELYN COMMIT 200", "customer": "LENNAR HOMES", "product": '3/8" Clear Tempered', "dimensions": '11 7/16" x 80"'})
+                second = imported_item(order, "2", 1, f"{source_prefix}:2")
+                second.update({"job": "89198368 ROSELYN COMMIT 200", "customer": "LENNAR HOMES", "product": '3/8" Clear Tempered', "dimensions": '28 1/4" x 79 1/2"'})
+                items.extend([first, second])
+            store.import_delivery_list({
+                "payload": {"deliveryDate": "2026-09-21", "items": items},
+                "fileName": "Delivery List 09-21-2026.xlsx", "user": "admin",
+            })
+            store.sync_aw_cutting_rows([
+                {
+                    "sourceRowId": "v543-cut-1", "orderNr": "743002", "itemNr": "1", "bomId": 0,
+                    "keyIndex": 0, "batchJobNumber": "9801", "batchStatusCode": 460,
+                    "batchCreatedAt": "2026-09-14T16:40:00", "optimizationNumber": 88001,
+                    "optimizationStatusCode": 460, "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                    "optimizationLastChangedAt": "2026-09-14T16:45:00", "quantity": 1, "cutQuantity": 1,
+                    "aggregateId": 1000,
+                },
+                {
+                    "sourceRowId": "v543-cut-2", "orderNr": "743002", "itemNr": "2", "bomId": 0,
+                    "keyIndex": 0, "batchJobNumber": "9802", "batchStatusCode": 460,
+                    "batchCreatedAt": "2026-09-14T16:40:00", "optimizationNumber": 88002,
+                    "optimizationStatusCode": 460, "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                    "optimizationLastChangedAt": "2026-09-14T16:45:00", "quantity": 1, "cutQuantity": 1,
+                    "aggregateId": 1000,
+                },
+            ])
+
+            detected = store.detect_superseded_order_candidates_from_scanner("2026-09-21", "admin")
+            self.assertEqual(detected["scannerCandidateCount"], 1)
+            self.assertEqual(detected["insertedCount"], 1)
+            review = store.list_superseded_order_reviews(status="", include_inactive=True)["reviews"][0]
+            self.assertEqual(review["originalOrderNumber"], "743001")
+            self.assertEqual(review["replacementOrderNumber"], "743002")
+            self.assertEqual(review["evidence"]["rule"], "v0.543-current-scanner-normal-production-divergence-1")
+            self.assertFalse(review["evidence"]["originalHasProductionEvidence"])
+            self.assertTrue(review["evidence"]["replacementHasProductionEvidence"])
+            produced = {row["itemNumber"]: row for row in review["replacementItems"]}
+            self.assertEqual(produced["001"]["batch"], "9801")
+            self.assertEqual(produced["001"]["optimization"], 88001)
+            self.assertEqual(produced["001"]["cuttingLabel"], "Cut")
+            self.assertEqual(produced["002"]["batch"], "9802")
+            self.assertEqual(produced["002"]["optimization"], 88002)
+            self.assertTrue(produced["002"]["cuttingComplete"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v543_reoptimization_replaces_stale_current_optimization_in_same_batch(self) -> None:
+        verification_root = ROOT / "_verification_v543_reoptimization"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            base = {
+                "orderNr": "743100", "itemNr": "1", "bomId": 0, "keyIndex": 0,
+                "batchJobNumber": "9810", "batchStatusCode": 200,
+                "batchCreatedAt": "2026-09-17T08:00:00", "quantity": 1, "cutQuantity": 0,
+                "aggregateId": 1000, "optimizationStatusSource": "PROD_OPTIMIZATION",
+            }
+            store.sync_aw_cutting_rows([{
+                **base, "sourceRowId": "v543-opti-old", "optimizationNumber": 88100,
+                "optimizationStatusCode": 100, "optimizationDate": "2026-09-17T08:05:00",
+                "optimizationLastChangedAt": "2026-09-17T08:06:00",
+            }])
+            self.assertEqual(store.aw_cutting_state("743100", "1")["optimization"], 88100)
+            store.sync_aw_cutting_rows([{
+                **base, "sourceRowId": "v543-opti-new", "optimizationNumber": 88101,
+                "optimizationStatusCode": 100, "optimizationDate": "2026-09-17T08:15:00",
+                "optimizationLastChangedAt": "2026-09-17T08:16:00",
+            }])
+            current = store.aw_cutting_state("743100", "1")
+            self.assertEqual(current["optimization"], 88101)
+            self.assertEqual(current["state"], "optimized")
+            store.sync_aw_cutting_rows([{
+                **base, "sourceRowId": "v543-opti-booked", "optimizationNumber": 88101,
+                "optimizationStatusCode": 460, "optimizationStatusSource": "PROD_OPTI_STATISTICS",
+                "optimizationDate": "2026-09-17T08:15:00", "optimizationLastChangedAt": "2026-09-17T08:30:00",
+                "cutQuantity": 1,
+            }])
+            booked = store.aw_cutting_state("743100", "1")
+            self.assertEqual(booked["optimization"], 88101)
+            self.assertTrue(booked["complete"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
     def test_v524_schema20_inventory_migration_preserves_existing_rows_and_is_idempotent(self) -> None:
         verification_root = ROOT / "_verification_v524_inventory_migration"
         shutil.rmtree(verification_root, ignore_errors=True)
@@ -5932,6 +6109,243 @@ class ImportConsistencyTests(unittest.TestCase):
             self.assertEqual(routine_flags["pendingRemakeCount"], 0)
             self.assertEqual(routine_flags["pendingRushCount"], 0)
             self.assertEqual(routine_flags["pendingLineCount"], 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v0544_cutting_requires_current_booked_optimization(self) -> None:
+        verification_root = ROOT / "_verification_v0544_cutting_lifecycle"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            base = {
+                "sourceRowId": "v0544-current", "orderNr": "299544", "itemNr": "1",
+                "bomId": 0, "keyIndex": 0, "batchJobNumber": "9901", "batchStatusCode": 400,
+                "batchCreatedAt": "2026-09-17T08:00:00", "optimizationNumber": 9544,
+                "optimizationStatusSource": "PROD_OPTIMIZATION", "optimizationSequence": 1,
+                "optimizationSequenceRowId": "v0544-seq", "optimizationPlateNumber": 1,
+                "quantity": 1, "cutQuantity": 1, "optimizationPlateCut": 1,
+                "optimizationPlateStockBooked": 1, "cuttingBookingAt": "2026-09-17T08:10:00",
+                "aggregateId": 1000,
+            }
+            # Physical-looking fields must not promote an Optimized state to Cut.
+            store.sync_aw_cutting_rows([{**base, "optimizationStatusCode": 100}])
+            optimized = store.aw_cutting_state("299544", "001")
+            self.assertEqual(optimized["state"], "optimized")
+            self.assertFalse(optimized["complete"])
+
+            # Released is actively being cut, but still not complete.
+            store.sync_aw_cutting_rows([{**base, "optimizationStatusCode": 200}])
+            released = store.aw_cutting_state("299544", "001")
+            self.assertEqual(released["state"], "released")
+            self.assertFalse(released["complete"])
+
+            # Booked is the authoritative completion milestone.
+            store.sync_aw_cutting_rows([{**base, "optimizationStatusCode": 500}])
+            booked = store.aw_cutting_state("299544", "001")
+            self.assertEqual(booked["state"], "cut")
+            self.assertTrue(booked["complete"])
+            self.assertEqual(booked["evidenceSource"], "optimization_status_500")
+
+            # A newer reoptimization in the same KEYINDEX must not inherit the
+            # older Booked batch's Cutting completion.
+            newer = {
+                **base,
+                "sourceRowId": "v0544-reoptimized",
+                "batchJobNumber": "9902",
+                "batchCreatedAt": "2026-09-17T09:00:00",
+                "optimizationNumber": 9545,
+                "optimizationStatusCode": 100,
+                "optimizationSequence": 2,
+                "optimizationSequenceRowId": "v0544-seq-2",
+                "cuttingBookingAt": "",
+                "cutQuantity": 0,
+                "optimizationPlateCut": 0,
+                "optimizationPlateStockBooked": 0,
+            }
+            store.sync_aw_cutting_rows([newer])
+            reoptimized = store.aw_cutting_state("299544", "001")
+            self.assertEqual(reoptimized["batch"], "9902")
+            self.assertEqual(reoptimized["optimization"], 9545)
+            self.assertEqual(reoptimized["state"], "optimized")
+            self.assertFalse(reoptimized["complete"])
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v546_inventory_item_id_defaults_lookup_crud_and_resolution(self) -> None:
+        verification_root = ROOT / "_verification_v546_inventory_item_ids"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                # Schema 20 originally seeded these two Item IDs with older stock
+                # wording. v0.546 repairs only untouched legacy labels.
+                legacy = {
+                    row["item_id"]: row["glass_label"]
+                    for row in con.execute(
+                        "SELECT item_id, glass_label FROM inventory_item_mappings WHERE item_id IN (?, ?)",
+                        ("G38SATINCLR", "18CDSWG"),
+                    ).fetchall()
+                }
+                self.assertEqual(legacy["G38SATINCLR"], "3/8 Clear Satin")
+                self.assertEqual(legacy["18CDSWG"], "1/8 Clear DS B-Grade Glass")
+                store.ensure_inventory_item_mapping_defaults(con)
+                con.commit()
+
+            catalog = store.inventory_catalog({"username": "admin", "stageAccess": ["*"]})
+            mapping = {row["glassLabel"]: row["itemId"] for row in catalog["itemMappings"]}
+            self.assertEqual(mapping["3/8 Acid Etch"], "G38SATINCLR")
+            self.assertEqual(mapping["1/8 Clear"], "18CDSWG")
+            self.assertEqual(len(catalog["itemMappings"]), 15)
+            with store.connect() as con:
+                acid = store._inventory_item_mapping(con, "3/8 Acid Etch Tempered")
+                clear18 = store._inventory_item_mapping(con, "1/8 Clear Annealed")
+                self.assertEqual(acid["itemId"], "G38SATINCLR")
+                self.assertEqual(clear18["itemId"], "18CDSWG")
+
+            lookups = store.get_manual_edit_lookups()
+            maintained = {row["glassLabel"]: row["itemId"] for row in lookups["inventoryItemMappings"]}
+            self.assertEqual(maintained["3/8 Acid Etch"], "G38SATINCLR")
+            self.assertEqual(maintained["1/8 Clear"], "18CDSWG")
+
+            created = store.add_manual_edit_lookup({
+                "type": "inventory_item_id",
+                "itemId": "TESTGLASSID",
+                "glassLabel": "Test Inventory Glass",
+                "description": "TEST INVENTORY GLASS",
+                "matchTerms": "TEST INVENTORY; TEST GLASS",
+            }, "admin")
+            created_row = next(row for row in created["inventoryItemMappings"] if row["itemId"] == "TESTGLASSID")
+            self.assertEqual(created_row["glassLabel"], "Test Inventory Glass")
+            self.assertIn("TEST GLASS", created_row["matchTermsList"])
+
+            updated = store.add_manual_edit_lookup({
+                "type": "inventory_item_id",
+                "originalItemId": "TESTGLASSID",
+                "itemId": "TESTGLASSID2",
+                "glassLabel": "Test Inventory Glass",
+                "description": "UPDATED TEST INVENTORY GLASS",
+                "matchTerms": ["TEST INVENTORY GLASS", "TESTGLASSID2"],
+            }, "admin")
+            self.assertFalse(any(row["itemId"] == "TESTGLASSID" for row in updated["inventoryItemMappings"]))
+            self.assertTrue(any(row["itemId"] == "TESTGLASSID2" for row in updated["inventoryItemMappings"]))
+            with store.connect() as con:
+                resolved = store._inventory_item_mapping(con, "Test Inventory Glass Tempered")
+                self.assertEqual(resolved["itemId"], "TESTGLASSID2")
+                old_active = con.execute("SELECT active FROM inventory_item_mappings WHERE item_id='TESTGLASSID'").fetchone()[0]
+                self.assertEqual(int(old_active), 0)
+
+            removed = store.remove_manual_edit_lookup("inventory_item_id", "TESTGLASSID2", "admin")
+            self.assertFalse(any(row["itemId"] == "TESTGLASSID2" for row in removed["inventoryItemMappings"]))
+            with store.connect() as con:
+                inactive = con.execute("SELECT active FROM inventory_item_mappings WHERE item_id='TESTGLASSID2'").fetchone()[0]
+                self.assertEqual(int(inactive), 0)
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+    def test_v546_inventory_default_repair_preserves_operator_edits(self) -> None:
+        verification_root = ROOT / "_verification_v546_inventory_item_edit_preservation"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                con.execute(
+                    "UPDATE inventory_item_mappings SET glass_label=?, description=? WHERE item_id=?",
+                    ("Operator Acid Etch Label", "OPERATOR DESCRIPTION", "G38SATINCLR"),
+                )
+                store.ensure_inventory_item_mapping_defaults(con)
+                con.commit()
+                row = con.execute(
+                    "SELECT glass_label, description FROM inventory_item_mappings WHERE item_id=?",
+                    ("G38SATINCLR",),
+                ).fetchone()
+                self.assertEqual(row["glass_label"], "Operator Acid Etch Label")
+                self.assertEqual(row["description"], "OPERATOR DESCRIPTION")
+        finally:
+            shutil.rmtree(verification_root, ignore_errors=True)
+
+
+    def test_v547_inventory_export_uses_current_item_id_mapping_without_mutating_snapshot(self) -> None:
+        verification_root = ROOT / "_verification_v547_inventory_export_item_ids"
+        shutil.rmtree(verification_root, ignore_errors=True)
+        verification_root.mkdir(parents=True, exist_ok=True)
+        user = {"username": "admin", "displayName": "Inventory Admin", "stageAccess": ["*"]}
+        try:
+            store = self.make_store(verification_root)
+            with store.connect() as con:
+                # Simulate an inventory that started before the corrected Item ID
+                # mapping existed: both frozen system and physical rows retained
+                # blank/stale Item IDs. The session itself must remain immutable.
+                cursor = con.execute(
+                    """
+                    INSERT INTO inventory_sessions
+                        (session_code, location, inventory_type, status, cycle_filter_json, started_by, started_at,
+                         completed_by, completed_at, expected_line_count, expected_qty, expected_total_sqft, notes, created_at, updated_at)
+                    VALUES (?, 'airport_rd', 'full', 'completed', '{}', 'admin', ?, 'admin', ?, 2, 2, 20.0, '', ?, ?)
+                    """,
+                    ("AIR-V547-EXPORT", "2026-09-18T12:00:00+00:00", "2026-09-18T13:00:00+00:00",
+                     "2026-09-18T12:00:00+00:00", "2026-09-18T13:00:00+00:00"),
+                )
+                session_id = int(cursor.lastrowid)
+                expected_rows = [
+                    ("acid", "3/8 Acid Etch Tempered", "", "930001", "001", 10.0),
+                    ("clear18", "1/8 Clear Annealed", "LEGACY18", "930002", "001", 10.0),
+                ]
+                expected_ids = []
+                for key, glass_type, item_id, order_no, item_no, total_sqft in expected_rows:
+                    row = con.execute(
+                        """
+                        INSERT INTO inventory_expected_items
+                            (session_id, snapshot_key, source_line_item_id, source_list_id, delivery_date, job_no, customer,
+                             order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty, total_sqft, route, bay_code,
+                             cutting_key_index, cutting_state, source_reason, source_payload_json)
+                        VALUES (?, ?, '', '', '2026-09-18', 'TEST JOB', 'TEST CUSTOMER', ?, ?, ?, ?, '24 x 60', ?, 1, ?, 'IT', '', 0, 'cut', '', '{}')
+                        """,
+                        (session_id, key, order_no, item_no, glass_type, item_id, total_sqft, total_sqft),
+                    )
+                    expected_ids.append(int(row.lastrowid))
+                for expected_id, (key, glass_type, item_id, order_no, item_no, total_sqft) in zip(expected_ids, expected_rows):
+                    con.execute(
+                        """
+                        INSERT INTO inventory_scans
+                            (session_id, expected_item_id, source_line_item_id, barcode, entry_type, scanned_at, scanned_by,
+                             delivery_date, job_no, customer, order_no, item_no, glass_type, item_id, dimensions, sqft_each, qty,
+                             total_sqft, notes, manual_fields_json)
+                        VALUES (?, ?, '', ?, 'scan', '2026-09-18T12:30:00+00:00', 'admin', '2026-09-18',
+                                'TEST JOB', 'TEST CUSTOMER', ?, ?, ?, ?, '24 x 60', ?, 1, ?, '', '{}')
+                        """,
+                        (session_id, expected_id, f"BC-{key}", order_no, item_no, glass_type, item_id, total_sqft, total_sqft),
+                    )
+                store.ensure_inventory_item_mapping_defaults(con)
+                con.commit()
+
+            workbook = store.export_inventory_xlsx(session_id, user)
+            self.assertTrue(zipfile.is_zipfile(BytesIO(workbook)))
+            with zipfile.ZipFile(BytesIO(workbook)) as archive:
+                for sheet_index in (1, 2, 3, 4):
+                    sheet_xml = archive.read(f"xl/worksheets/sheet{sheet_index}.xml").decode("utf-8")
+                    self.assertIn("G38SATINCLR", sheet_xml)
+                    self.assertIn("18CDSWG", sheet_xml)
+                summary_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                self.assertNotIn("LEGACY18", summary_xml)
+
+            # XLSX normalization is presentation-only; the durable session keeps
+            # the Item IDs that were frozen/scanned at count time.
+            with store.connect() as con:
+                frozen = con.execute(
+                    "SELECT glass_type, item_id FROM inventory_expected_items WHERE session_id=? ORDER BY id",
+                    (session_id,),
+                ).fetchall()
+                scanned = con.execute(
+                    "SELECT glass_type, item_id FROM inventory_scans WHERE session_id=? ORDER BY id",
+                    (session_id,),
+                ).fetchall()
+                self.assertEqual([row["item_id"] for row in frozen], ["", "LEGACY18"])
+                self.assertEqual([row["item_id"] for row in scanned], ["", "LEGACY18"])
         finally:
             shutil.rmtree(verification_root, ignore_errors=True)
 

@@ -6514,7 +6514,6 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 /* Denver/WaterJet pending fabrication keeps its configured machine color. The
    older generic prior-step rule remains neutral for genuinely unknown work. */
 .scan-progress-stack-v476 .scan-progress-step-v475.is-prior-pending-v475.is-fabrication-pending-v480 {
-  --progress-step-color: var(--progress-left) !important;
   border-color: color-mix(in srgb, var(--progress-step-color) 55%, #cbd5e1) !important;
   background: linear-gradient(90deg, color-mix(in srgb, var(--progress-step-color) 17%, white), color-mix(in srgb, var(--progress-step-color) 7%, white)) !important;
   color: color-mix(in srgb, var(--progress-step-color) 76%, #17324d) !important;
@@ -6784,7 +6783,6 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
    intentionally outranks the older generic "prior pending" gray/blue rules so
    Settings navigation cannot repaint Denver/WJ as a scanner stage. */
 .scan-page .scan-progress-flow-v481 .scan-progress-step-v475.is-fabrication-pending-v480:not(.is-complete-v475) {
-  --progress-step-color: var(--progress-left) !important;
   border-color: color-mix(in srgb, var(--progress-step-color) 55%, #cbd5e1) !important;
   background: linear-gradient(90deg,
     color-mix(in srgb, var(--progress-step-color) 18%, white),
@@ -8404,7 +8402,7 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
 .scan-review-grid-v530 .scan-update-reviewed-button > span,
 .scan-review-grid-v530 .scan-update-review-button > span { white-space: nowrap !important; }
 
-/* FAB work is hidden for the first three seconds in JS. If it lasts longer,
+/* FAB work is hidden for the first second in JS. If it lasts longer,
    this max-height/spacing transition makes the Scan workspace move rather than
    jump when the meter enters or leaves the document flow. */
 .scan-fabrication-load-v531:not([hidden]) {
@@ -9329,4 +9327,183 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
     min-width: 0 !important;
     max-width: none !important;
   }
+}
+
+
+/* ========================================================================== */
+/* v0.541 progress scale, zoom safety, review action sizing                    */
+/* ========================================================================== */
+/* Grow v0.540 checkpoints ~10%, center the pair in the Progress column, and
+   keep machine/card typography identical. Inline --progress-step-color remains
+   authoritative so an incomplete WaterJet/Denver card uses Lookup Manager color. */
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-flow-line-v485 {
+  justify-content: center !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+.scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+.scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+  flex: 0 0 119px !important;
+  width: 119px !important;
+  max-width: 119px !important;
+  height: 37px !important;
+  min-height: 37px !important;
+  overflow: hidden !important;
+}
+.scan-page .delivery-table .scan-progress-step-v475.is-fabrication-pending-v480 .scan-progress-copy-v539 > b,
+.scan-page .delivery-table .scan-progress-step-v475.is-fabrication-pending-v480 .scan-progress-copy-v539 > strong,
+.scan-page .delivery-table .scan-progress-copy-v539 > b,
+.scan-page .delivery-table .scan-progress-copy-v539 > strong,
+.scan-page .delivery-table .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 .scan-progress-copy-v539 > strong {
+  font-size: 11.75px !important;
+  line-height: 1.3 !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.scan-page .delivery-table .scan-progress-copy-v539 > b {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button {
+  min-width: 100px !important;
+  gap: 5px !important;
+  padding-inline: 8px !important;
+  font-size: 8.5px !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button svg {
+  flex-basis: 12px !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+/* Browser zoom reduces CSS-pixel viewport width. Keep the same ~10% size gain
+   while reducing each card just enough to prevent Progress-column overflow at
+   110%, 125%, 150%, and 175% desktop zoom. */
+@media (min-width: 761px) and (max-width: 1500px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+  .scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+    flex-basis: 103px !important;
+    width: 103px !important;
+    max-width: 103px !important;
+    height: 37px !important;
+    min-height: 37px !important;
+    padding-inline: 4px !important;
+  }
+  .scan-page .delivery-table .scan-progress-step-v475.is-fabrication-pending-v480 .scan-progress-copy-v539 > b,
+  .scan-page .delivery-table .scan-progress-step-v475.is-fabrication-pending-v480 .scan-progress-copy-v539 > strong,
+  .scan-page .delivery-table .scan-progress-copy-v539 > b,
+  .scan-page .delivery-table .scan-progress-copy-v539 > strong,
+  .scan-page .delivery-table .scan-progress-flow-v485 .scan-progress-step-v475.is-cutting-step-v511 .scan-progress-copy-v539 > strong {
+    font-size: 11px !important;
+  }
+}
+@media (max-width: 760px) {
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475,
+  .scan-page .delivery-table .scan-order-item-v477 .scan-progress-step-v475.is-fabrication-pending-v480,
+  .scan-page .delivery-table .scan-progress-flow-v485.is-single-v531 .scan-progress-step-v475 {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    height: 36px !important;
+    min-height: 36px !important;
+  }
+  .scan-review-grid-v530 .scan-update-reviewed-button {
+    min-width: 94px !important;
+    padding-inline: 7px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.542 zoom-safe Scan layout, review sizing, and Internal Reject edges     */
+/* ========================================================================== */
+/* Browser zoom mostly reduces available CSS height. Preserve the normal 100%
+   workspace, but give the scanner a bounded compact column at short desktop
+   heights so the delivery table keeps usable width instead of colliding with it. */
+@media (min-width: 961px) and (max-height: 840px) {
+  .scan-page .workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 360px) !important;
+    gap: 10px !important;
+    padding: 10px 8px 0 !important;
+  }
+  .scan-page .scanner-panel:not(.bay-scanner-panel) {
+    padding-inline: 10px !important;
+  }
+}
+
+@media (min-width: 961px) and (max-height: 640px) {
+  .scan-page .workspace {
+    grid-template-columns: minmax(0, 1fr) 330px !important;
+    gap: 8px !important;
+    padding-inline: 6px !important;
+  }
+  .scan-page .table-wrap {
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    scrollbar-width: thin;
+  }
+  .scan-page .delivery-table {
+    min-width: 760px !important;
+  }
+  .scan-page .scanner-panel:not(.bay-scanner-panel) {
+    padding: 10px 8px !important;
+  }
+}
+
+/* Give Mark Reviewed the larger share of each review card instead of forcing
+   two equal action columns. This fixes the cramped label without growing the
+   whole card or changing the 100% page rhythm. */
+.scan-review-grid-v530 .scan-update-review-actions {
+  grid-template-columns: minmax(0, .84fr) minmax(0, 1.16fr) !important;
+  gap: 7px !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 30px !important;
+  padding-inline: 10px !important;
+  font-size: 9.5px !important;
+}
+.scan-review-grid-v530 .scan-update-reviewed-button svg {
+  flex: 0 0 13px !important;
+  width: 13px !important;
+  height: 13px !important;
+}
+
+/* The ribbon remains the primary Internal Reject treatment; these two slim
+   edges make the affected physical line unmistakable without recoloring every
+   cell or competing with glass/remake styling. */
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--attention-internal-reject) 72%, transparent) !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:last-child {
+  box-shadow: inset -3px 0 0 color-mix(in srgb, var(--attention-internal-reject) 72%, transparent) !important;
+}
+
+@media (max-width: 760px) {
+  .scan-review-grid-v530 .scan-update-reviewed-button {
+    min-width: 0 !important;
+    padding-inline: 8px !important;
+    font-size: 9.25px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.543 Internal Reject row treatment                                       */
+/* ========================================================================== */
+/* Remove v0.542's left/right rails. The incident ribbon remains authoritative;
+   strengthen only the soft row gradient so Reject rows read as one continuous
+   treatment without competing vertical markers. */
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:first-child,
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:last-child {
+  box-shadow: none !important;
+}
+.scan-page .delivery-table .scan-order-item-v477.has-internal-reject > td:nth-child(n) {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--attention-internal-reject) 25%, transparent) 0,
+    color-mix(in srgb, var(--attention-internal-reject) 11%, transparent) 15px,
+    color-mix(in srgb, var(--attention-internal-reject) 4%, transparent) 27px,
+    transparent 46px) !important;
 }

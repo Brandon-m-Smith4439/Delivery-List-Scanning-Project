@@ -30749,3 +30749,64 @@ body button.app-primary-button.global-result-action-v475 {
     align-items: stretch !important;
   }
 }
+
+/* ========================================================================== */
+/* v0.542 short desktop viewport navigation                                   */
+/* ========================================================================== */
+/* Browser zoom reduces CSS-pixel height. Keep the 100% desktop rail unchanged,
+   but make the navigation region itself scrollable before lower destinations
+   fall below the viewport. The profile stays pinned at the bottom. */
+@media (min-width: 961px) and (max-height: 860px) {
+  .app-sidebar,
+  .app.is-sidebar-collapsed .app-sidebar {
+    height: 100dvh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    gap: 10px !important;
+  }
+  .app-sidebar .app-nav,
+  .app.is-sidebar-collapsed .app-sidebar .app-nav {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(177,205,247,.48) transparent;
+    padding-right: 2px !important;
+  }
+  .app-sidebar .app-nav::-webkit-scrollbar { width: 5px; }
+  .app-sidebar .app-nav::-webkit-scrollbar-track { background: transparent; }
+  .app-sidebar .app-nav::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(177,205,247,.48);
+  }
+  .sidebar-spacer {
+    flex: 0 0 0 !important;
+    min-height: 0 !important;
+  }
+  .sidebar-user-menu {
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 961px) and (max-height: 680px) {
+  .app-sidebar,
+  .app.is-sidebar-collapsed .app-sidebar {
+    padding-top: 10px !important;
+    padding-bottom: 9px !important;
+    gap: 7px !important;
+  }
+  .app-sidebar .sidebar-brand-row,
+  .app.is-sidebar-collapsed .app-sidebar .sidebar-brand-row {
+    min-height: 92px !important;
+    padding-block: 4px 7px !important;
+  }
+  .app-sidebar .app-nav,
+  .app.is-sidebar-collapsed .app-sidebar .app-nav { gap: 4px !important; }
+  .app-sidebar .app-nav button,
+  body[data-language="es"] .app-sidebar .app-nav button,
+  .app.is-sidebar-collapsed .app-sidebar .app-nav button {
+    min-height: 48px !important;
+  }
+}

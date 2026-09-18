@@ -854,6 +854,60 @@ function Get-SupersededOrderCandidates {
             }
         }
     }
+    # v0.543: also detect exact normal/normal duplicates when one copy has no
+    # production batch at all and its twin has entered production. This is the
+    # floor case where two ordinary A+W orders contain the same Job, Customer and
+    # exact item set, but only one was actually released/cut. Keep this review-only.
+    $normalDuplicateBuckets = @($orderDescriptors | Where-Object { -not $_.mixedRemake -and -not $_.remake } | Group-Object { "$($_.job)|$($_.customer)|$($_.exactSignature)" })
+    foreach ($bucket in $normalDuplicateBuckets) {
+        if ($bucket.Count -lt 2) { continue }
+        foreach ($left in @($bucket.Group | Sort-Object order)) {
+            foreach ($right in @($bucket.Group | Where-Object { [int64]$_.order -gt [int64]$left.order } | Sort-Object order)) {
+                $leftHasProduction = @($left.rows | Where-Object {
+                    ([int]$_.ProductionBatch1 -gt 0) -or ([int]$_.ProductionBatch2 -gt 0) -or ([int]$_.ProductionBatch3 -gt 0)
+                }).Count -gt 0
+                $rightHasProduction = @($right.rows | Where-Object {
+                    ([int]$_.ProductionBatch1 -gt 0) -or ([int]$_.ProductionBatch2 -gt 0) -or ([int]$_.ProductionBatch3 -gt 0)
+                }).Count -gt 0
+                if ($leftHasProduction -eq $rightHasProduction) { continue }
+                $unproduced = if ($leftHasProduction) { $right } else { $left }
+                $produced = if ($leftHasProduction) { $left } else { $right }
+                $pairKey = "${dateKey}|$([Math]::Min([int64]$unproduced.order,[int64]$produced.order))|$([Math]::Max([int64]$unproduced.order,[int64]$produced.order))"
+                $alreadyPresent = @($candidates | Where-Object {
+                    $orders = @([int64]$_.originalOrderNumber,[int64]$_.replacementOrderNumber) | Sort-Object
+                    "${dateKey}|$($orders[0])|$($orders[1])" -eq $pairKey
+                }).Count -gt 0
+                if ($alreadyPresent) { continue }
+                $sameRoute = ([string]$unproduced.route -eq [string]$produced.route)
+                $headerKey = if ($produced.headerIdentity) { [string]$produced.headerIdentity } elseif ($unproduced.headerIdentity) { [string]$unproduced.headerIdentity } else { 'production-duplicate' }
+                $candidates.Add([ordered]@{
+                    candidateKey = "${dateKey}|production-duplicate|$($unproduced.order)|$($produced.order)"
+                    deliveryDate = $dateKey
+                    headerIdentity = $headerKey
+                    originalOrderNumber = [string][int64]$unproduced.order
+                    replacementOrderNumber = [string][int64]$produced.order
+                    confidence = 'high'
+                    evidence = [ordered]@{
+                        sameDeliveryDate = $true
+                        sameJobNumber = $true
+                        sameCustomer = $true
+                        sameRoute = [bool]$sameRoute
+                        routeIgnoredForDuplicateIdentity = $true
+                        exactItemSetMatch = $true
+                        exactItemOverlapCount = [int]$unproduced.rows.Count
+                        bothNormalOrders = $true
+                        originalHasProductionBatch = $false
+                        replacementHasProductionBatch = $true
+                        originalOrderStatuses = @($unproduced.rows | ForEach-Object { [int]$_.OrderStatus } | Select-Object -Unique)
+                        replacementOrderStatuses = @($produced.rows | ForEach-Object { [int]$_.OrderStatus } | Select-Object -Unique)
+                        rule = 'v0.543-same-day-normal-production-divergence-1'
+                    }
+                    originalItems = @($unproduced.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+                    replacementItems = @($produced.rows | ForEach-Object { Convert-CandidateItem -Row $_ })
+                })
+            }
+        }
+    }
     return @($candidates.ToArray())
 }
 
@@ -1415,7 +1469,10 @@ $sequenceSkipSql
 ),
 ResolvedJobItems AS (
     SELECT ji.*,
-           ISNULL(COALESCE(NULLIF(ji.OPTIMIZATION,0),NULLIF(seqopt.SequenceOptimization,0)),0) AS ResolvedOptimization
+           -- v0.543: current PROD_OPTI_SEQUENCE membership is authoritative when
+           -- an older PROD_JOBITEM optimization survives a rejected/reoptimized run.
+           -- Fall back to PROD_JOBITEM only when no current sequence exists.
+           ISNULL(COALESCE(NULLIF(seqopt.SequenceOptimization,0),NULLIF(ji.OPTIMIZATION,0)),0) AS ResolvedOptimization
     FROM JobItems ji
     LEFT JOIN SeqCurrentOptimization seqopt
       ON seqopt.AUFNR=ji.AUFNR AND seqopt.POSNR=ji.POSNR

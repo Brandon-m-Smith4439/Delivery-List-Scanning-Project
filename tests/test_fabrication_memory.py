@@ -116,3 +116,18 @@ def test_no_fabrication_piece_is_terminal_for_current_lifecycle(tmp_path):
         assert classify.call_count == 1
         s.fabrication_status('238001', '001', label_hint={'lifecycleRevision': 'remake-1'})
         assert classify.call_count == 2
+
+
+
+def test_refresh_missing_finds_later_completion_before_cache_expiry_v542(tmp_path):
+    s = service(tmp_path)
+    with mock.patch.object(s, 'machine_assignment', return_value=assigned()):
+        first = s.fabrication_status('238001', '001')
+        assert first['fabricated'] is False
+        # Add completion while the negative fabrication cache is still fresh.
+        # refresh_missing is the bounded current-day status-batch path and must
+        # discover it without waiting for cache expiry.
+        (s.roots['program'] / '23800101.egl').write_text('done')
+        refreshed = s.fabrication_status('238001', '001', refresh_missing=True)
+        assert refreshed['fabricated'] is True
+        assert refreshed['retryAfterSeconds'] == 0
