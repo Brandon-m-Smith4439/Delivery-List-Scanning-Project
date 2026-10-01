@@ -131,3 +131,188 @@ def test_refresh_missing_finds_later_completion_before_cache_expiry_v542(tmp_pat
         refreshed = s.fabrication_status('238001', '001', refresh_missing=True)
         assert refreshed['fabricated'] is True
         assert refreshed['retryAfterSeconds'] == 0
+
+
+def test_v560_completed_floor_machine_overrides_opposite_sketch_assignment_both_directions(tmp_path):
+    """Completed production evidence is operational truth even when the sketch names the other machine."""
+    s = service(tmp_path)
+    s.roots['completed_wj'].mkdir(parents=True, exist_ok=True)
+
+    # Sketch says Waterjet, but the exact item exists in completed Denver output.
+    pdf_wj = s.roots['sketch'] / '239301.pdf'
+    from test_sketch_recovery import write_pdf
+    write_pdf(pdf_wj, ['239301.1 WATERJET'])
+    (s.roots['program'] / '23930101.egl').write_text('Denver complete', encoding='utf-8')
+
+    pdf_denver = s.roots['sketch'] / '239302.pdf'
+    write_pdf(pdf_denver, ['239302.1 DENVER 2'])
+    (s.roots['completed_wj'] / '23930201.nce').write_text('Waterjet complete', encoding='utf-8')
+
+    wj_to_denver = s.fabrication_status('239301', '001', known_items=['001'])
+    assert wj_to_denver['assignedMachine'] == 'Waterjet'
+    assert wj_to_denver['actualMachine'] == 'Denver CNC'
+    assert wj_to_denver['actualMachineCode'] == 'denver'
+    assert wj_to_denver['machineOverride'] is True
+    assert wj_to_denver['fabricated'] is True
+
+    # Sketch says Denver, but the exact item appears in completed Waterjet output.
+    denver_to_wj = s.fabrication_status('239302', '001', known_items=['001'])
+    assert denver_to_wj['assignedMachine'] == 'Denver CNC'
+    assert denver_to_wj['actualMachine'] == 'Waterjet'
+    assert denver_to_wj['actualMachineCode'] == 'waterjet'
+    assert denver_to_wj['machineOverride'] is True
+    assert denver_to_wj['fabricated'] is True
+
+
+def test_v560_when_both_machine_completions_exist_newest_exact_file_wins(tmp_path):
+    """A rerun on the other fabrication machine must become the displayed floor truth."""
+    s = service(tmp_path)
+    s.roots['completed_wj'].mkdir(parents=True, exist_ok=True)
+    from test_sketch_recovery import write_pdf
+    write_pdf(s.roots['sketch'] / '239303.pdf', ['239303.1 WATERJET'])
+
+    denver = s.roots['program'] / '23930301.egl'
+    waterjet = s.roots['completed_wj'] / '23930301.nce'
+    denver.write_text('Denver complete', encoding='utf-8')
+    waterjet.write_text('Waterjet rerun complete', encoding='utf-8')
+    now = time.time()
+    import os
+    os.utime(denver, (now - 20, now - 20))
+    os.utime(waterjet, (now - 5, now - 5))
+
+    status = s.fabrication_status('239303', '001', known_items=['001'])
+    assert status['assignedMachine'] == 'Waterjet'
+    assert status['actualMachine'] == 'Waterjet'
+    assert status['evidence']['name'] == waterjet.name
+    assert status['fabricated'] is True
+
+    # A later Denver rerun supersedes the earlier Waterjet completion.
+    os.utime(denver, (now + 5, now + 5))
+    s.assets('program', refresh=True)
+    status = s.fabrication_status('239303', '001', known_items=['001'], force_check=True)
+    assert status['actualMachine'] == 'Denver CNC'
+    assert status['machineOverride'] is True
+    assert status['evidence']['name'] == denver.name
+
+
+def test_v563_sole_scanner_item_accepts_denver_program_numbered_like_physical_sketch_page(tmp_path):
+    """239197-style orders may have one scanner item but a Denver program suffix matching page 2."""
+    s = service(tmp_path)
+    from test_sketch_recovery import write_pdf
+
+    write_pdf(s.roots['sketch'] / '239197.pdf', ['239197.1 Fabrication', '239197.2 DENVER 2'])
+    denver = s.roots['program'] / '23919702.egl'
+    denver.write_text('Denver completion for physical panel/page 2', encoding='utf-8')
+
+    status = s.fabrication_status('239197', '001', known_items=['001'])
+    assert status['assignedMachine'] == 'Denver CNC'
+    assert status['actualMachine'] == 'Denver CNC'
+    assert status['actualMachineCode'] == 'denver'
+    assert status['fabricated'] is True
+    assert status['evidence']['name'] == denver.name
+    assert status['evidence']['soleItemInferred'] is True
+    assert [row['name'] for row in status['programs']] == [denver.name]
+    assert status['programs'][0]['soleItemInferred'] is True
+
+    item_assets = s.item_assets('239197', '001', known_items=['001'])
+    assert [row['name'] for row in item_assets['programs']] == [denver.name]
+    assert item_assets['programs'][0]['soleItemInferred'] is True
+
+
+def test_v563_physical_page_program_fallback_never_crosses_multi_item_order(tmp_path):
+    """A page-2 Denver file cannot satisfy Item 001 when Item 002 is a real scanner item."""
+    s = service(tmp_path)
+    denver = s.roots['program'] / '23919702.egl'
+    denver.write_text('Denver completion for item 2', encoding='utf-8')
+
+    with mock.patch.object(s, 'machine_assignment', return_value=assigned('denver')):
+        status = s.fabrication_status('239197', '001', known_items=['001', '002'])
+    assert status['fabricated'] is False
+    assert status['actualMachine'] == ''
+    assert status['programs'] == []
+
+
+def test_v563_newest_sole_item_floor_completion_beats_older_exact_opposite_machine(tmp_path):
+    """Physical-page Denver reruns remain floor truth even when Waterjet used the scanner item suffix."""
+    s = service(tmp_path)
+    s.roots['completed_wj'].mkdir(parents=True, exist_ok=True)
+    from test_sketch_recovery import write_pdf
+
+    write_pdf(s.roots['sketch'] / '239197.pdf', ['239197.1 Fabrication', '239197.2 DENVER 2'])
+    waterjet = s.roots['completed_wj'] / '23919701.nce'
+    denver = s.roots['program'] / '23919702.egl'
+    waterjet.write_text('older Waterjet completion', encoding='utf-8')
+    denver.write_text('newer Denver rerun', encoding='utf-8')
+    now = time.time()
+    import os
+    os.utime(waterjet, (now - 30, now - 30))
+    os.utime(denver, (now - 5, now - 5))
+
+    status = s.fabrication_status('239197', '001', known_items=['001'])
+    assert status['actualMachine'] == 'Denver CNC'
+    assert status['actualMachineCode'] == 'denver'
+    assert status['fabricated'] is True
+    assert status['evidence']['name'] == denver.name
+    assert status['evidence']['soleItemInferred'] is True
+
+
+def test_v564_order_details_auto_probe_finds_denver_file_created_after_stale_index(tmp_path):
+    """Order Details must not wait for the rolling Programs index to notice a new Denver file."""
+    s = service(tmp_path)
+    from test_sketch_recovery import write_pdf
+
+    write_pdf(s.roots['sketch'] / '239197.pdf', ['239197.1 Fabrication', '239197.2 DENVER 2'])
+    # Prime an empty Programs cache first; this reproduces the live case where
+    # the .egl exists after the rolling production index snapshot was built.
+    assert s.assets('program', refresh=True) == []
+    assert s.assets('sketch', refresh=True)
+    denver = s.roots['program'] / '23919702.egl'
+    denver.write_text('Denver completion for physical panel/page 2', encoding='utf-8')
+
+    with mock.patch.object(s, '_walk_root', side_effect=AssertionError('Order Details must use bounded targeted probing')):
+        assets = s.item_assets('239197', '001', known_items=['001'])
+
+    status = assets['fabrication']
+    assert status['assignedMachine'] == 'Denver CNC'
+    assert status['actualMachine'] == 'Denver CNC'
+    assert status['fabricated'] is True
+    assert status['evidence']['name'] == denver.name
+    assert [row['name'] for row in assets['programs']] == [denver.name]
+
+
+def test_v564_targeted_probe_supports_order_folder_with_physical_page_filename(tmp_path):
+    """Programs/239197/02.egl is valid sole-item page-2 Denver evidence without a full share walk."""
+    s = service(tmp_path)
+    from test_sketch_recovery import write_pdf
+
+    write_pdf(s.roots['sketch'] / '239197.pdf', ['239197.1 Fabrication', '239197.2 DENVER 2'])
+    assert s.assets('program', refresh=True) == []
+    assert s.assets('sketch', refresh=True)
+    order_folder = s.roots['program'] / '239197'
+    order_folder.mkdir(parents=True)
+    denver = order_folder / '02.egl'
+    denver.write_text('Denver completion in order folder', encoding='utf-8')
+
+    with mock.patch.object(s, '_walk_root', side_effect=AssertionError('Targeted probe must stay bounded')):
+        assets = s.item_assets('239197', '001', known_items=['001'])
+
+    status = assets['fabrication']
+    assert status['actualMachineCode'] == 'denver'
+    assert status['fabricated'] is True
+    assert status['evidence']['name'] == denver.name
+    assert status['evidence']['relativePath'] == '239197/02.egl'
+    assert status['evidence']['soleItemInferred'] is True
+
+
+def test_v564_targeted_order_folder_probe_remains_strict_for_multi_item_orders(tmp_path):
+    """A page-2 file under the order folder cannot complete Item 001 when Item 002 really exists."""
+    s = service(tmp_path)
+    order_folder = s.roots['program'] / '239197'
+    order_folder.mkdir(parents=True)
+    (order_folder / '02.egl').write_text('Denver completion for physical item 2', encoding='utf-8')
+
+    with mock.patch.object(s, 'machine_assignment', return_value=assigned('denver')):
+        result = s.fabrication_status('239197', '001', known_items=['001', '002'], force_check=True)
+    assert result['fabricated'] is False
+    assert result['evidence'] is None
+    assert result['programs'] == []

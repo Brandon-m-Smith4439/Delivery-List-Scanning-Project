@@ -22689,3 +22689,1470 @@ body.is-lookup-editor-open-v476 { overflow:hidden; }
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================================================================== */
+/* v0.549 Superseded / optimization review                                    */
+/* ========================================================================== */
+.admin-modal-panel:has(.superseded-review-shell) { overflow:hidden; }
+.superseded-review-shell,
+.superseded-review-list,
+.superseded-review-card,
+.superseded-review-card > *,
+.superseded-review-compare,
+.superseded-review-compare > section,
+.superseded-review-item-list-v544,
+.superseded-review-item-card-v544 { min-width:0; max-width:100%; }
+.superseded-review-shell { overflow-x:hidden; }
+.superseded-review-compare {
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:12px;
+}
+.superseded-review-evidence-details-v328 { overflow:hidden; }
+.superseded-review-item-grid-v544 { min-width:0; }
+.superseded-review-production-pills-v544 {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  min-width:0;
+}
+.superseded-review-production-pills-v544 > * { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.superseded-review-removal-choice-v328 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.superseded-review-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.superseded-review-actions button { flex:1 1 180px; min-height:40px; white-space:normal; }
+
+.optimization-review-section-v549 {
+  display:grid;
+  gap:10px;
+  border:1px solid #ecc5ca;
+  border-radius:14px;
+  background:linear-gradient(180deg,#fffafa,#fff5f6);
+  padding:12px;
+}
+.optimization-review-section-v549 > header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+}
+.optimization-review-section-v549 > header > div { min-width:0; }
+.optimization-review-section-v549 > header span { color:#a93040; font-size:9px; font-weight:950; letter-spacing:.07em; text-transform:uppercase; }
+.optimization-review-section-v549 > header strong { display:block; color:#532630; font-size:15px; }
+.optimization-review-section-v549 > header p { margin:3px 0 0; color:#73525a; font-size:10px; }
+.optimization-review-section-v549 > header > b { flex:0 0 auto; border-radius:999px; padding:5px 9px; background:#f1e7e9; color:#76515a; font-size:10px; }
+.optimization-review-section-v549 > header > b.has-alert { background:#c72f40; color:#fff; }
+.optimization-review-list-v549 { display:grid; gap:9px; }
+.optimization-review-card-v549 {
+  min-width:0;
+  border:1px solid #e8c8cd;
+  border-left:4px solid #c83242;
+  border-radius:12px;
+  background:#fff;
+  padding:11px 12px;
+  display:grid;
+  gap:9px;
+}
+.optimization-review-card-v549 > header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:9px; align-items:center; }
+.optimization-review-card-v549 > header div { min-width:0; }
+.optimization-review-card-v549 > header small { display:block; color:#a33542; font-size:8px; font-weight:900; text-transform:uppercase; }
+.optimization-review-card-v549 > header strong { display:block; margin-top:2px; color:#40262c; overflow-wrap:anywhere; }
+.optimization-review-card-v549 > header > b { border-radius:999px; background:#f4e7e9; color:#8e3440; padding:5px 8px; font-size:9px; white-space:nowrap; }
+.optimization-warning-mark-v549 { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:#c83242; color:#fff; font-weight:950; }
+.optimization-review-timeline-v549 { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:8px; align-items:center; }
+.optimization-review-timeline-v549 > span { min-width:0; border:1px solid #ead9dc; border-radius:9px; padding:8px 9px; background:#fffafb; }
+.optimization-review-timeline-v549 small,.optimization-review-timeline-v549 strong,.optimization-review-timeline-v549 em { display:block; }
+.optimization-review-timeline-v549 small { color:#86616a; font-size:8px; font-weight:900; text-transform:uppercase; }
+.optimization-review-timeline-v549 strong { margin-top:2px; color:#4a2b32; overflow-wrap:anywhere; }
+.optimization-review-timeline-v549 em { margin-top:2px; color:#79626a; font-size:9px; font-style:normal; }
+.optimization-review-card-v549 > p { margin:0; color:#694d54; font-size:10px; line-height:1.45; }
+.optimization-review-note-v549 { display:grid; gap:4px; }
+.optimization-review-note-v549 > span { color:#684c54; font-size:9px; font-weight:900; }
+.optimization-review-note-v549 textarea { width:100%; box-sizing:border-box; resize:vertical; border:1px solid #d9c5ca; border-radius:8px; padding:8px; color:#3d2a2f; }
+.optimization-review-card-v549 > footer { display:flex; flex-wrap:wrap; gap:7px; }
+.optimization-review-card-v549 > footer button { flex:1 1 125px; min-height:36px; }
+
+/* ========================================================================== */
+/* v0.549 Progress Settings and Lookup Manager consistency                     */
+/* ========================================================================== */
+.progress-settings-shell-v549 {
+  display:grid;
+  grid-template-columns:minmax(300px,.85fr) minmax(380px,1.15fr);
+  gap:14px;
+  min-width:0;
+}
+.progress-settings-editor-v549,
+.progress-settings-library-v549 {
+  min-width:0;
+  border:1px solid #d9e3ee;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 8px 22px rgba(18,58,91,.055);
+  padding:14px;
+}
+.progress-settings-editor-v549 > header small,
+.progress-settings-library-v549 > header small { color:#3777ad; font-size:9px; font-weight:950; text-transform:uppercase; letter-spacing:.06em; }
+.progress-settings-editor-v549 > header strong,
+.progress-settings-library-v549 > header strong { display:block; margin-top:2px; color:#173a59; font-size:15px; }
+.progress-settings-editor-v549 > header p { margin:4px 0 0; color:#617387; font-size:10px; line-height:1.45; }
+.progress-settings-form-v549 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
+.progress-settings-form-v549 label { min-width:0; display:grid; gap:5px; }
+.progress-settings-form-v549 label > span { color:#506579; font-size:9px; font-weight:900; }
+.progress-settings-form-v549 :is(input,select) { box-sizing:border-box; width:100%; min-width:0; min-height:40px; border:1px solid #cbd8e4; border-radius:8px; background:#fff; padding:0 10px; color:#173a59; }
+.progress-settings-form-v549 label small { color:#778697; font-size:8.5px; }
+.progress-settings-form-v549 footer { grid-column:1/-1; display:flex; justify-content:flex-end; gap:8px; }
+.progress-settings-list-v549 { display:grid; gap:8px; margin-top:10px; }
+.progress-setting-card-v549 { min-width:0; display:grid; grid-template-columns:minmax(125px,.7fr) minmax(0,1.4fr) auto; gap:10px; align-items:center; border:1px solid #dae4ee; border-left:4px solid #397daf; border-radius:10px; padding:9px 10px; background:#fbfdff; }
+.progress-setting-card-v549.is-inactive { opacity:.62; }
+.progress-setting-order-v549 span,.progress-setting-order-v549 strong,.progress-setting-order-v549 small { display:block; }
+.progress-setting-order-v549 span { color:#3975a4; font-size:8px; font-weight:950; text-transform:uppercase; }
+.progress-setting-order-v549 strong { color:#173a59; overflow-wrap:anywhere; }
+.progress-setting-order-v549 small { color:#738296; font-size:8.5px; }
+.progress-setting-facts-v549 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; min-width:0; }
+.progress-setting-facts-v549 > span { min-width:0; border:1px solid #e0e8f0; border-radius:8px; padding:7px 8px; background:#fff; }
+.progress-setting-facts-v549 small,.progress-setting-facts-v549 strong,.progress-setting-facts-v549 em { display:block; }
+.progress-setting-facts-v549 small { color:#778697; font-size:8px; font-weight:900; text-transform:uppercase; }
+.progress-setting-facts-v549 strong { color:#294c69; font-size:10px; }
+.progress-setting-facts-v549 em { color:#748398; font-size:8.5px; font-style:normal; overflow-wrap:anywhere; }
+
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  overflow:visible;
+}
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button {
+  flex:1 1 120px;
+  min-width:110px;
+  min-height:38px;
+  border:1px solid #d6e1ec;
+  border-radius:9px;
+  background:#fff;
+  color:#50657a;
+  justify-content:center;
+}
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button.is-active {
+  border-color:#8ab5da;
+  background:#eaf4fc;
+  color:#1f659d;
+  box-shadow:0 0 0 2px rgba(50,126,185,.07);
+}
+#adminModal[data-kind="lookups"] #adminModalBody { overflow-x:hidden; }
+#adminModal[data-kind="lookups"] .lookup-manager-shell,
+#adminModal[data-kind="lookups"] .lookup-manager-workspace,
+#adminModal[data-kind="lookups"] :is(.lookup-editor-card,.lookup-config-editor-v346,.lookup-manager-list) { min-width:0; max-width:100%; }
+#adminModal[data-kind="lookups"] :is(.lookup-editor-card,.lookup-config-editor-v346,.lookup-manager-list) {
+  border-radius:13px;
+  border-color:#d9e4ee;
+  box-shadow:0 6px 18px rgba(20,58,87,.05);
+}
+#adminModal[data-kind="lookups"] :is(.lookup-manager-form,.machine-lookup-form-v521,.sheet-size-form-v539) {
+  gap:10px;
+}
+#adminModal[data-kind="lookups"] :is(input,select,textarea) { border-radius:8px; }
+#adminModal[data-kind="lookups"] .lookup-row { min-width:0; border-radius:9px; }
+#adminModal[data-kind="lookups"] .lookup-row-main { min-width:0; }
+#adminModal[data-kind="lookups"] .lookup-row-main :is(strong,span,small,code) { overflow-wrap:anywhere; }
+
+@media (max-width:1100px) {
+  .superseded-review-compare,
+  .progress-settings-shell-v549 { grid-template-columns:1fr !important; }
+  .superseded-review-removal-choice-v328 { grid-template-columns:1fr; }
+}
+@media (max-width:700px) {
+  .optimization-review-card-v549 > header { grid-template-columns:auto minmax(0,1fr); }
+  .optimization-review-card-v549 > header > b { grid-column:2; justify-self:start; }
+  .optimization-review-timeline-v549 { grid-template-columns:1fr; }
+  .optimization-review-timeline-v549 > i { transform:rotate(90deg); justify-self:center; }
+  .progress-settings-form-v549,
+  .progress-setting-facts-v549,
+  .progress-setting-card-v549 { grid-template-columns:1fr; }
+  .progress-setting-card-v549 .lookup-row-actions-v346 { justify-content:flex-end; }
+}
+
+/* ========================================================================== */
+/* v0.550 Lookup Manager + graphical Progress Settings                        */
+/* ========================================================================== */
+/* Lookup Manager now uses the same shared tab rail as every other Admin GUI. */
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs {
+  display: flex;
+  align-items: end;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid #d8e3f1;
+  background: #fff;
+  scrollbar-width: thin;
+}
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button {
+  flex: 0 0 auto;
+  min-width: auto;
+  min-height: 42px;
+  justify-content: flex-start;
+  border: 1px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: #536780;
+  box-shadow: none;
+  padding: 0 15px;
+}
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button:hover,
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button:focus-visible {
+  background: #f3f7fd;
+  color: #174f93;
+}
+#adminModal[data-kind="lookups"] .admin-modal-section-tabs button.is-active {
+  border-color: #d2dfef;
+  border-bottom-color: #174f93;
+  background: #f7fbff;
+  color: #0b2d5a;
+  box-shadow: none;
+}
+#adminModal[data-kind="lookups"] .sheet-size-manager-v539 {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  padding: 12px !important;
+}
+#adminModal[data-kind="lookups"] .sheet-size-manager-v539 > .lookup-config-editor-v346 {
+  display: grid !important;
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* Every focused Lookup editor is the same dialog surface after it is moved to
+   document.body. This prevents tab-specific Admin selectors from disappearing. */
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550.is-editor-open-v470 {
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: min(820px, calc(100vw - 40px)) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: min(88dvh, 900px) !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  border: 1px solid #cbd9e6 !important;
+  border-radius: 16px !important;
+  background: #fff !important;
+  box-shadow: 0 30px 85px rgba(6,24,41,.38) !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: grid !important;
+  grid-template-columns: auto minmax(0,1fr) !important;
+  gap: 12px !important;
+  align-items: start !important;
+  margin: 0 !important;
+  padding: 16px 62px 14px 18px !important;
+  border-bottom: 1px solid #d9e4ee !important;
+  background: linear-gradient(135deg,#f9fcff,#edf5fc) !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header :is(strong,h3) {
+  color: #173f68 !important;
+  font-size: 15px !important;
+  line-height: 1.25 !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header p {
+  margin: 4px 0 0 !important;
+  color: #687f94 !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(form,.station-add-row-v346,.station-alias-editor-v470) {
+  min-height: 0;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > form,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-add-row-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-alias-editor-v470 {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 18px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-grid,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .machine-lookup-form-v521,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .stage-definition-form-v346 {
+  grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+  gap: 12px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(label,.lookup-route-fields) {
+  min-width: 0;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(input,select,textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(.lookup-live-preview,.lookup-form-actions,.machine-lookup-form-v521 > footer,.stage-definition-form-v346 > footer) {
+  grid-column: 1 / -1 !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-actions,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 form > footer {
+  position: sticky;
+  bottom: -18px;
+  z-index: 2;
+  margin: 6px -18px -18px !important;
+  padding: 12px 18px !important;
+  border-top: 1px solid #dce6ef;
+  background: rgba(255,255,255,.97);
+  backdrop-filter: blur(6px);
+}
+.lookup-editor-modal-shell-v476 .lookup-editor-close-v470 {
+  --gui-close-top: 12px;
+  --gui-close-right: 12px;
+  --gui-close-z-index: 9;
+}
+
+.progress-settings-shell-v550 {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0,1.55fr) minmax(300px,.72fr);
+  gap: 14px;
+  align-items: start;
+}
+.progress-workflow-board-v550,
+.progress-settings-inspector-v550 {
+  min-width: 0;
+  border: 1px solid #d5e1ec;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(18,58,91,.06);
+}
+.progress-workflow-board-v550 { overflow: hidden; }
+.progress-workflow-header-v550 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 17px 13px;
+  border-bottom: 1px solid #e1e9f1;
+  background: linear-gradient(135deg,#f9fcff,#edf5fb);
+}
+.progress-workflow-header-v550 > div:first-child { min-width: 0; }
+.progress-workflow-header-v550 small,
+.progress-settings-inspector-v550 > small,
+.progress-settings-inspector-v550 header small {
+  display: block;
+  color: #3777ad;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.progress-workflow-header-v550 strong,
+.progress-settings-inspector-v550 > strong,
+.progress-settings-inspector-v550 header strong {
+  display: block;
+  margin-top: 2px;
+  color: #173a59;
+  font-size: 16px;
+  font-weight: 950;
+}
+.progress-workflow-header-v550 p,
+.progress-settings-inspector-v550 p {
+  margin: 4px 0 0;
+  color: #65778a;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.progress-workflow-header-v550 > div:last-child {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.progress-workflow-header-v550 > div:last-child > span {
+  border: 1px solid #ccdbe8;
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 9px;
+  color: #597087;
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.progress-workflow-legend-v550 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 17px 0;
+  color: #65798d;
+  font-size: 9px;
+  font-weight: 850;
+}
+.progress-workflow-legend-v550 span { display: inline-flex; align-items: center; gap: 5px; }
+.progress-workflow-legend-v550 i { width: 9px; height: 9px; border-radius: 3px; background: #6b7f93; }
+.progress-workflow-legend-v550 i.is-machine { background: #2e78bd; }
+.progress-workflow-legend-v550 i.is-custom { background: #7558b8; }
+.progress-workflow-scroll-v550 {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 18px 14px 20px;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+.progress-workflow-track-v550 {
+  width: max-content;
+  min-width: 100%;
+  display: flex;
+  align-items: stretch;
+}
+.progress-workflow-node-v550 {
+  position: relative;
+  flex: 0 0 146px;
+  min-width: 0;
+  min-height: 118px;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #d7e2ec;
+  border-top: 4px solid var(--progress-node-color,#60788e);
+  border-radius: 12px;
+  background: #fbfdff;
+  box-shadow: 0 4px 12px rgba(21,57,87,.055);
+}
+.progress-workflow-node-v550.is-custom {
+  border-color: color-mix(in srgb,var(--progress-node-color,#7558b8) 38%,#d7e2ec);
+  background: linear-gradient(180deg,#f9f7ff,#fff);
+  cursor: grab;
+}
+.progress-workflow-node-v550.is-custom.is-dragging { opacity: .42; cursor: grabbing; }
+.progress-workflow-node-v550 > button,
+.progress-workflow-node-v550.is-fixed {
+  color: #23435e;
+}
+.progress-workflow-node-v550 > button {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0,1fr);
+  align-content: start;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  padding: 14px 10px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.progress-workflow-node-v550.is-fixed {
+  display: grid;
+  grid-template-columns: 30px minmax(0,1fr);
+  align-content: start;
+  gap: 9px;
+  padding: 14px 10px 10px;
+}
+.progress-workflow-icon-v550 {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb,var(--progress-node-color,#60788e) 12%,white);
+  color: var(--progress-node-color,#60788e);
+}
+.progress-workflow-icon-v550 svg { width: 18px; height: 18px; }
+.progress-workflow-copy-v550 { min-width: 0; }
+.progress-workflow-copy-v550 small,
+.progress-workflow-copy-v550 strong,
+.progress-workflow-copy-v550 em { display: block; min-width: 0; overflow-wrap: break-word; word-break: normal; }
+.progress-workflow-copy-v550 small { color: #718397; font-size: 7.5px; font-weight: 950; letter-spacing: .04em; text-transform: uppercase; }
+.progress-workflow-copy-v550 strong { margin-top: 3px; color: #1e435f; font-size: 11.5px; line-height: 1.25; }
+.progress-workflow-copy-v550 em { margin-top: 4px; color: #718094; font-size: 8.5px; font-style: normal; line-height: 1.35; }
+.progress-workflow-drag-handle-v550 {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 2;
+  color: #967fc6;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+.progress-workflow-dropzone-v550 {
+  position: relative;
+  flex: 0 0 28px;
+  min-width: 28px;
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.progress-workflow-dropzone-v550::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: #cbd9e5;
+  transform: translateY(-50%);
+}
+.progress-workflow-dropzone-v550 span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #b9cadd;
+  border-radius: 999px;
+  background: #fff;
+  color: #3979ae;
+  font-size: 14px;
+  font-weight: 900;
+  transform: translate(-50%,-50%);
+  transition: transform 100ms ease, background 100ms ease, border-color 100ms ease;
+}
+.progress-workflow-dropzone-v550:hover span,
+.progress-workflow-dropzone-v550:focus-visible span,
+.progress-workflow-dropzone-v550.is-drag-over span {
+  border-color: #3979ae;
+  background: #eaf4fc;
+  transform: translate(-50%,-50%) scale(1.14);
+}
+.progress-workflow-board-v550.is-dragging .progress-workflow-dropzone-v550 {
+  flex-basis: 42px;
+  background: #f6f9fc;
+}
+.progress-workflow-board-v550.is-dragging .progress-workflow-dropzone-v550.is-drag-over {
+  background: #e7f2fb;
+}
+.progress-workflow-help-v550 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 14px 14px;
+  border: 1px solid #dce6ef;
+  border-radius: 9px;
+  background: #f8fbfe;
+  padding: 9px 10px;
+  color: #687d90;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.progress-workflow-help-v550 strong { flex: 0 0 auto; color: #356f9f; }
+.progress-settings-inspector-v550 { padding: 15px; }
+.progress-settings-inspector-v550.is-empty {
+  min-height: 270px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+.progress-settings-inspector-icon-v550 {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 11px;
+  border-radius: 12px;
+  background: #f0ecfb;
+  color: #7558b8;
+}
+.progress-settings-inspector-icon-v550 svg { width: 22px; height: 22px; }
+.progress-settings-inspector-v550.is-empty .app-primary-button { margin-top: 14px; }
+.progress-settings-inspector-v550 > header {
+  margin: -15px -15px 14px;
+  padding: 14px 15px 12px;
+  border-bottom: 1px solid #e0e8f0;
+  background: #f9fbfd;
+  border-radius: 15px 15px 0 0;
+}
+.progress-settings-form-v550 {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 11px;
+}
+.progress-settings-form-v550 label { min-width: 0; display: grid; align-content: start; gap: 5px; }
+.progress-settings-form-v550 label.is-wide { grid-column: 1 / -1; }
+.progress-settings-form-v550 label > span { color: #506579; font-size: 9px; font-weight: 900; }
+.progress-settings-form-v550 label small { color: #7b8b9b; font-size: 8px; line-height: 1.35; }
+.progress-settings-form-v550 :is(input,select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #cbd8e4;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  color: #173a59;
+}
+.progress-settings-form-v550 input[readonly] { background: #f3f6f9; color: #6f7f8f; }
+.progress-settings-form-v550 footer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding-top: 4px;
+}
+.progress-settings-form-v550 footer .danger { color: #a92938; border-color: #e5b7bd; background: #fff6f7; }
+
+@media (max-width: 1100px) {
+  .progress-settings-shell-v550 { grid-template-columns: 1fr; }
+  .progress-settings-inspector-v550.is-empty { min-height: 180px; }
+}
+@media (max-width: 760px) {
+  #adminModal[data-kind="lookups"] .admin-modal-section-tabs { padding-inline: 10px; }
+  #adminModal[data-kind="lookups"] .admin-modal-section-tabs button { min-height: 44px; padding-inline: 12px; }
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550.is-editor-open-v470 {
+    width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
+    border-radius: 13px !important;
+  }
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-grid,
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .machine-lookup-form-v521,
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .stage-definition-form-v346 {
+    grid-template-columns: 1fr !important;
+  }
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(button,input,select,textarea) { min-height: 44px; }
+  .progress-workflow-header-v550 { flex-direction: column; }
+  .progress-workflow-header-v550 > div:last-child { width: 100%; justify-content: space-between; }
+  .progress-workflow-node-v550 { flex-basis: 156px; }
+  .progress-settings-form-v550 { grid-template-columns: 1fr; }
+  .progress-settings-form-v550 label.is-wide,
+  .progress-settings-form-v550 footer { grid-column: 1; }
+  .progress-settings-form-v550 footer { grid-template-columns: 1fr 1fr; }
+  .progress-settings-form-v550 footer > span { display: none; }
+  .progress-settings-form-v550 footer .danger { grid-column: 1 / -1; }
+}
+
+/* ========================================================================== */
+/* v0.551 Progress workspace, focused Lookup editors, and Reject tabs          */
+/* ========================================================================== */
+/* Progress Settings is intentionally one vertical workspace: the workflow gets
+   the full modal width and the selected checkpoint editor lives underneath. */
+#adminModal[data-kind="progressSettings"] #adminModalBody {
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #f3f7fb;
+}
+.progress-settings-shell-v550 {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+}
+.progress-workflow-board-v550,
+.progress-settings-inspector-v550 {
+  width: 100%;
+  box-sizing: border-box;
+}
+.progress-workflow-scroll-v550 {
+  padding: 18px 16px 19px;
+}
+.progress-workflow-track-v550 {
+  min-width: max(100%, max-content);
+}
+.progress-workflow-node-v550.is-machine,
+.progress-workflow-node-v550.is-custom {
+  cursor: grab;
+}
+.progress-workflow-node-v550.is-machine {
+  display: grid;
+  grid-template-columns: 30px minmax(0,1fr);
+  align-content: start;
+  gap: 9px;
+  padding: 14px 10px 10px;
+  border-color: color-mix(in srgb,var(--progress-node-color,#2e78bd) 35%,#d7e2ec);
+  background: linear-gradient(180deg,#f7fbff,#fff);
+}
+.progress-workflow-node-v550.is-machine.is-dragging,
+.progress-workflow-node-v550.is-custom.is-dragging {
+  opacity: .42;
+  cursor: grabbing;
+}
+.progress-workflow-node-v550.is-machine .progress-workflow-drag-handle-v550 {
+  color: #4e83b4;
+}
+.progress-workflow-lock-v551 {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  color: transparent;
+  background: #8ca0b3;
+  opacity: .72;
+}
+.progress-settings-inspector-v550 {
+  padding: 0;
+  overflow: hidden;
+}
+.progress-settings-inspector-v550.is-empty {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  gap: 13px;
+  padding: 14px 16px;
+}
+.progress-settings-inspector-v550.is-empty .progress-settings-inspector-icon-v550 {
+  margin: 0;
+}
+.progress-settings-inspector-v550.is-empty .app-primary-button {
+  margin: 0;
+  justify-self: end;
+}
+.progress-settings-inspector-v550 > header {
+  margin: 0;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid #e0e8f0;
+  border-radius: 0;
+  background: linear-gradient(135deg,#fbfdff,#f1f6fb);
+}
+.progress-settings-form-v550 {
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.progress-settings-form-v550 label.is-wide { grid-column: span 2; }
+.progress-settings-form-v550 :is(input,select) {
+  min-height: 42px;
+  border-color: #bccdde;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.progress-settings-form-v550 :is(input,select):focus-visible {
+  outline: none;
+  border-color: #4383b8;
+  box-shadow: 0 0 0 3px rgba(43,112,170,.12);
+}
+.progress-settings-form-v550 footer {
+  grid-column: 1 / -1;
+  margin: 2px -16px -16px;
+  padding: 12px 16px;
+  border-top: 1px solid #dde6ee;
+  background: #fbfdff;
+}
+
+/* Focused Lookup editors use the available dialog width rather than leaving a
+   narrow form column and a dead white panel. Keep controls consistent across
+   every lookup type and hide legacy instructional blocks inside edit dialogs. */
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550.is-editor-open-v470 {
+  width: min(720px, calc(100vw - 32px)) !important;
+  max-height: min(86dvh, 820px) !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header {
+  grid-template-columns: minmax(0,1fr) !important;
+  gap: 3px !important;
+  padding: 15px 58px 13px 17px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header > :first-child:not(div) {
+  display: none !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header p {
+  margin-top: 2px !important;
+  font-size: 10px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > form,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-add-row-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-alias-editor-v470 {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 15px 17px 17px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-grid,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .machine-lookup-form-v521,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .stage-definition-form-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-route-fields {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+  gap: 11px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(label,.lookup-route-fields,.machine-lookup-field-v521) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 label > span:first-child {
+  color: #46627c;
+  font-size: 9px;
+  font-weight: 900;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(input:not([type="color"]),select,textarea) {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  box-sizing: border-box !important;
+  border: 1px solid #bccdde !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  padding: 8px 10px !important;
+  color: #173a59 !important;
+  font: inherit !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 textarea {
+  min-height: 82px !important;
+  resize: vertical;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(input:not([type="color"]),select,textarea):focus-visible {
+  outline: none !important;
+  border-color: #4383b8 !important;
+  box-shadow: 0 0 0 3px rgba(43,112,170,.12) !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 input[type="color"] {
+  min-width: 54px !important;
+  min-height: 42px !important;
+  border: 1px solid #bccdde !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  padding: 4px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(label small,.lookup-live-preview,.portable-architecture-note-v355,.stage-preset-note-v346) {
+  display: none !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-actions,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 form > footer {
+  margin: 5px -17px -17px !important;
+  padding: 11px 17px !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .station-add-row-v346[hidden],
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .station-alias-editor-v470[hidden] {
+  display: none !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .station-add-row-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .station-alias-editor-v470 {
+  grid-template-columns: minmax(0,1fr) auto !important;
+  gap: 10px !important;
+  align-items: end !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .station-alias-editor-v470 > label {
+  min-width: 0;
+}
+
+/* Reject Reasons and Break Locations now live on separate shared Admin tabs.
+   The modal body owns vertical scrolling so each tab can be read top-to-bottom
+   naturally, including A+W mapping and historical cleanup tables. */
+#adminModal[data-kind="rejectSettings"] #adminModalBody {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  background: #f3f7fb;
+}
+#adminModal[data-kind="rejectSettings"] .admin-modal-section-tabs {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid #d8e3f1;
+  background: #fff;
+  scrollbar-width: thin;
+}
+#adminModal[data-kind="rejectSettings"] .admin-modal-section-tabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: #536780;
+  box-shadow: none;
+  padding: 0 15px;
+}
+#adminModal[data-kind="rejectSettings"] .admin-modal-section-tabs button.is-active {
+  border-color: #d2dfef;
+  border-bottom-color: #174f93;
+  background: #f7fbff;
+  color: #0b2d5a;
+}
+.reject-settings-shell-v551 {
+  min-height: 0;
+  height: auto;
+  display: grid;
+  grid-template-rows: none;
+  grid-template-columns: minmax(0,1fr);
+  gap: 12px;
+  padding: 12px;
+  overflow: visible;
+}
+.reject-settings-shell-v551 .reject-settings-library-v347 {
+  min-height: 0;
+  height: auto;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  overflow: visible;
+}
+.reject-settings-shell-v551 .reject-catalog-list-v347 {
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+.reject-settings-shell-v551 .reject-history-table-wrap-v485 {
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+.reject-settings-shell-v551 .reject-history-table-v485 :is(input,select) {
+  min-height: 38px;
+  border: 1px solid #bfd0df;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 9px;
+  color: #173e62;
+  font: inherit;
+}
+
+@media (max-width: 1050px) {
+  .progress-settings-form-v550 { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .progress-settings-form-v550 label.is-wide { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .progress-settings-inspector-v550.is-empty {
+    grid-template-columns: auto minmax(0,1fr);
+  }
+  .progress-settings-inspector-v550.is-empty .app-primary-button {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-self: stretch;
+  }
+  .progress-settings-form-v550 { grid-template-columns: 1fr; }
+  .progress-settings-form-v550 label.is-wide,
+  .progress-settings-form-v550 footer { grid-column: 1; }
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-grid,
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .machine-lookup-form-v521,
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .stage-definition-form-v346,
+  .lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-route-fields {
+    grid-template-columns: 1fr !important;
+  }
+  #adminModal[data-kind="rejectSettings"] .admin-modal-section-tabs { padding-inline: 10px; }
+}
+.reject-settings-shell-v551 .reject-history-maintenance-v485 { margin-top: 0; }
+
+/* ========================================================================== */
+/* v0.553 multi-edit delivery lists, shared actions, Lookup form cleanup      */
+/* ========================================================================== */
+.app-save-action-v553,
+.lookup-editor-dialog-v550 .lookup-save-button-v529,
+#adminModal :is(#automationSaveBtn,#automationProductionSaveBtn,#automationRejectSaveBtn),
+#adminModal [data-reject-aw-mapping-save] {
+  box-sizing: border-box;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #1d6599 !important;
+  border-radius: 9px !important;
+  background: linear-gradient(180deg,#2f79ad,#1e5f90) !important;
+  color: #fff !important;
+  padding: 0 13px !important;
+  box-shadow: 0 6px 14px rgba(25,88,137,.16) !important;
+  font-weight: 900 !important;
+  cursor: pointer;
+}
+.app-save-action-v553:hover:not(:disabled),
+.lookup-editor-dialog-v550 .lookup-save-button-v529:hover:not(:disabled),
+#adminModal :is(#automationSaveBtn,#automationProductionSaveBtn,#automationRejectSaveBtn):hover:not(:disabled),
+#adminModal [data-reject-aw-mapping-save]:hover:not(:disabled) {
+  background: linear-gradient(180deg,#3786bc,#23699a) !important;
+}
+.app-clear-action-v553,
+.lookup-editor-dialog-v550 :is([data-lookup-clear-form],[data-glass-profile-clear-v349],[data-stage-definition-clear-v346],[data-machine-new-v521]) {
+  box-sizing: border-box;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #d6a2a6 !important;
+  border-radius: 9px !important;
+  background: linear-gradient(180deg,#fffafa,#fff1f1) !important;
+  color: #a7353d !important;
+  padding: 0 13px !important;
+  box-shadow: none !important;
+  font-weight: 900 !important;
+  cursor: pointer;
+}
+.app-clear-action-v553:hover:not(:disabled),
+.lookup-editor-dialog-v550 :is([data-lookup-clear-form],[data-glass-profile-clear-v349],[data-stage-definition-clear-v346],[data-machine-new-v521]):hover:not(:disabled) {
+  border-color: #c56c73 !important;
+  background: #ffeaea !important;
+  color: #8e252e !important;
+}
+.app-save-action-v553:disabled,
+.app-clear-action-v553:disabled { opacity: .48; cursor: default; box-shadow: none !important; }
+
+/* The focused Lookup editor owns one usable form column. This removes the
+   empty right rail left by legacy two-column editor definitions. */
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-form-grid,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .machine-lookup-form-v521,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .stage-definition-form-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 .lookup-route-fields {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(label,.lookup-route-fields,.machine-lookup-field-v521) {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 :is(input:not([type="color"]),select,textarea) {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+#adminModal[data-kind="deliveryLists"] .admin-delivery-bulk-toolbar-v553 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #d5e1ec;
+  border-radius: 10px;
+  background: linear-gradient(180deg,#fbfdff,#f4f8fb);
+}
+.admin-delivery-bulk-copy-v553 { min-width: 0; display: grid; gap: 1px; }
+.admin-delivery-bulk-copy-v553 small { color:#6a7e90; font-size:8.5px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; }
+.admin-delivery-bulk-copy-v553 strong { color:#173f68; font-size:12px; font-weight:900; }
+.admin-delivery-bulk-copy-v553 strong b { color:#0e5d99; font-size:15px; }
+.admin-delivery-bulk-actions-v553 { display:inline-flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.admin-delivery-bulk-actions-v553 button { min-height:36px !important; padding:0 12px !important; font-size:10px !important; white-space:nowrap; }
+.admin-delivery-bulk-complete-v553 { display:inline-flex !important; align-items:center; gap:6px; }
+.admin-delivery-bulk-complete-v553 > span { font-size:14px; font-weight:950; }
+.admin-delivery-whole-list-v527 .admin-delivery-date-summary:has(.admin-delivery-date-select-v553) {
+  grid-template-columns: 32px minmax(230px,1fr) minmax(140px,.55fr) auto !important;
+}
+.admin-delivery-date-select-v553,
+.manual-edit-select-control-v553 {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  cursor: pointer;
+}
+.admin-delivery-date-select-v553 input,
+.manual-edit-select-control-v553 input {
+  position:absolute; inset:0; inline-size:100%; block-size:100%; margin:0; opacity:0; cursor:pointer; z-index:2;
+}
+.admin-delivery-date-select-v553 > span,
+.manual-edit-select-control-v553 > span {
+  box-sizing:border-box; pointer-events:none; width:18px; height:18px; display:grid; place-items:center;
+  border:1.5px solid #9fb4c7; border-radius:5px; background:#fff; box-shadow:inset 0 1px 1px rgba(27,61,88,.05);
+}
+.admin-delivery-date-select-v553 input:checked + span,
+.manual-edit-select-control-v553 input:checked + span {
+  border-color:#1d6aa3; background:#1d6aa3; box-shadow:0 0 0 3px rgba(29,106,163,.10);
+}
+.admin-delivery-date-select-v553 input:checked + span::after,
+.manual-edit-select-control-v553 input:checked + span::after {
+  content:""; width:8px; height:4px; border-left:2px solid #fff; border-bottom:2px solid #fff; transform:translateY(-1px) rotate(-45deg);
+}
+.admin-delivery-date-select-v553 input:focus-visible + span,
+.manual-edit-select-control-v553 input:focus-visible + span { outline:3px solid rgba(49,130,206,.2); outline-offset:2px; }
+.admin-delivery-date-group.is-selected-v553 { border-color:#7fa7c7 !important; box-shadow:0 0 0 2px rgba(53,116,165,.08),0 8px 18px rgba(20,48,85,.06) !important; }
+.admin-delivery-date-group.is-selected-v553 .admin-delivery-date-summary { background:linear-gradient(180deg,#f7fbff,#edf5fb) !important; }
+
+.manual-edit-bulk-toolbar-v553 {
+  display:grid;
+  grid-template-columns:minmax(170px,.7fr) minmax(120px,.45fr) minmax(260px,1fr);
+  align-items:center;
+  gap:10px;
+  padding:10px 12px;
+  border:1px solid #ccdbe8;
+  border-radius:11px;
+  background:linear-gradient(180deg,#fbfdff,#f3f7fa);
+}
+.manual-edit-bulk-toolbar-v553 > div:first-child,
+.manual-edit-bulk-toolbar-v553 > label { display:grid; gap:2px; min-width:0; }
+.manual-edit-bulk-toolbar-v553 small,
+.manual-edit-bulk-toolbar-v553 label > span { color:#6b7f91; font-size:8.5px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+.manual-edit-bulk-toolbar-v553 strong { color:#173f68; font-size:12px; font-weight:900; }
+.manual-edit-bulk-toolbar-v553 strong b { color:#11639b; font-size:15px; }
+.manual-edit-bulk-actions-v553 { display:flex; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.manual-edit-bulk-actions-v553 button { min-height:36px !important; font-size:10px !important; }
+.manual-edit-job-group-v553 {
+  display:grid;
+  gap:6px;
+  margin-bottom:11px;
+  padding:8px;
+  border:1px solid #d6e2ed;
+  border-radius:12px;
+  background:#f8fbfd;
+}
+.manual-edit-job-group-v553 > header {
+  display:grid;
+  grid-template-columns:minmax(120px,.7fr) minmax(180px,1.3fr);
+  gap:12px;
+  padding:2px 5px 5px;
+  border-bottom:1px solid #dce6ef;
+}
+.manual-edit-job-group-v553 > header span { min-width:0; display:grid; gap:1px; }
+.manual-edit-job-group-v553 > header small { color:#708297; font-size:8px; font-weight:900; letter-spacing:.07em; }
+.manual-edit-job-group-v553 > header strong { overflow:hidden; color:#173f68; font-size:11px; font-weight:900; text-overflow:ellipsis; white-space:nowrap; }
+.manual-edit-job-items-v553 { display:grid; gap:7px; }
+#adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-card-header:has(.manual-edit-select-control-v553) {
+  grid-template-columns:30px minmax(170px,1fr) minmax(150px,.8fr) minmax(78px,.35fr) auto 20px !important;
+}
+#adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-row-actions { grid-column:5 !important; }
+.manual-edit-card.is-dirty-v553 {
+  border-color:#d6a349 !important;
+  box-shadow:inset 4px 0 0 #d6a349,0 8px 18px rgba(128,85,20,.08) !important;
+}
+.manual-edit-card.is-dirty-v553 > summary::after {
+  content:"Unsaved";
+  position:absolute;
+  top:5px;
+  right:58px;
+  color:#99640d;
+  font-size:8px;
+  font-weight:950;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.manual-edit-card-header { position:relative; }
+.manual-edit-unsaved-dialog-v553 { max-width:620px; }
+.manual-edit-unsaved-actions-v553 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; grid-column:1 / -1; }
+.manual-edit-unsaved-actions-v553 > button { width:100%; min-width:0; }
+
+/* Reject Mapping actions use one right action rail instead of leaving uneven
+   white space beside individual Save controls. */
+#adminModal[data-kind="rejectSettings"] .reject-history-table-v485 th:last-child,
+#adminModal[data-kind="rejectSettings"] .reject-history-table-v485 td:last-child { width:1%; white-space:nowrap; text-align:right; }
+#adminModal[data-kind="rejectSettings"] .reject-row-save-v553 { margin-left:auto; }
+
+@media (max-width: 1100px) {
+  .manual-edit-bulk-toolbar-v553 { grid-template-columns:minmax(170px,.7fr) minmax(120px,.45fr) minmax(180px,1fr); }
+  .manual-edit-bulk-actions-v553 { grid-column:1 / -1; justify-content:flex-start; }
+}
+@media (max-width: 980px) {
+  #adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-card-header:has(.manual-edit-select-control-v553) {
+    grid-template-columns:30px minmax(150px,1fr) minmax(120px,.8fr) auto 20px !important;
+  }
+  #adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-row-actions { grid-column:4 !important; }
+  .manual-edit-bulk-toolbar-v553 { grid-template-columns:1fr 1fr; }
+  .manual-edit-bulk-toolbar-v553 > div:first-child,
+  .manual-edit-bulk-actions-v553 { grid-column:1 / -1; }
+  #adminModal[data-kind="deliveryLists"] .admin-delivery-bulk-toolbar-v553 { align-items:stretch; flex-direction:column; }
+  .admin-delivery-bulk-actions-v553 { justify-content:flex-start; }
+}
+@media (max-width: 760px) {
+  .admin-delivery-whole-list-v527 .admin-delivery-date-summary:has(.admin-delivery-date-select-v553) { grid-template-columns:30px minmax(0,1fr) !important; }
+  .admin-delivery-whole-list-v527 .admin-delivery-date-progress,
+  .admin-delivery-whole-list-v527 .admin-date-action-row { grid-column:2 !important; }
+  .admin-delivery-bulk-actions-v553 { display:grid; grid-template-columns:1fr 1fr; width:100%; }
+  .admin-delivery-bulk-actions-v553 button { width:100%; }
+  .manual-edit-bulk-toolbar-v553 { grid-template-columns:1fr; }
+  .manual-edit-bulk-toolbar-v553 > :is(div:first-child,label,.manual-edit-bulk-actions-v553) { grid-column:1; }
+  .manual-edit-bulk-actions-v553 { display:grid; grid-template-columns:1fr 1fr; }
+  .manual-edit-bulk-actions-v553 button { width:100%; }
+  .manual-edit-job-group-v553 > header { grid-template-columns:1fr; gap:4px; }
+  #adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-card-header:has(.manual-edit-select-control-v553) { grid-template-columns:30px minmax(0,1fr) auto 18px !important; }
+  #adminModal[data-kind="manualEdit"] .manual-edit-card .manual-edit-row-actions { grid-column:3 !important; }
+  .manual-edit-unsaved-actions-v553 { grid-template-columns:1fr !important; }
+}
+
+/* TC22 landscape/other short-height screens cannot reserve a tall fixed
+   control row plus a second independent result scroller. Let the modal body own
+   the vertical scroll so every delivery-date action remains reachable. */
+@media (max-height: 520px) {
+  #adminModal[data-kind="deliveryLists"] #adminModalBody {
+    display:block !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    padding-bottom:14px !important;
+  }
+  #adminModal[data-kind="deliveryLists"] .admin-delivery-list-controls-v338 { position:static !important; margin-bottom:10px; }
+  #adminModal[data-kind="deliveryLists"] #adminDeliveryListModalResults {
+    height:auto !important;
+    min-height:0 !important;
+    overflow:visible !important;
+    scrollbar-gutter:auto;
+  }
+}
+
+/* v0.553 Manual Edit progress owns a dedicated full-width operational panel. */
+.manual-edit-progress-panel-v553 {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px,.8fr) minmax(240px,1fr) auto;
+  align-items: end;
+  gap: 10px 12px;
+  padding: 11px 12px;
+  border: 1px solid #cbdceb;
+  border-left: 4px solid #2d6f9f;
+  border-radius: 10px;
+  background: linear-gradient(180deg,#f8fbfe,#f1f7fb);
+}
+.manual-edit-progress-panel-v553 .manual-edit-progress-copy-v529 {
+  align-self: center;
+}
+.manual-edit-progress-panel-v553 .manual-edit-progress-copy-v529 > strong i {
+  font-style: normal;
+  color: #5c7e99;
+  padding-inline: 2px;
+}
+.manual-edit-progress-panel-v553 .manual-edit-progress-field-v529 {
+  grid-column: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.manual-edit-progress-panel-v553 .manual-edit-progress-actions-v529.wide {
+  grid-column: auto;
+  justify-content: flex-end;
+  align-self: end;
+  padding: 0;
+}
+@media (max-width: 980px) {
+  .manual-edit-progress-panel-v553 { grid-template-columns: 1fr 1fr; }
+  .manual-edit-progress-panel-v553 .manual-edit-progress-copy-v529 { grid-column: 1 / -1; }
+  .manual-edit-progress-panel-v553 .manual-edit-progress-actions-v529.wide { justify-content: flex-start; }
+}
+@media (max-width: 760px) {
+  .manual-edit-progress-panel-v553 { grid-template-columns: 1fr; }
+  .manual-edit-progress-panel-v553 .manual-edit-progress-copy-v529,
+  .manual-edit-progress-panel-v553 .manual-edit-progress-field-v529,
+  .manual-edit-progress-panel-v553 .manual-edit-progress-actions-v529.wide { grid-column: 1; }
+  .manual-edit-progress-panel-v553 .manual-edit-progress-actions-v529.wide { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .manual-edit-progress-panel-v553 .manual-edit-progress-actions-v529.wide button { width: 100%; min-width: 0; }
+}
+
+
+/* ========================================================================== */
+/* v0.578 focused Lookup editor width cleanup                                 */
+/* ========================================================================== */
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550.is-editor-open-v470 {
+  scrollbar-gutter: auto !important;
+  overflow: hidden !important;
+}
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > header,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > form,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-add-row-v346,
+.lookup-editor-modal-shell-v476 > .lookup-editor-dialog-v550 > .station-alias-editor-v470 {
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+/* v0.579 optimization-level duplicate warning grouping */
+.optimization-review-group-subtitle-v579 {
+  display:block;
+  margin-top:2px;
+  color:#7b5b63;
+  font-size:9px;
+  font-style:normal;
+  font-weight:800;
+}
+.optimization-review-members-v579 {
+  border:1px solid #ead9dc;
+  border-radius:9px;
+  overflow:hidden;
+  background:#fffafb;
+}
+.optimization-review-members-v579 > summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:8px 10px;
+  color:#5d3f47;
+  cursor:pointer;
+  font-size:9px;
+  font-weight:900;
+}
+.optimization-review-members-v579 > summary span {
+  color:#8d6871;
+  font-size:8px;
+  white-space:nowrap;
+}
+.optimization-review-members-v579 > div {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px;
+  padding:0 8px 8px;
+}
+.optimization-review-members-v579 > div > span {
+  min-width:0;
+  display:grid;
+  gap:2px;
+  padding:7px 8px;
+  border:1px solid #efe2e5;
+  border-radius:7px;
+  background:#fff;
+}
+.optimization-review-members-v579 strong {
+  color:#4a2b32;
+  font-size:9px;
+  overflow-wrap:anywhere;
+}
+.optimization-review-members-v579 small {
+  color:#79626a;
+  font-size:8px;
+  overflow-wrap:anywhere;
+}
+@media (max-width:720px) {
+  .optimization-review-members-v579 > div { grid-template-columns:1fr; }
+}
+
+/* ========================================================================== */
+/* v0.580 collapsed Superseded/optimization review history                    */
+/* ========================================================================== */
+.superseded-review-history-group-v580 {
+  margin: 10px 0;
+  border: 1px solid #cad8e6;
+  border-radius: 12px;
+  background: #f8fbfe;
+  box-shadow: 0 4px 14px rgba(21, 60, 94, .055);
+  overflow: hidden;
+}
+.superseded-review-history-group-v580 > summary {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 22px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  cursor: pointer;
+  list-style: none;
+  background: linear-gradient(180deg, #fbfdff 0%, #f1f6fb 100%);
+  color: #173d61;
+  user-select: none;
+}
+.superseded-review-history-group-v580 > summary::-webkit-details-marker { display: none; }
+.superseded-review-history-group-v580 > summary:hover { background: linear-gradient(180deg, #ffffff 0%, #eaf3fb 100%); }
+.superseded-review-history-group-v580 > summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.superseded-review-history-group-v580 > summary small {
+  color: #55738e;
+  font: 900 9px/1.2 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.superseded-review-history-group-v580 > summary strong {
+  color: #123858;
+  font: 900 14px/1.2 "Segoe UI", Arial, sans-serif;
+}
+.superseded-review-history-group-v580 > summary em {
+  color: #6b8093;
+  font: 650 10px/1.35 "Segoe UI", Arial, sans-serif;
+  font-style: normal;
+}
+.superseded-review-history-group-v580 > summary > b {
+  min-width: 76px;
+  padding: 6px 9px;
+  border: 1px solid #c5d6e5;
+  border-radius: 999px;
+  background: #fff;
+  color: #365b78;
+  text-align: center;
+  font: 850 9px/1 "Segoe UI", Arial, sans-serif;
+  white-space: nowrap;
+}
+.superseded-review-history-group-v580 > summary > i {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #e8f1f8;
+  transition: transform 160ms ease, background 160ms ease;
+}
+.superseded-review-history-group-v580 > summary > i::before,
+.superseded-review-history-group-v580 > summary > i::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  width: 7px;
+  height: 2px;
+  border-radius: 99px;
+  background: #315b7b;
+}
+.superseded-review-history-group-v580 > summary > i::before { left: 4px; transform: rotate(45deg); }
+.superseded-review-history-group-v580 > summary > i::after { right: 4px; transform: rotate(-45deg); }
+.superseded-review-history-group-v580[open] > summary > i { transform: rotate(180deg); background: #dcebf6; }
+.superseded-review-history-group-v580[open] > summary { border-bottom: 1px solid #d4e0ea; }
+.superseded-review-history-body-v580 {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #f3f7fa;
+}
+.superseded-review-history-body-v580 > .superseded-review-card,
+.superseded-review-history-body-v580 > .optimization-review-card-v549 { margin: 0; }
+.superseded-review-history-body-v580 .superseded-review-evidence-details-v328:not([open]) > summary {
+  border-radius: 8px;
+}
+.optimization-review-history-meta-v580 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
+  gap: 7px;
+  margin-top: 9px;
+  padding: 8px;
+  border: 1px solid #d5e1eb;
+  border-radius: 9px;
+  background: #f8fbfd;
+}
+.optimization-review-history-meta-v580 > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: #fff;
+}
+.optimization-review-history-meta-v580 small {
+  color: #718497;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.optimization-review-history-meta-v580 strong { color: #244a68; font-size: 9.5px; overflow-wrap: anywhere; }
+.optimization-review-history-meta-v580 > p {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 7px 8px;
+  border-top: 1px solid #dce6ee;
+}
+@media (max-width: 760px) {
+  .superseded-review-history-group-v580 > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .superseded-review-history-group-v580 > summary > i { grid-column: 2; grid-row: 1; justify-self: end; margin-right: 2px; }
+  .superseded-review-history-group-v580 > summary > b { grid-column: 2; grid-row: 2; min-width: 0; }
+  .optimization-review-history-meta-v580 { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .superseded-review-history-group-v580 > summary > i { transition: none; }
+}
+
+/* ========================================================================== */
+/* v0.581 reversible superseded / optimization review decisions              */
+/* ========================================================================== */
+.superseded-review-history-actions-v581,
+.optimization-review-history-actions-v581 {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #d9e3ee;
+}
+.superseded-review-history-actions-v581 > button,
+.optimization-review-history-actions-v581 > button {
+  min-width: 156px;
+}

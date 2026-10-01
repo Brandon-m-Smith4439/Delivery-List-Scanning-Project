@@ -36,6 +36,7 @@ the normal floor launcher.
 backend/
   config.py              runtime configuration
   store.py               data access and workflow behavior
+  aw_reject_legacy.py    historical A+W reject vocabulary reconciliation
   automation_control.py  delivery automation control service
   import_safety.py       guarded import integration
   operations.py          operational feature service
@@ -122,6 +123,11 @@ from accumulating.
 - `data/production-file-index.json` also retains exact `.egl` files that the index has observed. Historical EGL entries are evidence-only and are not treated as live/openable network files.
 - `resources/aw` contains retained A+W source material that is not loaded by the
   web app.
+- `resources/aw_reject_legacy_context_v0585.json` is the audited, minimized
+  recut-log context introduced by schema 23/runtime reconciliation so historical A+W
+  numeric lookup-code reuse cannot rewrite old Internal Reject meaning. Schema 24
+  additionally seeds the current A+W reject catalogs and maps legacy generic
+  `POLISHER` history to Kodiak Polisher.
 
 ## Safe Cleanup
 

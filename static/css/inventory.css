@@ -281,3 +281,81 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================================================================== */
+/* v0.549 Inventory sticky hit ownership and reconciliation                    */
+/* ========================================================================== */
+.inventory-workspace {
+  --inventory-session-sticky-top-v548: calc(var(--app-header-height, 76px) + 16px);
+}
+.inventory-session-header {
+  z-index: 18 !important;
+  overflow: visible !important;
+  transform: translateZ(0);
+  pointer-events: auto !important;
+}
+.inventory-session-header::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: inherit;
+  pointer-events: none;
+}
+.inventory-session-actions {
+  z-index: 4 !important;
+  align-items: center;
+}
+.inventory-session-actions :is(button, a) {
+  position: relative;
+  z-index: 5 !important;
+  min-height: 44px;
+  pointer-events: auto !important;
+  touch-action: manipulation;
+}
+.inventory-workspace > .inventory-tabs {
+  z-index: 2 !important;
+}
+.inventory-reconcile-actions-v549 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8e4ef;
+  border-radius: 12px;
+  background: linear-gradient(180deg,#fbfdff,#f5f9fc);
+}
+.inventory-reconcile-actions-v549 > span {
+  flex: 1 1 260px;
+  color: #566b7d;
+  font-size: .82rem;
+}
+.inventory-reconcile-select-v549 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 800;
+  color: #274e70;
+}
+@media (max-width:720px) {
+  .inventory-workspace { --inventory-session-sticky-top-v548: 0px; }
+  .inventory-reconcile-actions-v549 > button { flex: 1 1 140px; }
+}
+
+/* v0.549 final sticky hit-target ownership: the JS offset tracks the rendered
+   application-header lower edge so zoom cannot leave an invisible overlap over
+   the upper portion of the Inventory command buttons. */
+.inventory-session-header {
+  z-index: 30 !important;
+  contain: paint;
+}
+.inventory-session-actions {
+  position: relative;
+  z-index: 31 !important;
+}
+.inventory-session-actions :is(button, a) {
+  z-index: 32 !important;
+}

@@ -16,20 +16,26 @@ const context = vm.createContext({state,console,AbortController,Map,Date,Number,
   window:{setTimeout,clearTimeout},
   fetchJson:()=>{fetchCalls++;return new Promise(r=>resolveFetch=r)},
   scanDateWideCatalogSignatureV486:()=> 'revision-1',
+  cachedScanDateHistoryV555:()=> [],
+  loadScanDateHistoryV555:()=>Promise.resolve([]),
   scanStagePresetV485:()=> 'airport_staging',
   buildDateWideScanItemsV485:()=>[{id:'item'}],
   renderStationOptions:()=>{},renderScanPage:()=>{},renderDeliveryDateSelect:()=>{},
   scheduleScanDatePrefetchV527:()=>{},
+  pauseScanDateBackgroundWorkV583:()=>{},showScanDateLoadingV583:()=>{},hideScanDateLoadingV583:()=>{},
   showPage:()=>{assert.equal(state.scanDateWideLoadingV485,false);assert.equal(state.scanDateWideAbortControllerV512,null);navigations++},
   escapeHtml:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
   compactMachineLabelV475:()=> '',cuttingLabelEdgeCalloutsV507:()=>[],appLocale:()=> 'en-US',PLANT_TIME_ZONE_V516:'America/New_York'});
-for(const name of ['cachedScanDateBundleV526','rememberScanDateBundleV526','invalidateScanDateBundleV526','cancelScanDateWideLoadV512','activateScanDateV485','parseGeneratedSketchDimensionV516','generatedSketchDimensionsV516','generatedProductionSketchV516']) {
+for(const name of ['pad','canonicalBarcode','cuttingLabelBarcodeV500','cuttingLabelProcessRowsV504','cachedScanDateBundleV526','rememberScanDateBundleV526','invalidateScanDateBundleV526','cancelScanDateWideLoadV512','activateScanDateV485','parseGeneratedSketchDimensionV516','generatedSketchDimensionsV516','generatedProductionSketchV516']) {
   vm.runInContext(definition(name),context);
 }
 const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'2026-09-09'}}}]};
 (async()=>{
  const pending=context.activateScanDateV485('2026-09-09',true);resolveFetch(bundle);await pending;
  assert.equal(navigations,1);assert.equal(state.pageIndex,3);assert.equal(fetchCalls,1);
+ assert.equal(context.canonicalBarcode('238986','006'),'T200238986006000');
+ assert.equal(context.cuttingLabelBarcodeV500('238986','006'),'T200238986006000');
+ assert.deepEqual(Array.from(context.cuttingLabelProcessRowsV504({sketchEdgeFinishCodeV553:'SE',processRows:[{workTypeId:20,edgeData:'1111'}]})),['Seamed Edge side(s) 1/2/3/4']);
  const cached=context.activateScanDateV485('2026-09-09',false);await cached;
  assert.equal(fetchCalls,1,'Unchanged repeat date must reuse the v0.526 signature cache');
  assert.equal(state.scanDateWideLastLoadMsV486,0,'Cached date switch should report zero network-load time');
@@ -57,23 +63,42 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
  // minutes have elapsed; once stale, it becomes eligible exactly once.
  let fabricationRequests=0;
  const fabricationKey='926001|001';
- const cadenceState={backend:true,page:'scan',fabricationStatusCacheV474:new Map([[fabricationKey,{fabricated:false,retryAfterSeconds:0}]]),
-   productionProgressCheckedV522:new Map([[fabricationKey,{at:Date.now(),retryAfterSeconds:60}]]),cuttingStatusCacheV522:new Map(),
+ const cadenceState={backend:true,page:'scan',fabricationStatusCacheV474:new Map([[fabricationKey,{fabricated:false,retryAfterSeconds:0,machine:'Denver',machineCode:'denver'}]]),
+   fabricationStatusRefreshDueV552:new Set(),productionProgressCheckedV522:new Map([[fabricationKey,{at:Date.now(),retryAfterSeconds:60}]]),cuttingStatusCacheV522:new Map(),
    fabricationStatusPendingV474:new Set(),fabricationStatusBatchTokenV474:0,fabricationStatusEpochV522:0,productionFileSettings:{cacheMinutes:1},
    items:[],globalSearchLastResults:[],orderDetailProductionCacheV507:new Map(),orderDetailRenderedPayloadV507:null};
-  const cadenceContext=vm.createContext({state:cadenceState,document:{hidden:false},Date,Number,Math,Array,String,Boolean,Map,Set,console,FABRICATION_AUTO_RETRY_MS_V526:600000,FABRICATION_TODAY_RETRY_MS_V542:60000,
+  const cadenceContext=vm.createContext({state:cadenceState,document:{hidden:false},Date,Number,Math,Array,String,Boolean,Map,Set,console,FABRICATION_AUTO_RETRY_MS_V526:600000,FABRICATION_TODAY_RETRY_MS_V542:60000,FABRICATION_FOREGROUND_MAX_CHUNK_V582:6,FABRICATION_BACKGROUND_CHUNK_SIZE_V582:40,
    hasAnyPermission:()=>true,fabricationRevisionV521:()=>'',fabricationStatusKeyV474:()=>fabricationKey,cuttingProgressPresentationV498:()=>({complete:false}),
    isRemakeItem:(row)=>Boolean(row?.remake),
    requestFabricationBatchV522:async()=>{fabricationRequests++;return {results:[{key:fabricationKey,status:{fabricated:false,retryAfterSeconds:300},cutting:{},progressRetryAfterSeconds:300}]}},
    fabricationStatusItemKeyV521:()=>fabricationKey,todayKey:()=> '2026-09-16',window:{setTimeout},scheduleScanRender:()=>{},printWorkspaceIsVisible:()=>false});
  vm.runInContext(definition('fabricationAutomaticRetrySecondsV542'),cadenceContext);
+ vm.runInContext(definition('fabricationForegroundChunkSizeV582'),cadenceContext);
+ assert.equal(cadenceContext.fabricationForegroundChunkSizeV582(8),1,'Small visible FAB loads should report each completed item');
+ assert.equal(cadenceContext.fabricationForegroundChunkSizeV582(32),2,'Medium visible FAB loads should use two-item checkpoints');
+ assert.equal(cadenceContext.fabricationForegroundChunkSizeV582(80),4,'Larger visible FAB loads should remain granular without request spam');
+ assert.equal(cadenceContext.fabricationForegroundChunkSizeV582(240),6,'Large visible FAB loads should cap at six-item checkpoints');
+ vm.runInContext(definition('mergeFabricationStatusV552'),cadenceContext);
  vm.runInContext(definition('hydrateFabricationStatusesV474'),cadenceContext);
+ const preservedMachine=cadenceContext.mergeFabricationStatusV552(
+   {machine:'Denver',machineCode:'denver',assignedMachine:'Denver CNC',assignedMachineCode:'denver',fabricated:false,required:true},
+   {checkedAt:new Date().toISOString(),machine:'',machineCode:'',assignedMachine:'',assignedMachineCode:'',fabricated:null,checkUnavailable:true,availability:{sketch:false}},
+ );
+ assert.equal(preservedMachine.machineCode,'denver',"An unavailable refresh must retain the browser's last known machine identity");
+ assert.equal(preservedMachine.fabricated,false,'An unavailable refresh must retain known incomplete fabrication state without re-enabling enforcement');
+ assert.equal(preservedMachine.rememberedMachineV552,true);
  const cadenceRow={order:'926001',item:'001',job:'J',product:'Glass'};
  await cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
  assert.equal(fabricationRequests,0,'Fresh pending fabrication must respect the 10-minute Scan retry window');
  cadenceState.productionProgressCheckedV522.set(fabricationKey,{at:Date.now()-601000,retryAfterSeconds:60});
-  await cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
+  let resolveStaleFab;
+  cadenceContext.requestFabricationBatchV522=()=>{fabricationRequests++;return new Promise(resolve=>{resolveStaleFab=resolve;});};
+  const staleRefresh=cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
+  await Promise.resolve();
   assert.equal(fabricationRequests,1,'Stale pending fabrication should become eligible after 10 minutes');
+  assert.equal(cadenceState.fabricationStatusCacheV474.get(fabricationKey)?.machineCode,'denver','A due FAB refresh must preserve the last known machine classification instead of collapsing the row to Cutting');
+  resolveStaleFab({results:[{key:fabricationKey,status:{fabricated:false,retryAfterSeconds:300,machine:'Denver',machineCode:'denver'},cutting:{},progressRetryAfterSeconds:300}]});
+  await staleRefresh;
   cadenceState.fabricationStatusCacheV474.delete(fabricationKey);
   await cadenceContext.hydrateFabricationStatusesV474([cadenceRow],{context:'scan'});
   assert.equal(fabricationRequests,1,'A partial response with no cached status must still respect its recent attempt timestamp');
@@ -130,6 +155,12 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
     {eventType:'scan',item:{order:'238100',item:'001'}},
   ]);
   assert.equal(deduped.length,2,'Duplicate representations of one rejectId must collapse to one All Scans row');
+  const importDedupe=dedupeContext.dedupeRecentEventsV527([
+    {eventType:'update',time:'2026-09-23T21:13:40Z',message:'Delivery list updated',reason:'A+W SQL 2026-09-24 | 2 changed line(s) | 0 added piece(s) | 2 changed piece(s)',station:'Airport Rd'},
+    {eventType:'update',time:'2026-09-23T21:13:40Z',message:'Delivery list updated',reason:'A+W SQL 2026-09-24 | 2 changed line(s) | 0 added piece(s) | 2 changed piece(s)',station:'Indian Trail'},
+    {eventType:'scan',time:'2026-09-23T21:13:40Z',barcode:'T200238986006000',item:{order:'238986',item:'006'}},
+  ]);
+  assert.equal(importDedupe.length,2,'One import/update replicated to multiple workflow stages must render once in All Scans');
 
   // A deferred sketch parse that sees the large REMAKE text is authoritative for
   // the existing item-level remake owner without mutating production-line data.
@@ -146,6 +177,7 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
   const detailContext=vm.createContext({Map,String,Boolean,Number,Array,
     normalizedOrderDetailItemV477:(value)=>String(value||'').replace(/^0+/,''),
   });
+  vm.runInContext(definition('sketchEdgeFinishCodeV553'),detailContext);
   vm.runInContext(definition('cuttingProgressTimestampV511'),detailContext);
   vm.runInContext(definition('mergeOrderProductionDetailV507'),detailContext);
   const optimizedCore={items:[{item:'001',cutting:{state:'optimized',complete:false,optimizationStatusLabel:'Optimized',optimizationLastChangedAt:'2026-09-17T09:15:00'}}]};
@@ -158,5 +190,5 @@ const bundle={records:[{list:{id:'one'},payload:{meta:{id:'one',deliveryDate:'20
   assert.equal(detailContext.cuttingProgressTimestampV511({state:'released',optimizationLastChangedAt:'2026-09-17T09:20:00'}),'','Released Cutting must not show a completion time');
   assert.equal(detailContext.cuttingProgressTimestampV511({state:'cut',cutCompletedAt:'2026-09-17T09:30:00',optimizationLastChangedAt:'2026-09-17T09:29:00'}),'2026-09-17T09:30:00');
 
-  console.log('Scan ownership, cancellation, date cache, fabrication cadence and reference geometry behavior passed.');
+  console.log('Scan ownership, cancellation, date cache, fabrication cadence, v0.555 audit dedupe, v0.553 barcode round-trip and reference geometry behavior passed.');
 })().catch(error=>{console.error(error);process.exitCode=1});

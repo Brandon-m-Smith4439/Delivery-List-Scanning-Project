@@ -160,6 +160,24 @@ MIGRATIONS = (
         "Per-user Internal Reject review receipts, lifecycle-safe manual Cutting/fabrication progress overrides, and Inventory scan delivery date; v529-r1",
         "_migration_021_v529_internal_reject_review_and_manual_production_progress",
     ),
+    Migration(
+        22,
+        "v549_progress_settings_and_optimization_review",
+        "Administrator-defined progress checkpoints plus durable A+W released/booked reoptimization review alerts; v549-r1",
+        "_migration_022_v549_progress_settings_and_optimization_review",
+    ),
+    Migration(
+        23,
+        "v585_aw_reject_vocabulary_history",
+        "Preserve event-level legacy A+W reject labels and canonical context after Basic Data reason/cause rebuilds; v585-r1",
+        "_migration_023_v585_aw_reject_vocabulary_history",
+    ),
+    Migration(
+        24,
+        "v586_aw_reject_catalog_and_kodiak_history",
+        "Seed the rebuilt A+W Complaint Reason/Cause vocabulary into scanner reject catalogs and map historical generic POLISHER events to Kodiak Polisher; v586-r1",
+        "_migration_024_v586_aw_reject_catalog_and_kodiak_history",
+    ),
 )
 
 
@@ -1298,6 +1316,479 @@ def _migration_021_v529_internal_reject_review_and_manual_production_progress(co
             ON manual_production_progress_overrides(delivery_date, order_no, item_no);
         """
     )
+
+
+def _migration_022_v549_progress_settings_and_optimization_review(connection: Any) -> None:
+    """Add custom progress configuration and suspicious reoptimization review state."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS progress_stage_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage_key TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            anchor_stage_key TEXT NOT NULL,
+            position TEXT NOT NULL DEFAULT 'after' CHECK (position IN ('before','after')),
+            completion_mode TEXT NOT NULL DEFAULT 'manual_scan' CHECK (completion_mode IN ('manual_scan','file')),
+            scanner_station TEXT NOT NULL DEFAULT '',
+            file_pattern TEXT NOT NULL DEFAULT '',
+            downstream_policy TEXT NOT NULL DEFAULT 'auto_complete' CHECK (downstream_policy IN ('auto_complete','require_override','block')),
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_progress_stage_settings_active_order
+            ON progress_stage_settings(active, sort_order, id);
+
+        CREATE TABLE IF NOT EXISTS progress_stage_completions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage_id INTEGER NOT NULL REFERENCES progress_stage_settings(id) ON DELETE CASCADE,
+            delivery_date TEXT NOT NULL DEFAULT '',
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            completed_by TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'manual_scan',
+            evidence_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(evidence_json)),
+            UNIQUE(stage_id, delivery_date, order_no, item_no)
+        );
+        CREATE INDEX IF NOT EXISTS idx_progress_stage_completions_identity
+            ON progress_stage_completions(stage_id, delivery_date, order_no, item_no);
+
+        CREATE TABLE IF NOT EXISTS aw_optimization_review_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_key TEXT NOT NULL UNIQUE,
+            order_no TEXT NOT NULL,
+            item_no TEXT NOT NULL,
+            key_index INTEGER NOT NULL DEFAULT 0,
+            batch_job_number TEXT NOT NULL DEFAULT '',
+            previous_optimization_number INTEGER NOT NULL DEFAULT 0,
+            previous_status_code INTEGER NOT NULL DEFAULT 0,
+            previous_status_label TEXT NOT NULL DEFAULT '',
+            previous_status_at TEXT NOT NULL DEFAULT '',
+            current_optimization_number INTEGER NOT NULL DEFAULT 0,
+            current_status_code INTEGER NOT NULL DEFAULT 0,
+            current_status_label TEXT NOT NULL DEFAULT '',
+            current_status_at TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','working','acknowledged','false_alarm','cleared')),
+            note TEXT NOT NULL DEFAULT '',
+            detected_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT NOT NULL DEFAULT '',
+            evidence_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(evidence_json))
+        );
+        CREATE INDEX IF NOT EXISTS idx_aw_optimization_review_status_time
+            ON aw_optimization_review_alerts(status, detected_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_aw_optimization_review_order_item
+            ON aw_optimization_review_alerts(order_no, item_no, batch_job_number, detected_at DESC);
+        """
+    )
+
+
+def _migration_023_v585_aw_reject_vocabulary_history(connection: Any) -> None:
+    """Preserve legacy A+W reject meaning across lookup-library rebuilds.
+
+    Historical PROD_BREAKAGE rows retain numeric reason/cause codes after Basic
+    Data rows are deleted.  If A+W later reuses a code for a new lookup value, a
+    live LEFT JOIN can otherwise rewrite old scanner history.  Keep the current
+    lookup text for raw-source traceability, but store an event-level legacy
+    label and canonical current vocabulary resolved from the supplied recut log.
+    """
+    from backend.aw_reject_legacy import (
+        LEGACY_CONTEXT_CUTOVER,
+        canonical_location,
+        canonical_reason,
+        resolve_legacy_context,
+    )
+    from database.time_utils import parse_utc_timestamp, plant_time_zone
+
+    def row_value(row: Any, key: str, default: Any = None) -> Any:
+        if row is None:
+            return default
+        try:
+            value = row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+        return default if value is None else value
+
+    _ensure_column(connection, "aw_reject_events", "legacy_reason_label", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "aw_reject_events", "legacy_location_label", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "aw_reject_events", "canonical_reason_label", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "aw_reject_events", "canonical_location_label", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "aw_reject_events", "canonical_resolution", "TEXT NOT NULL DEFAULT ''")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_aw_reject_events_context_identity "
+        "ON aw_reject_events(order_no, item_no, breakage_date, original_job_number)"
+    )
+
+    rows = connection.execute(
+        """
+        SELECT event_key, order_no, item_no, breakage_date, original_job_number,
+               reason_code, reason_label, location_code, location_label,
+               machine, registration_point, work_type
+        FROM aw_reject_events
+        ORDER BY breakage_date, event_key
+        """
+    ).fetchall()
+
+    def plant_date(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            return parse_utc_timestamp(text).astimezone(plant_time_zone()).date().isoformat()
+        except Exception:
+            return text[:10]
+
+    # First pass resolves exact/unambiguous recut-log matches.
+    for row in rows:
+        resolved = resolve_legacy_context(
+            breakage_date=plant_date(row_value(row, "breakage_date", "")),
+            order_no=row_value(row, "order_no", ""),
+            item_no=row_value(row, "item_no", ""),
+            original_job_number=row_value(row, "original_job_number", ""),
+            machine=row_value(row, "machine", ""),
+            registration_point=row_value(row, "registration_point", ""),
+            work_type=row_value(row, "work_type", ""),
+        )
+        if not resolved or resolved.get("resolution") == "recut-log:ambiguous":
+            continue
+        connection.execute(
+            """
+            UPDATE aw_reject_events
+            SET legacy_reason_label=?, legacy_location_label=?, canonical_reason_label=?,
+                canonical_location_label=?, canonical_resolution=?
+            WHERE event_key=?
+            """,
+            (
+                str(resolved.get("legacyReason") or ""),
+                str(resolved.get("legacyLocation") or ""),
+                str(resolved.get("canonicalReason") or ""),
+                str(resolved.get("canonicalLocation") or ""),
+                str(resolved.get("resolution") or ""),
+                str(row_value(row, "event_key", "") or ""),
+            ),
+        )
+
+    def code_hint(kind: str, code: int) -> str:
+        if int(code or 0) <= 0:
+            return ""
+        label_column = "legacy_reason_label" if kind == "reason" else "legacy_location_label"
+        code_column = "reason_code" if kind == "reason" else "location_code"
+        candidates = connection.execute(
+            f"""
+            SELECT {label_column} AS label, COUNT(*) AS uses
+            FROM aw_reject_events
+            WHERE {code_column}=? AND TRIM(COALESCE({label_column},''))<>''
+            GROUP BY {label_column}
+            ORDER BY uses DESC, label
+            """,
+            (int(code),),
+        ).fetchall()
+        if not candidates:
+            return ""
+        top_count = int(row_value(candidates[0], "uses", 0) or 0)
+        tied = [candidate for candidate in candidates if int(row_value(candidate, "uses", 0) or 0) == top_count]
+        return str(row_value(tied[0], "label", "") or "") if len(tied) == 1 else ""
+
+    # Second pass uses legacy code meaning learned from unambiguous recut rows to
+    # disambiguate the small set of same-day repeated order/item events.
+    rows = connection.execute(
+        """
+        SELECT event_key, order_no, item_no, breakage_date, original_job_number,
+               reason_code, location_code, machine, registration_point, work_type,
+               canonical_resolution
+        FROM aw_reject_events
+        WHERE canonical_resolution='' OR canonical_resolution='recut-log:ambiguous'
+        ORDER BY breakage_date, event_key
+        """
+    ).fetchall()
+    for row in rows:
+        reason_code = int(row_value(row, "reason_code", 0) or 0)
+        location_code = int(row_value(row, "location_code", 0) or 0)
+        resolved = resolve_legacy_context(
+            breakage_date=plant_date(row_value(row, "breakage_date", "")),
+            order_no=row_value(row, "order_no", ""),
+            item_no=row_value(row, "item_no", ""),
+            original_job_number=row_value(row, "original_job_number", ""),
+            reason_hint=code_hint("reason", reason_code),
+            location_hint=code_hint("location", location_code),
+            machine=row_value(row, "machine", ""),
+            registration_point=row_value(row, "registration_point", ""),
+            work_type=row_value(row, "work_type", ""),
+        )
+        if not resolved:
+            continue
+        connection.execute(
+            """
+            UPDATE aw_reject_events
+            SET legacy_reason_label=?, legacy_location_label=?, canonical_reason_label=?,
+                canonical_location_label=?, canonical_resolution=?
+            WHERE event_key=?
+            """,
+            (
+                str(resolved.get("legacyReason") or ""),
+                str(resolved.get("legacyLocation") or ""),
+                str(resolved.get("canonicalReason") or ""),
+                str(resolved.get("canonicalLocation") or ""),
+                str(resolved.get("resolution") or ""),
+                str(row_value(row, "event_key", "") or ""),
+            ),
+        )
+
+    # Anything historical that is still unresolved must not fall back to the
+    # newly rebuilt live lookup label.  Reuse a stable old code meaning when the
+    # already-resolved recut rows establish one; otherwise record an explicit
+    # unknown.  This is safer than assigning a recycled Basic Data value to old
+    # production history.
+    unresolved = connection.execute(
+        """
+        SELECT event_key, breakage_date, reason_code, location_code,
+               machine, registration_point, work_type, canonical_resolution
+        FROM aw_reject_events
+        WHERE canonical_resolution='' OR canonical_resolution='recut-log:ambiguous'
+        ORDER BY breakage_date, event_key
+        """
+    ).fetchall()
+    for row in unresolved:
+        local_date = plant_date(row_value(row, "breakage_date", ""))
+        if not local_date or local_date > LEGACY_CONTEXT_CUTOVER:
+            continue
+        reason_hint = code_hint("reason", int(row_value(row, "reason_code", 0) or 0))
+        location_hint = code_hint("location", int(row_value(row, "location_code", 0) or 0))
+        reason_label = canonical_reason(reason_hint, location_hint) if reason_hint else "Other/Unknown"
+        location_label = canonical_location(
+            location_hint,
+            machine=row_value(row, "machine", ""),
+            registration_point=row_value(row, "registration_point", ""),
+            work_type=row_value(row, "work_type", ""),
+        ) if location_hint else "Other/Unknown"
+        connection.execute(
+            """
+            UPDATE aw_reject_events
+            SET legacy_reason_label=?, legacy_location_label=?, canonical_reason_label=?,
+                canonical_location_label=?, canonical_resolution=?
+            WHERE event_key=?
+            """,
+            (
+                reason_hint,
+                location_hint,
+                reason_label,
+                location_label,
+                "legacy-code-hint" if (reason_hint or location_hint) else "historical-unresolved",
+                str(row_value(row, "event_key", "") or ""),
+            ),
+        )
+
+    # Re-project historical A+W mirrors from the preserved event-level meaning.
+    # Operator per-event overrides remain authoritative and are never replaced.
+    mirrors = connection.execute(
+        """
+        SELECT r.id, r.delivery_date, r.order_no, r.item_no, r.manual_override_json,
+               a.canonical_reason_label, a.canonical_location_label
+        FROM reject_events r
+        JOIN aw_reject_events a ON a.event_key=r.source_external_key
+        WHERE r.source_type='aw'
+          AND (TRIM(COALESCE(a.canonical_reason_label,''))<>''
+               OR TRIM(COALESCE(a.canonical_location_label,''))<>'')
+        """
+    ).fetchall()
+    affected: set[tuple[str, str, str]] = set()
+    for row in mirrors:
+        try:
+            overrides = json.loads(str(row_value(row, "manual_override_json", "{}") or "{}"))
+        except Exception:
+            overrides = {}
+        if not isinstance(overrides, dict):
+            overrides = {}
+        updates: list[str] = []
+        params: list[Any] = []
+        if "reason" not in overrides and str(row_value(row, "canonical_reason_label", "") or "").strip():
+            updates.append("reason_label=?")
+            params.append(str(row_value(row, "canonical_reason_label", "") or ""))
+        if "location" not in overrides and str(row_value(row, "canonical_location_label", "") or "").strip():
+            updates.append("location_label=?")
+            params.append(str(row_value(row, "canonical_location_label", "") or ""))
+        if updates:
+            params.append(int(row_value(row, "id", 0) or 0))
+            connection.execute(f"UPDATE reject_events SET {', '.join(updates)} WHERE id=?", tuple(params))
+            affected.add((
+                str(row_value(row, "delivery_date", "") or ""),
+                str(row_value(row, "order_no", "") or ""),
+                str(row_value(row, "item_no", "") or ""),
+            ))
+
+    for delivery_date, order_no, item_no in affected:
+        events = connection.execute(
+            """
+            SELECT qty, reason_label, location_label, rejected_at
+            FROM reject_events
+            WHERE delivery_date=? AND order_no=? AND item_no=?
+            ORDER BY rejected_at DESC, id DESC
+            """,
+            (delivery_date, order_no, item_no),
+        ).fetchall()
+        total_qty = sum(max(int(row_value(event, "qty", 0) or 0), 0) for event in events)
+        latest = events[0] if events else None
+        connection.execute(
+            """
+            UPDATE line_items
+            SET internal_reject_count=?, last_reject_reason=?, last_reject_location=?,
+                last_rejected_at=?, updated_at_utc=?
+            WHERE id IN (
+                SELECT li.id FROM line_items li
+                JOIN delivery_lists dl ON dl.id=li.list_id
+                WHERE dl.delivery_date=? AND COALESCE(li.is_deleted,0)=0
+                  AND li.order_no=? AND li.item_no=?
+            )
+            """,
+            (
+                total_qty,
+                str(row_value(latest, "reason_label", "") or ""),
+                str(row_value(latest, "location_label", "") or ""),
+                str(row_value(latest, "rejected_at", "") or ""),
+                utc_now(), delivery_date, order_no, item_no,
+            ),
+        )
+
+
+def _migration_024_v586_aw_reject_catalog_and_kodiak_history(connection: Any) -> None:
+    """Align scanner reject choices with A+W and repair legacy POLISHER history.
+
+    v0.585 intentionally left generic historical POLISHER rows unresolved when
+    A+W did not retain enough machine context to distinguish Kodiak from Skiati.
+    Plant context now establishes that the generic historical POLISHER label
+    belongs to Kodiak because Skiati was only acquired recently.  This migration
+    also makes every rebuilt A+W Complaint Reason/Cause available for scanner-
+    entered Internal Rejects without deleting or deactivating operator choices.
+    """
+    from backend.aw_reject_legacy import CURRENT_LOCATION_LABELS, CURRENT_REASON_LABELS
+
+    now = utc_now()
+
+    def row_value(row: Any, key: str, default: Any = None) -> Any:
+        if row is None:
+            return default
+        try:
+            value = row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+        return default if value is None else value
+
+    def upsert_standard(table: str, labels: tuple[str, ...]) -> None:
+        for sort_order, label in enumerate(labels, start=1):
+            exact = connection.execute(
+                f"SELECT id FROM {table} WHERE label=? ORDER BY id LIMIT 1",
+                (label,),
+            ).fetchone()
+            if exact:
+                connection.execute(
+                    f"UPDATE {table} SET active=1, sort_order=?, updated_at=? WHERE id=?",
+                    (sort_order, now, int(row_value(exact, "id", 0) or 0)),
+                )
+                continue
+            folded = connection.execute(
+                f"SELECT id FROM {table} WHERE lower(label)=lower(?) ORDER BY active DESC, id LIMIT 1",
+                (label,),
+            ).fetchone()
+            if folded:
+                connection.execute(
+                    f"UPDATE {table} SET label=?, active=1, sort_order=?, updated_at=? WHERE id=?",
+                    (label, sort_order, now, int(row_value(folded, "id", 0) or 0)),
+                )
+            else:
+                connection.execute(
+                    f"INSERT INTO {table} (label, active, sort_order, created_by, created_at, updated_at) "
+                    "VALUES (?, 1, ?, 'system-aw-standard', ?, ?)",
+                    (label, sort_order, now, now),
+                )
+
+    upsert_standard("reject_reasons", CURRENT_REASON_LABELS)
+    upsert_standard("reject_locations", CURRENT_LOCATION_LABELS)
+
+    polisher_events = connection.execute(
+        """
+        SELECT event_key
+        FROM aw_reject_events
+        WHERE upper(trim(COALESCE(legacy_location_label,'')))='POLISHER'
+        """
+    ).fetchall()
+    event_keys = [str(row_value(row, "event_key", "") or "") for row in polisher_events if str(row_value(row, "event_key", "") or "")]
+    if event_keys:
+        placeholders = ",".join("?" for _ in event_keys)
+        connection.execute(
+            f"UPDATE aw_reject_events SET canonical_location_label='Kodiak Polisher' WHERE event_key IN ({placeholders})",
+            tuple(event_keys),
+        )
+
+    affected: set[tuple[str, str, str]] = set()
+    if event_keys:
+        placeholders = ",".join("?" for _ in event_keys)
+        mirrors = connection.execute(
+            f"""
+            SELECT id, delivery_date, order_no, item_no, manual_override_json
+            FROM reject_events
+            WHERE source_type='aw' AND source_external_key IN ({placeholders})
+            """,
+            tuple(event_keys),
+        ).fetchall()
+        for row in mirrors:
+            try:
+                overrides = json.loads(str(row_value(row, "manual_override_json", "{}") or "{}"))
+            except Exception:
+                overrides = {}
+            if not isinstance(overrides, dict):
+                overrides = {}
+            if "location" in overrides:
+                continue
+            connection.execute(
+                "UPDATE reject_events SET location_label='Kodiak Polisher' WHERE id=?",
+                (int(row_value(row, "id", 0) or 0),),
+            )
+            affected.add((
+                str(row_value(row, "delivery_date", "") or ""),
+                str(row_value(row, "order_no", "") or ""),
+                str(row_value(row, "item_no", "") or ""),
+            ))
+
+    for delivery_date, order_no, item_no in affected:
+        events = connection.execute(
+            """
+            SELECT qty, reason_label, location_label, rejected_at
+            FROM reject_events
+            WHERE delivery_date=? AND order_no=? AND item_no=?
+            ORDER BY rejected_at DESC, id DESC
+            """,
+            (delivery_date, order_no, item_no),
+        ).fetchall()
+        total_qty = sum(max(int(row_value(event, "qty", 0) or 0), 0) for event in events)
+        latest = events[0] if events else None
+        connection.execute(
+            """
+            UPDATE line_items
+            SET internal_reject_count=?, last_reject_reason=?, last_reject_location=?,
+                last_rejected_at=?, updated_at_utc=?
+            WHERE id IN (
+                SELECT li.id FROM line_items li
+                JOIN delivery_lists dl ON dl.id=li.list_id
+                WHERE dl.delivery_date=? AND COALESCE(li.is_deleted,0)=0
+                  AND li.order_no=? AND li.item_no=?
+            )
+            """,
+            (
+                total_qty,
+                str(row_value(latest, "reason_label", "") or ""),
+                str(row_value(latest, "location_label", "") or ""),
+                str(row_value(latest, "rejected_at", "") or ""),
+                now,
+                delivery_date,
+                order_no,
+                item_no,
+            ),
+        )
+
 
 def run_sqlite_migrations(connection: Any, owner: Any) -> list[int]:
     """Handle run sqlite migrations for the maintained Delivery List Scanner workflow."""

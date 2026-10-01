@@ -2048,6 +2048,7 @@ class Handler(SimpleHTTPRequestHandler):
                     location=params.get("location", [""])[0],
                     reason=params.get("reason", [""])[0],
                     rejected_by=params.get("rejectedBy", [""])[0],
+                    all_dates=str(params.get("allDates", ["0"])[0] or "0").strip().lower() in {"1", "true", "yes", "on"},
                 )
             )
             return
@@ -2173,18 +2174,34 @@ class Handler(SimpleHTTPRequestHandler):
             user = self.require_permission("view_delivery_lists")
             if not user:
                 return
-            delivery_date = parse_qs(parsed.query).get("deliveryDate", [""])[0]
+            params = parse_qs(parsed.query)
+            delivery_date = params.get("deliveryDate", [""])[0]
+            include_flags = str(params.get("includeFlags", ["1"])[0] or "1").strip().lower() not in {"0", "false", "no"}
             try:
                 bundle = STORE.get_delivery_date_scan_bundle(delivery_date, user=user)
                 records = [record for record in bundle.get("records", []) if isinstance(record, dict)]
-                list_ids = [str(record.get("list", {}).get("id") or "").strip() for record in records]
-                flags_by_list = OPERATIONS.line_flags_many(
-                    [list_id for list_id in list_ids if list_id],
-                    user["username"],
-                ).get("results", {})
-                for record, list_id in zip(records, list_ids):
-                    record["flags"] = flags_by_list.get(list_id, {"ok": True, "listId": list_id, "items": []})
+                if include_flags:
+                    list_ids = [str(record.get("list", {}).get("id") or "").strip() for record in records]
+                    flags_by_list = OPERATIONS.line_flags_many(
+                        [list_id for list_id in list_ids if list_id],
+                        user["username"],
+                    ).get("results", {})
+                    for record, list_id in zip(records, list_ids):
+                        record["flags"] = flags_by_list.get(list_id, {"ok": True, "listId": list_id, "items": []})
+                bundle["flagsIncluded"] = include_flags
                 self.send_json(bundle)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/scan/date-events":
+            user = self.require_permission("view_delivery_lists")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            delivery_date = params.get("deliveryDate", [""])[0]
+            try:
+                self.send_json(STORE.get_delivery_date_scan_events(delivery_date, user=user))
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
@@ -2235,6 +2252,27 @@ class Handler(SimpleHTTPRequestHandler):
                     include_sketch_safety=params.get("includeSketchSafety", ["0"])[0] in {"1", "true", "yes"},
                 )
             )
+            return
+
+        if parsed.path == "/api/admin/optimization-reviews/summary":
+            user = self.require_any_permission("view_admin", "review_superseded_orders")
+            if not user:
+                return
+            self.send_json(STORE.optimization_review_summary())
+            return
+
+        if parsed.path == "/api/admin/optimization-reviews":
+            user = self.require_any_permission("view_admin", "review_superseded_orders")
+            if not user:
+                return
+            params = parse_qs(parsed.query)
+            self.send_json(STORE.list_optimization_review_alerts(params.get("status", ["open"])[0]))
+            return
+
+        if parsed.path == "/api/admin/progress-settings":
+            if not self.require_any_permission("manage_lookup_values", "manage_production_files"):
+                return
+            self.send_json(STORE.list_progress_stage_settings())
             return
 
         if parsed.path == "/api/admin/users":
@@ -3048,7 +3086,10 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 notice_ids = data.get("noticeIds") if isinstance(data.get("noticeIds"), list) else []
                 review_kind = str(data.get("reviewKind") or "").strip().lower()
-                self.send_json(OPERATIONS.acknowledge_line_updates(list_id, notice_ids, user["username"], review_kind))
+                return_flags = data.get("returnFlags", True) not in {False, 0, "0", "false", "False"}
+                self.send_json(OPERATIONS.acknowledge_line_updates(
+                    list_id, notice_ids, user["username"], review_kind, include_flags=return_flags
+                ))
                 return
 
             if parsed.path == "/api/operations/internal-rejects/acknowledge":
@@ -3063,7 +3104,10 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "Permission denied for this delivery list"}, HTTPStatus.FORBIDDEN)
                     return
                 reject_ids = data.get("rejectIds") if isinstance(data.get("rejectIds"), list) else []
-                self.send_json(OPERATIONS.acknowledge_internal_rejects(list_id, reject_ids, user["username"]))
+                return_flags = data.get("returnFlags", True) not in {False, 0, "0", "false", "False"}
+                self.send_json(OPERATIONS.acknowledge_internal_rejects(
+                    list_id, reject_ids, user["username"], include_flags=return_flags
+                ))
                 return
 
             if parsed.path == "/api/operations/line-flags/batch":
@@ -3172,6 +3216,35 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            if parsed.path == "/api/admin/optimization-reviews/update":
+                user = self.require_permission("review_superseded_orders")
+                if not user:
+                    return
+                self.send_json(STORE.update_optimization_review_alert(int(data.get("alertId") or data.get("id") or 0), data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/progress-settings":
+                user = self.require_any_permission("manage_lookup_values", "manage_production_files")
+                if not user:
+                    return
+                self.send_json(STORE.upsert_progress_stage_setting(data, user["username"]))
+                return
+
+            if parsed.path == "/api/admin/progress-settings/remove":
+                user = self.require_any_permission("manage_lookup_values", "manage_production_files")
+                if not user:
+                    return
+                self.send_json(STORE.remove_progress_stage_setting(str(data.get("stageKey") or data.get("key") or ""), user["username"]))
+                return
+
+            if parsed.path == "/api/progress-stage/complete":
+                user = self.current_user()
+                if not user:
+                    self.send_json({"error": "Authentication required"}, HTTPStatus.UNAUTHORIZED)
+                    return
+                self.send_json(STORE.complete_progress_stage(data, user["username"]))
+                return
+
             if parsed.path == "/api/admin/superseded-order-reviews/decision":
                 user = self.require_permission("review_superseded_orders")
                 if not user:
@@ -3246,6 +3319,7 @@ class Handler(SimpleHTTPRequestHandler):
                     evidence_after = str(row.get("lastRejectedAt") or "").strip() or STORE.latest_internal_reject_at(order, item)
                     request_key = str(row.get("key") or f"{order}:{item}:{job}")
                     cutting = dict(label_hints.get(request_key) or {})
+                    cutting["knownOrderItems"] = list(row.get("knownOrderItems") or [])
                     if cutting.get("manualMachineComplete") is True and not force_check:
                         machine_code = str(cutting.get("manualMachineCode") or "").strip().lower()
                         machine_row = next(
@@ -3293,6 +3367,7 @@ class Handler(SimpleHTTPRequestHandler):
                             refresh_missing=refresh_incomplete,
                         )
                     cutting.pop("lifecycleRevision", None)
+                    cutting.pop("knownOrderItems", None)
                     if status.get("fabricated") is True and not cutting.get("complete"):
                         # v0.545: downstream Denver/WaterJet completion is useful
                         # diagnostic evidence, but it must never promote A+W Cutting.
@@ -3309,6 +3384,11 @@ class Handler(SimpleHTTPRequestHandler):
                         "status": status, "cutting": cutting,
                         "progressRetryAfterSeconds": service.cache_seconds,
                     })
+                custom_progress = STORE.refresh_file_progress_for_requests(raw_items, "system-file")
+                for result in results:
+                    key = str(result.get("key") or "")
+                    if key in custom_progress:
+                        result["customProgress"] = custom_progress[key]
                 self.send_json({"results": results, "fabricationRevision": service.fabrication_revision()})
                 return
 

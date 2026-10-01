@@ -519,6 +519,7 @@ class ProductionFileService:
                     }
                     for asset_id, (modified_at, order_token, assignments) in self._sketch_page_cache.items()
                     if asset_id in self._asset_lookup and assignments
+                    and not any(bool(row.get("parseFallback")) for row in assignments if isinstance(row, dict))
                 ],
             }
         with self._persist_write_lock:
@@ -1508,6 +1509,27 @@ class ProductionFileService:
         return {"machine": "", "required": False, "confidence": "unknown", "reason": "", "signal": signal[:600]}
 
     @staticmethod
+    def _sketch_edge_finish_code_v553(text: Any) -> str:
+        """Return the authoritative edge-finish shorthand printed on a shop sketch.
+
+        A+W/Crystal process rows can report polishing work even when the physical
+        shop sketch calls the glass out as SE (seamed edge). The sketch is the
+        operator-facing production drawing, so preserve this small piece of page
+        evidence with the exact item assignment and let Order Details use it when
+        reconstructing the cutting label.
+        """
+        source = str(text or "")
+        if not source:
+            return ""
+        if re.search(r"\bSEAM(?:ED)?\s+EDGE(?:S)?\b", source, flags=re.IGNORECASE):
+            return "SE"
+        # Shop drawings use a standalone SE callout beside an edge. Keep the
+        # boundary strict so words containing those letters do not qualify.
+        if re.search(r"(?<![A-Z0-9])SE(?![A-Z0-9])", source.upper()):
+            return "SE"
+        return ""
+
+    @staticmethod
     def _normalized_item_number(item: Any) -> str:
         digits = re.sub(r"\D+", "", str(item or "").strip())
         if not digits:
@@ -1516,6 +1538,438 @@ class ProductionFileService:
             return str(int(digits))
         except ValueError:
             return digits.lstrip("0") or "0"
+
+    def _normalized_known_items_v560(self, known_items: Any = None) -> set[str]:
+        """Normalize active scanner item identities used to interpret multi-page sketches.
+
+        Some A+W shop PDFs number physical sketch pages/panels as ``Order.1``,
+        ``Order.2`` even when the scanner has a single Order/Item.  The active
+        order item set lets us distinguish that continuation-page case from the
+        normal multi-item contract without guessing from page numbers alone.
+        """
+        if not isinstance(known_items, (list, tuple, set)):
+            return set()
+        return {
+            value for value in (self._normalized_item_number(item) for item in known_items) if value
+        }
+
+    def _sole_item_fabrication_context_v563(self, item: Any, known_items: Any = None) -> bool:
+        """Return True only when one scanner item safely owns order-level machine evidence.
+
+        A+W shop drawings can number physical panels/pages independently from the
+        scanner item identity. Denver program filenames can follow that physical
+        number as well (for example a sole scanner Item 001 can have a page/program
+        suffix of 02). The active scanner item set is the safety boundary: only a
+        genuinely sole-item order may inherit otherwise order-level completion files.
+        """
+        item_number = self._normalized_item_number(item)
+        return bool(item_number and self._normalized_known_items_v560(known_items) == {item_number})
+
+    def _sole_item_fabrication_suffixes_v563(
+        self, order: Any, item: Any, job: Any = "", *, known_items: Any = None,
+    ) -> set[str]:
+        """Return physical sketch/page identifiers that safely belong to one scanner item.
+
+        This is intentionally narrower than "one active scanner item" by itself.
+        We only broaden filename matching when the exact order PDF actually exposes
+        an additional physical page/panel that v0.560 associated with the sole item.
+        That prevents an unrelated Item 002 program from being inherited merely
+        because Item 002 is absent from today's scanner import.
+        """
+        item_number = self._normalized_item_number(item)
+        if not self._sole_item_fabrication_context_v563(item_number, known_items):
+            return set()
+        suffixes: set[str] = set()
+        candidates: dict[str, ProductionAsset] = {}
+        try:
+            candidates.update({asset.asset_id: asset for asset in self.matches(
+                "sketch", order, "", job, limit=8, require_item=False
+            )})
+        except OSError:
+            pass
+        candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order, job)})
+        for sketch in candidates.values():
+            if sketch.extension != ".pdf":
+                continue
+            assignments = self._sketch_page_assignments(sketch, order, allow_content_read=True)
+            for row in self._sketch_rows_for_item_v560(assignments, item_number, known_items):
+                if not row.get("continuationInferred"):
+                    continue
+                physical = self._normalized_item_number(row.get("item"))
+                if not physical:
+                    physical = self._normalized_item_number(row.get("pageNumber"))
+                if physical and physical != item_number:
+                    suffixes.add(physical)
+        return suffixes
+
+    def _sole_item_fabrication_asset_allowed_v563(
+        self, asset: ProductionAsset, order: Any, item: Any, job: Any = "", *, known_items: Any = None,
+    ) -> bool:
+        """Validate one non-exact machine file against real sole-item sketch context."""
+        if not self._sole_item_fabrication_context_v563(item, known_items):
+            return False
+        order_token = _compact(order)
+        job_tokens = self._job_identity_tokens(job)
+        identities = [token for token in [order_token, *job_tokens] if token]
+        stem_token = _compact(Path(asset.name).stem)
+        relative_parent_token = _compact(str(Path(asset.relative).parent))
+        # A machine file named exactly as the order is unambiguous for a known
+        # sole scanner item. Exact Job Nr. stems are already accepted by _score.
+        if order_token and stem_token == order_token:
+            return True
+        for physical_suffix in self._sole_item_fabrication_suffixes_v563(
+            order, item, job, known_items=known_items
+        ):
+            if self._asset_mentions_item(asset, order, physical_suffix):
+                return True
+            if any(self._asset_mentions_item(asset, job_token, physical_suffix) for job_token in job_tokens):
+                return True
+
+            # v0.564: Denver output can also be organized as an Order/Job folder
+            # whose file itself is only the physical panel/page identifier, e.g.
+            # ``Programs/239197/02.egl``.  The v0.563 same-filename check could
+            # not see that relationship even though the full relative path was
+            # unambiguous.  Keep this sole-item + sketch-proven so a real Item 002
+            # on a multi-item order can never satisfy Item 001.
+            stem_digits = re.sub(r"\D+", "", str(Path(asset.name).stem or ""))
+            stem_number = self._normalized_item_number(stem_digits)
+            if (
+                stem_number == physical_suffix
+                and relative_parent_token
+                and any(identity in relative_parent_token for identity in identities)
+            ):
+                return True
+        return False
+
+    def _targeted_machine_paths_v564(
+        self, root: Path, identities: list[str], extension: str, *, max_depth: int = 2, max_dirs: int = 128, max_entries: int = 6000,
+    ) -> list[Path]:
+        """Find one Order/Job's machine files without recursively cataloging the share.
+
+        The normal production index intentionally prunes old directory trees.  A
+        Denver program may still be created/updated under a stable parent folder
+        whose own mtime is old, so an operator refresh needs a bounded identity
+        probe that does not depend on that rolling index.  This walks at most two
+        directory levels, caps directories/entries, and only retains files whose
+        full relative path contains the requested Order Nr. or Job Nr.
+        """
+        clean_extension = str(extension or "").strip().lower()
+        identity_tokens = [token for token in dict.fromkeys(_compact(value) for value in identities) if token]
+        if not clean_extension or not identity_tokens:
+            return []
+        try:
+            if not root.is_dir():
+                return []
+        except OSError:
+            return []
+
+        results: dict[str, Path] = {}
+        queue: list[tuple[Path, int, bool]] = [(root, 0, False)]
+        visited: set[str] = set()
+        directories_seen = 0
+        entries_seen = 0
+        cutoff = self._recent_cutoff()
+
+        while queue and directories_seen < max_dirs and entries_seen < max_entries:
+            folder, depth, parent_identity = queue.pop(0)
+            folder_key = os.path.normcase(os.path.normpath(str(folder)))
+            if folder_key in visited:
+                continue
+            visited.add(folder_key)
+            directories_seen += 1
+            try:
+                entries = list(os.scandir(folder))
+            except OSError:
+                continue
+            entries_seen += len(entries)
+            if entries_seen > max_entries:
+                entries = entries[: max(0, max_entries - (entries_seen - len(entries)))]
+
+            child_dirs: list[tuple[int, float, Path, bool]] = []
+            for entry in entries:
+                try:
+                    relative = Path(entry.path).relative_to(root).as_posix()
+                except ValueError:
+                    continue
+                relative_token = _compact(relative)
+                identity_match = any(token in relative_token for token in identity_tokens)
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        if Path(entry.name).suffix.lower() != clean_extension or not identity_match:
+                            continue
+                        results[os.path.normcase(os.path.normpath(entry.path))] = Path(entry.path)
+                        continue
+                    if not entry.is_dir(follow_symlinks=False) or depth >= max_depth:
+                        continue
+                    stat = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                modified_at = float(stat.st_mtime or 0)
+                # Identity-bearing folders always win.  Otherwise inspect only
+                # recent children (or children of an already identity-bearing
+                # parent), keeping the probe bounded and avoiding a full share walk.
+                should_descend = bool(identity_match or parent_identity or modified_at >= cutoff or depth == 0)
+                if not should_descend:
+                    continue
+                priority = 0 if identity_match else (1 if parent_identity else 2)
+                child_dirs.append((priority, -modified_at, Path(entry.path), identity_match or parent_identity))
+
+            child_dirs.sort(key=lambda row: (row[0], row[1], str(row[2]).lower()))
+            room = max(0, max_dirs - directories_seen - len(queue))
+            queue.extend((path, depth + 1, identity) for _priority, _mtime, path, identity in child_dirs[:room])
+
+        return sorted(results.values(), key=lambda path: str(path).lower())
+
+    def _fabrication_evidence_matches_v563(
+        self,
+        kind: str,
+        order: Any,
+        item: Any = "",
+        job: Any = "",
+        *,
+        known_items: Any = None,
+        limit: int = 12,
+        refresh: bool = False,
+    ) -> tuple[list[ProductionAsset], set[str]]:
+        """Return exact completions plus sketch-proven sole-item physical-program evidence.
+
+        Multi-item orders stay strict. A sole scanner item may inherit a machine
+        file with a different numeric suffix only when the real order PDF proves
+        that physical page/panel is a continuation of that same scanner item.
+        Newest eligible evidence is first so floor reruns remain authoritative.
+        """
+        clean_kind = str(kind or "").strip().lower()
+        expected_extension = {"program": ".egl", "completed_wj": ".nce"}.get(clean_kind)
+        require_item = bool(str(item or "").strip())
+        strict = self.matches(
+            clean_kind, order, item, job, limit=max(int(limit or 12), 1),
+            require_item=require_item, refresh=refresh,
+        )
+        strict = [asset for asset in strict if not expected_extension or asset.extension == expected_extension]
+        if not self._sole_item_fabrication_context_v563(item, known_items):
+            return strict, set()
+
+        broad = self.matches(
+            clean_kind, order, "", job, limit=max(int(limit or 12) * 4, 48),
+            require_item=False, refresh=False,
+        )
+        eligible: dict[str, ProductionAsset] = {asset.asset_id: asset for asset in strict}
+        for asset in broad:
+            if expected_extension and asset.extension != expected_extension:
+                continue
+            if asset.asset_id in eligible or self._sole_item_fabrication_asset_allowed_v563(
+                asset, order, item, job, known_items=known_items
+            ):
+                eligible[asset.asset_id] = asset
+        strict_ids = {asset.asset_id for asset in strict}
+        ordered = sorted(
+            eligible.values(),
+            key=lambda asset: (-float(asset.modified_at or 0), asset.relative.lower()),
+        )[: max(int(limit or 12), 1)]
+        inferred_ids = {asset.asset_id for asset in ordered if asset.asset_id not in strict_ids}
+        return ordered, inferred_ids
+
+    def _sketch_rows_for_item_v560(
+        self,
+        assignments: list[dict[str, Any]],
+        item: Any,
+        known_items: Any = None,
+    ) -> list[dict[str, Any]]:
+        """Return sketch pages owned by one scanner item, including safe continuations.
+
+        Existing multi-item orders keep exact ``Order.Item`` ownership. When the
+        scanner knows there is exactly one active item for the order, every page
+        from that exact order-level PDF may belong to the same physical pane. This
+        includes pages whose visible Order.Item marker is not extractable by the
+        PDF text layer. The sole-item guard is what makes that fallback safe.
+        """
+        item_number = self._normalized_item_number(item)
+        if not item_number:
+            return []
+        rows = sorted(
+            (dict(row) for row in assignments if isinstance(row, dict)),
+            key=lambda row: (int(row.get("pageNumber") or 0), str(row.get("item") or "")),
+        )
+        exact = [row for row in rows if str(row.get("item") or "") == item_number]
+        known = self._normalized_known_items_v560(known_items)
+        if known != {item_number}:
+            return exact
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            clone = dict(row)
+            if str(clone.get("item") or "") != item_number:
+                clone["continuationForItem"] = item_number
+                clone["continuationInferred"] = True
+            result.append(clone)
+        return result
+
+    @staticmethod
+    def _raw_pdf_page_count_v562(path: Path, *, max_bytes: int = 64 * 1024 * 1024) -> int:
+        """Best-effort physical page count when the normal PDF parser cannot open a shop file.
+
+        The browser PDF viewer is more tolerant than pypdf for a handful of A+W PDFs.
+        This fallback never interprets item ownership; it only preserves the physical
+        pages so a known sole scanner item can still display the real drawing.
+        """
+        try:
+            size = int(path.stat().st_size or 0)
+            if size <= 0 or size > max_bytes:
+                return 0
+            raw = path.read_bytes()
+        except OSError:
+            return 0
+        page_objects = len(re.findall(rb"/Type\s*/Page(?!s)\b", raw))
+        page_tree_counts: list[int] = []
+        for pattern in (
+            rb"/Type\s*/Pages\b(?:(?!endobj).){0,4096}?/Count\s+(\d{1,4})",
+            rb"/Count\s+(\d{1,4})(?:(?!endobj).){0,4096}?/Type\s*/Pages\b",
+        ):
+            for match in re.finditer(pattern, raw, flags=re.DOTALL):
+                try:
+                    value = int(match.group(1))
+                except (TypeError, ValueError):
+                    continue
+                if 0 < value <= 256:
+                    page_tree_counts.append(value)
+        candidates = [value for value in [page_objects, *page_tree_counts] if 0 < value <= 256]
+        return max(candidates) if candidates else 0
+
+    def _unique_document_machine_v562(self, asset: ProductionAsset) -> str:
+        """Return one unambiguous machine term from the whole PDF as a last-resort hint."""
+        text = self._read_machine_text(asset)
+        if not text:
+            return ""
+        matches: list[str] = []
+        for row in self.machine_definitions:
+            code = str(row.get("code") or "").strip().lower()
+            name = str(row.get("name") or "").strip()
+            if not code or not name or not row.get("active", True):
+                continue
+            if self._matches_machine_terms(text, code):
+                matches.append(name)
+        unique = list(dict.fromkeys(matches))
+        return unique[0] if len(unique) == 1 else ""
+
+    def _physical_sketch_fallback_rows_v562(
+        self,
+        asset: ProductionAsset,
+        order_token: str,
+        *,
+        page_count: int = 0,
+        reason: str = "raw-physical-pages",
+    ) -> list[dict[str, Any]]:
+        """Preserve real PDF pages when a tolerant browser can open what pypdf cannot.
+
+        These rows deliberately have no item identity. ``_sketch_rows_for_item_v560``
+        exposes them only when the scanner knows there is exactly one active item.
+        """
+        count = int(page_count or 0) or self._raw_pdf_page_count_v562(asset.path)
+        if count <= 0:
+            return []
+        document_machine = self._unique_document_machine_v562(asset)
+        rows: list[dict[str, Any]] = []
+        for page_number in range(1, count + 1):
+            rows.append({
+                "item": "",
+                "marker": "",
+                "pageNumber": page_number,
+                # When the parser cannot identify a page, keep the whole-document
+                # machine hint on the final physical page. This is used only for a
+                # sole active scanner item, and only when exactly one configured
+                # machine term exists in the document fallback text.
+                "machine": document_machine if document_machine and page_number == count else "",
+                "genericFabrication": False,
+                "edgeFinishCode": "",
+                "sketchRemake": False,
+                "sketchCancelled": False,
+                "unassignedPage": True,
+                "sourcePageDirect": True,
+                "parseFallback": reason,
+                "physicalPageCount": count,
+                "parseContract": 562,
+            })
+        return rows
+
+    def _pymupdf_sketch_rows_v562(self, asset: ProductionAsset, order_token: str) -> list[dict[str, Any]]:
+        """Optional tolerant parser for A+W PDFs that pypdf cannot traverse.
+
+        PyMuPDF is opportunistic only; the maintained install does not require it.
+        If unavailable, Order Details still receives raw physical-page fallbacks.
+        """
+        try:
+            import fitz  # type: ignore
+        except Exception:
+            return []
+        try:
+            document = fitz.open(str(asset.path))
+        except Exception:
+            return []
+        rows: list[dict[str, Any]] = []
+        try:
+            page_count = int(document.page_count or 0)
+            if page_count <= 0:
+                return []
+            order_marker_token = r"\s*".join(re.escape(char) for char in order_token)
+            marker_patterns = [
+                re.compile(rf"(?<!\d){order_marker_token}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                re.compile(rf"(?<!\d)(?:ORDER\s*)?{order_marker_token}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+            ]
+            for page_index in range(page_count):
+                try:
+                    page = document.load_page(page_index)
+                    text = page.get_text("text") or ""
+                except Exception:
+                    rows.extend(self._physical_sketch_fallback_rows_v562(
+                        asset, order_token, page_count=page_count, reason="pymupdf-page-read"
+                    )[page_index:page_index + 1])
+                    continue
+                machine = self._detect_machine(text) if text else ""
+                generic_fabrication = bool(text and re.search(r"\bFABRICAT(?:E|ED|ING|ION)?\b", text, flags=re.IGNORECASE))
+                edge_finish_code = self._sketch_edge_finish_code_v553(text)
+                sketch_remake = bool(text and re.search(r"(?<![A-Z0-9])REMAKE(?![A-Z0-9])", text, flags=re.IGNORECASE))
+                page_items: set[str] = set()
+                for marker in marker_patterns:
+                    for match in marker.finditer(text):
+                        item_number = self._normalized_item_number(match.group(1))
+                        if not item_number or item_number in page_items:
+                            continue
+                        page_items.add(item_number)
+                        rows.append({
+                            "item": item_number,
+                            "marker": f"{order_token}.{item_number}",
+                            "pageNumber": page_index + 1,
+                            "machine": machine,
+                            "genericFabrication": generic_fabrication,
+                            "edgeFinishCode": edge_finish_code,
+                            "sketchRemake": sketch_remake,
+                            "sketchCancelled": False,
+                            "sourcePageDirect": True,
+                            "parser": "pymupdf",
+                            "physicalPageCount": page_count,
+                            "parseContract": 562,
+                        })
+                if not page_items:
+                    rows.append({
+                        "item": "",
+                        "marker": "",
+                        "pageNumber": page_index + 1,
+                        "machine": machine,
+                        "genericFabrication": generic_fabrication,
+                        "edgeFinishCode": edge_finish_code,
+                        "sketchRemake": sketch_remake,
+                        "sketchCancelled": False,
+                        "unassignedPage": True,
+                        "sourcePageDirect": True,
+                        "parser": "pymupdf",
+                        "physicalPageCount": page_count,
+                        "parseContract": 562,
+                    })
+        finally:
+            try:
+                document.close()
+            except Exception:
+                pass
+        return rows
 
     def _sketch_page_assignments(
         self,
@@ -1537,13 +1991,31 @@ class ProductionFileService:
         cached = self._sketch_page_cache.get(asset.asset_id)
         if cached and cached[0] == asset.modified_at and cached[1] == order_token:
             if cached[2]:
-                return [dict(row) for row in cached[2]]
-            # Reuse an empty parse only long enough to coalesce adjacent item
-            # lookups from one Order Details request. After that, try the PDF
-            # again because A+W/network copies can become readable moments later.
+                # v0.562 requires a complete physical-page contract. v0.561 could
+                # stamp a successfully parsed first page while silently losing a
+                # later page that Chrome still rendered, leaving the stale map valid.
+                has_edge_contract = all("edgeFinishCode" in row for row in cached[2])
+                has_page_contract = all(int(row.get("parseContract") or 0) >= 562 for row in cached[2])
+                counts = {int(row.get("physicalPageCount") or 0) for row in cached[2] if int(row.get("physicalPageCount") or 0) > 0}
+                represented = {int(row.get("pageNumber") or 0) for row in cached[2] if int(row.get("pageNumber") or 0) > 0}
+                complete_physical_map = bool(counts) and len(counts) == 1 and represented.issuperset(range(1, next(iter(counts)) + 1))
+                has_fallback = any(bool(row.get("parseFallback")) for row in cached[2])
+                if has_fallback and allow_content_read:
+                    fallback_at = float(self._sketch_empty_cache_at.get(asset.asset_id) or 0)
+                    if not fallback_at or time.time() - fallback_at >= 3.0:
+                        self._sketch_page_cache.pop(asset.asset_id, None)
+                    else:
+                        return [dict(row) for row in cached[2]]
+                elif (has_edge_contract and has_page_contract and complete_physical_map) or not allow_content_read:
+                    return [dict(row) for row in cached[2]]
+                else:
+                    self._sketch_page_cache.pop(asset.asset_id, None)
+            # Reuse an empty/fallback parse only long enough to coalesce adjacent
+            # item lookups from one Order Details request. Then retry the PDF.
             empty_at = float(self._sketch_empty_cache_at.get(asset.asset_id) or 0)
             if empty_at and time.time() - empty_at < 3.0:
-                return []
+                cached_now = self._sketch_page_cache.get(asset.asset_id)
+                return [dict(row) for row in cached_now[2]] if cached_now and cached_now[2] else []
             self._sketch_page_cache.pop(asset.asset_id, None)
             self._sketch_empty_cache_at.pop(asset.asset_id, None)
         if not allow_content_read:
@@ -1551,32 +2023,49 @@ class ProductionFileService:
 
         assignments: list[dict[str, Any]] = []
         parse_succeeded = False
+        page_count = 0
         try:
             from pypdf import PdfReader  # type: ignore
 
             with asset.path.open("rb") as source:
                 reader = PdfReader(source)
-                # Canonical shop pages use ``Order.Item``. Manual markups sometimes
-                # rewrite that identity as ``Order / Item`` or ``Order ITEM n``; accept
-                # those explicit separators without treating arbitrary nearby numbers
-                # (dimensions/page counts) as item identities. Annotation text is also
-                # included because Bluebeam/Acrobat machine notes may not be flattened.
+                page_count = int(len(reader.pages) or 0)
+                if page_count <= 0:
+                    raise ValueError("PDF exposes no physical pages")
+                order_marker_token = r"\s*".join(re.escape(char) for char in order_token)
                 marker_patterns = [
-                    re.compile(rf"(?<!\d){re.escape(order_token)}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
-                    re.compile(rf"(?<!\d)(?:ORDER\s*)?{re.escape(order_token)}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                    re.compile(rf"(?<!\d){order_marker_token}\s*\.\s*0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
+                    re.compile(rf"(?<!\d)(?:ORDER\s*)?{order_marker_token}\s*(?:[/#-]\s*|ITEM\s*(?:NR\.?|NO\.?|#)?\s*)0*(\d{{1,3}})(?!\d)", re.IGNORECASE),
                 ]
-                for page_index, page in enumerate(reader.pages):
+                for page_index in range(page_count):
                     try:
-                        text = page.extract_text() or ""
+                        page = reader.pages[page_index]
                     except Exception:
-                        text = ""
-                    annotation_text = self._pdf_annotation_text(page)
-                    if annotation_text:
-                        text = "\n".join(part for part in (text, annotation_text) if part)
-                    if not text:
+                        assignments.extend(self._physical_sketch_fallback_rows_v562(
+                            asset, order_token, page_count=page_count, reason="pypdf-page-read"
+                        )[page_index:page_index + 1])
                         continue
-                    machine = self._detect_machine(text)
-                    sketch_remake = bool(re.search(r"(?<![A-Z0-9])REMAKE(?![A-Z0-9])", text, flags=re.IGNORECASE))
+                    chunks: list[str] = []
+                    try:
+                        plain_text = page.extract_text() or ""
+                    except Exception:
+                        plain_text = ""
+                    if plain_text:
+                        chunks.append(plain_text)
+                    try:
+                        layout_text = page.extract_text(extraction_mode="layout") or ""
+                    except Exception:
+                        layout_text = ""
+                    if layout_text and layout_text not in chunks:
+                        chunks.append(layout_text)
+                    annotation_text = self._pdf_annotation_text(page)
+                    if annotation_text and annotation_text not in chunks:
+                        chunks.append(annotation_text)
+                    text = "\n".join(chunks)
+                    machine = self._detect_machine(text) if text else ""
+                    generic_fabrication = bool(text and re.search(r"\bFABRICAT(?:E|ED|ING|ION)?\b", text, flags=re.IGNORECASE))
+                    edge_finish_code = self._sketch_edge_finish_code_v553(text)
+                    sketch_remake = bool(text and re.search(r"(?<![A-Z0-9])REMAKE(?![A-Z0-9])", text, flags=re.IGNORECASE))
                     sketch_cancelled = self._pdf_page_has_cancellation_x_v534(page)
                     page_items: set[str] = set()
                     for marker in marker_patterns:
@@ -1590,27 +2079,67 @@ class ProductionFileService:
                                 "marker": f"{order_token}.{item_number}",
                                 "pageNumber": page_index + 1,
                                 "machine": machine,
+                                "genericFabrication": generic_fabrication,
+                                "edgeFinishCode": edge_finish_code,
                                 "sketchRemake": sketch_remake,
                                 "sketchCancelled": sketch_cancelled,
+                                "physicalPageCount": page_count,
+                                "parseContract": 562,
                             })
+                    if not page_items:
+                        assignments.append({
+                            "item": "",
+                            "marker": "",
+                            "pageNumber": page_index + 1,
+                            "machine": machine,
+                            "genericFabrication": generic_fabrication,
+                            "edgeFinishCode": edge_finish_code,
+                            "sketchRemake": sketch_remake,
+                            "sketchCancelled": sketch_cancelled,
+                            "unassignedPage": True,
+                            "physicalPageCount": page_count,
+                            "parseContract": 562,
+                        })
             parse_succeeded = True
-        except Exception:
-            # A locked/partially copied network PDF is not authoritative evidence
-            # that no sketch exists. Leave it uncached so the bounded frontend
-            # retry can recover without waiting for a process restart.
-            return []
+        except Exception as exc:
+            # A transient network/copy read miss is not proof that the PDF needs a
+            # tolerant-parser fallback. Preserve the maintained short retry behavior
+            # for OSError so a file still being copied is retried normally.
+            if isinstance(exc, OSError):
+                return []
+            # Some stable A+W PDFs render correctly in Chrome while pypdf cannot
+            # traverse their page tree. Try another already-available parser
+            # opportunistically, then preserve physical pages directly from the
+            # original PDF so Order Details never drops back to a generated rectangle.
+            assignments = self._pymupdf_sketch_rows_v562(asset, order_token)
+            if not assignments:
+                assignments = self._physical_sketch_fallback_rows_v562(asset, order_token)
+            parse_succeeded = bool(assignments)
 
-        # Keep one deterministic page per item when a PDF happens to repeat a
-        # title/marker in annotations or revision notes.
-        unique: dict[str, dict[str, Any]] = {}
+        # If one page object failed after pypdf already established the document
+        # page count, preserve that page and attach an unambiguous whole-document
+        # machine hint to the final fallback page when available.
+        if assignments and any(row.get("parseFallback") for row in assignments):
+            document_machine = self._unique_document_machine_v562(asset)
+            fallback_rows = [row for row in assignments if row.get("parseFallback")]
+            if document_machine and fallback_rows and not any(str(row.get("machine") or "") for row in fallback_rows):
+                fallback_rows[-1]["machine"] = document_machine
+            self._sketch_empty_cache_at[asset.asset_id] = time.time()
+
+        # Keep one deterministic assignment per physical page/item pair. A
+        # legitimate piece can span multiple pages, and markerless pages need to
+        # survive so a sole scanner item can safely claim them.
+        unique: dict[tuple[int, str], dict[str, Any]] = {}
         for row in assignments:
-            unique.setdefault(str(row.get("item") or ""), row)
+            key = (int(row.get("pageNumber") or 0), str(row.get("item") or ""))
+            unique.setdefault(key, row)
         result = list(unique.values())
         if parse_succeeded:
             self._sketch_page_cache[asset.asset_id] = (asset.modified_at, order_token, [dict(row) for row in result])
             if result:
-                self._sketch_empty_cache_at.pop(asset.asset_id, None)
-                self._schedule_persist_index(asset.root)
+                if not any(row.get("parseFallback") for row in result):
+                    self._sketch_empty_cache_at.pop(asset.asset_id, None)
+                    self._schedule_persist_index(asset.root)
                 self._prime_sketch_preview_pages_async(asset, result)
             else:
                 self._sketch_empty_cache_at[asset.asset_id] = time.time()
@@ -1623,8 +2152,13 @@ class ProductionFileService:
         page_number: int = 0,
         item_marker: str = "",
         machine_hint: str = "",
+        edge_finish_code: str = "",
         sketch_remake: bool = False,
         sketch_cancelled: bool = False,
+        continuation_for_item: str = "",
+        continuation_inferred: bool = False,
+        source_page_direct: bool = False,
+        parser_fallback: str = "",
     ) -> dict[str, Any]:
         row = asset.public()
         if page_number:
@@ -1633,10 +2167,20 @@ class ProductionFileService:
             row["itemMarker"] = str(item_marker)
         if machine_hint:
             row["machineHint"] = str(machine_hint)
+        if edge_finish_code:
+            row["edgeFinishCode"] = str(edge_finish_code).upper()
         if sketch_remake:
             row["sketchRemake"] = True
         if sketch_cancelled:
             row["sketchCancelled"] = True
+        if continuation_for_item:
+            row["continuationForItem"] = str(continuation_for_item)
+        if continuation_inferred:
+            row["continuationInferred"] = True
+        if source_page_direct:
+            row["sourcePageDirect"] = True
+        if parser_fallback:
+            row["sketchParseFallback"] = str(parser_fallback)
         return row
 
     @staticmethod
@@ -1773,8 +2317,10 @@ class ProductionFileService:
                 assets[asset.asset_id] = asset
         return list(assets.values())
 
-    def sketch_item_views(self, order: Any, item: Any, job: Any = "") -> list[dict[str, Any]]:
-        """Return exact sketch pages for one item from order-level sketch PDFs."""
+    def sketch_item_views(
+        self, order: Any, item: Any, job: Any = "", *, known_items: Any = None
+    ) -> list[dict[str, Any]]:
+        """Return exact and safely inferred continuation sketch pages for one item."""
         item_number = self._normalized_item_number(item)
         if not item_number:
             return []
@@ -1789,23 +2335,28 @@ class ProductionFileService:
         candidates.update({asset.asset_id: asset for asset in self._exact_order_sketches(order, job)})
         for sketch in candidates.values():
             if sketch.extension == ".pdf":
-                for assignment in self._sketch_page_assignments(sketch, order, allow_content_read=True):
-                    if str(assignment.get("item") or "") != item_number:
-                        continue
+                assignments = self._sketch_page_assignments(sketch, order, allow_content_read=True)
+                for assignment in self._sketch_rows_for_item_v560(assignments, item_number, known_items):
                     page_number = int(assignment.get("pageNumber") or 0)
                     views.append(self._public_asset_view(
                         sketch,
                         page_number=page_number,
                         item_marker=str(assignment.get("marker") or ""),
                         machine_hint=str(assignment.get("machine") or ""),
+                        edge_finish_code=str(assignment.get("edgeFinishCode") or ""),
                         sketch_remake=bool(assignment.get("sketchRemake")),
                         sketch_cancelled=bool(assignment.get("sketchCancelled")),
+                        continuation_for_item=str(assignment.get("continuationForItem") or ""),
+                        continuation_inferred=bool(assignment.get("continuationInferred")),
+                        source_page_direct=bool(assignment.get("sourcePageDirect")),
+                        parser_fallback=str(assignment.get("parseFallback") or ""),
                     ))
             elif self._asset_mentions_item(sketch, order, item):
                 # Backward-compatible support for older item-named TXT/image
                 # sketches. The plant PDF contract remains Order.Item-by-page.
                 machine = self._detect_machine(self._read_machine_text(sketch)) if sketch.extension in _TEXT_EXTENSIONS else ""
                 views.append(self._public_asset_view(sketch, machine_hint=machine))
+        views.sort(key=lambda row: (int(row.get("pageNumber") or 0), str(row.get("name") or "")))
         if not views and self._is_network_root(self.roots["sketch"]):
             # ``assets()`` intentionally returns the current network snapshot while
             # a refresh runs. If a sketch was created after that snapshot, request
@@ -1861,6 +2412,7 @@ class ProductionFileService:
         *,
         allow_content_read: bool = True,
         label_hint: dict[str, Any] | None = None,
+        known_items: Any = None,
     ) -> dict[str, Any]:
         item_number = self._normalized_item_number(item)
         label_assignment = self._label_fabrication_assignment(label_hint)
@@ -1904,28 +2456,61 @@ class ProductionFileService:
             if sketch.extension == ".pdf":
                 assignments = self._sketch_page_assignments(sketch, order, allow_content_read=allow_content_read)
                 if item_number:
-                    assignment = next((row for row in assignments if str(row.get("item") or "") == item_number), None)
-                    if not assignment:
+                    relevant = self._sketch_rows_for_item_v560(assignments, item_number, known_items)
+                    if not relevant:
                         continue
+                    exact_rows = [row for row in relevant if not row.get("continuationInferred")]
+                    exact_machine = next((row for row in exact_rows if str(row.get("machine") or "")), None)
+                    exact_requires_fabrication = any(bool(row.get("genericFabrication")) for row in exact_rows)
+                    continuation_machines = [row for row in relevant if row.get("continuationInferred") and str(row.get("machine") or "")]
+                    continuation_codes = {self._machine_code(row.get("machine")) for row in continuation_machines if self._machine_code(row.get("machine"))}
+                    assignment = exact_machine
+                    inferred_continuation = False
+                    sole_item_context = self._normalized_known_items_v560(known_items) == {item_number}
+                    if (
+                        assignment is None
+                        and len(continuation_codes) == 1
+                        and (
+                            exact_requires_fabrication
+                            or bool(label_assignment.get("required"))
+                            or (sole_item_context and not exact_rows)
+                        )
+                    ):
+                        assignment = continuation_machines[0]
+                        inferred_continuation = True
+                    display_row = assignment or exact_rows[0] or relevant[0]
                     source = self._public_asset_view(
                         sketch,
-                        page_number=int(assignment.get("pageNumber") or 0),
-                        item_marker=str(assignment.get("marker") or ""),
-                        machine_hint=str(assignment.get("machine") or ""),
-                        sketch_remake=bool(assignment.get("sketchRemake")),
+                        page_number=int(display_row.get("pageNumber") or 0),
+                        item_marker=str(display_row.get("marker") or ""),
+                        machine_hint=str(display_row.get("machine") or ""),
+                        sketch_remake=bool(display_row.get("sketchRemake")),
+                        sketch_cancelled=bool(display_row.get("sketchCancelled")),
+                        continuation_for_item=str(display_row.get("continuationForItem") or ""),
+                        continuation_inferred=bool(display_row.get("continuationInferred")),
+                        source_page_direct=bool(display_row.get("sourcePageDirect")),
+                        parser_fallback=str(display_row.get("parseFallback") or ""),
                     )
-                    machine = str(assignment.get("machine") or "")
+                    machine = str(display_row.get("machine") or "") if assignment is not None else ""
                     if machine:
+                        parser_fallback = bool(display_row.get("parseFallback"))
                         return {
                             "machine": machine,
                             "machineCode": self._machine_code(machine),
                             "required": True,
-                            "confidence": "high",
+                            "confidence": "document-fallback" if parser_fallback else ("high-continuation" if inferred_continuation else "high"),
                             "source": source,
                             "sketchMatched": True,
-                            "sketchRemake": bool(assignment.get("sketchRemake")),
-                            "sketchCancelled": bool(assignment.get("sketchCancelled")),
-                            "assignmentReason": "Exact sketch page identifies the fabrication machine",
+                            "sketchRemake": bool(display_row.get("sketchRemake")),
+                            "sketchCancelled": bool(display_row.get("sketchCancelled")),
+                            "assignmentReason": (
+                                "Sole scanner item uses the real order PDF fallback and one unambiguous fabrication machine term"
+                                if parser_fallback else (
+                                    "Sole scanner item uses a continuation sketch page that identifies the fabrication machine"
+                                    if inferred_continuation else
+                                    "Exact sketch page identifies the fabrication machine"
+                                )
+                            ),
                         }
                     matched_source = source
                     matched_without_machine = True
@@ -1992,23 +2577,38 @@ class ProductionFileService:
         job: Any = "",
         *,
         evidence_cutoff: float = 0.0,
-    ) -> tuple[ProductionAsset, float] | None:
-        """Return the best previously observed exact Denver program for evidence only."""
+        known_items: Any = None,
+    ) -> tuple[ProductionAsset, float, bool] | None:
+        """Return the newest valid historical Denver completion for this item lifecycle.
+
+        Exact item identity remains mandatory for multi-item orders. A sole scanner
+        item may safely inherit an order/job-level historical .egl for the same
+        reason live v0.563 evidence can: shop program numbering can follow the
+        physical sketch page rather than the scanner item number.
+        """
         require_item = bool(str(item or "").strip())
+        sole_item = self._sole_item_fabrication_context_v563(item, known_items)
         with self._lock:
             rows = list(self._egl_history.values())
-        scored: list[tuple[int, float, float, ProductionAsset]] = []
+        scored: list[tuple[float, float, int, ProductionAsset, bool]] = []
         for asset, last_seen in rows:
-            if not self._evidence_is_after(asset, evidence_cutoff):
+            if asset.extension != ".egl" or not self._evidence_is_after(asset, evidence_cutoff):
                 continue
-            score = self._score(asset, order, item, job, require_item=require_item)
+            exact_score = self._score(asset, order, item, job, require_item=require_item)
+            inferred = False
+            score = exact_score
+            if score <= 0 and sole_item and self._sole_item_fabrication_asset_allowed_v563(
+                asset, order, item, job, known_items=known_items
+            ):
+                score = self._score(asset, order, "", job, require_item=False)
+                inferred = score > 0
             if score > 0:
-                scored.append((score, float(last_seen or 0), float(asset.modified_at or 0), asset))
+                scored.append((float(asset.modified_at or 0), float(last_seen or 0), score, asset, inferred))
         if not scored:
             return None
         scored.sort(key=lambda row: (-row[0], -row[1], -row[2], row[3].relative.lower()))
-        _score_value, last_seen, _mtime, asset = scored[0]
-        return asset, last_seen
+        _mtime, last_seen, _score_value, asset, inferred = scored[0]
+        return asset, last_seen, inferred
 
     @staticmethod
     def _evidence_cutoff_timestamp(value: Any) -> float:
@@ -2051,7 +2651,7 @@ class ProductionFileService:
                     continue
                 self._fabrication_cache.pop(key, None)
 
-    def _check_item_sources(self, order: Any, item: Any, job: Any) -> bool:
+    def _check_item_sources(self, order: Any, item: Any, job: Any, *, known_items: Any = None) -> bool:
         """Manual refresh of one item's metadata; never recurse the share."""
         identities = [str(order or "").strip(), *self._job_identity_tokens(job)]
         identities = [token for token in identities if re.fullmatch(r"\d{6,12}", token)][:3]
@@ -2080,14 +2680,28 @@ class ProductionFileService:
                     continue
                 reachable = True
                 found = []
-                for token in identities:
-                    for path in root.glob(f"{token}*{extension}"):
+                for path in self._targeted_machine_paths_v564(root, identities, extension):
+                    try:
                         info = path.stat()
                         relative = path.relative_to(root).as_posix()
-                        asset = ProductionAsset(kind, root, path, relative, path.name, extension,
-                                                self._asset_id(kind, relative), _compact(relative), info.st_mtime)
-                        if self._score(asset, order, item, job, require_item=True) > 0: found.append(asset)
-                        if len(found) >= 80: break
+                    except OSError:
+                        continue
+                    asset = ProductionAsset(
+                        kind, root, path, relative, path.name, path.suffix.lower(),
+                        self._asset_id(kind, relative), _compact(relative), info.st_mtime,
+                    )
+                    exact_score = self._score(asset, order, item, job, require_item=True)
+                    sole_item_score = (
+                        self._score(asset, order, "", job, require_item=False)
+                        if exact_score <= 0 and self._sole_item_fabrication_asset_allowed_v563(
+                            asset, order, item, job, known_items=known_items
+                        )
+                        else 0
+                    )
+                    if exact_score > 0 or sole_item_score > 0:
+                        found.append(asset)
+                    if len(found) >= 80:
+                        break
                 with self._lock:
                     values = {a.asset_id: a for a in self._cache.get(kind, (0, []))[1]}
                     values.update({a.asset_id: a for a in found})
@@ -2099,16 +2713,19 @@ class ProductionFileService:
     def fabrication_status(self, order: Any, item: Any = "", job: Any = "", *,
                            refresh_missing: bool = False, allow_content_read: bool = True,
                            evidence_after: Any = "", label_hint: dict[str, Any] | None = None,
-                           force_check: bool = False) -> dict[str, Any]:
+                           force_check: bool = False, known_items: Any = None) -> dict[str, Any]:
         """Coalesce concurrent checks and reuse durable, evidence-aware results."""
+        if known_items is None and isinstance(label_hint, dict):
+            known_items = label_hint.get("knownOrderItems")
         lock = self._fabrication_check_locks[hash(_compact(order)) % len(self._fabrication_check_locks)]
         with lock:
             key = (_compact(order), _compact(item), "", bool(allow_content_read), str(evidence_after or "").strip(), self._fabrication_lifecycle_signature(label_hint))
             previous = self._fabrication_cache.get(key)
-            reachable = self._check_item_sources(order, item, job) if force_check else True
+            reachable = self._check_item_sources(order, item, job, known_items=known_items) if force_check else True
             result = self._compute_fabrication_status(order, item, job, refresh_missing=refresh_missing,
                                                      allow_content_read=allow_content_read,
-                                                     evidence_after=evidence_after, label_hint=label_hint)
+                                                     evidence_after=evidence_after, label_hint=label_hint,
+                                                     known_items=known_items)
             if force_check:
                 kind = {"denver": "program", "waterjet": "completed_wj"}.get(result.get("assignedMachineCode"))
                 result["checkUnavailable"] = not result.get("availability", {}).get(kind) if kind else not reachable
@@ -2134,11 +2751,13 @@ class ProductionFileService:
         allow_content_read: bool = True,
         evidence_after: Any = "",
         label_hint: dict[str, Any] | None = None,
+        known_items: Any = None,
     ) -> dict[str, Any]:
         evidence_after_text = str(evidence_after or "").strip()
         evidence_cutoff = self._evidence_cutoff_timestamp(evidence_after_text)
         lifecycle_signature = self._fabrication_lifecycle_signature(label_hint)
         cache_key = (_compact(order), _compact(item), "", bool(allow_content_read), evidence_after_text, lifecycle_signature)
+        known_items_signature = ",".join(sorted(self._normalized_known_items_v560(known_items), key=lambda value: (int(value) if value.isdigit() else 10**9, value)))
         now = time.monotonic()
         cached = self._fabrication_cache.get(cache_key)
         # Positive completion is a durable milestone. Missing/unknown evidence is
@@ -2146,7 +2765,10 @@ class ProductionFileService:
         # again after the configured production refresh interval.
         remembered = bool(cached and cached[1].get("fabricated") is True)
         cache_is_fresh = bool(cached and (remembered or now - cached[0] < self.cache_seconds))
-        if cache_is_fresh and (not refresh_missing or not cached[1].get("blockStaging")):
+        cache_matches_known_items = bool(
+            not cached or remembered or str(cached[1].get("knownItemsSignature") or "") == known_items_signature
+        )
+        if cache_is_fresh and cache_matches_known_items and (not refresh_missing or not cached[1].get("blockStaging")):
             # Return a shallow copy so UI-specific callers cannot mutate the cache.
             result = {**cached[1], "remembered": True}
             source = {"denver": "program", "waterjet": "completed_wj"}.get(result.get("assignedMachineCode"))
@@ -2161,7 +2783,9 @@ class ProductionFileService:
         # the background recent-file index and its configured refresh interval.
         refresh_evidence = bool(cache_is_fresh and refresh_missing and cached[1].get("blockStaging"))
         availability = self.availability()
-        assignment = self.machine_assignment(order, item, job, allow_content_read=allow_content_read, label_hint=label_hint)
+        assignment = self.machine_assignment(
+            order, item, job, allow_content_read=allow_content_read, label_hint=label_hint, known_items=known_items
+        )
         assigned_machine = str(assignment.get("machine") or "")
         assigned_code = str(assignment.get("machineCode") or self._machine_code(assigned_machine) or "")
         actual_machine = assigned_machine
@@ -2172,22 +2796,24 @@ class ProductionFileService:
         fabricated: bool | None = None
         enforceable = False
 
-        require_item = bool(str(item or "").strip())
+        inferred_program_ids: set[str] = set()
+        inferred_waterjet_ids: set[str] = set()
         if availability.get("program"):
-            programs = self.matches(
-                "program", order, item, job, limit=12, require_item=require_item, refresh=refresh_evidence
+            programs, inferred_program_ids = self._fabrication_evidence_matches_v563(
+                "program", order, item, job, known_items=known_items, limit=12, refresh=refresh_evidence
             )
         if availability.get("completed_wj"):
-            completed_wj = self.matches(
-                "completed_wj", order, item, job, limit=12, require_item=require_item, refresh=refresh_evidence
+            completed_wj, inferred_waterjet_ids = self._fabrication_evidence_matches_v563(
+                "completed_wj", order, item, job, known_items=known_items, limit=12, refresh=refresh_evidence
             )
         live_denver_candidates = [asset for asset in programs if asset.extension == ".egl"]
         denver_evidence = next((asset for asset in live_denver_candidates if self._evidence_is_after(asset, evidence_cutoff)), None)
         historical_denver = None if denver_evidence else self._historical_egl_match(
-            order, item, job, evidence_cutoff=evidence_cutoff
+            order, item, job, evidence_cutoff=evidence_cutoff, known_items=known_items
         )
         historical_denver_evidence = historical_denver[0] if historical_denver else None
         historical_denver_last_seen = historical_denver[1] if historical_denver else 0
+        historical_denver_inferred = bool(historical_denver and historical_denver[2])
         waterjet_evidence = next(
             (asset for asset in completed_wj if asset.extension == ".nce" and self._evidence_is_after(asset, evidence_cutoff)),
             None,
@@ -2264,17 +2890,36 @@ class ProductionFileService:
             "blockStaging": bool(assigned_code in {"denver", "waterjet"} and enforceable and fabricated is False),
             "label": label,
             "evidence": (
-                {**evidence.public(), "historical": True, "existsNow": False, "lastSeenAt": historical_denver_last_seen}
+                {
+                    **evidence.public(), "historical": True, "existsNow": False,
+                    "lastSeenAt": historical_denver_last_seen,
+                    "soleItemInferred": historical_denver_inferred,
+                }
                 if evidence is historical_denver_evidence and historical_denver_evidence
-                else ({**evidence.public(), "historical": False, "existsNow": True} if evidence else None)
+                else (
+                    {
+                        **evidence.public(), "historical": False, "existsNow": True,
+                        "soleItemInferred": bool(
+                            evidence.asset_id in inferred_program_ids or evidence.asset_id in inferred_waterjet_ids
+                        ),
+                    }
+                    if evidence else None
+                )
             ),
             "availability": availability,
-            "programs": [asset.public() for asset in programs],
-            "completedWaterjet": [asset.public() for asset in completed_wj],
+            "programs": [
+                {**asset.public(), "soleItemInferred": asset.asset_id in inferred_program_ids}
+                for asset in programs
+            ],
+            "completedWaterjet": [
+                {**asset.public(), "soleItemInferred": asset.asset_id in inferred_waterjet_ids}
+                for asset in completed_wj
+            ],
             "evidenceAfter": evidence_after_text,
             "evidenceResetRequired": bool(evidence_cutoff > 0),
             "lifecycleRevision": lifecycle_signature,
             "identityTokens": [str(order or "").strip(), *self._job_identity_tokens(job)],
+            "knownItemsSignature": known_items_signature,
             "staleEvidence": (
                 {**stale_denver.public(), "reason": "Predates latest Internal Reject"}
                 if stale_denver
@@ -2296,25 +2941,58 @@ class ProductionFileService:
 
     def item_assets(
         self, order: Any, item: Any = "", job: Any = "", *,
-        evidence_after: Any = "", label_hint: dict[str, Any] | None = None,
+        evidence_after: Any = "", label_hint: dict[str, Any] | None = None, known_items: Any = None,
     ) -> dict[str, Any]:
         # Hardware lists are commonly order-level documents, but sketches and
         # programs are item-specific production records. Keep sibling item files
         # out of an item's Order Details card when an item number is available.
+        if known_items is None and isinstance(label_hint, dict):
+            known_items = label_hint.get("knownOrderItems")
         require_item = bool(str(item or "").strip())
-        sketches = self.sketch_item_views(order, item, job) if require_item else []
+        sketches = self.sketch_item_views(order, item, job, known_items=known_items) if require_item else []
         with self._lock:
             sketch_refresh_pending = "sketch" in self._refreshing
+        fabrication = self.fabrication_status(
+            order, item, job, evidence_after=evidence_after, label_hint=label_hint, known_items=known_items
+        )
+        # v0.564: Order Details supplies the complete active-item set.  When it
+        # has already resolved a concrete Denver/Waterjet assignment but the
+        # rolling production index still has no completion, perform the same
+        # bounded one-piece source probe as the explicit refresh button.  This
+        # closes the gap where the .egl exists on disk but sits outside/stale to
+        # the recent metadata index.  Other hot-path item_assets callers do not
+        # pass known_items, so they remain cache-only.
+        if (
+            self._normalized_known_items_v560(known_items)
+            and fabrication.get("assignedMachineCode") in {"denver", "waterjet"}
+            and fabrication.get("fabricated") is not True
+        ):
+            fabrication = self.fabrication_status(
+                order, item, job, evidence_after=evidence_after, label_hint=label_hint,
+                known_items=known_items, force_check=True,
+            )
+        program_rows: dict[str, dict[str, Any]] = {
+            row["id"]: row
+            for asset in self.matches("program", order, item, job, limit=12, require_item=require_item)
+            for row in [asset.public()]
+            if row.get("id")
+        }
+        # v0.563: expose sole-item inferred Denver evidence in Order Details too,
+        # so the Program action and fabrication stage reflect the same floor truth.
+        for row in fabrication.get("programs", []) if isinstance(fabrication, dict) else []:
+            if isinstance(row, dict) and row.get("id"):
+                program_rows[str(row["id"])] = dict(row)
+        programs = sorted(
+            program_rows.values(),
+            key=lambda row: (-float(row.get("modifiedAt") or 0), str(row.get("relativePath") or "").lower()),
+        )[:12]
         return {
             "hardware": [asset.public() for asset in self.matches("hardware", order, item, job, limit=8)],
             "sketches": sketches,
             "referenceGeometry": self.reference_geometry(order, item, evidence_after=evidence_after) if require_item and not sketches else None,
             "sketchRefreshPending": bool(sketch_refresh_pending),
-            "programs": [
-                asset.public()
-                for asset in self.matches("program", order, item, job, limit=12, require_item=require_item)
-            ],
-            "fabrication": self.fabrication_status(order, item, job, evidence_after=evidence_after, label_hint=label_hint),
+            "programs": programs,
+            "fabrication": fabrication,
         }
 
     def order_assets(self, order: Any, job: Any = "") -> dict[str, Any]:

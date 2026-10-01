@@ -76,6 +76,28 @@ def test_partial_pdf_recovers_and_newer_pdf_replaces_item_page(tmp_path):
     assert s.sketch_item_views('238001', '001')[0]['pageNumber'] == 2
 
 
+
+def test_v0553_exact_sketch_se_edge_finish_replaces_legacy_cached_flat_polish_assumption(tmp_path):
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '238986.pdf'
+    write_pdf(pdf, ['238986.6 SE SE SE SE'])
+
+    # Seed the exact shape of the pre-v0.553 persisted assignment. The next
+    # content-enabled item lookup must reparse it instead of trusting a cache
+    # that could never carry edge-finish evidence.
+    assets = s._exact_order_sketches('238986', '')
+    assert len(assets) == 1
+    asset = assets[0]
+    s._sketch_page_cache[asset.asset_id] = (
+        asset.modified_at, '238986',
+        [{'item': '6', 'marker': '238986.6', 'pageNumber': 1, 'machine': ''}],
+    )
+    views = s.sketch_item_views('238986', '006')
+    assert len(views) == 1
+    assert views[0]['itemMarker'] == '238986.6'
+    assert views[0]['edgeFinishCode'] == 'SE'
+
+
 def test_hot_fabrication_lookup_does_not_probe_exact_files(tmp_path):
     s = service(tmp_path)
     with mock.patch.object(s, '_exact_order_sketches', side_effect=AssertionError('Hot-path file probe')):
@@ -281,3 +303,144 @@ def test_v528_sketch_remake_and_punctuated_machine_terms_are_detected(tmp_path):
     assert s._matches_machine_terms('PROCESS: WATERJET / HOLE', 'waterjet')
     assert s._matches_machine_terms('MACHINE WJ', 'waterjet')
     assert not s._matches_machine_terms('MACHINE WJUNK', 'waterjet')
+
+
+def test_v560_single_scanner_item_uses_multi_page_sketch_continuation_machine(tmp_path):
+    """A sole delivery-list item may own multiple numbered physical sketch pages."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239197.pdf'
+    write_pdf(pdf, ['239197.1 Fabrication', '239197.2 DENVER 2'])
+
+    views = s.sketch_item_views('239197', '001', known_items=['001'])
+    assert [view['pageNumber'] for view in views] == [1, 2]
+    assert views[0]['itemMarker'] == '239197.1'
+    assert views[1]['itemMarker'] == '239197.2'
+    assert views[1]['machineHint'] == 'Denver CNC'
+    assert views[1]['continuationForItem'] == '1'
+    assert views[1]['continuationInferred'] is True
+
+    assignment = s.machine_assignment('239197', '001', known_items=['001'])
+    assert assignment['machine'] == 'Denver CNC'
+    assert assignment['machineCode'] == 'denver'
+    assert assignment['source']['pageNumber'] == 2
+    assert assignment['confidence'] == 'high-continuation'
+
+    status = s.fabrication_status('239197', '001', known_items=['001'])
+    assert status['assignedMachine'] == 'Denver CNC'
+    assert status['fabricated'] is False
+    assert status['blockStaging'] is True
+    assert status['label'] == 'Not Fabricated - Denver CNC'
+
+
+def test_v560_multi_item_order_keeps_exact_sketch_page_ownership(tmp_path):
+    """Continuation inference must not steal a real sibling Order/Item page."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239198.pdf'
+    write_pdf(pdf, ['239198.1 Fabrication', '239198.2 DENVER 2'])
+
+    item1 = s.sketch_item_views('239198', '001', known_items=['001', '002'])
+    item2 = s.sketch_item_views('239198', '002', known_items=['001', '002'])
+    assert [view['pageNumber'] for view in item1] == [1]
+    assert [view['pageNumber'] for view in item2] == [2]
+    assert not item1[0].get('continuationInferred')
+    assert item2[0]['machineHint'] == 'Denver CNC'
+
+
+def test_v561_single_item_recovers_markerless_physical_pages_and_denver_machine(tmp_path):
+    """A sole scanner item may claim exact-order PDF pages whose marker text is not extractable."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239197.pdf'
+    # This mirrors the live failure mode: Chrome shows the physical pages, but
+    # pypdf may expose the operation/machine text without the center Order.Item marker.
+    write_pdf(pdf, ['Fabrication', 'DENVER 2'])
+
+    views = s.sketch_item_views('239197', '001', known_items=['001'])
+    assert [view['pageNumber'] for view in views] == [1, 2]
+    assert views[0].get('continuationInferred') is True
+    assert views[1].get('continuationInferred') is True
+    assert views[1]['machineHint'] == 'Denver CNC'
+
+    assignment = s.machine_assignment('239197', '001', known_items=['001'])
+    assert assignment['machine'] == 'Denver CNC'
+    assert assignment['machineCode'] == 'denver'
+    assert assignment['source']['pageNumber'] == 2
+    assert assignment['confidence'] == 'high-continuation'
+
+    # Markerless pages are never guessed onto one item when the order has siblings.
+    assert s.sketch_item_views('239197', '001', known_items=['001', '002']) == []
+
+
+def test_v561_reparses_pre_v561_sketch_page_cache_before_using_live_order_details(tmp_path):
+    """Persisted page maps from v0.560 cannot hide a later physical page after upgrade."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239197.pdf'
+    write_pdf(pdf, ['239197.1 Fabrication', 'DENVER 2'])
+    assets = s._exact_order_sketches('239197', '')
+    assert len(assets) == 1
+    asset = assets[0]
+
+    # Shape of an older persisted cache: only the page it could identify, with no
+    # v0.561 parse contract. The first content-enabled lookup must throw it away.
+    s._sketch_page_cache[asset.asset_id] = (
+        asset.modified_at,
+        '239197',
+        [{
+            'item': '1', 'marker': '239197.1', 'pageNumber': 1, 'machine': '',
+            'genericFabrication': True, 'edgeFinishCode': '',
+            'sketchRemake': False, 'sketchCancelled': False,
+        }],
+    )
+
+    views = s.sketch_item_views('239197', '001', known_items=['001'])
+    assert [view['pageNumber'] for view in views] == [1, 2]
+    assert views[1]['machineHint'] == 'Denver CNC'
+    assert all(int(row.get('parseContract') or 0) >= 561 for row in s._sketch_page_cache[asset.asset_id][2])
+
+
+def test_v562_single_item_keeps_real_two_page_pdf_when_pypdf_cannot_parse(tmp_path):
+    """Chrome-tolerant shop PDFs still expose their physical pages instead of a generated fallback."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239197.pdf'
+    write_pdf(pdf, ['Order overview', '239197.2 DENVER 2'])
+
+    # Reproduce the live symptom: the order-level PDF exists and the browser can
+    # render it, but the maintained pypdf parser cannot traverse this one file.
+    with mock.patch('pypdf.PdfReader', side_effect=RuntimeError('broken A+W page tree')), \
+         mock.patch.object(s, '_pymupdf_sketch_rows_v562', return_value=[]):
+        views = s.sketch_item_views('239197', '001', known_items=['001'])
+        assert [view['pageNumber'] for view in views] == [1, 2]
+        assert all(view.get('sourcePageDirect') is True for view in views)
+        assert views[1]['machineHint'] == 'Denver CNC'
+        assert views[1]['sketchParseFallback'] == 'raw-physical-pages'
+
+        assignment = s.machine_assignment('239197', '001', known_items=['001'])
+        assert assignment['machine'] == 'Denver CNC'
+        assert assignment['machineCode'] == 'denver'
+        assert assignment['source']['pageNumber'] == 2
+        assert assignment['source']['sourcePageDirect'] is True
+        assert assignment['confidence'] == 'document-fallback'
+
+
+def test_v562_rejects_incomplete_v561_page_map_even_when_it_was_persisted(tmp_path):
+    """A v0.561 cache containing only page 1 cannot permanently hide a real second page."""
+    s = service(tmp_path)
+    pdf = s.roots['sketch'] / '239197.pdf'
+    write_pdf(pdf, ['239197.1 Fabrication', '239197.2 DENVER 2'])
+    asset = s._exact_order_sketches('239197', '')[0]
+    s._sketch_page_cache[asset.asset_id] = (
+        asset.modified_at,
+        '239197',
+        [{
+            'item': '1', 'marker': '239197.1', 'pageNumber': 1, 'machine': '',
+            'genericFabrication': True, 'edgeFinishCode': '', 'sketchRemake': False,
+            'sketchCancelled': False, 'physicalPageCount': 1, 'parseContract': 561,
+        }],
+    )
+
+    views = s.sketch_item_views('239197', '001', known_items=['001'])
+    assert [view['pageNumber'] for view in views] == [1, 2]
+    assert views[1]['machineHint'] == 'Denver CNC'
+    cached_rows = s._sketch_page_cache[asset.asset_id][2]
+    assert all(int(row.get('parseContract') or 0) >= 562 for row in cached_rows)
+    assert {int(row.get('pageNumber') or 0) for row in cached_rows} == {1, 2}
+    assert {int(row.get('physicalPageCount') or 0) for row in cached_rows} == {2}

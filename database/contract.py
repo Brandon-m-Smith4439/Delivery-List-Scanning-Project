@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-APPLICATION_VERSION = "548"
-# Schema version 21 adds per-user Internal Reject review receipts, durable manual
-# production-progress overrides, and delivery-date identity on physical Inventory scans.
-CURRENT_SCHEMA_VERSION = 21
+APPLICATION_VERSION = "587"
+# Schema version 24 standardizes the scanner reject catalogs on the current A+W
+# Complaint Reason/Cause vocabulary and repairs historical generic POLISHER events.
+CURRENT_SCHEMA_VERSION = 24
 
 TABLE_DESCRIPTIONS = {
     "schema_migrations": "Installed numbered database migrations and checksums.",
@@ -50,7 +50,7 @@ TABLE_DESCRIPTIONS = {
     "reject_reasons": "Admin-managed internal reject reason choices.",
     "reject_locations": "Admin-managed internal reject break-location choices.",
     "reject_events": "Internal reject history from scanner actions and mirrored A+W breakage events.",
-    "reject_value_mappings": "Admin display overrides for stable A+W reject reason/location codes.",
+    "reject_value_mappings": "Admin display overrides for current A+W reject reason/location numeric codes.",
     "aw_reject_events": "Logical A+W breakage events grouped across BOM-level PROD_BREAKAGE rows.",
     "aw_reject_source_rows": "Raw A+W PROD_BREAKAGE rows keyed by immutable external ROWID.",
     "aw_cutting_generations": "A+W production batch/optimization generations used for Cutting progress and label context.",
@@ -63,6 +63,9 @@ TABLE_DESCRIPTIONS = {
     "inventory_item_mappings": "Maintained glass-description to inventory Item ID reference mapping.",
     "internal_reject_review_receipts": "Per-user acknowledgement of Internal Reject incidents shown on delivery lists.",
     "manual_production_progress_overrides": "Audited manual Cutting/fabrication completion overrides keyed to one physical lifecycle.",
+    "progress_stage_settings": "Administrator-defined progress checkpoints layered between maintained production/scanner stages.",
+    "progress_stage_completions": "Per-piece completion evidence for administrator-defined progress checkpoints.",
+    "aw_optimization_review_alerts": "Durable review queue for suspicious released/booked A+W batches that are later reoptimized.",
 }
 
 REQUIRED_COLUMNS = {
@@ -89,7 +92,7 @@ REQUIRED_COLUMNS = {
     "line_update_receipts": {"notice_id", "user_id", "seen_at"},
     "machine_events": {"id", "machine_id", "scanner_id", "line_item_id", "event_type", "event_status", "qty", "barcode", "order_no", "item_no", "metadata_json", "created_at_utc"},
     "reject_events": {"id", "delivery_date", "order_no", "item_no", "qty", "reason_label", "location_label", "rejected_at", "rejected_by", "source_type", "source_external_key", "source_reason_code", "source_location_code", "manual_override_json"},
-    "aw_reject_events": {"event_key", "order_no", "item_no", "breakage_date", "quantity", "reason_code", "reason_label", "location_code", "location_label", "source_row_count", "first_seen_at", "last_seen_at"},
+    "aw_reject_events": {"event_key", "order_no", "item_no", "breakage_date", "quantity", "reason_code", "reason_label", "location_code", "location_label", "legacy_reason_label", "legacy_location_label", "canonical_reason_label", "canonical_location_label", "canonical_resolution", "source_row_count", "first_seen_at", "last_seen_at"},
     "aw_reject_source_rows": {"aw_row_id", "event_key", "order_no", "item_no", "bom_id", "key_index", "quantity", "breakage_date", "reason_code", "location_code", "synced_at"},
     "aw_cutting_generations": {"order_no", "item_no", "key_index", "batch_job_number", "batch_status_code", "optimization_number", "optimization_status_code", "cutting_booking_at", "weight", "surface_area", "source_payload_json", "synced_at"},
     "packing_list_prints": {"id", "rack_code", "delivery_date", "printed_at", "printed_by", "snapshot_json"},
@@ -125,6 +128,22 @@ REQUIRED_COLUMNS = {
         "id", "item_id", "glass_label", "description", "match_terms_json", "sort_order",
         "active", "created_at", "updated_at",
     },
+    "progress_stage_settings": {
+        "id", "stage_key", "display_name", "anchor_stage_key", "position", "completion_mode",
+        "scanner_station", "file_pattern", "downstream_policy", "active", "sort_order",
+        "created_by", "created_at", "updated_by", "updated_at",
+    },
+    "progress_stage_completions": {
+        "id", "stage_id", "delivery_date", "order_no", "item_no", "completed_at",
+        "completed_by", "source", "evidence_json",
+    },
+    "aw_optimization_review_alerts": {
+        "id", "alert_key", "order_no", "item_no", "key_index", "batch_job_number",
+        "previous_optimization_number", "previous_status_code", "previous_status_label",
+        "previous_status_at", "current_optimization_number", "current_status_code",
+        "current_status_label", "current_status_at", "status", "note", "detected_at",
+        "updated_at", "updated_by", "evidence_json",
+    },
 }
 
 TEXT_BUSINESS_IDENTIFIERS = {
@@ -147,6 +166,9 @@ TEXT_BUSINESS_IDENTIFIERS = {
     "inventory_scans": {"source_line_item_id", "barcode", "delivery_date", "job_no", "order_no", "item_no", "item_id"},
     "manual_production_progress_overrides": {"delivery_date", "order_no", "item_no", "machine_code"},
     "inventory_item_mappings": {"item_id"},
+    "progress_stage_settings": {"stage_key", "anchor_stage_key", "scanner_station"},
+    "progress_stage_completions": {"delivery_date", "order_no", "item_no", "source"},
+    "aw_optimization_review_alerts": {"alert_key", "order_no", "item_no", "batch_job_number", "status"},
 }
 
 SQLITE_TO_SQLSERVER_TYPES = {
@@ -187,6 +209,7 @@ INDEX_DESCRIPTIONS = {
     "idx_aw_cutting_order_item_generation_v498": "Newest A+W physical cutting generation by Order/Item and remake key.",
     "idx_aw_cutting_batch_v498": "A+W Batch/Optimization lookup for cutting history and label context.",
     "idx_aw_reject_events_time": "Recent logical A+W reject events by breakage time.",
+    "idx_aw_reject_events_context_identity": "Historical A+W reject vocabulary reconciliation by order/item/date/job context.",
     "idx_aw_reject_source_rows_event": "Raw A+W breakage rows belonging to one logical event.",
     "idx_aw_reject_source_rows_time": "Raw A+W breakage synchronization by source breakage time.",
     "idx_packing_list_prints_time": "Packing-list print history newest first.",
@@ -203,6 +226,10 @@ INDEX_DESCRIPTIONS = {
     "idx_inventory_scans_source_once": "One physical count per production source identity within a session.",
     "idx_internal_reject_review_receipts_user": "Per-user Internal Reject review marker lookup.",
     "idx_manual_production_progress_identity": "Manual production progress lookup by delivery date and Order/Item.",
+    "idx_progress_stage_settings_active_order": "Active custom progress checkpoints in display order.",
+    "idx_progress_stage_completions_identity": "Custom progress completion lookup by stage/date/order/item.",
+    "idx_aw_optimization_review_status_time": "Open A+W reoptimization alerts by review state and detection time.",
+    "idx_aw_optimization_review_order_item": "A+W reoptimization alert lookup by Order/Item/batch.",
 }
 
 JSON_COLUMNS = {
@@ -224,6 +251,8 @@ JSON_COLUMNS = {
     "inventory_expected_items": {"source_payload_json"},
     "inventory_scans": {"manual_fields_json"},
     "inventory_item_mappings": {"match_terms_json"},
+    "progress_stage_completions": {"evidence_json"},
+    "aw_optimization_review_alerts": {"evidence_json"},
 }
 
 TIMESTAMP_COLUMNS = {
@@ -251,4 +280,7 @@ TIMESTAMP_COLUMNS = {
     "internal_reject_review_receipts": {"reviewed_at"},
     "manual_production_progress_overrides": {"updated_at", "reject_cutoff"},
     "inventory_item_mappings": {"created_at", "updated_at"},
+    "progress_stage_settings": {"created_at", "updated_at"},
+    "progress_stage_completions": {"completed_at"},
+    "aw_optimization_review_alerts": {"previous_status_at", "current_status_at", "detected_at", "updated_at"},
 }

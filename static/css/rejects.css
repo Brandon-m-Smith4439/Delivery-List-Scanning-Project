@@ -3288,7 +3288,7 @@ tr.has-internal-reject > td:first-child {
   }
 }
 
-/* v0.489: keep the Rejects page bounded to a server-paged two-week working set. */
+/* v0.489/v0.586: keep Internal Reject history server-paged; v0.586 adds explicit all-history paging. */
 .reject-pagination-v489 {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -3346,3 +3346,118 @@ tr.has-internal-reject > td:first-child {
 .internal-reject-toast-copy b { color: color-mix(in srgb, var(--attention-internal-reject) 72%, #5b2b00) !important; }
 .reject-history-item.is-internal-reject,
 .reject-timeline-card-v151.is-internal-reject { border-left-color: var(--attention-internal-reject) !important; }
+
+/* v0.586: A+W-standard reject catalogs plus visible all-history paging. */
+.reject-pagination-v586 {
+  grid-template-columns: minmax(104px, auto) minmax(0, 1fr) minmax(104px, auto);
+  margin-top: 14px;
+}
+
+.reject-pagination-status-v586 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.reject-pagination-status-v586 > span {
+  color: #536b86;
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.reject-pagination-status-v586 label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #667b90;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.reject-pagination-status-v586 select {
+  min-width: 68px;
+  height: 34px;
+  border: 1px solid #c9d6e3;
+  border-radius: 8px;
+  background: #fff;
+  color: #183b5d;
+  font: inherit;
+  font-weight: 850;
+  padding: 0 25px 0 9px;
+}
+
+.reject-filter-panel-v151 .reject-filter-field :where(input, select):disabled {
+  background: #edf2f7;
+  color: #8a99a8;
+  cursor: not-allowed;
+}
+
+.reject-catalog-list-v347 article.is-aw-standard-v586 {
+  background: linear-gradient(90deg, rgba(222, 238, 252, 0.7), rgba(248, 251, 254, 0.94));
+  border-color: #c8dced;
+}
+
+.reject-catalog-list-v347 article > div:first-of-type {
+  min-width: 0;
+}
+
+.reject-aw-standard-badge-v586,
+.reject-custom-badge-v586 {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 3px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.reject-aw-standard-badge-v586 {
+  background: #e1effb;
+  color: #1e5d8f;
+}
+
+.reject-custom-badge-v586 {
+  background: #eef1f4;
+  color: #667789;
+}
+
+.reject-aw-standard-lock-v586 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px solid #cddbea;
+  border-radius: 8px;
+  background: #f2f7fb;
+  color: #577089;
+  font-size: 0.68rem;
+  font-weight: 850;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .reject-pagination-v586 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .reject-pagination-status-v586 {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .reject-pagination-v586 > button {
+    width: 100%;
+    min-width: 0;
+  }
+}

@@ -1,3 +1,608 @@
+## v0.587 - Fabrication Freshness and Order Details Navigation Polish
+
+- Added a compact Scan-page fabrication freshness indicator with **Up to date**, **Stale**, and **Checking** states. Freshness reuses the maintained fabrication retry/cache rules rather than inventing a separate timer.
+- Moved each Order Details `Progress checked ...` timestamp into the Progress heading immediately left of the item refresh control; unchecked items display a restrained not-yet-checked message.
+- Corrected Scan-row double-click focus so Order Details scrolls the requested item header near the top of the modal body instead of vertically centering the whole card and overshooting its header.
+- Removed per-item sketch page selectors. Multi-page sketch navigation now appears only in the **Full shower sketch** order overview and keeps the inline iframe, maximize action, and print action on the selected physical page.
+- Removed the quantity-derived Cutting Label Piece selector. A line with quantity greater than one now keeps one visible label identity instead of suggesting separate selectable item identities.
+- Enlarged Order Details header fact typography and gave Job Nr. a wider, slightly farther-left position for faster operator recognition.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.587** and kept SQLite schema **24** unchanged. Changed browser cache keys advance to `scan.css?v=20261001-v0.587`, `shared-ui.css?v=20261001-v0.587`, and `app.js?v=20261001-v0.587`.
+
+### Validation
+
+- JavaScript syntax, Python parse/import checks, focused UI/static regressions, and the complete maintained test suite were run before packaging.
+- No production SQLite database is included in either package.
+
+## v0.586 - A+W Reject Catalog Alignment, Kodiak History, and Full Reject Paging
+
+- Applied the plant clarification that historical generic **POLISHER** rejects predate meaningful Skiati reject history. Legacy `POLISHER` now canonicalizes to **Kodiak Polisher**, and schema migration 24 repairs already-reconciled v0.585 A+W events/mirrors without overriding explicit scanner per-event location overrides.
+- Added the complete rebuilt A+W Complaint Reason library to scanner Internal Reject logging: **25 standard reasons** from Broken on Truck through Other/Unknown.
+- Added the complete rebuilt A+W Complaint Cause library to scanner Internal Reject logging: **22 standard causes/machines** from Indian Trail/Install through Other/Unknown, including both Kodiak Polisher and Skiati Polisher.
+- A+W-standard reasons/causes are seeded/reactivated idempotently in schema migration 24, sorted before scanner custom values in the exact maintained A+W order, and protected from rename/delete in Scanner settings. Existing scanner custom values are preserved and remain editable. Case-insensitive attempts to add an existing A+W standard reuse the standard row instead of creating a duplicate.
+- Internal Rejects now defaults to **All history** and remains server-paged instead of rendering the entire history. Added **Newer dates / Older dates** navigation plus 25/50/100 rows-per-page controls; the existing focused date presets and custom date range remain available.
+- Added an explicit backend `allDates` query mode so historical paging is intentional rather than bypassing the maintained two-week default implicitly.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.586** and SQLite schema **23 -> 24**. Changed browser cache keys advance to `rejects.css?v=20260930-v0.586` and `app.js?v=20260930-v0.586`.
+
+### Validation
+
+- Focused regressions cover all-history paging, exact A+W catalog ordering/protection, case-insensitive standard reuse, schema-24 data preservation, and generic-POLISHER -> Kodiak repair.
+- Final maintained suite: **426/426 passed**. JavaScript syntax and 38-file Python AST/import checks passed. An exact v0.585 schema-23 database upgraded through the normal startup path to schema 24 with a verified pre-upgrade backup, unchanged A+W event/source/mirror row counts, `integrity_check = ok`, and 0 foreign-key violations. Headless Chromium visual capture was attempted but the managed container browser did not complete rendering; live browser appearance remains operator-side verification.
+- No production SQLite database is included in either package.
+
+## v0.585 - Historical A+W Reject Vocabulary Reconciliation
+
+- Fixed historical Internal Reject corruption after A+W Complaint Reason / Complaint Cause Basic Data rows were deleted and recreated. A+W `PROD_BREAKAGE` retains numeric reason/cause codes, and those numbers can later resolve to different lookup text; v0.585 no longer treats that numeric code as a permanent historical meaning.
+- Added `resources/aw_reject_legacy_context_v0585.json`, generated from the supplied 1,040-row recut log, with only breakage date, Order/Item, original-job, glass type, legacy reason/location, and note context needed to identify old reject events. The source hash and row count are retained in the resource metadata for auditability.
+- Added event-level legacy and canonical vocabulary fields to `aw_reject_events`. Historical rows preserve their old reason/location while exposing a canonical current Complaint Reason/Cause. Contextual translations include breakout -> **Bad Breakout / Cutting Table**, Denver failures -> **... in Machine / Denver CNC**, shipping breakage -> **Broken on Truck / In Transit**, wrong-label -> **Mistagged**, old no-fab/no-polish -> **Missed Fabrication/Missed Edgework**, and optimization duplicates/issues -> **Optimization Reject**.
+- Kept machine splits conservative. Generic old `POLISHER`, `WASHER`, `HANDLING`, and similar values use captured A+W machine/registration/work-type evidence and recut comments where supported; unresolved cases become **Other/Unknown** instead of being assigned to a specific machine without evidence.
+- Updated A+W synchronization so historical events through 2026-09-29 resolve recut-log context before considering the newly rebuilt live lookup text. Re-syncing a historical `PROD_BREAKAGE` event with a recycled numeric code therefore cannot overwrite its preserved canonical meaning. Post-cutover/current events continue using the current A+W lookup library normally.
+- Reprojected historical A+W `reject_events` mirrors from the preserved canonical values while honoring existing per-event manual overrides. Affected line-item Internal Reject summaries are recalculated after migration; raw A+W source rows and event identities are preserved.
+- Advanced SQLite schema **22 -> 23** with an idempotent numbered migration that adds the five event-level vocabulary columns plus a context-identity index. The normal store migration path creates and verifies a pre-upgrade SQLite backup before applying the schema change.
+- Added equivalent Azure SQL columns/index contract and documented the historical-code-reuse behavior in the A+W automation documentation.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.585**. Browser CSS/JS did not change, so v0.584 cache keys remain valid.
+
+### Validation
+
+- Added focused legacy-vocabulary, recycled-code, source-refresh, and schema-upgrade/data-preservation regressions.
+- Ran JavaScript syntax checks, Python parse/import checks, database migration/integrity/foreign-key validation on an isolated copy, and the complete maintained test suite before packaging.
+
+## v0.584 - Viewport Date Loading and Faster Review Acknowledgement
+
+- Changed slow Scan date transitions into an explicit focus state: after the existing 120ms anti-flicker delay, the Scan heading and delivery-list surface fade in place while the scanner panel stays fully visible. The loading card is re-parented directly to `body` while active so it remains centered in the current viewport regardless of page scroll or transformed application containers.
+- Removed per-user review-flag aggregation from the critical Scan-date response. `/api/scan/date` now supports `includeFlags=0`; foreground and prefetch date loads request only the core date bundle, and the likely active stage's review flags are requested only after the selected date has painted so the cold flag query cannot compete with the operator's foreground date request. The compatibility default still includes flags for existing callers.
+- Expanded the bounded Scan date LRU from five to seven entries and biased idle prefetch toward upcoming delivery dates before filling any remaining cache slots behind the current date. Foreground date selection still aborts unrelated speculation, so the larger warm window cannot own the operator hot path.
+- Added deferred review-state responses to line-update and Internal Reject acknowledgement APIs. The server still validates and writes the exact review receipts transactionally, but callers can skip the expensive post-write `line_flags` rebuild when they do not need it in the same response.
+- Updated Scan review actions to use that fast acknowledgement mode. Updated Orders, Rush, Remake, Internal Reject, and Mark All Reviewed now clear the visible review state immediately after the validated save and schedule the authoritative flags/marker refresh in the background. This removes the redundant second flag read that previously made Mark Reviewed feel slow. Airport-wide review acknowledgement also limits its cross-stage expansion to notices that are still unread for that user, so old reviewed history is no longer reprocessed on every click.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.584** and kept SQLite schema **22** unchanged. Advanced cache keys only for changed browser assets: `scan.css` and `app.js`.
+
+### Validation
+
+- Ran JavaScript syntax validation, Python parse/import checks, focused Scan date/review regressions, and the complete maintained test suite before packaging.
+- Remote Desktop Commander is not available in this execution environment, so live production-browser screenshots and floor timing remain operator-side verification.
+
+## v0.583 - Faster Scan Date Switching and Foreground Loading Feedback
+
+- Prioritized operator-driven Scan date changes over speculative background work. Starting a foreground date change now cancels unrelated in-flight Scan-date prefetch requests and pauses pending prefetch/FAB-prewarm timers so the selected date owns the hot path.
+- Reworked Scan-date prefetching around the existing bounded five-date LRU: the two immediate neighboring dates warm together after a short idle delay, then the second-nearest dates warm one at a time. Valid prefetched bundles are still guarded by the compact catalog signature before reuse.
+- Stopped future FAB prewarming from fetching missing `/api/scan/date` bundles. FAB prewarming now consumes only date bundles already present in the bounded Scan cache, eliminating a source of background competition during date navigation.
+- Added a compact centered **Loading delivery date** status for genuinely cold/slow date changes. It appears only after a 120ms anti-flicker delay, includes the requested delivery date, does not block interaction, and is cleared safely by the matching load token so stale requests cannot hide or overwrite a newer switch.
+- Preserved deferred Scan history loading, per-date history caching, cancellable foreground requests, stale-response tokens, date-wide fabrication hydration, and the v0.582 FAB progress behavior.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.583** and kept SQLite schema **22** unchanged. Advanced cache keys only for changed browser assets: `scan.css` and `app.js`.
+
+### Validation
+
+- Ran JavaScript syntax validation, Python parse/import validation, focused Scan-date navigation regressions, and the complete maintained pytest suite before packaging.
+- Attempted local Chromium visual QA for the date-loading status, but the managed container browser did not complete screenshot capture. Responsive geometry is covered by structural CSS regressions; live desktop/tablet/TC22 appearance and production-database/network timing remain operator-side verification.
+
+## v0.582 - Real FAB Progress and Compact Status Rail
+
+- Reworked the Scan fabrication status rail to remove extra vertical whitespace while making the progress track substantially thicker at **9px**. The Refresh and Checking states still share one fixed footprint so the page does not jump during the transition.
+- Moved the live fabrication activity detail below the progress bar and left-aligned it with the progress column. The top row is now reserved for the main status label and percentage.
+- Replaced the previous large foreground FAB request grouping with adaptive operator-visible batches: **1** item per request for workloads up to 16, **2** through 48, **4** through 120, and a maximum of **6** above that. This lets the existing progress renderer receive frequent genuine completion checkpoints instead of sitting at 0% while a large server batch finishes.
+- Kept speculative future-date prewarming at **40 items per batch** and kept the existing request queue/cache/index architecture. This preserves the lightweight background path and does not introduce another full-catalog reload or production-share scan.
+- Corrected manual Refresh fabrication progress accounting so phase one cannot reach 100% and then fall backward when the live Denver/WaterJet evidence phase is discovered. The progress total reserves phase-two work first, then tightens to the actual assigned-machine count once classification completes.
+- Kept explicit live Denver/WaterJet completion probes sequential at one piece per request. This is intentionally conservative for network shares and retains the existing production-file caching, durable fabrication memory, and lifecycle/reject invalidation behavior.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.582** and kept SQLite schema **22** unchanged. Advanced cache keys only for changed browser assets: `scan.css` and `app.js`.
+
+### Validation
+
+- Ran JavaScript syntax validation, Python compile/import validation, focused FAB progress/layout regressions, production-file fabrication-memory tests, and the complete maintained pytest suite before packaging.
+- Visual QA verifies the compact rail geometry, 9px progress track, below-track activity text, and fixed-footprint Refresh/Checking transition at maintained desktop/tablet/mobile test widths. Live floor production-share timing remains an operator-side verification.
+
+## v0.581 - Reversible Reviews, Packed Review Cards, and Faster FAB Review
+
+- Added **Send back to review** actions to Approved/All superseded-order history and duplicate-optimization history. Reopening a superseded approval removes the durable exclusion and restores only source rows retired by that approval; safely-identifiable rack membership is restored while prior bay state is not guessed. Duplicate-warning reopen is group-wide and returns the optimization to Needs review.
+- Changed Scan review cards to auto-pack left-to-right instead of pinning Updated Orders / Rejects / Remakes to fixed grid columns, removing white gaps when an earlier card is absent.
+- Reduced the fixed FAB status stage height and tightened its badge, copy, percent, and progress track. The reserved footprint is retained so Refresh and Checking still transition without moving the page.
+- Expanded FAB progress reporting to update as each returned item is processed and to show concise phase text plus the number of checks remaining. Operator-triggered refresh distinguishes A+W machine assignment from live fabrication completion evidence.
+- Improved first-open Delivery List Update Preview responsiveness by starting Lookup Manager hydration in parallel with preview requests, caching recent per-stage preview payloads, and prewarming the current stage when its Scan review card appears.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.581** and kept SQLite schema **22** unchanged. Advanced cache keys only for changed browser assets: `scan.css`, `admin.css`, and `app.js`.
+
+### Validation
+
+- Added regressions for reopening an approved superseded removal with row restoration, reopening grouped duplicate warnings, reversible-history controls, packed review-card layout, compact FAB progress, and preview prewarming/caching.
+- Ran JavaScript syntax validation, Python compilation/import checks, focused v0.581 tests, and the complete maintained pytest suite before packaging.
+
+## v0.580 - Collapsed Review History and Stable FAB Transition
+
+- Reworked the Superseded Order Review **Approved** and **All** tabs into headed history sections that are expandable/collapsible and start collapsed. Approved history now contains both approved superseded-order removals and resolved duplicate-optimization warnings (Cleared / False alarm); All history contains every superseded review plus open and resolved optimization warnings.
+- Changed the Settings-page **Review superseded orders** red badge to use the combined open-review total, so grouped duplicate-optimization warnings contribute to the same notification count as pending superseded orders.
+- Nudged the collapsed Settings sidebar badge another **2 px right** while retaining the existing expanded and mobile positions.
+- Wrapped Refresh fabrication and the FAB progress state in one fixed-footprint Scan stage. The refresh surface fades out as the progress surface fades in, and the slightly stronger blue progress background distinguishes active checking without shifting the content below it.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.580** and kept SQLite schema **22** unchanged. Updated cache keys for the four browser assets changed by this release: `styles.css`, `scan.css`, `admin.css`, and `app.js`.
+
+### Validation
+
+- Added focused v0.580 structural coverage for collapsed review history, resolved optimization history, combined Settings notification counts, sidebar badge placement, and the fixed-height FAB transition.
+- Ran JavaScript syntax validation, Python compilation/import checks, visual QA, and the complete maintained pytest suite before packaging.
+
+## v0.579 - Optimization-Level Duplicate Warning Groups
+
+- Changed duplicate-production safety review from one visible warning per A+W order/item row to one warning per **current optimization number**. A 13-item reoptimization now appears as one warning and contributes one open notification count.
+- Kept the existing item-level `aw_optimization_review_alerts` rows as durable evidence instead of discarding or migrating them. Grouped API responses include affected orders/items/batches and prior optimization details for review.
+- Made all optimization-review status actions group-wide. Working on it, Acknowledge, False alarm, and Clear resolved now update every item-level evidence row for the selected optimization in one transaction and create one audit entry for the group action.
+- Added an expandable affected-production section to each grouped warning card so the compact one-warning presentation still exposes the exact item evidence behind the warning.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.579** and kept SQLite schema **22** unchanged. Advanced cache keys only for `admin.css` and `app.js`; v0.578 Scan/UI assets and the v0.577 physical Cutting Label stylesheet remain unchanged.
+
+### Validation
+
+- Added a 13-item reoptimization regression that verifies one grouped warning, grouped counters, retained evidence, and group-wide clearing.
+- Ran JavaScript syntax validation, Python compilation/import checks, focused v0.579 structural regressions, and the complete maintained pytest suite.
+
+## v0.578 - Optimization Review Actions and Admin UI Polish
+
+- Fixed the duplicate-optimization review action contract: the browser posts `alertId`, and the update API now accepts that key while preserving `id` compatibility. This removes the false `Optimization warning not found` failure when changing warning status.
+- Moved **Refresh fabrication** from the delivery-table pager row to a dedicated Scan fabrication-status toolbar beneath the filters. Redesigned the control with a compact icon/copy treatment and made it disappear whenever fabrication is actively loading or manually refreshing.
+- Shifted the collapsed Settings review-count badge approximately 3 px to the right so it sits on the icon's upper-right corner. Expanded and mobile badge placement remain unchanged.
+- Removed the focused Lookup editor's inherited `scrollbar-gutter: stable` rail and explicitly stretched direct dialog surfaces to full width, eliminating the extra white strip shown on Route and other lookup editors.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.578** and kept SQLite schema **22** unchanged. Updated cache keys only for browser assets changed by this release; the v0.577 physical Cutting Label stylesheet remains unchanged.
+
+### Validation
+
+- Ran JavaScript syntax validation, Python compilation/import checks, focused v0.578 regressions, and the complete maintained pytest suite.
+- Checked the updated Scan fabrication toolbar, Settings badge offset, and focused Lookup editor geometry against the supplied screenshots and focused DOM/CSS regressions.
+
+## v0.577 - Physical Cutting Label 8% Content Reduction
+
+- Reduced the visible physical Cutting Label content by approximately **8%** while preserving the confirmed **4.5 x 5.5 in** stock size and the v0.576 reference-matched anchor positions.
+- Reduced typography, barcode dimensions, line heights, label content widths/heights, grid columns, and internal gaps directly in print CSS. This deliberately avoids reintroducing transform-based print scaling that previously caused physical printer pagination problems.
+- Preserved customer/date placement, SG/AW identifiers, Batch/Optimization, glass/size, process route, edge dimensions, metrics, left alignment, and the right-edge hardware safety margin. The on-screen Order Details preview is unchanged.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.577** and kept SQLite schema **22** unchanged. Advanced only changed browser assets to `shared-ui.css?v=20260929-v0.577` and `app.js?v=20260929-v0.577`; unchanged `statistics.css` remains on v0.574.
+
+### Validation
+
+- Ran JavaScript syntax validation, Python compilation/import checks, the focused Cutting Label regression, and the complete maintained pytest suite.
+- Rendered a local 4.5 x 5.5 in print QA harness; output remained exactly one page at 324 x 396 pt with no horizontal overflow.
+
+## v0.576 - A+W Reference-Matched Physical Cutting Label
+
+- Rebuilt the print-only Cutting Label geometry from the supplied physical A+W reference label instead of continuing to tune the v0.575 left-safe approximation. The confirmed media remains **4.5 x 5.5 in**.
+- Matched the reference hierarchy: customer at upper left, delivery date at upper right, wide barcode below, SG/AW identifiers on the left, Batch/Optimization on the right, glass and size in large semibold type, process route on the lower left, MOD-13 edge dimensions on the lower right, and weight/sqft/plate-sequence metrics at the bottom-right above the preprinted logo area.
+- Restored right-side Batch/Optimization, edge dimensions, and metrics while keeping them inside a deliberate printer-safe margin rather than against the stock edge.
+- Expanded the process region so long labels like the supplied Denver/CNC example can show the full Cutting, Polisher, multiple Denver, hole, and Tempering route lines instead of truncating after one or two rows.
+- Tuned typography to the photo: customer/date and descriptive text use medium/normal weight; SG/AW values, Batch/Optimization values, glass, dimensions, and metrics use restrained semibold weight rather than the older extra-heavy bold.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.576** and kept SQLite schema **22** unchanged. Advanced only changed browser assets to `shared-ui.css?v=20260929-v0.576` and `app.js?v=20260929-v0.576`; unchanged `statistics.css` remains on v0.574.
+
+### Validation
+
+- Built a QA harness with the exact values visible in the supplied physical label: **TRI POINTE HMS INC**, **90398333 ASCEND 22**, **239372 / 2**, Batch **6676**, Optimization **8619**, **3/8 Clear Tempered**, **79 1/2 x 28 3/16**, the seven visible production-route rows, four edge dimensions, **74.42 lbs**, **15.50 sqft**, and plate/sequence **1 / 2**.
+- Visually inspected the browser render against the supplied photo. Measured geometry on the 432 x 528 CSS-pixel stock canvas: title x=12/y=28, barcode x=12/y=74/w=310, identifiers x=12/y=132, Batch/Optimization x=236/y=154, glass y=198, size y=230, process x=14/y=270, edge dimensions x=247/y=270, metrics x=230/y=365.
+- Chromium PDF output is exactly **1 page** at **324 x 396 pt**, matching 4.5 x 5.5 in media.
+- JavaScript syntax, Python parse/import checks, focused Cutting Label regression, and the complete maintained pytest suite were run on the final source.
+- No database migration was required. No production SQLite database was opened, modified, reset, copied, or packaged.
+
+## v0.575 - Left-Safe Medium-Weight Cutting Label Print Layout
+
+- Reworked the physical Cutting Label layout for the new floor label printer, which clips closer to the right edge than the prior Brother setup. The confirmed **4.5 x 5.5 in** media size is retained.
+- Shifted the print-only content back toward the left safe area and reduced dependence on the right edge. Customer/title, barcode, SG/AW identifiers, Batch/Optimization, glass, size, process text, and metrics now share a safer left-side composition.
+- Restored moderate emphasis after v0.573 removed all bold weight. General print text uses medium weight, while key values use a restrained semibold treatment rather than the previous 800/900-style heavy bold.
+- Batch/Optimization and lbs / sqft / piece count are left-aligned in the print layout, protecting those values from right-edge clipping on the new printer.
+- Preserved the no-ellipsis SG identifier behavior and direct one-page 4.5 x 5.5 print contract. The on-screen Order Details Cutting Label preview is unchanged.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.575** and kept SQLite schema **22** unchanged. Advanced only changed browser assets to `shared-ui.css?v=20260929-v0.575` and `app.js?v=20260929-v0.575`; unchanged `statistics.css` remains on v0.574.
+
+### Validation
+
+- Visually rendered the maintained Cutting Label verification markup with the final v0.575 print CSS and confirmed the full SG value is visible, the main content is shifted left, Batch/Optimization no longer relies on the right edge, and the metrics block is left-safe. Browser geometry measured the right-most date edge at x=380 on a 432px-wide stock canvas, while the barcode/SG rows end at x=354.
+- Chromium PDF output is exactly **1 page** at **324 x 396 pt**, matching the confirmed **4.5 x 5.5 in** media size with no hidden second page.
+- `node --check static/js/app.js` passed. Python AST parsing/import checks passed for **37** maintained Python files and reported application **575** / schema **22**.
+- Focused Cutting Label regression passed **1/1** and the complete maintained test suite passed **410/410** on the final source.
+- No database migration was required. No production SQLite database was opened, modified, reset, copied, or packaged.
+
+## v0.574 - Historical Daily Production Count and Glass Quantity Reconciliation
+
+- Added a compact **Production day** date selector to the Daily Production Count section. It defaults to today but can load prior production days independently from the main Statistics chart date range.
+- Updated the daily production loader to key its cache and in-flight requests by the selected production day, including stale-response protection when operators change dates quickly. The glass drill-down and Daily Production Count email now follow the selected day as well.
+- Corrected `glassQuantityByType` reporting to use the immutable first-import **New Production** ledger instead of delivery-date inventory volume. This resolves the case where a large mirror quantity first imported yesterday for a future delivery date appeared in Daily Production Count but not in yesterday's Glass Type Quantity table.
+- Added SQFT and logical-item count to the first-import glass aggregation so the corrected glass-quantity payload retains useful audit metadata while excluding External Remakes exactly like Daily Production Count.
+- Updated the Glass Type Quantity chart description to state its New Production / first-seen basis.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.574** and kept SQLite schema **22** unchanged. Advanced only changed browser assets to `statistics.css?v=20260929-v0.574` and `app.js?v=20260929-v0.574`; unchanged `shared-ui.css` remains on its v0.573 cache key.
+
+### Validation
+
+- Added a focused regression with **139 mirror pieces** first imported on one plant-local day but assigned to a later delivery date. The selected production-day report now returns 139 pieces in both Daily Production Count and `glassQuantityByType`, while the later delivery day correctly returns zero New Production for that item.
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained Python files; core imports passed and reported application **574** / schema **22**.
+- All **410 maintained tests** passed. Because the monolithic pytest invocation exceeded this environment's execution window, the 102-test import-consistency file was run in six complete chunks (**10 + 10 + 20 + 20 + 20 + 22 = 102**) and the remaining maintained files were run by file: static structure **262**, auth passwords **5**, scan reference **1**, fabrication memory **21**, and sketch recovery **19**.
+- An isolated SQLite database initialized and reinitialized at migration/schema **22**, returned `integrity_check = ok`, returned **0** foreign-key violations, and preserved a seeded metadata marker across the second initialization. No production SQLite database was opened, modified, reset, copied, or packaged.
+- Visual QA covered the updated Daily Production Count header/date control at **1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and TC22 640x360 landscape** using the production Statistics CSS and browser layout engine, with no horizontal overflow. Remote Desktop Commander was not connected in this session, so the live floor browser remains operator-side verification.
+
+## v0.573 - Exact 4.5 x 5.5 Brother Label Media and Typography
+
+- Corrected the physical media contract for the Brother TJ-4021TN from the previous **4 x 6 in** assumption to the operator-confirmed **4.5 x 5.5 in** stock. The popup now declares `@page`, `html/body`, and the print root at the same exact 4.5 x 5.5 dimensions, addressing the behavior where one populated tag printed correctly and the printer then advanced an additional blank label.
+- Expanded the SG identifier region and overrides the preview-only ellipsis/overflow behavior in the print layout so values such as `89420398M 2089 HOLB` render completely.
+- Increased the upper-right delivery date to 18px, moved Batch/Optimization closer to the right edge, and increased the remaining print-only text sizes by roughly 1-2px.
+- Removed bold weight from all printed label text (`strong`, `b`, process markers, remake text, edge-dimension annotations, glass/size, and metrics) while leaving the barcode geometry unchanged.
+- Preserved the v0.572 left-aligned A+W presentation and rightward composition nudge, with a 432px-wide direct layout that corresponds to 4.5 inches at 96 CSS px/in.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.573** and kept SQLite schema **22** unchanged. Advanced only the changed `shared-ui.css` and `app.js` browser cache keys to `20260928-v0.573`.
+
+### Validation
+
+- Local print rendering produced exactly **1 page** at **324 x 396 pt**, which is 4.5 x 5.5 inches at 72 points/inch. Visual inspection confirmed the full SG number is present without ellipsis, the delivery date is larger, Batch/Optimization are farther right, all printed text uses normal weight, and the lower metrics remain clear of the bottom stock area.
+- JavaScript syntax, Python parse/import checks, the focused Brother label regression, and the complete maintained test suite were run on the final source.
+- No database migration was required. No production SQLite database was opened, modified, reset, copied, or packaged.
+
+## v0.572 - Right-Nudged Left-Aligned Brother Cutting Label
+
+- Corrected the interpretation of the previous centering request: the label content should keep the A+W-style **left-aligned text**, with the entire printable composition nudged to the right so it sits more naturally in the middle of the physical 4x6 stock.
+- Preserved v0.571's vertical placement and larger upper-right delivery date. Customer, route, glass, size, and process text return to left alignment; the barcode and left-side identifiers share the same right-shifted inset.
+- Kept Batch/Optimization and the lbs/sqft/piece-count metrics as right-aligned data blocks, but positioned them consistently with the right-shifted main composition rather than centering their text.
+- Preserved the direct one-page Brother TJ-4021TN print contract: exact 4in x 6in page, zero browser margins, no transform scaling, and the lower safe area for preprinted branding. Order Details on-screen preview remains unchanged.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.572** and kept SQLite schema **22** unchanged. Advanced the changed `shared-ui.css` and `app.js` browser cache keys to `20260928-v0.572`.
+
+### Validation
+
+- Local Chromium visual QA rendered the exact maintained 4x6 harness after the final CSS update. Measured print geometry confirmed the title, barcode, glass, and process content use a shared **34px left inset**, remain left aligned, the date renders at **16px**, and the metrics stay right aligned near the right edge.
+- Chromium print output is exactly **1 page** at **288 x 432 pt (4 x 6 in)**. The final preview was visually inspected against v0.571 to confirm the requested left-aligned composition and rightward nudge while preserving v0.571's vertical position.
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained Python files; core imports reported application **572** / schema **22** with bytecode writes disabled.
+- Focused v0.572 Cutting Label regression passed **1/1**. The complete maintained test suite passed **408/408**.
+
+## v0.571 - Lowered and Centered Brother Cutting Label Layout
+
+- Followed up on the physical-label feedback from v0.570: the print path was now correctly staying on a single 4x6 sheet, but the operator still needed the reconstructed content moved farther down, the delivery date enlarged, and the layout centered more cleanly on the stock.
+- Shifted the entire print-only Cutting Label block lower inside the exact 4in x 6in page by adding additional top offset to the physical print container instead of changing the on-screen Order Details preview.
+- Increased the delivery-date typography in the upper-right corner and tightened the centered title band so the customer name and date remain visually balanced at the top of the label.
+- Recentered the main print content by adjusting the title, barcode, identifiers/meta columns, glass, size, process, and lower metrics positions so the physical output no longer feels overly left-aligned.
+- Preserved the direct one-page 4x6 print contract introduced in v0.570: no transform scaling, zero page margins, protected lower logo safe-zone, and no SQLite/schema changes.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.571** and kept SQLite schema **22** unchanged. Advanced the changed `shared-ui.css` and `app.js` browser cache keys to `20260928-v0.571`.
+
+### Validation
+
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained Python files and core version/schema imports reported application **571** / schema **22**.
+- Re-rendered the maintained `_verification/cutting_label_4x6.html` harness locally after the CSS updates and visually inspected the resulting output: the title/date band sits lower, the date is larger, the barcode/content are centered more cleanly, and the lower metrics block remains clear of the bottom safe area.
+- Focused v0.571 Brother Cutting Label regression passed **1/1**. The complete maintained test suite passed **408/408** on the final source.
+
+## v0.569 - Brother TJ-4021TN Label Compaction and Readability Tuning
+
+- Used the new physical-print photo to refine the reconstructed A+W Cutting Label specifically for the Brother TJ-4021TN. The previous label still crossed onto the next stock even though the browser preview showed one 4x6 page.
+- Pulled the bottom metrics block (lbs / sqft / piece count) upward, then shifted the main printed content slightly downward and increased the internal label typography just a little for better readability.
+- Tightened the dedicated print popup safe region again by rendering the label at **80%** scale inside the 4x6 page while keeping the page itself at an exact portrait **4in x 6in** with zero browser margins and page-break suppression.
+- Preserved the borderless label treatment and left the on-screen Order Details preview geometry unchanged. Only the physical Cutting Label print popup changed.
+- Advanced the maintained release marker to **v0.569** and synchronized `index.html`, `README.md`, `database/contract.py`, `static/js/app.js`, and `static/css/shared-ui.css`. SQLite schema remains **22**.
+
+### Validation
+
+- Static verification confirmed the dedicated print popup now uses `cutting-label-print-root-v569` and the v0.569 print-safe geometry.
+- No database migration was required or performed. No SQLite files were opened, modified, copied, or packaged for this print-layout tuning revision.
+
+## v0.568 - Brother TJ-4021TN Print-Safe Cutting Label Sizing
+
+- Compared the supplied good physical A+W label with the current Brother TJ-4021TN output. The v0.567 browser sheet was one 4x6 page, but the reconstructed content was still oversized for the physical label workflow and could be split by the printer/driver across the stock gap.
+- Kept `@page` at an exact portrait **4in x 6in**, but stopped sizing the reconstructed A+W content itself to the full 4x6 page. The dedicated print popup now uses `cutting-label-print-root-v568`, which renders the maintained 436px label geometry at **82%** inside a 650px logical height and a small top/left safe inset.
+- The reduced print geometry makes customer/date, barcode, SG/AW identifiers, glass/size, process rows, and metrics smaller while reserving the lower portion of the stock for the preprinted Barefoot / Builders FirstSource branding visible in the supplied reference label.
+- Preserved the borderless reconstruction, zero browser page margins, and page-break suppression from v0.566-v0.567. Order Details preview sizing is unchanged; only the physical Cutting Label print popup receives the Brother-specific safe print geometry.
+- Found and corrected release-marker drift left by v0.567: `index.html` / README displayed 0.567 while `database/contract.py` still reported 566. v0.568 synchronizes `APPLICATION_VERSION`, footer, README, tests, and browser cache keys to one release value. SQLite schema remains **22**.
+
+### Validation
+
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **568** / schema **22**.
+- Focused v0.568 Cutting Label print regression passed **1/1**. The complete static-structure suite passed **261/261**.
+- A plain `pytest -q` shell invocation initially hit four collection errors because that shell did not place the project root on `PYTHONPATH`; rerunning the maintained suite with `PYTHONPATH=.` passed **408/408**. No product test failed after the project import path was supplied.
+- An isolated v0.568 SQLite database initialized and re-initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, passed `database.integrity.check_database` with **0** errors / **0** warnings, and preserved a seeded metadata probe across repeated initialization. No production database was opened, reset, migrated, copied, or packaged.
+- The exact print harness rendered to **one** 4x6 page: PDF size **288 x 432 pt** and raster size **384 x 576 px** at 96 CSS dpi. Visual inspection confirmed the smaller customer/date, barcode, identifiers, glass/size, process rows, and metrics all remain on that one page with the lower stock area clear for the preprinted logos.
+- Physical Brother TJ-4021TN output remains the final operator-only check because Remote Desktop Commander is not connected to the floor PC/printer in this session. No local Delivery List Scanner test server was started for this print-only change.
+
+## v0.567 - Single-Surface 4x6 Cutting Label Print Origin Fix
+
+- Reworked the Cutting Label popup print document so it renders one fixed 4x6 print surface at the page origin instead of a normal browser flow layout. This prevents the Brother-style label feed from advancing into the next stock before the first printed line appears.
+- Kept the v0.566 borderless label treatment, but added hard absolute positioning, zeroed document margins/padding, and page-break suppression so the label content starts at the top of the intended physical label and stays on one stock.
+- Updated the popup print stylesheet cache key and the local `_verification/cutting_label_4x6.html` QA file to the maintained `20260928-v0.567` assets.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.567** and kept SQLite schema **22** unchanged. Advanced only the changed `shared-ui.css` and `app.js` browser cache keys to `20260928-v0.567`; unchanged page-specific CSS keys remain untouched.
+
+### Validation
+- Static verification confirmed the Cutting Label print popup now emits a single absolute 4x6 root (`cutting-label-print-root-v567`) with the reconstructed label anchored at `top:0; left:0` and all browser margins removed.
+- `_verification/cutting_label_4x6.html` now mirrors the exact popup print contract for quick manual print-preview and physical-label QA against the provided reference photos.
+- No database migration was required or performed. No SQLite files were opened, modified, copied, or packaged for this UI-only print-origin fix.
+
+## v0.566 - Borderless Full-Size 4x6 Cutting Label Printing
+
+- Removed the artificial black outer border and hard drop shadow from reconstructed A+W Cutting Labels. The surrounding Order Details preview frame still provides visual separation, but the label itself now reflects borderless physical stock.
+- Reworked the dedicated Cutting Label print popup to declare `@page { size: 4in 6in; margin: 0; }` and a matching 4in x 6in document canvas. This removes the browser-default inset that made the label appear undersized on 4x6 media.
+- The printed label now occupies the physical 4x6 page directly (`width: 4in; height: 6in`) with no transform-based stretching, no label border, and no print shadow. Barcode/text geometry remains crisp and the bottom-anchored metrics can use the full label height.
+- Updated the print popup stylesheet reference from the stale `shared-ui.css?v=521` key to the maintained `20260928-v0.566` key.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.566** and kept SQLite schema **22** unchanged. Advanced only the changed `shared-ui.css` and `app.js` browser cache keys to `20260928-v0.566`; unchanged page-specific CSS keys remain untouched.
+
+### Validation
+
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **566** / schema **22**.
+- Focused Cutting Label/static regressions passed **3/3**. Complete maintained pytest suite passed **408/408**.
+- An isolated v0.566 SQLite database initialized and re-initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, passed `database.integrity.check_database` with **0** errors / **0** warnings, and preserved a seeded `system_metadata` marker across repeated initialization. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.566 server returned healthy `/api/health`, served the **0.566** footer plus the `20260928-v0.566` `shared-ui.css` / `app.js` cache keys, and exposed the new `@page{size:4in 6in;margin:0}` print contract. The validation server was then stopped and its remaining child process was explicitly terminated; no Delivery List Scanner test server remains running.
+- A CSS layout render of the exact print harness resolved to **one 384 x 576 CSS-pixel page** (4in x 6in at 96 CSS px/in). Both the print page wrapper and Cutting Label measured exactly **384 x 576**, with **0 overflow boxes**, confirming the label no longer sits inside browser-default page margins.
+- Managed Chromium blocks both `file:` and `127.0.0.1` navigation in this environment, and Remote Desktop Commander is not connected, so the actual Microsoft Edge print-preview dialog / physical 4x6 printer remains operator-side verification. The supplied Edge screenshot was used as the before-state reference.
+- No validation database, `_verification/`, screenshots, `.pytest_cache/`, bytecode, logs, backups, secrets, or credentials are included in either release package.
+
+## v0.565 - Durable Fabrication Memory and Refresh FAB
+
+- Added a compact **Refresh FAB** button to the top-right of the Scan content controls. It refreshes fabrication for the active delivery date without reloading the whole catalog: A+W Cutting/machine classification runs in bounded batches, then only pieces with a concrete Denver/Waterjet assignment receive one-at-a-time live completion-evidence checks.
+- Made a concrete fabrication machine assignment durable for the current piece lifecycle. Once a pane is classified as Denver or Waterjet, cache expiry, service restart, and normal production-index refreshes reuse that assignment instead of reparsing the sketch simply to rediscover the same machine.
+- Kept pending fabrication live. A remembered Denver assignment continues checking Programs for matching `.egl` evidence and a remembered Waterjet assignment continues checking Completed WJ for `.nce` evidence. When evidence is found, the completed fabrication result remains durable even if the source file is later archived or temporarily unavailable.
+- Separated Lookup Manager presentation edits from machine-classification changes. Changing a machine color, display name, or rank no longer bumps the fabrication revision or clears learned machine assignments; current display names/colors still refresh from Lookup Manager. Detection-rule changes still advance the fabrication revision so unresolved pieces can be reconsidered, while already learned lifecycle assignments remain stable.
+- Preserved floor-truth overrides: a manual Refresh FAB can still discover newer exact opposite-machine completion evidence after a rerun, while normal cached completion does not need repeated manual refreshes.
+- Preserved reject/remake lifecycle boundaries. A new lifecycle revision intentionally creates a new fabrication cache identity, so the rejected/remade piece must pass Cutting/Fabrication again and pre-reject evidence remains excluded by the maintained cutoff logic.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.565** and kept SQLite schema **22** unchanged. Advanced `scan.css` and `app.js` browser cache keys to `20260928-v0.565`.
+
+### Validation
+
+- `node --check static/js/app.js` passed. Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **565** / schema **22**.
+- Focused fabrication-memory suite passed **21/21**, including durable pending Denver assignment across restart, Lookup color edits preserving assignment, force Refresh FAB finding later `.egl` completion without reclassification, and reject lifecycle reset.
+- Combined fabrication-memory + static-structure regression set passed **281/281**.
+- Complete maintained pytest suite passed **407/407**.
+- An isolated v0.565 SQLite database initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, passed the maintained integrity report with **0** errors/warnings, and preserved a seeded metadata marker across repeated initialization. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.565 server returned healthy `/api/health`, served the **0.565** footer marker and `20260928-v0.565` JavaScript cache key, and was stopped after validation.
+- Production CSS/markup for the Scan controls was rendered in Chromium at **1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and 640x360 landscape**. The Refresh FAB control remained visible with **0px horizontal overflow** at every viewport; desktop hover/loading and mobile touch-sized states were also inspected. Managed Chromium blocks direct localhost navigation, so the visual pass used the maintained production CSS/markup rather than a live authenticated browser session.
+- Remote Desktop Commander is not connected in this session, so the live BFS production shares and operator floor workflow remain the final operator-only verification. No validation server or Chromium process was left running.
+
+## v0.564 - Bounded Live Fabrication Evidence Probe
+
+- Traced the remaining Order 239197 symptom beyond filename/page matching: Order Details could correctly assign **Denver** from sketch page 2 while still reusing a stale Programs index that did not contain the existing `.egl`. The v0.563 sole-item matcher only helped once the file had already reached the in-memory index or an explicit manual probe found it.
+- Updated Order Details production hydration so a known Denver/Waterjet assignment with missing completion evidence performs one bounded item-specific source probe automatically. Hot Scan/custom-progress callers that do not provide the full active-item set remain cache/index based.
+- Reworked the targeted Programs / Completed WJ probe to search identity-bearing files and shallow subfolders without requiring the Order Nr. or Job Nr. to begin the filename. The probe is capped to two directory levels, 128 directories, and 6,000 entries and never runs an unbounded recursive share scan.
+- Added sole-item support for folder-based program identity such as `Programs/239197/02.egl`: the order/job folder supplies the identity while the numeric filename supplies the sketch-proven physical page/program suffix.
+- Preserved the sole-item safety boundary. A page/program suffix that differs from the scanner item is accepted only when the exact order sketch proves that physical continuation page and the active scanner order truly has one item. Multi-item orders continue to require exact item evidence.
+- Preserved Internal Reject evidence cutoffs, durable historical Denver memory, and newest-completion-wins behavior when both Denver and Waterjet evidence exist.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.564** and kept SQLite schema **22** unchanged. No CSS or JavaScript runtime asset changed, so browser asset cache keys remain unchanged.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **564** / schema **22**.
+- Focused fabrication-memory suite passed **17/17**, including stale-index recovery, `Programs/239197/02.egl`, multi-item isolation, floor-machine overrides, durable evidence, and bounded manual refresh.
+- Combined fabrication/sketch/static regression set passed **295/295**.
+- Complete maintained pytest suite passed **402/402**.
+- An isolated v0.564 SQLite database initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, passed the maintained integrity report with **0** errors/warnings, and preserved a seeded metadata marker across repeated initialization. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.564 server returned healthy `/api/health`, served the **0.564** footer marker, and was stopped after validation.
+- Functional regression reproduced the live failure mode by priming an empty Programs index, then creating Denver evidence afterward; Order Details recovered the `.egl` through the bounded source probe without calling the full `_walk_root` catalog scan. A second regression verified the folder form `Programs/239197/02.egl`.
+- No CSS/JavaScript layout changed in this release. Remote Desktop Commander is not connected in this session, so the live BFS `I:` Programs share and the exact existing Order 239197 `.egl` filename/path could not be inspected directly. The remaining operator verification is to reopen 239197/001 on the floor host and confirm Denver shows **1/1** with the existing program evidence.
+- No local Delivery List Scanner server created for validation was left running.
+
+## v0.563 - Sole-Item Fabrication Evidence Parity
+
+- Traced the remaining Order 239197 symptom to an identity mismatch between scanner Item `001` and Denver program naming that can follow the physical shop sketch/program page number (for example suffix `02`). The existing exact-item matcher correctly rejected that filename for normal multi-item orders, but it also hid valid Denver evidence for this known sole-item order.
+- Added a sole-item fabrication-evidence resolver that first preserves exact item matches, then safely broadens only when `knownOrderItems` proves there is exactly one active scanner item. In that sole-item context, `.egl` / `.nce` files matching the exact Order Nr. or Job Nr. remain valid floor truth even when their physical program suffix differs from the scanner item number.
+- Kept multi-item protection unchanged: if Items 001 and 002 both exist, a `...02.egl` file cannot satisfy Item 001.
+- Changed sole-item completion ordering to use newest file modification time across eligible Denver and Waterjet evidence, so a later floor rerun continues to override an older opposite-machine completion.
+- Applied the same sole-item rule to historical Denver `.egl` memory and bounded force-check source probes, preserving completion after archival without introducing a full network-share walk.
+- Merged inferred Denver evidence into Order Details `programs` so the visible Program action and the Fabrication/Denver progress state are driven by the same backend evidence. Inferred rows are marked `soleItemInferred` in the API for diagnostics.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.563** and kept SQLite schema **22** unchanged. No CSS or JavaScript runtime asset changed, so existing asset cache keys remain unchanged.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **563** / schema **22**.
+- Focused fabrication-evidence regressions passed **15/15**, including the new 239197-style sole-item page-2 Denver `.egl` case, multi-item wrong-item protection, newest Denver/Waterjet rerun precedence, and the existing v0.470 Staging gate regression.
+- The first complete-suite run intentionally exposed one over-broad sole-item fallback against the maintained wrong-item Staging test; the matcher was narrowed to require real PDF continuation/page context before accepting a mismatched numeric program suffix.
+- Final complete maintained pytest suite passed **399/399**.
+- A direct 239197 reproduction with sketch pages `239197.1 Fabrication` and `239197.2 DENVER 2`, scanner Item `001`, Job Nr. text `ARBOR GATES 36 43607476`, and Denver program `23919702.egl` returned both real sketch pages, exposed the `.egl` in Order Details programs, and returned `assignedMachine=Denver CNC`, `actualMachine=Denver CNC`, `fabricated=true`.
+- An isolated SQLite database initialized and re-initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, and preserved a seeded `system_metadata` marker across the repeated initialization. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.563 server returned healthy `/api/health` and served the **0.563** application marker; it was stopped immediately after the smoke check.
+- No CSS or JavaScript runtime file changed in v0.563, so no browser cache key required advancement.
+- Remote Desktop Commander is not connected in this session, so the actual BFS Programs share and live Order 239197 window remain operator-side verification. The implementation avoids a recursive share scan and uses the existing bounded cached/targeted evidence paths.
+- No local Delivery List Scanner server was left running after validation.
+
+## v0.562 - Browser-Tolerant Real Sketch Fallback
+
+- Reproduced the operator symptom after v0.561: the order-level PDF is visible in Order Details, but Item 001 can still render the generated reference rectangle when server-side PDF parsing fails or accepts an incomplete cached page map.
+- Changed sketch parsing to retain the document's physical page count and isolate page-level failures. A bad second-page object no longer causes the entire item sketch result to disappear.
+- Added optional PyMuPDF page/text extraction as a tolerant secondary parser when it is already installed. This remains opportunistic and does not add a required deployment dependency.
+- Added a bounded raw-PDF page-count fallback for exact order PDFs. When the scanner knows the order has exactly one active item, those real physical pages are returned instead of a generated sketch even if text extraction is impossible. Multi-item orders remain strict and never inherit unassigned pages.
+- Added `sourcePageDirect` handling through Order Details. Parser-fallback pages point Chrome at the original PDF and use the real physical `#page=N` fragment instead of requesting a cached single-page PDF that may not be producible.
+- Updated page switching, maximize, and print/open targeting to retain direct-source page context. When no machine-specific page is extractable, the final direct physical page is preferred over the generated fallback, matching the two-page 239197 shop-document layout.
+- Added one conservative whole-document machine fallback: if exactly one configured fabrication machine term is detectable in the source PDF, the sole active scanner item can use that machine; ambiguous Denver/WaterJet evidence remains unresolved.
+- Bumped the sketch-page parse contract to **562** and now validates physical-page completeness before trusting a persisted page map. Parser-fallback maps are not persisted and are retried after a short coalescing interval.
+- Preserved completed Denver `.egl` and WaterJet `.nce` operational-truth override behavior from v0.560.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.562** and kept SQLite schema **22** unchanged. Only the changed `app.js` browser cache key advances to `20260925-v0.562`.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **562** / schema **22**.
+- Focused sketch recovery/transient-read regressions passed **20/20**, including the stable pypdf-failure/raw-page fallback, incomplete v0.561 page-map rejection, markerless sole-item continuation, and maintained transient-copy retry behavior.
+- Complete maintained pytest suite passed **396/396**.
+- Browser-side direct-page contract evaluation verified parser-fallback page 2 uses the original asset URL plus `#page=2`, normal cached-page previews retain `&page=2#page=1`, and a two-page direct-source fallback prefers physical page 2 when no machine-specific page was extractable.
+- An isolated SQLite database initialized and re-initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, passed `database.integrity.check_database` with no errors/warnings, and preserved a seeded verification marker. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.562 server returned healthy `/api/health`, served the **0.562** application marker and `app.js?v=20260925-v0.562`, then was stopped; a process check confirmed no Delivery List Scanner server remained running.
+- Remote Desktop Commander is not connected in this session. A local headless Chromium screenshot attempt hung in this environment and was terminated, so the actual BFS Order Details window remains operator-side visual verification. The supplied live screenshot was used to confirm the remaining symptom is specifically the generated item sketch while the order-level PDF itself is present.
+- No local Delivery List Scanner server, headless Chromium process, verification database, cache folder, or generated screenshot is included in either release package.
+
+## v0.561 - Real Multi-Page Sketch Recovery for Markerless A+W Pages
+
+- Reproduced the remaining Order 239197 symptom from the operator screenshot: the order-level two-page PDF is available, but item-level `productionFiles.sketches` can be empty, which makes Order Details render its generated reference sketch (`239197.1 Fabrication`) instead of the real shop page.
+- Traced the failure to page identity extraction rather than the v0.560 page-selector UI. The parser previously discarded any physical PDF page when its visible `Order.Item` callout could not be extracted/matched, even though the order-level PDF itself was known and Chrome could render the page.
+- Preserved one parsed row per physical page/item pair instead of collapsing the page cache to one row per item. Legitimate multi-page pieces can now retain every physical page.
+- Added a bounded pypdf layout-text extraction pass alongside the existing normal extraction and annotation text, plus conservative whitespace-tolerant Order.Item marker matching so visible markers such as `2 3 9 1 9 7 . 2` can resolve as `239197.2`.
+- When a page still has no extractable item marker, retain that physical page with its machine/process signals. Markerless pages are assigned only when the scanner knows the order has exactly one active item; normal multi-item orders still require exact page ownership.
+- Expanded sole-item continuation assignment so one unique concrete machine on a markerless physical page (for example `DENVER 2`) can become the fabrication assignment even when no page marker is extractable. Conflicting machine evidence remains unresolved rather than guessed.
+- Added parse contract **561** to sketch-page cache rows. Content-enabled Order Details requests automatically discard/reparse older persisted page maps, preventing a v0.560 cache from hiding page 2 after upgrade.
+- Preserved the v0.560 completed-floor-file truth behavior: exact completed Denver `.egl` / WaterJet `.nce` evidence can override the planned sketch machine, with the newest exact completion winning when both exist.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.561**. SQLite schema remains **22**. No CSS/JavaScript runtime asset changed, so existing v0.560 browser cache keys remain unchanged.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **561** / schema **22**.
+- Focused sketch/fabrication regressions passed **9/9**, including the original v0.560 continuation case, markerless two-page single-item recovery, multi-item safety, floor-machine override behavior, and forced reparse of a pre-v0.561 persisted page map.
+- Focused v0.560/v0.561 static contracts passed **2/2**.
+- Complete maintained pytest suite passed **393/393**.
+- An isolated SQLite database initialized and re-initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, and preserved a seeded metadata marker. No production database was opened, reset, migrated, copied, or packaged.
+- An isolated v0.561 server returned healthy `/api/health`, served the **0.561** application marker, and intentionally retained the unchanged v0.560 `app.js` browser cache key; the server was stopped after validation.
+- Direct Playwright navigation to the isolated localhost application remains blocked by the managed Chromium policy (`ERR_BLOCKED_BY_ADMINISTRATOR`), and Remote Desktop Commander is not connected in this session. The actual BFS Order Details window for 239197 therefore remains operator-side visual verification; backend page association and machine resolution are covered by regression tests.
+- No local Delivery List Scanner server or Chromium process was left running after validation.
+
+## v0.560 - Multi-Page Sketch Continuations and Floor-Machine Truth
+
+- Traced Order 239197 to a sketch-identity edge case: the delivery-list item is `001`, but its two physical shop pages are numbered `239197.1` and `239197.2`; page 2 contains the concrete `DENVER 2` routing while page 1 only says generic `Fabrication`.
+- Added active-order item context to production classification. When an order has exactly one active scanner item, additional numbered pages in the same PDF are treated as continuation pages for that sole physical item. Orders with multiple active items retain exact `Order.Item` page ownership.
+- Updated fabrication assignment to use a unique concrete machine found on a safely inferred continuation page when the exact first page has no concrete Denver/Waterjet name. This makes 239197/001 resolve to Denver while still retaining both sketch pages.
+- Added a compact Order Details sketch-page selector and made the concrete-machine page the default preview/Open Sketch target when multiple associated pages exist. Print and maximize controls follow the currently selected page.
+- Propagated `knownOrderItems` through Order Details, the bounded production-status batch, and Staging fabrication preflight without changing the public production-file settings or database schema.
+- Re-verified and regression-protected the existing operational-truth rule: exact completed Denver `.egl` evidence overrides a Waterjet sketch assignment, exact completed Waterjet `.nce` evidence overrides a Denver assignment, and when both exact completion types exist the newest completion remains authoritative.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.560**, kept SQLite schema **22** unchanged, and advanced the changed `shared-ui.css` and `app.js` browser cache keys to `20260925-v0.560`.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `backend.production_files`, `server`) passed with bytecode writes disabled and reported application **560** / schema **22**.
+- Focused multi-page sketch and fabrication-memory regressions passed **26/26**, including the 239197 single-item continuation case, multi-item page-ownership guard, Denver-over-Waterjet completion override, Waterjet-over-Denver completion override, and newest-completion-wins behavior.
+- Complete maintained pytest suite passed **390/390**.
+- An isolated v0.560 SQLite database initialized at schema **22**, returned `PRAGMA integrity_check = ok`, returned **0** foreign-key violations, and preserved a seeded metadata marker across a repeated schema initialization. No production database was reset, migrated, copied into the release package, or otherwise modified.
+- An isolated v0.560 server returned healthy `/api/health` against an isolated database and served the **0.560** application marker plus `shared-ui.css?v=20260925-v0.560` and `app.js?v=20260925-v0.560`; the server was stopped after validation.
+- Responsive Chromium/Playwright QA using the maintained production stylesheet order and exact Order Details multi-page sketch markup passed at **1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and TC22 640x360 landscape**. Page 2 (Denver) was the default active page; switching to page 1 synchronized the active tab plus maximize/print page targets; switching back to page 2 restored the Denver view; no horizontal overflow or selector clipping was detected. Desktop and TC22 screenshots were visually inspected.
+- Remote Desktop Commander is not connected in this session, and the available managed Chromium blocks direct localhost/file navigation with `ERR_BLOCKED_BY_ADMINISTRATOR`, so the live Windows floor instance could not be clicked through. Visual QA therefore used the exact maintained CSS/Order Details markup in an isolated Chromium document, while server behavior was verified separately with direct HTTP smoke checks.
+- No local Delivery List Scanner server or Chromium process was left running after validation.
+
+## v0.559 - Runtime Progress Filter Markup Parity
+
+- Traced the remaining Progress-only misalignment/white-count defect to `renderScanMachineFiltersV521()`: after page load it rebuilt Cutting, WaterJet, Denver, Staging, and Outbound buttons with legacy child markup, replacing the corrected static v0.558 label/count classes.
+- Updated the runtime renderer to emit the same `scan-filter-label-v555` and `scan-filter-count-v555` children used by Status, Attention, Route, Glass Type, and the static Progress fallback.
+- Removed the obsolete hidden `<i>` child from generated Progress buttons; the shared `::before` color dot remains the maintained visual identity marker.
+- Because Progress now uses the maintained shared markup, the existing v0.558 optical `translateY(4px)` label correction and v0.557 high-specificity black selected-state label/count rules apply without another CSS patch.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.559**, kept SQLite schema **22** unchanged, and advanced only the changed `app.js` browser cache key to `20260925-v0.559`.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files; core imports (`database.contract`, `backend.config`, `backend.store`, `server`) passed with bytecode writes disabled and reported application **559** / schema **22**.
+- Focused v0.557/v0.558/v0.559 Scan-filter regressions passed **3/3**.
+- Complete maintained pytest suite passed **385/385**.
+- An isolated v0.559 SQLite database initialized at schema **22**, returned `PRAGMA integrity_check = ok`, and returned **0** foreign-key violations. No production database was opened, copied, reset, or packaged.
+- An isolated v0.559 server returned healthy `/api/health`, served the **0.559** footer/cache key, and served the corrected runtime Progress renderer. The server was stopped after validation.
+- Responsive Chromium/Playwright QA using the maintained production stylesheet order and the corrected runtime Progress markup passed at **1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and TC22 640x360 landscape**. Cutting, WaterJet, Denver, and Staging each retained black selected label/count ink (`rgb(17, 24, 39)`), the v0.558 4px label optical correction remained active, counts remained unshifted, and no horizontal Progress-section overflow was detected. Desktop and TC22 screenshots were visually inspected.
+- Remote Desktop Commander is not connected in this session, and managed Chromium blocks direct localhost navigation, so the live Windows floor instance could not be clicked through. Visual QA therefore used the user's real Edge screenshot as the defect reference plus the exact maintained production CSS/Progress markup in isolated Chromium.
+- No local Delivery List Scanner server or Chromium process was left running after validation.
+
+## v0.558 - Filter Label Optical Ink Alignment
+
+- Corrected the remaining visible filter-chip label misalignment using the real operator screenshot as the reference instead of treating equal DOM box centers as equivalent to equal visual centers.
+- Confirmed the color dot and numeric count were already visually aligned while Segoe UI label glyphs rendered roughly 3-5px high inside their mathematically centered line box.
+- Applied a focused 4px downward optical correction to filter labels only across Status, Attention, Route, Progress/Machine, and Glass Type controls; button geometry, hit areas, dots, and counts remain unchanged.
+- Preserved the v0.557 selected-state contrast fix so WaterJet, Denver, and other selected machine/progress counts remain black and readable.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.558**, kept SQLite schema **22** unchanged, and advanced only the changed `scan.css` browser cache key.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parsing passed for **37** maintained `.py` files and core imports (`database.contract`, `backend.config`, `backend.store`, `server`) passed with bytecode writes disabled.
+- Focused v0.556/v0.557/v0.558 Scan-filter contracts: **3 passed**.
+- Complete maintained pytest suite: **384 passed**.
+- Isolated SQLite validation passed `PRAGMA integrity_check = ok`, zero foreign-key violations, migration/schema version **22**, and a repeated-initialize data-preservation marker check under application **558**. No production database was opened or packaged.
+- Responsive Chromium QA using the maintained filter markup and production CSS passed at **1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and 640x360 landscape**: no label/count overflow; the 4px label correction remained inside every chip; selected WaterJet/Denver/Glass labels and counts stayed black; selected Mirror hover remained stable; and the desktop WaterJet label/count painted-glyph centers were within 2px.
+- Remote Desktop Commander is not connected in this session, so the Windows floor instance could not be exercised directly. The supplied operator screenshot was used as the real-render reference for the optical offset, and the corrected production CSS was then rendered in isolated Chromium. No Chromium or test-server process was left running.
+
+## v0.557 - Filter Optical Centering and Selected Count Contrast
+
+- Replaced the remaining oversized Scan-filter text line boxes with a single explicit 20px content row so each color dot, label, and count shares one vertical centerline.
+- Centered the real text line inside the label/count boxes and standardized their Segoe UI font metrics, correcting the label text that still appeared visually high inside filter buttons.
+- Added high-specificity selected-state guards that keep both labels and counts black across Status, Attention, Route, Progress/Machine, and Glass Type filters.
+- Fixed WaterJet/Denver and other selected Progress/Machine count numerals reverting to white because older v0.553 state selectors outranked the generic v0.556 color rule.
+- Preserved the v0.556 restrained selected gradients, neutral hover treatment, Review-card layout, mobile/TC22 touch sizing, and all existing filter behavior.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.557**, kept SQLite schema **22** unchanged, and advanced only the changed `scan.css` browser cache key.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python AST parse/import validation passed for 37 maintained `.py` files plus `database.contract`, `backend.config`, `backend.store`, and `server`, with bytecode writes disabled.
+- Focused v0.556/v0.557 Scan UI contracts: **2 passed**.
+- Complete maintained pytest suite: **383 passed** with the project root on `PYTHONPATH`. An initial bare `pytest -q` invocation hit four collection imports because this container did not place the project root on `PYTHONPATH`; the maintained-root invocation passed completely.
+- Isolated SQLite validation passed `PRAGMA integrity_check = ok`, zero foreign-key violations, and migration/schema version **22** under application **557**.
+- Browser geometry checks using the exact maintained Scan-filter markup plus production `styles.css`, `scan.css`, `shared-ui.css`, and `mobile.css` passed at 1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and 640x360 landscape. Label/count center offsets were **0 px** across the sampled Status, Attention, WaterJet, Denver, and Glass Type controls; selected WaterJet/Denver label/count ink remained `rgb(17, 24, 39)`.
+- Direct navigation to the isolated localhost app in the available managed Chromium was blocked by the environment (`ERR_BLOCKED_BY_ADMINISTRATOR`), so the browser QA injected the exact maintained markup/CSS into an isolated headless Chromium document instead of exercising the live localhost route. No Chromium or test-server process was left running.
+
+## v0.556 - Filter Alignment, Stable Hover, and Three-Card Review Row
+
+- Centered filter labels, identity dots, and counts on one optical row using matching text sizing/alignment boxes.
+- Forced filter labels and counts to black across inactive, selected, and attention-needed states for reliable readability over restrained gradients.
+- Overrode the older high-specificity Glass Type selected-hover rules so hovering a selected glass filter no longer explodes into a saturated saved-color fill; the selected tint now remains stable on hover/focus.
+- Kept inactive filter hover neutral and lightweight while preserving each filter's identity in the left dot.
+- Reworked desktop/tablet review cards into one compact three-column row with equal-size Review and Mark Reviewed actions.
+- Reordered the review-card DOM for keyboard/visual parity: New/Updated Orders, Internal Rejects, External Remakes; External Remakes is pinned to the far-right column when earlier cards are absent.
+- Preserved narrow mobile/TC22 stacking and touch-safe action sizes; at tablet workspace widths, paired review actions stack inside each card so their icon/text never clips while all three cards stay on one row.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.556**, kept SQLite schema **22** unchanged, and advanced only the changed `scan.css` cache key.
+
+### Validation
+
+- `node --check static/js/app.js` passed.
+- Python parse/import check passed for 37 maintained `.py` files plus `database.contract`, `backend.config`, `backend.store`, and `server`, with bytecode writes disabled.
+- Focused v0.555/v0.556 Scan UI contracts: **2 passed**.
+- Complete maintained pytest suite: **382 passed**.
+- Isolated SQLite startup database: `PRAGMA integrity_check = ok`, no foreign-key violations, and latest recorded migration remains **22** under application **556**.
+- Isolated server smoke test passed `/api/health`, the v0.556 HTML version marker, and the served v0.556 `scan.css`; the test server was stopped afterward.
+- Responsive Chromium production-CSS geometry/hover review passed at 1920x1080, 1440x900, 1366x768, 1024x768, 390x844, TC22 360x640 portrait, and 640x360 landscape: filter label/count centerlines aligned, filter copy/counts black, selected Glass Type background stable on hover, no filter/action overflow, three desktop/tablet review cards shared one row, and External Remakes remained pinned to the right slot.
+
+## v0.555 - Filter Alignment, All Scans Cleanup, and Faster Delivery-Date Loading
+
+- Rebuilt Scan filters around one dot/label/count grid so Status, Attention, Route, Progress, and Glass Type controls align consistently; Glass Type hover is now neutral and selected filters use their own indicator-color gradient.
+- Added a soft red idle state to nonzero Attention filters and enlarged Review cards so Review / Mark Reviewed actions use equal 38px controls with readable single-line labels.
+- Deduplicated identical date-wide import/update events written once per maintained workflow stage, while preserving distinct scan/movement events and the existing reject-event dedupe.
+- Compacted All Scans Details to nonzero audit deltas and removed repeated no-line-item/action copy from system import/update rows.
+- Moved date-wide scan history off the main `/api/scan/date` hot path into `/api/scan/date-events`, cached it separately in the browser, and hydrate it after the delivery rows paint.
+- Pre-limited scan events before historical rack/bay correlation and stopped the date bundle from executing history/error queries for every workflow stage.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.555**, kept SQLite schema **22** unchanged, and advanced cache keys for changed `scan.css`, `mobile.css`, and `app.js`.
+
+## v0.554 - Preserve Deleted A+W Reject Labels
+
+- Preserved the last known A+W reject reason/location source label when the historical `PROD_BREAKAGE` row still carries its numeric code but the corresponding A+W Basic Data lookup has been deleted and the live lookup label becomes blank.
+- Standardized A+W reject display precedence as scanner mapping → current A+W label → remembered historical source label → numeric `A+W code ###` fallback.
+- Applied the remembered-label fallback both while mirroring A+W rejects into Internal Rejects and while listing the direct A+W reject history; raw `aw_reject_events` labels remain an accurate reflection of the current A+W lookup response.
+- Added a regression for the verified Yield Percentage case (Reason **140**, Location **17**) proving a later blank-label sync keeps one logical reject, preserves the readable **Yield Percentage** display, and does not duplicate or delete history.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.554** and kept SQLite schema **22** unchanged. No CSS/JavaScript asset changed, so v0.553 cache keys remain unchanged.
+
+## v0.553 - Order Labels, Review Controls, and Delivery List Multi-Edit
+
+- Added Job Nr. to each Order Details item identity row immediately after Order / Item and carried exact-item sketch edge-finish evidence into the reconstructed A+W Cutting Label. Sketch `SE` callouts now render as **Seamed Edge side(s) ...** while retaining the A+W side mask.
+- Kept cutting-label barcodes on the maintained canonical `T200 + 6-digit order + 3-digit item + 000` contract and added a round-trip regression for Order 238986 / Item 006.
+- Refined Scan filter presentation with neutral inactive outlines, preserved colored identity dots, plain readable counts, and a stronger selected-state gradient.
+- Balanced Internal Reject review actions and independently blocked **Mark Reviewed** if the Internal Rejects filter is no longer active.
+- Removed the unused right column from focused Lookup Manager editors, normalized full-width form controls, and standardized blue Save / red Clear actions across the affected Settings editors.
+- Added delivery-date multi-select to All Delivery Lists with **Complete Selected**, **Delete Selected**, and **Clear Selection**. Whole-date completion now belongs to All Delivery Lists instead of Manual Edit.
+- Added Order / Item multi-select to the whole-list Manual Edit workspace, bulk Save/Delete actions, unsaved-row highlighting, Job Nr. / Customer grouping, and a three-choice unsaved-close flow: **Don’t Save**, **Review Changes**, or **Save and Close**.
+- Added a short-height Delivery List modal scroller contract so TC22 landscape and similarly short viewports can reach the result/edit controls instead of trapping them below the control panel.
+- Advanced `APPLICATION_VERSION` exactly one step to **v0.553**, advanced cache keys for changed `admin.css`, `scan.css`, `shared-ui.css`, and `app.js`, and kept SQLite schema **22** unchanged.
+
+## v0.552 - Stable Fabrication Filters and Unified Scan Filter UI
+
+- Fixed WaterJet/Denver progress filtering so selecting a machine filter warms the complete selected delivery date through the existing bounded FAB check instead of depending only on currently visible rows.
+- Changed unfinished fabrication refreshes to stale-while-revalidate: the last known WaterJet/Denver assignment remains visible while a due check runs, preventing progress cells and filter membership from collapsing back to Cutting during background refresh.
+- Corrected FAB retry freshness to use the newest of the last status observation and request attempt, so failed or stale checks remain throttled instead of being eligible again on every Scan repaint.
+- Preserved active progress filters through transient zero counts while the full-date fabrication catalog is warming.
+- Unified Status, Attention, Route, Progress, and Glass Type filter controls around one neutral button surface with a small left color dot, common count badge, and common selected/hover states.
+- Advanced the application exactly one step to **v0.552**, advanced cache keys for changed `scan.css` and `app.js`, and kept SQLite schema **22** unchanged.
+
+## v0.551 - Progress Workspace, Lookup Editor Polish, and Reject Tabs
+
+- Reworked Progress Settings into a full-width vertical workspace: the process map spans the Admin GUI and the selected checkpoint editor sits below it instead of occupying a narrow right column.
+- Added left/right drag reordering for fabrication-machine stages while retaining custom-checkpoint drag/drop; core Cutting, Staging, Outbound, and Destination scanner milestones remain locked to their semantic order.
+- Persisted machine workflow reordering through the existing machine-configuration `progressRank` contract and kept custom checkpoint placement on the existing Progress Settings API; SQLite schema remains unchanged.
+- Simplified focused Lookup Manager edit dialogs, removed unnecessary instructional clutter, expanded forms to use the available width, and normalized text/select/textarea styling and responsive behavior.
+- Split Reject Reasons and Break Locations into separate shared Admin tabs and changed those workspaces to full-page vertical scrolling across active values, A+W mappings, and historical cleanup.
+- Advanced the application release exactly one step to **v0.551** and advanced cache keys for changed `admin.css` and `app.js` only. SQLite schema remains **22**; no database migration is included.
+
+## v0.550 - Lookup Manager Repair and Visual Progress Workflow
+
+- Repaired Lookup Manager tab activation/fallback behavior, including Sheet Sizes refresh when its optional usage data was not loaded during the initial manager warm-up.
+- Restyled Lookup Manager tabs to match the established admin GUI tab rail instead of the oversized wrapped-card treatment.
+- Standardized Lookup Manager edit dialogs across glass profiles, item IDs, routes, processes, machines, and stations with responsive form grids, contained scrolling, consistent headers/footers, and touch-friendly controls.
+- Fixed the sidebar Settings label so it is icon-only when the desktop sidebar is collapsed and fully labeled when expanded; repositioned the admin review indicator for both states.
+- Rebuilt Progress Settings as a graphical workflow editor that shows fixed cutting/machine/scanner milestones plus draggable custom stages, supports inserting new stages between workflow points, and exposes step settings in a dedicated inspector.
+- Aligned custom-progress scan-gating ranks with the workflow's configured machine ranks and scanner stages.
+- Advanced the application release to **v0.550**. SQLite schema remains **22**; no database migration is included.
+
+## v0.549 - Inventory Reconciliation, Progress Settings, and Production Review
+- Added schema **22** through the existing numbered migration registry for durable administrator-defined progress checkpoints/completions and A+W suspicious-reoptimization review alerts; no existing production table is replaced or rewritten.
+- Added completed-Inventory reconciliation controls: Airport Rd can complete non-Indian-Trail missing orders while Indian Trail routes advance through Staging/Outbound only; Indian Trail inventory can subsequently complete system work confirmed physically absent and clear active rack/bay occupancy.
+- Corrected Inventory sticky hit ownership across browser zoom by positioning the command bar below the actual rendered app-header lower edge instead of relying only on a nominal header-height variable.
+- Kept Cutting quantity status-authoritative everywhere: Optimized/Released are **0/1**, Released renders an active Cutting spinner, and only Booked is **1/1**.
+- Rebuilt Scan filter presentation around one colored-dot/button/count contract, kept Remake provenance in its tooltip instead of widening the visible count, and hid route filters that have zero pieces on the active list.
+- Strengthened Superseded review responsiveness so comparison/evidence/action cards wrap within the GUI without horizontal scrolling; added an admin-only red Settings badge for open Superseded plus optimization reviews.
+- Added durable A+W reoptimization warnings when an existing same-batch generation previously reached Released/Booked and later changes optimization number; review states are Pending, Working, Acknowledged, False Alarm, and Cleared with notes/audit history.
+- Simplified Lookup Manager to Glass Types, Sheet Sizes, Item IDs, Routes, Process States, Machines, and Stations; removed Stages, Color Manager, and Presentation from the active tab rail and normalized editor/list visual styling.
+- Added most-used A+W stock-plate suggestions to Sheet Sizes; unconfigured glass types are pre-filled from observed optimization plate dimensions and can be accepted with the normal save action.
+- Added Settings → Progress Settings for custom before/after checkpoints, scanner- or file-detected completion, and downstream auto-complete / require-override / block policy using the existing scanner and production-file systems.
+- Removed Airport Rd from Delivery List Management route choices so the editor offers route destinations only.
+- Added one shared red confirmation-action style through the maintained confirmation dialog component for destructive/committing confirmation workflows.
+- Advanced `APPLICATION_VERSION` exactly one step from **548** to **549**, advanced every changed CSS/JS browser cache key, and advanced SQLite schema exactly from **21** to **22**.
+- JavaScript syntax passes; all maintained Python sources parse without bytecode churn; changed runtime modules import as application **549** / schema **22**; focused Inventory/custom-progress/reoptimization regressions pass **3/3**; static/UI contracts pass **247/247**; and the complete maintained suite passes **371/371**.
+- Verified the exact production upgrade path by first bringing an isolated production-scale copy to schema **21** with v0.548 and then upgrading that same copy **21 → 22** with v0.549. The numbered migration runner created/verified its backup, preserved **338 delivery lists / 22,754 line items / 2,080 scan events / 3 reject events / 663 imports / 64 bay assignments**, installed migration 22, returned `integrity_check: ok`, and reported **0** foreign-key violations.
+- An isolated v0.549 server returned healthy `/api/health` against the upgraded schema-22 copy and was stopped afterward. Headless Chromium is blocked from localhost by organization policy in this environment, so final desktop/tablet/TC22 visual confirmation remains a controlled deployment check.
+
 ## v0.548 - Inventory Action Accessibility and Control Alignment
 - Kept the active Inventory session command bar above long Inventory content so **Export Excel**, **Finish Inventory**, and **Cancel** remain clickable while operators are working at the bottom of Physical Scans, Reconciliation, Glass Totals, or System Snapshot views.
 - Gave the Inventory session actions explicit pointer/stacking ownership and returned the Inventory tab strip to normal flow so overlapping sticky surfaces cannot intercept the session controls.

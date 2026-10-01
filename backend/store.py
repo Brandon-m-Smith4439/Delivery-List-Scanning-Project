@@ -19,6 +19,7 @@ the same business workflows through a compatibility adapter at the connection bo
 from __future__ import annotations
 
 import csv
+import fnmatch
 import base64
 import os
 import smtplib
@@ -43,6 +44,13 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
 from backend.config import AppConfig
+from backend.aw_reject_legacy import (
+    LEGACY_CONTEXT_CUTOVER,
+    canonical_current_source,
+    canonical_location,
+    canonical_reason,
+    resolve_legacy_context,
+)
 from backend.production_files import ProductionFileService
 from database.azure_compat import AzureSqlConnection, connect_azure_sql
 from database.migrations import (
@@ -2084,6 +2092,7 @@ def event_from_row(row: sqlite3.Row) -> dict[str, Any]:
             rack_move_to = match.group(2).strip()
 
     return {
+        "eventId": int(row_value(row, "id", 0) or 0),
         "ok": row["event_type"] in {"scan", "manual_scan", "undo", "redo", "import", "update", "rack_move", "reject_reset"},
         "isManual": row["event_type"] == "manual_scan",
         "barcode": row["canonical_barcode"] or row["barcode"],
@@ -2832,9 +2841,21 @@ class BaseDeliveryStore:
                 "product": str(row["product"] or ""),
                 "lastRejectedAt": str(row_value(row, "last_rejected_at", "") or ""),
             }
+            known_order_items = [
+                str(value["item_no"] or "")
+                for value in con.execute(
+                    """SELECT DISTINCT li2.item_no
+                       FROM line_items li2
+                       JOIN delivery_lists dl2 ON dl2.id=li2.list_id
+                       WHERE dl2.status='active' AND COALESCE(li2.is_deleted,0)=0
+                         AND li2.order_no=?""",
+                    (identity["order"],),
+                ).fetchall()
+            ]
         hint_key = f"{identity['order']}:{identity['item']}:{identity['job']}"
         hints = self.aw_fabrication_hints_for_requests([{**identity, "key": hint_key}])
         hint = dict(hints.get(hint_key) or {})
+        hint["knownOrderItems"] = list(known_order_items)
         if hint.get("manualMachineComplete") is True:
             machine_code = str(hint.get("manualMachineCode") or "fabrication").strip().lower() or "fabrication"
             machine_row = next(
@@ -3426,6 +3447,11 @@ class BaseDeliveryStore:
             piece_facts.setdefault(pair, []).append({key: row_value(match, key, "") for key in
                 ("job", "product", "dimensions", "qty", "source_id", "process_state", "queue_state", "last_rejected_at")})
 
+        known_items_by_order: dict[str, list[str]] = {}
+        for order, item in sorted(allowed_pairs, key=lambda pair: (pair[0], int(pair[1]) if pair[1].isdigit() else 10**9, pair[1])):
+            if item:
+                known_items_by_order.setdefault(order, []).append(item)
+
         filtered: list[dict[str, Any]] = []
         for row in requested:
             order = str(row.get("order") or "").strip()
@@ -3447,9 +3473,10 @@ class BaseDeliveryStore:
                 filtered.append({**row, "job": canonical["job"], "product": canonical["product"],
                                  "lastRejectedAt": canonical["last_rejected_at"],
                                  "remake": remake,
-                                 "remakeGeneration": str(max(remake_generations)) if remake_generations else ("1" if remake else "")})
+                                 "remakeGeneration": str(max(remake_generations)) if remake_generations else ("1" if remake else ""),
+                                 "knownOrderItems": list(known_items_by_order.get(order, []))})
             else:
-                filtered.append(row)
+                filtered.append({**row, "knownOrderItems": list(known_items_by_order.get(order, []))})
         return filtered
 
     def get_stations(self) -> list[str]:
@@ -4957,6 +4984,105 @@ class BaseDeliveryStore:
             "changeToken": change_token,
         }
 
+
+    def _restore_approved_superseded_rows(
+        self,
+        con: Any,
+        review_id: int,
+        delivery_date: str,
+        restore_orders: list[str],
+        user: str,
+    ) -> dict[str, Any]:
+        """Restore source rows retired by a superseded-order approval before reopening review.
+
+        Only rows carrying this workflow's exact removal markers are reactivated. Rack
+        membership can be restored safely because only Active memberships were retired.
+        Bay status is intentionally left cancelled because the previous status can be
+        Assigned, PreAssigned, or SDIOverride and must not be guessed.
+        """
+        targets = {str(value or "").strip() for value in restore_orders if str(value or "").strip()}
+        if not targets:
+            return {"restoredLineCount": 0, "restoredPieceQty": 0, "affectedListIds": [], "locationReviewRequired": False}
+        candidate_rows = con.execute(
+            """
+            SELECT li.*, dl.delivery_date, dl.stage, dl.scanner
+            FROM line_items li
+            JOIN delivery_lists dl ON dl.id = li.list_id
+            WHERE dl.status = 'active'
+              AND dl.delivery_date = ?
+              AND COALESCE(li.is_deleted, 0) = 1
+              AND COALESCE(li.manual_only, 0) = 0
+              AND COALESCE(li.manual_source, '') = ''
+            ORDER BY li.list_id, li.item_no
+            """,
+            (delivery_date,),
+        ).fetchall()
+        rows = []
+        for row in candidate_rows:
+            source_key = self.import_order_item_key(row["source_id"], row["order_no"], row["item_no"])
+            source_order = source_key.rsplit("-", 1)[0] if "-" in source_key else ""
+            removal_note = f"Superseded order {source_order} removed by Admin approval"
+            if source_order in targets and removal_note.lower() in str(row["queue_state"] or "").lower():
+                rows.append((row, source_order, removal_note))
+        if not rows:
+            return {"restoredLineCount": 0, "restoredPieceQty": 0, "affectedListIds": [], "locationReviewRequired": False}
+
+        now = now_iso()
+        affected: dict[str, dict[str, Any]] = {}
+        location_review_required = False
+        affected_rack_ids: set[int] = set()
+        restored_qty = 0
+        for row, source_order, removal_note in rows:
+            line_id = str(row["id"] or "")
+            process_state = re.sub(r"(?:^|\s+)Removed Line(?:\s+|$)", " ", str(row["process_state"] or ""), flags=re.IGNORECASE).strip()
+            queue_parts = [part.strip() for part in str(row["queue_state"] or "").split("|") if part.strip()]
+            queue_state = " | ".join(part for part in queue_parts if part.lower() != removal_note.lower())
+            con.execute(
+                """
+                UPDATE line_items
+                SET is_deleted = 0, deleted_at_utc = '', deleted_by_user_id = NULL,
+                    process_state = ?, queue_state = ?, updated_at_utc = ?
+                WHERE id = ?
+                """,
+                (process_state, queue_state, now, line_id),
+            )
+            rack_rows = con.execute(
+                "SELECT DISTINCT rack_id FROM rack_items WHERE line_item_id = ? AND status = 'Removed' AND reason = 'Approved superseded order removal'",
+                (line_id,),
+            ).fetchall()
+            affected_rack_ids.update(int(rack_row["rack_id"]) for rack_row in rack_rows)
+            con.execute(
+                """
+                UPDATE rack_items
+                SET status = 'Active', removed_by = '', removed_at = '', reason = ''
+                WHERE line_item_id = ? AND status = 'Removed' AND reason = 'Approved superseded order removal'
+                """,
+                (line_id,),
+            )
+            cancelled_bay = con.execute(
+                "SELECT 1 FROM bay_assignments WHERE line_item_id = ? AND status = 'Cancelled' AND reason = 'Approved superseded order removal' LIMIT 1",
+                (line_id,),
+            ).fetchone()
+            location_review_required = location_review_required or bool(cancelled_bay)
+            details = affected.setdefault(str(row["list_id"]), {"scanner": str(row["scanner"] or ""), "lines": 0, "pieces": 0})
+            details["lines"] += 1
+            details["pieces"] += int(row["qty"] or 0)
+            restored_qty += int(row["qty"] or 0)
+
+        for rack_id in sorted(affected_rack_ids):
+            self.refresh_rack_destination(con, rack_id)
+        for list_id, details in affected.items():
+            con.execute("UPDATE delivery_lists SET revision = revision + 1 WHERE id = ?", (list_id,))
+            reason = f"Superseded review #{review_id} reopened; restored {details['lines']} line(s) / {details['pieces']} piece(s)."
+            self.insert_event(con, list_id, None, "UPDATE", "", user, details["scanner"], "superseded_order_restored", "Superseded A+W order restored for review", reason)
+            self.insert_audit(con, "delivery_list", list_id, "reopen_superseded_order_review", user, details["scanner"], reason, {"reviewId": review_id, "deliveryDate": delivery_date, "restoredOrders": sorted(targets)})
+        return {
+            "restoredLineCount": len(rows),
+            "restoredPieceQty": restored_qty,
+            "affectedListIds": sorted(affected),
+            "locationReviewRequired": location_review_required,
+        }
+
     def decide_superseded_order_review(
         self,
         review_id: int,
@@ -4976,9 +5102,12 @@ class BaseDeliveryStore:
             "keep_both": "keep_both",
             "review_later": "review_later",
             "later": "review_later",
+            "reopen": "pending",
+            "review_again": "pending",
+            "undo": "pending",
         }
         if clean_action not in status_map:
-            raise ValueError("Decision must remove one, remove both, keep both, or review later.")
+            raise ValueError("Decision must remove one, remove both, keep both, review later, or send the decision back for review.")
         next_status = status_map[clean_action]
         clean_reason = str(reason or "").strip()[:1000]
         with self.connect() as con:
@@ -4996,10 +5125,17 @@ class BaseDeliveryStore:
                 replacement_items = json.loads(str(row["replacement_items_json"] or "[]"))
             except Exception:
                 replacement_items = []
+            previous_status = str(row["status"] or "pending")
+            previous_remove_order = str(row_value(row, "approved_remove_order_no", "") or "").strip()
             selected_remove_order = ""
             selected_remove_items: list[dict[str, Any]] = []
             removal_targets: list[tuple[str, list[dict[str, Any]]]] = []
             kept_order = ""
+            restore = {"restoredLineCount": 0, "restoredPieceQty": 0, "affectedListIds": [], "locationReviewRequired": False}
+            if next_status == "pending" and previous_status == "approved":
+                approved_target = previous_remove_order or original_order
+                restore_orders = [original_order, replacement_order] if approved_target == "__both__" else [approved_target]
+                restore = self._restore_approved_superseded_rows(con, int(review_id), str(row["delivery_date"] or ""), restore_orders, user)
             if next_status == "approved":
                 if clean_action == "remove_both":
                     selected_remove_order = "__both__"
@@ -5028,8 +5164,13 @@ class BaseDeliveryStore:
                     )
                 elif next_status == "keep_both":
                     clean_reason = "Both A+W orders are valid and should remain on the delivery list."
+                elif next_status == "pending":
+                    clean_reason = "Previous decision undone and returned to the review queue."
                 else:
                     clean_reason = "Deferred for later review; no source rows changed."
+            decision_at = "" if next_status == "pending" else now
+            decision_by = "" if next_status == "pending" else user
+            stored_reason = "" if next_status == "pending" else clean_reason
             con.execute(
                 """
                 UPDATE superseded_order_reviews
@@ -5037,7 +5178,7 @@ class BaseDeliveryStore:
                     approved_remove_order_no = ?, active = 1, updated_at_utc = ?
                 WHERE id = ?
                 """,
-                (next_status, now, user, clean_reason, selected_remove_order if next_status == "approved" else "", now, int(review_id)),
+                (next_status, decision_at, decision_by, stored_reason, selected_remove_order if next_status == "approved" else "", now, int(review_id)),
             )
             removal = {"removedLineCount": 0, "removedPieceQty": 0, "affectedStageLineCount": 0, "affectedStagePieceQty": 0, "affectedListIds": [], "stageSummaries": []}
             if next_status == "approved":
@@ -5114,6 +5255,8 @@ class BaseDeliveryStore:
                     "removedOrder": selected_remove_order,
                     "keptOrder": kept_order,
                     **{key: value for key, value in removal.items() if key != "stageSummaries"},
+                    **restore,
+                    "previousStatus": previous_status,
                 },
             )
             con.commit()
@@ -5127,6 +5270,7 @@ class BaseDeliveryStore:
             "approvedRemoveOrderNumber": selected_remove_order,
             "exclusionPath": str(exclusion_path),
             **removal,
+            **restore,
             **self.superseded_order_review_summary(),
         }
 
@@ -5569,6 +5713,11 @@ class BaseDeliveryStore:
             "locationCode": int(row_value(row, "location_code", 0) or 0),
             "location": str(row_value(row, "display_location_label", row_value(row, "location_label", "")) or ""),
             "sourceLocation": str(row_value(row, "location_label", "") or ""),
+            "legacyReason": str(row_value(row, "legacy_reason_label", "") or ""),
+            "legacyLocation": str(row_value(row, "legacy_location_label", "") or ""),
+            "canonicalReason": str(row_value(row, "canonical_reason_label", "") or ""),
+            "canonicalLocation": str(row_value(row, "canonical_location_label", "") or ""),
+            "canonicalResolution": str(row_value(row, "canonical_resolution", "") or ""),
             "fromScanner": bool(int(row_value(row, "from_scanner", 0) or 0)),
             "reportedBy": str(row_value(row, "timeline_employee", "") or row_value(row, "breakage_user", "") or ""),
             "timelineEmployee": str(row_value(row, "timeline_employee", "") or ""),
@@ -5585,10 +5734,20 @@ class BaseDeliveryStore:
         }
 
     @staticmethod
-    def _aw_reject_mapped_label(con: Any, kind: str, code: int, raw_label: str) -> str:
+    def _aw_reject_mapped_label(con: Any, kind: str, code: int, raw_label: str, context_label: str = "") -> str:
+        """Resolve an A+W reject label without rewriting historical meaning.
+
+        Event-level canonical context wins for historical rejects because A+W
+        Basic Data numbers can be deleted and later reused.  Current events may
+        still use an operator mapping or the live lookup text; the remembered
+        source label is only a blank-lookup fallback for that current code.
+        """
+        context = str(context_label or "").strip()
+        if context:
+            return context
         row = con.execute(
             """
-            SELECT mapped_label
+            SELECT mapped_label, source_label
             FROM reject_value_mappings
             WHERE source_system = 'aw' AND kind = ? AND source_code = ?
             LIMIT 1
@@ -5596,7 +5755,9 @@ class BaseDeliveryStore:
             (kind, int(code or 0)),
         ).fetchone()
         mapped = str(row_value(row, "mapped_label", "") or "").strip()
-        return mapped or str(raw_label or "").strip() or (f"A+W code {int(code)}" if int(code or 0) else "Not specified")
+        current_source = str(raw_label or "").strip()
+        remembered_source = str(row_value(row, "source_label", "") or "").strip()
+        return mapped or current_source or remembered_source or (f"A+W code {int(code)}" if int(code or 0) else "Not specified")
 
     @staticmethod
     def _remember_aw_reject_source_label(con: Any, kind: str, code: int, raw_label: str, user: str, now: str) -> None:
@@ -5614,6 +5775,35 @@ class BaseDeliveryStore:
             """,
             (kind, clean_code, str(raw_label or "").strip(), str(user or ""), now, now),
         )
+
+    @staticmethod
+    def _aw_reject_legacy_code_hint(con: Any, kind: str, code: int) -> str:
+        """Return the dominant preserved legacy label for one historical A+W code.
+
+        The hint is used only to disambiguate recut-log rows that share the same
+        date/order/item/job.  A tie deliberately returns blank rather than
+        guessing which old meaning a recycled numeric code represented.
+        """
+        clean_code = int(code or 0)
+        if clean_code <= 0:
+            return ""
+        label_column = "legacy_reason_label" if kind == "reason" else "legacy_location_label"
+        code_column = "reason_code" if kind == "reason" else "location_code"
+        rows = con.execute(
+            f"""
+            SELECT {label_column} AS label, COUNT(*) AS uses
+            FROM aw_reject_events
+            WHERE {code_column}=? AND TRIM(COALESCE({label_column},''))<>''
+            GROUP BY {label_column}
+            ORDER BY uses DESC, label
+            """,
+            (clean_code,),
+        ).fetchall()
+        if not rows:
+            return ""
+        top = int(row_value(rows[0], "uses", 0) or 0)
+        tied = [row for row in rows if int(row_value(row, "uses", 0) or 0) == top]
+        return str(row_value(tied[0], "label", "") or "") if len(tied) == 1 else ""
 
     @staticmethod
     def _aw_reject_delivery_context(con: Any, order_no: str, item_no: str, breakage_date: str) -> dict[str, Any]:
@@ -5732,7 +5922,7 @@ class BaseDeliveryStore:
             fallback = source_label or f"A+W code {clean_code}"
             display = clean_label or fallback
             matching_events = con.execute(
-                f"SELECT id, delivery_date, order_no, item_no, manual_override_json FROM reject_events WHERE source_type='aw' AND {code_column}=?",
+                f"SELECT id, delivery_date, order_no, item_no, source_external_key, manual_override_json FROM reject_events WHERE source_type='aw' AND {code_column}=?",
                 (clean_code,),
             ).fetchall()
             affected_identities: set[tuple[str, str, str]] = set()
@@ -5745,7 +5935,20 @@ class BaseDeliveryStore:
                     overrides = {}
                 if not isinstance(overrides, dict):
                     overrides = {}
-                if override_key not in overrides:
+                context_row = con.execute(
+                    "SELECT canonical_reason_label, canonical_location_label, canonical_resolution FROM aw_reject_events WHERE event_key=?",
+                    (str(row_value(event, "source_external_key", "") or ""),),
+                ).fetchone()
+                context_column = "canonical_reason_label" if clean_kind == "reason" else "canonical_location_label"
+                canonical_resolution = str(row_value(context_row, "canonical_resolution", "") or "").strip()
+                has_historical_context = (
+                    (
+                        canonical_resolution.startswith("recut-log:")
+                        or canonical_resolution in {"legacy-code-hint", "historical-unresolved"}
+                    )
+                    and bool(str(row_value(context_row, context_column, "") or "").strip())
+                )
+                if override_key not in overrides and not has_historical_context:
                     con.execute(f"UPDATE reject_events SET {column}=? WHERE id=?", (display, int(row_value(event, "id", 0) or 0)))
                 affected_identities.add((
                     str(row_value(event, "delivery_date", "") or ""),
@@ -6060,8 +6263,20 @@ class BaseDeliveryStore:
             rows = con.execute(
                 f"""
                 SELECT e.*,
-                       COALESCE(NULLIF(rm.mapped_label, ''), e.reason_label) AS display_reason_label,
-                       COALESCE(NULLIF(lm.mapped_label, ''), e.location_label) AS display_location_label
+                       COALESCE(
+                         NULLIF(e.canonical_reason_label, ''),
+                         NULLIF(rm.mapped_label, ''),
+                         NULLIF(e.reason_label, ''),
+                         NULLIF(rm.source_label, ''),
+                         CASE WHEN e.reason_code > 0 THEN 'A+W code ' || e.reason_code ELSE 'Not specified' END
+                       ) AS display_reason_label,
+                       COALESCE(
+                         NULLIF(e.canonical_location_label, ''),
+                         NULLIF(lm.mapped_label, ''),
+                         NULLIF(e.location_label, ''),
+                         NULLIF(lm.source_label, ''),
+                         CASE WHEN e.location_code > 0 THEN 'A+W code ' || e.location_code ELSE 'Not specified' END
+                       ) AS display_location_label
                 FROM aw_reject_events e
                 LEFT JOIN reject_value_mappings rm
                   ON rm.source_system='aw' AND rm.kind='reason' AND rm.source_code=e.reason_code
@@ -6221,8 +6436,79 @@ class BaseDeliveryStore:
                 raw_location_label = str(representative.get("locationLabel") or "").strip()
                 self._remember_aw_reject_source_label(con, "reason", reason_code, raw_reason_label, user, synced_at)
                 self._remember_aw_reject_source_label(con, "location", location_code, raw_location_label, user, synced_at)
-                display_reason_label = self._aw_reject_mapped_label(con, "reason", reason_code, raw_reason_label)
-                display_location_label = self._aw_reject_mapped_label(con, "location", location_code, raw_location_label)
+                existing_event = con.execute(
+                    """
+                    SELECT event_key, legacy_reason_label, legacy_location_label,
+                           canonical_reason_label, canonical_location_label, canonical_resolution
+                    FROM aw_reject_events WHERE event_key = ?
+                    """,
+                    (event_key,),
+                ).fetchone()
+
+                reason_hint = str(row_value(existing_event, "legacy_reason_label", "") or "")
+                location_hint = str(row_value(existing_event, "legacy_location_label", "") or "")
+                if not reason_hint:
+                    reason_hint = self._aw_reject_legacy_code_hint(con, "reason", reason_code)
+                if not location_hint:
+                    location_hint = self._aw_reject_legacy_code_hint(con, "location", location_code)
+
+                legacy_context = resolve_legacy_context(
+                    breakage_date=str(representative.get("breakageDate") or "")[:10],
+                    order_no=representative.get("orderNr"),
+                    item_no=representative.get("itemNr"),
+                    original_job_number=representative.get("originalJobNumber"),
+                    reason_hint=reason_hint,
+                    location_hint=location_hint,
+                    machine=representative.get("machine"),
+                    registration_point=representative.get("registrationPoint"),
+                    work_type=representative.get("workType"),
+                )
+                breakage_local_date = str(representative.get("breakageDate") or "")[:10]
+                is_legacy_period = bool(breakage_local_date and breakage_local_date <= LEGACY_CONTEXT_CUTOVER)
+                current_context = {} if is_legacy_period else canonical_current_source(raw_reason_label, raw_location_label)
+                if legacy_context:
+                    legacy_reason_label = str(legacy_context.get("legacyReason") or "")
+                    legacy_location_label = str(legacy_context.get("legacyLocation") or "")
+                    canonical_reason_label = str(legacy_context.get("canonicalReason") or "")
+                    canonical_location_label = str(legacy_context.get("canonicalLocation") or "")
+                    canonical_resolution = str(legacy_context.get("resolution") or "")
+                elif current_context:
+                    legacy_reason_label = reason_hint or raw_reason_label
+                    legacy_location_label = location_hint or raw_location_label
+                    canonical_reason_label = str(current_context.get("canonicalReason") or "")
+                    canonical_location_label = str(current_context.get("canonicalLocation") or "")
+                    canonical_resolution = str(current_context.get("resolution") or "")
+                elif is_legacy_period:
+                    # A lookup-library rebuild can reuse a historical numeric code
+                    # for an unrelated current label.  Never accept that live join
+                    # text as historical truth.  Use preserved code meaning when we
+                    # have it; otherwise make the uncertainty explicit rather than
+                    # silently rewriting an old reject.
+                    legacy_reason_label = reason_hint
+                    legacy_location_label = location_hint
+                    canonical_reason_label = (
+                        canonical_reason(reason_hint, location_hint) if reason_hint else "Other/Unknown"
+                    )
+                    canonical_location_label = canonical_location(
+                        location_hint,
+                        machine=representative.get("machine"),
+                        registration_point=representative.get("registrationPoint"),
+                        work_type=representative.get("workType"),
+                    ) if location_hint else "Other/Unknown"
+                    canonical_resolution = "legacy-code-hint" if (reason_hint or location_hint) else "historical-unresolved"
+                else:
+                    legacy_reason_label = reason_hint
+                    legacy_location_label = location_hint
+                    canonical_reason_label = str(row_value(existing_event, "canonical_reason_label", "") or "")
+                    canonical_location_label = str(row_value(existing_event, "canonical_location_label", "") or "")
+                    canonical_resolution = str(row_value(existing_event, "canonical_resolution", "") or "")
+
+                display_reason_label = self._aw_reject_mapped_label(
+                    con, "reason", reason_code, raw_reason_label, canonical_reason_label
+                )
+                display_location_label = self._aw_reject_mapped_label(
+                    con, "location", location_code, raw_location_label, canonical_location_label
+                )
                 event_values = {
                     "event_key": event_key,
                     "order_no": str(representative.get("orderNr") or "").strip(),
@@ -6235,6 +6521,11 @@ class BaseDeliveryStore:
                     "reason_label": raw_reason_label,
                     "location_code": location_code,
                     "location_label": raw_location_label,
+                    "legacy_reason_label": legacy_reason_label,
+                    "legacy_location_label": legacy_location_label,
+                    "canonical_reason_label": canonical_reason_label,
+                    "canonical_location_label": canonical_location_label,
+                    "canonical_resolution": canonical_resolution,
                     "display_reason_label": display_reason_label,
                     "display_location_label": display_location_label,
                     "from_scanner": 1 if int_field(representative, "fromScanner") else 0,
@@ -6264,31 +6555,27 @@ class BaseDeliveryStore:
                         separators=(",", ":"),
                     ),
                 }
-                existing_event = con.execute(
-                    "SELECT event_key FROM aw_reject_events WHERE event_key = ?",
-                    (event_key,),
-                ).fetchone()
                 if existing_event:
                     con.execute(
                         """
                         UPDATE aw_reject_events
                         SET order_no = ?, item_no = ?, breakage_date = ?, quantity = ?,
                             original_job_number = ?, replacement_job_number = ?, reason_code = ?, reason_label = ?,
-                            location_code = ?, location_label = ?, from_scanner = ?, breakage_user = ?,
-                            timeline_employee = ?, work_type_id = ?, work_type = ?, registration_point_id = ?,
-                            registration_point = ?, machine = ?, scan_mode = ?, booking_message = ?,
-                            source_last_changed_at = ?, source_last_changed_user = ?, last_seen_at = ?,
-                            source_payload_json = ?
+                            location_code = ?, location_label = ?, legacy_reason_label = ?, legacy_location_label = ?,
+                            canonical_reason_label = ?, canonical_location_label = ?, canonical_resolution = ?,
+                            from_scanner = ?, breakage_user = ?, timeline_employee = ?, work_type_id = ?, work_type = ?,
+                            registration_point_id = ?, registration_point = ?, machine = ?, scan_mode = ?, booking_message = ?,
+                            source_last_changed_at = ?, source_last_changed_user = ?, last_seen_at = ?, source_payload_json = ?
                         WHERE event_key = ?
                         """,
                         (
                             event_values["order_no"], event_values["item_no"], event_values["breakage_date"], event_values["quantity"],
                             event_values["original_job_number"], event_values["replacement_job_number"], event_values["reason_code"], event_values["reason_label"],
-                            event_values["location_code"], event_values["location_label"], event_values["from_scanner"], event_values["breakage_user"],
-                            event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"], event_values["registration_point_id"],
-                            event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
-                            event_values["source_last_changed_at"], event_values["source_last_changed_user"], synced_at,
-                            event_values["source_payload_json"], event_key,
+                            event_values["location_code"], event_values["location_label"], event_values["legacy_reason_label"], event_values["legacy_location_label"],
+                            event_values["canonical_reason_label"], event_values["canonical_location_label"], event_values["canonical_resolution"],
+                            event_values["from_scanner"], event_values["breakage_user"], event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"],
+                            event_values["registration_point_id"], event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
+                            event_values["source_last_changed_at"], event_values["source_last_changed_user"], synced_at, event_values["source_payload_json"], event_key,
                         ),
                     )
                     updated_events += 1
@@ -6298,18 +6585,20 @@ class BaseDeliveryStore:
                         INSERT INTO aw_reject_events (
                             event_key, order_no, item_no, breakage_date, quantity, original_job_number,
                             replacement_job_number, reason_code, reason_label, location_code, location_label,
+                            legacy_reason_label, legacy_location_label, canonical_reason_label, canonical_location_label, canonical_resolution,
                             from_scanner, breakage_user, timeline_employee, work_type_id, work_type,
                             registration_point_id, registration_point, machine, scan_mode, booking_message,
                             source_row_count, source_last_changed_at, source_last_changed_user,
                             first_seen_at, last_seen_at, source_payload_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                         """,
                         (
                             event_key, event_values["order_no"], event_values["item_no"], event_values["breakage_date"], event_values["quantity"],
                             event_values["original_job_number"], event_values["replacement_job_number"], event_values["reason_code"], event_values["reason_label"],
-                            event_values["location_code"], event_values["location_label"], event_values["from_scanner"], event_values["breakage_user"],
-                            event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"], event_values["registration_point_id"],
-                            event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
+                            event_values["location_code"], event_values["location_label"], event_values["legacy_reason_label"], event_values["legacy_location_label"],
+                            event_values["canonical_reason_label"], event_values["canonical_location_label"], event_values["canonical_resolution"],
+                            event_values["from_scanner"], event_values["breakage_user"], event_values["timeline_employee"], event_values["work_type_id"], event_values["work_type"],
+                            event_values["registration_point_id"], event_values["registration_point"], event_values["machine"], event_values["scan_mode"], event_values["booking_message"],
                             event_values["source_last_changed_at"], event_values["source_last_changed_user"], synced_at, synced_at, event_values["source_payload_json"],
                         ),
                     )
@@ -6563,6 +6852,90 @@ class BaseDeliveryStore:
             return 0.0
 
     @staticmethod
+    def _aw_optimization_status_label(code: Any) -> str:
+        clean = int(code or 0)
+        if clean in AW_OPTI_STATUS_BOOKED_CODES:
+            return "Booked"
+        if clean == AW_OPTI_STATUS_RELEASED:
+            return "Released"
+        if clean == AW_OPTI_STATUS_OPTIMIZED:
+            return "Optimized"
+        return f"Status {clean}" if clean else "Not Optimized"
+
+    def _record_aw_optimization_review_alert_con(
+        self,
+        con: sqlite3.Connection,
+        *,
+        order_no: str,
+        item_no: str,
+        key_index: int,
+        batch: str,
+        previous: dict[str, Any],
+        current_optimization: int,
+        current_status_code: int,
+        current_status_at: str,
+        detected_at: str,
+    ) -> bool:
+        """Queue a durable warning when released/booked batch work is reoptimized."""
+        previous_optimization = int(previous.get("optimization") or 0)
+        previous_status_code = int(previous.get("optimizationStatusCode") or 0)
+        if (
+            previous_optimization <= 0
+            or current_optimization <= 0
+            or previous_optimization == current_optimization
+            or previous_status_code not in ({AW_OPTI_STATUS_RELEASED} | set(AW_OPTI_STATUS_BOOKED_CODES))
+        ):
+            return False
+        alert_key = "|".join((
+            str(order_no), str(item_no), str(int(key_index or 0)), str(batch),
+            str(previous_optimization), str(current_optimization),
+        ))
+        evidence = {
+            "rule": "v0.549-released-or-booked-batch-reoptimized",
+            "previous": previous,
+            "current": {
+                "optimization": current_optimization,
+                "statusCode": current_status_code,
+                "statusLabel": self._aw_optimization_status_label(current_status_code),
+                "statusAt": current_status_at,
+            },
+        }
+        existing = con.execute(
+            "SELECT id FROM aw_optimization_review_alerts WHERE alert_key=?",
+            (alert_key,),
+        ).fetchone()
+        if existing:
+            con.execute(
+                """UPDATE aw_optimization_review_alerts
+                   SET current_status_code=?, current_status_label=?, current_status_at=?,
+                       updated_at=?, evidence_json=?
+                   WHERE alert_key=?""",
+                (
+                    current_status_code, self._aw_optimization_status_label(current_status_code),
+                    current_status_at, detected_at,
+                    json.dumps(evidence, sort_keys=True, separators=(",", ":")), alert_key,
+                ),
+            )
+            return False
+        con.execute(
+            """INSERT INTO aw_optimization_review_alerts (
+                   alert_key, order_no, item_no, key_index, batch_job_number,
+                   previous_optimization_number, previous_status_code, previous_status_label, previous_status_at,
+                   current_optimization_number, current_status_code, current_status_label, current_status_at,
+                   status, note, detected_at, updated_at, updated_by, evidence_json
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?, '', ?)""",
+            (
+                alert_key, order_no, item_no, int(key_index or 0), batch,
+                previous_optimization, previous_status_code,
+                self._aw_optimization_status_label(previous_status_code),
+                str(previous.get("optimizationLastChangedAt") or previous.get("optimizationDate") or previous.get("batchLastChangedAt") or ""),
+                current_optimization, current_status_code, self._aw_optimization_status_label(current_status_code), current_status_at,
+                detected_at, detected_at, json.dumps(evidence, sort_keys=True, separators=(",", ":")),
+            ),
+        )
+        return True
+
+    @staticmethod
     def _aw_cutting_public_row(row: Any) -> dict[str, Any]:
         # v0.501: label-only A+W fields live inside source_payload_json so label
         # reconstruction can improve without another schema migration. Keeping
@@ -6578,16 +6951,7 @@ class BaseDeliveryStore:
         cut_evidence = source_payload.get("cutEvidence") if isinstance(source_payload.get("cutEvidence"), dict) else {}
         progress_memory = source_payload.get("progressMemory") if isinstance(source_payload.get("progressMemory"), dict) else {}
         optimization_status_code = int(row_value(row, "optimization_status_code", 0) or 0)
-        if optimization_status_code in AW_OPTI_STATUS_BOOKED_CODES:
-            optimization_status_label = "Booked"
-        elif optimization_status_code == AW_OPTI_STATUS_RELEASED:
-            optimization_status_label = "Released"
-        elif optimization_status_code == AW_OPTI_STATUS_OPTIMIZED:
-            optimization_status_label = "Optimized"
-        elif optimization_status_code:
-            optimization_status_label = f"Status {optimization_status_code}"
-        else:
-            optimization_status_label = "Not Optimized"
+        optimization_status_label = SQLiteDeliveryStore._aw_optimization_status_label(optimization_status_code)
         return {
             "order": str(row_value(row, "order_no", "") or ""),
             "item": str(row_value(row, "item_no", "") or ""),
@@ -6727,6 +7091,7 @@ class BaseDeliveryStore:
         inserted = 0
         updated = 0
         unchanged = 0
+        optimization_review_alert_optimizations: set[int] = set()
         clean_plates: list[dict[str, Any]] = []
         seen_plates: set[tuple[int, int]] = set()
         if optimization_plates is not None:
@@ -6922,6 +7287,15 @@ class BaseDeliveryStore:
                     # Do not carry a prior Booked memory into a newer Optimized or
                     # Released snapshot. Current optimization status is authoritative.
                     previous = self._aw_cutting_public_row(existing)
+                    if self._record_aw_optimization_review_alert_con(
+                        con,
+                        order_no=order_no, item_no=item_no, key_index=key_index, batch=batch,
+                        previous=previous, current_optimization=optimization,
+                        current_status_code=int(optimization_row.get("optimizationStatusCode") or 0),
+                        current_status_at=str(optimization_row.get("optimizationLastChangedAt") or optimization_row.get("optimizationDate") or ""),
+                        detected_at=now,
+                    ):
+                        optimization_review_alert_optimizations.add(int(optimization or 0))
                 if existing_values == values:
                     unchanged += 1
                     continue
@@ -6980,12 +7354,594 @@ class BaseDeliveryStore:
             "inserted": inserted,
             "updated": updated,
             "unchanged": unchanged,
+            "optimizationReviewAlerts": len({value for value in optimization_review_alert_optimizations if value > 0}),
             "optimizationPlateCount": len(clean_plates) if optimization_plates is not None else None,
             "coverage": dict((source_window or {}).get("coverage") or {})
             if isinstance((source_window or {}).get("coverage"), dict) else {},
             "syncedAt": now,
             "user": str(user or ""),
         }
+
+    @staticmethod
+    def _optimization_review_group_status_v579(alerts: list[dict[str, Any]]) -> str:
+        """Collapse item-level evidence into one actionable status per optimization."""
+        statuses = {str(alert.get("status") or "pending").strip().lower() for alert in alerts}
+        for status in ("pending", "working", "acknowledged"):
+            if status in statuses:
+                return status
+        if statuses == {"false_alarm"}:
+            return "false_alarm"
+        return "cleared"
+
+    @staticmethod
+    def _optimization_review_public_row_v579(row: Any) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "order": str(row["order_no"] or ""),
+            "item": str(row["item_no"] or ""),
+            "keyIndex": int(row["key_index"] or 0),
+            "batch": str(row["batch_job_number"] or ""),
+            "previousOptimization": int(row["previous_optimization_number"] or 0),
+            "previousStatusCode": int(row["previous_status_code"] or 0),
+            "previousStatus": str(row["previous_status_label"] or ""),
+            "previousStatusAt": str(row["previous_status_at"] or ""),
+            "currentOptimization": int(row["current_optimization_number"] or 0),
+            "currentStatusCode": int(row["current_status_code"] or 0),
+            "currentStatus": str(row["current_status_label"] or ""),
+            "currentStatusAt": str(row["current_status_at"] or ""),
+            "status": str(row["status"] or "pending"),
+            "note": str(row["note"] or ""),
+            "detectedAt": str(row["detected_at"] or ""),
+            "updatedAt": str(row["updated_at"] or ""),
+            "updatedBy": str(row["updated_by"] or ""),
+        }
+
+    def _optimization_review_groups_v579(self, rows: Iterable[Any]) -> list[dict[str, Any]]:
+        """Group durable per-item evidence into one review warning per current optimization.
+
+        The database intentionally keeps every item-level transition so evidence is never
+        discarded.  The review queue, counters, and actions operate on the optimization
+        group so one reoptimization does not create a wall of duplicate warnings.
+        """
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            alert = self._optimization_review_public_row_v579(row)
+            current_optimization = int(alert.get("currentOptimization") or 0)
+            group_key = f"optimization:{current_optimization}" if current_optimization > 0 else f"alert:{alert['id']}"
+            grouped.setdefault(group_key, []).append(alert)
+
+        result: list[dict[str, Any]] = []
+        for group_key, members in grouped.items():
+            members.sort(key=lambda alert: (str(alert.get("detectedAt") or ""), int(alert.get("id") or 0)))
+            representative = members[0]
+            latest = max(members, key=lambda alert: (str(alert.get("updatedAt") or ""), int(alert.get("id") or 0)))
+            current_snapshot = max(members, key=lambda alert: (str(alert.get("currentStatusAt") or ""), int(alert.get("id") or 0)))
+            previous_optimizations = sorted({int(alert.get("previousOptimization") or 0) for alert in members if int(alert.get("previousOptimization") or 0) > 0})
+            previous_statuses = sorted({str(alert.get("previousStatus") or "").strip() for alert in members if str(alert.get("previousStatus") or "").strip()})
+            orders = sorted({str(alert.get("order") or "").strip() for alert in members if str(alert.get("order") or "").strip()})
+            batches = sorted({str(alert.get("batch") or "").strip() for alert in members if str(alert.get("batch") or "").strip()})
+            affected_map: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+            for alert in members:
+                identity = (
+                    str(alert.get("order") or ""), str(alert.get("item") or ""),
+                    int(alert.get("keyIndex") or 0), str(alert.get("batch") or ""),
+                )
+                affected_map.setdefault(identity, {
+                    "order": identity[0], "item": identity[1], "keyIndex": identity[2], "batch": identity[3],
+                    "previousOptimization": int(alert.get("previousOptimization") or 0),
+                    "previousStatus": str(alert.get("previousStatus") or ""),
+                    "previousStatusAt": str(alert.get("previousStatusAt") or ""),
+                })
+            affected_items = sorted(
+                affected_map.values(),
+                key=lambda item: (str(item.get("order") or ""), str(item.get("item") or ""), int(item.get("keyIndex") or 0), str(item.get("batch") or "")),
+            )
+            nonempty_notes = [alert for alert in members if str(alert.get("note") or "").strip()]
+            note_source = max(nonempty_notes, key=lambda alert: (str(alert.get("updatedAt") or ""), int(alert.get("id") or 0))) if nonempty_notes else latest
+            previous_times = [str(alert.get("previousStatusAt") or "") for alert in members if str(alert.get("previousStatusAt") or "")]
+            detected_times = [str(alert.get("detectedAt") or "") for alert in members if str(alert.get("detectedAt") or "")]
+            result.append({
+                **representative,
+                "id": int(representative.get("id") or 0),
+                "groupKey": group_key,
+                "status": self._optimization_review_group_status_v579(members),
+                "note": str(note_source.get("note") or ""),
+                "updatedAt": str(latest.get("updatedAt") or ""),
+                "updatedBy": str(latest.get("updatedBy") or ""),
+                "detectedAt": min(detected_times) if detected_times else str(representative.get("detectedAt") or ""),
+                "previousOptimization": previous_optimizations[0] if len(previous_optimizations) == 1 else 0,
+                "previousOptimizations": previous_optimizations,
+                "previousStatus": previous_statuses[0] if len(previous_statuses) == 1 else "Released/Booked",
+                "previousStatusAt": min(previous_times) if previous_times else "",
+                "currentStatusCode": int(current_snapshot.get("currentStatusCode") or 0),
+                "currentStatus": str(current_snapshot.get("currentStatus") or ""),
+                "currentStatusAt": str(current_snapshot.get("currentStatusAt") or ""),
+                "memberIds": [int(alert.get("id") or 0) for alert in members],
+                "affectedItems": affected_items,
+                "affectedItemCount": len(affected_items),
+                "orders": orders,
+                "orderCount": len(orders),
+                "batches": batches,
+                "batchCount": len(batches),
+            })
+        result.sort(key=lambda alert: (str(alert.get("detectedAt") or ""), int(alert.get("id") or 0)), reverse=True)
+        result.sort(key=lambda alert: {"pending": 0, "working": 1, "acknowledged": 2, "false_alarm": 3, "cleared": 4}.get(str(alert.get("status") or ""), 5))
+        return result
+
+    def optimization_review_summary(self) -> dict[str, Any]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT * FROM aw_optimization_review_alerts ORDER BY detected_at DESC, id DESC"
+            ).fetchall()
+        groups = self._optimization_review_groups_v579(rows)
+        counts: dict[str, int] = {}
+        for group in groups:
+            status = str(group.get("status") or "pending")
+            counts[status] = counts.get(status, 0) + 1
+        open_count = sum(counts.get(key, 0) for key in ("pending", "working", "acknowledged"))
+        return {
+            "pending": counts.get("pending", 0),
+            "working": counts.get("working", 0),
+            "acknowledged": counts.get("acknowledged", 0),
+            "falseAlarm": counts.get("false_alarm", 0),
+            "cleared": counts.get("cleared", 0),
+            "open": open_count,
+        }
+
+    def list_optimization_review_alerts(self, status: str = "") -> dict[str, Any]:
+        clean_status = str(status or "").strip().lower()
+        with self.connect() as con:
+            rows = con.execute(
+                """SELECT * FROM aw_optimization_review_alerts
+                   ORDER BY detected_at DESC, id DESC LIMIT 5000"""
+            ).fetchall()
+        groups = self._optimization_review_groups_v579(rows)
+        if clean_status and clean_status != "all":
+            if clean_status == "open":
+                groups = [group for group in groups if str(group.get("status") or "") in {"pending", "working", "acknowledged"}]
+            else:
+                groups = [group for group in groups if str(group.get("status") or "") == clean_status]
+        groups = groups[:500]
+        return {"alerts": groups, **self.optimization_review_summary()}
+
+    def update_optimization_review_alert(self, alert_id: int, data: dict[str, Any], user: str) -> dict[str, Any]:
+        status = str(data.get("status") or "").strip().lower()
+        if status not in {"pending", "working", "acknowledged", "false_alarm", "cleared"}:
+            raise ValueError("Choose Pending, Working on it, Acknowledged, False alarm, or Cleared")
+        note = str(data.get("note") or "").strip()[:1000]
+        updated_at = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM aw_optimization_review_alerts WHERE id=?", (int(alert_id),)).fetchone()
+            if not row:
+                raise ValueError("Optimization warning not found")
+            current_optimization = int(row["current_optimization_number"] or 0)
+            if current_optimization > 0:
+                group_rows = con.execute(
+                    "SELECT id FROM aw_optimization_review_alerts WHERE current_optimization_number=?",
+                    (current_optimization,),
+                ).fetchall()
+                con.execute(
+                    """UPDATE aw_optimization_review_alerts
+                       SET status=?, note=?, updated_at=?, updated_by=?
+                       WHERE current_optimization_number=?""",
+                    (status, note, updated_at, str(user or ""), current_optimization),
+                )
+            else:
+                group_rows = [row]
+                con.execute(
+                    "UPDATE aw_optimization_review_alerts SET status=?, note=?, updated_at=?, updated_by=? WHERE id=?",
+                    (status, note, updated_at, str(user or ""), int(alert_id)),
+                )
+            self.insert_audit(
+                con, "aw_optimization_review", f"optimization:{current_optimization}" if current_optimization > 0 else str(alert_id),
+                "optimization_review_status", str(user or ""), "", note,
+                {"status": status, "currentOptimization": current_optimization,
+                 "affectedWarningRows": len(group_rows), "sourceAlertId": int(alert_id)},
+            )
+            con.commit()
+        return self.list_optimization_review_alerts("open")
+
+    @staticmethod
+    def _progress_stage_public(row: Any) -> dict[str, Any]:
+        return {
+            "id": int(row_value(row, "id", 0) or 0),
+            "key": str(row_value(row, "stage_key", "") or ""),
+            "label": str(row_value(row, "display_name", "") or ""),
+            "anchor": str(row_value(row, "anchor_stage_key", "") or ""),
+            "position": str(row_value(row, "position", "after") or "after"),
+            "completionMode": str(row_value(row, "completion_mode", "manual_scan") or "manual_scan"),
+            "scannerStation": str(row_value(row, "scanner_station", "") or ""),
+            "filePattern": str(row_value(row, "file_pattern", "") or ""),
+            "downstreamPolicy": str(row_value(row, "downstream_policy", "auto_complete") or "auto_complete"),
+            "active": bool(int(row_value(row, "active", 1) or 0)),
+            "sortOrder": int(row_value(row, "sort_order", 0) or 0),
+            "updatedAt": str(row_value(row, "updated_at", "") or ""),
+            "updatedBy": str(row_value(row, "updated_by", "") or ""),
+        }
+
+    def list_progress_stage_settings(self, *, active_only: bool = False) -> dict[str, Any]:
+        where = "WHERE active=1" if active_only else ""
+        with self.connect() as con:
+            rows = con.execute(
+                f"SELECT * FROM progress_stage_settings {where} ORDER BY sort_order, id"
+            ).fetchall()
+        return {"stages": [self._progress_stage_public(row) for row in rows]}
+
+    def upsert_progress_stage_setting(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        key = re.sub(r"[^a-z0-9_-]+", "-", str(data.get("key") or data.get("stageKey") or "").strip().lower()).strip("-")[:64]
+        label = " ".join(str(data.get("label") or data.get("displayName") or "").split())[:80]
+        anchor = str(data.get("anchor") or data.get("anchorStageKey") or "").strip().lower()[:64]
+        position = str(data.get("position") or "after").strip().lower()
+        completion_mode = str(data.get("completionMode") or "manual_scan").strip().lower()
+        downstream_policy = str(data.get("downstreamPolicy") or "auto_complete").strip().lower()
+        scanner_station = " ".join(str(data.get("scannerStation") or "").split())[:80]
+        file_pattern = str(data.get("filePattern") or "").strip()[:240]
+        sort_order = int(data.get("sortOrder") or 0)
+        active = 1 if str(data.get("active", True)).lower() not in {"0", "false", "no"} else 0
+        if not key or not label or not anchor:
+            raise ValueError("Progress stage key, name, and anchor are required")
+        if position not in {"before", "after"}:
+            raise ValueError("Progress stage position must be before or after")
+        if completion_mode not in {"manual_scan", "file"}:
+            raise ValueError("Progress stage completion mode must be manual scan or file")
+        if downstream_policy not in {"auto_complete", "require_override", "block"}:
+            raise ValueError("Choose Auto-complete, Require override, or Block next stage")
+        if completion_mode == "file" and not file_pattern:
+            raise ValueError("A file pattern is required for file-detected progress stages")
+        if completion_mode == "manual_scan" and not scanner_station:
+            raise ValueError("A scanner station is required for scan-completed progress stages")
+        now = now_iso()
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                """INSERT INTO progress_stage_settings
+                   (stage_key, display_name, anchor_stage_key, position, completion_mode, scanner_station,
+                    file_pattern, downstream_policy, active, sort_order, created_by, created_at, updated_by, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(stage_key) DO UPDATE SET
+                     display_name=excluded.display_name, anchor_stage_key=excluded.anchor_stage_key,
+                     position=excluded.position, completion_mode=excluded.completion_mode,
+                     scanner_station=excluded.scanner_station, file_pattern=excluded.file_pattern,
+                     downstream_policy=excluded.downstream_policy, active=excluded.active,
+                     sort_order=excluded.sort_order, updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                (key, label, anchor, position, completion_mode, scanner_station, file_pattern,
+                 downstream_policy, active, sort_order, str(user or ""), now, str(user or ""), now),
+            )
+            row = con.execute("SELECT * FROM progress_stage_settings WHERE stage_key=?", (key,)).fetchone()
+            self.insert_audit(con, "progress_stage", key, "progress_stage_saved", str(user or ""), scanner_station, "", self._progress_stage_public(row))
+            con.commit()
+        return self.list_progress_stage_settings()
+
+    def remove_progress_stage_setting(self, stage_key: str, user: str) -> dict[str, Any]:
+        key = str(stage_key or "").strip().lower()
+        if not key:
+            raise ValueError("Progress stage key is required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT * FROM progress_stage_settings WHERE stage_key=?", (key,)).fetchone()
+            if not row:
+                raise ValueError("Progress stage was not found")
+            con.execute("UPDATE progress_stage_settings SET active=0, updated_by=?, updated_at=? WHERE stage_key=?", (str(user or ""), now_iso(), key))
+            self.insert_audit(con, "progress_stage", key, "progress_stage_removed", str(user or ""), "", "", self._progress_stage_public(row))
+            con.commit()
+        return self.list_progress_stage_settings()
+
+    def _custom_progress_for_items_con(self, con: sqlite3.Connection, delivery_date: str, items: list[dict[str, Any]]) -> None:
+        if not items:
+            return
+        settings = con.execute("SELECT * FROM progress_stage_settings WHERE active=1 ORDER BY sort_order,id").fetchall()
+        if not settings:
+            return
+        orders = sorted({str(item.get("order") or "").strip() for item in items if str(item.get("order") or "").strip()})
+        if not orders:
+            return
+        placeholders = ",".join("?" for _ in orders)
+        completions = con.execute(
+            f"""SELECT psc.*, pss.stage_key FROM progress_stage_completions psc
+                JOIN progress_stage_settings pss ON pss.id=psc.stage_id
+                WHERE psc.delivery_date=? AND psc.order_no IN ({placeholders})""",
+            (delivery_date, *orders),
+        ).fetchall()
+        by_key = {}
+        for row in completions:
+            item_no = str(row_value(row, "item_no", "") or "").strip()
+            if item_no.isdigit(): item_no = item_no.zfill(3)
+            by_key[(str(row_value(row, "order_no", "") or "").strip(), item_no, str(row_value(row, "stage_key", "") or ""))] = row
+        public_settings = [self._progress_stage_public(row) for row in settings]
+        for item in items:
+            order_no = str(item.get("order") or "").strip()
+            item_no = str(item.get("item") or "").strip()
+            if item_no.isdigit(): item_no = item_no.zfill(3)
+            rows = []
+            for setting in public_settings:
+                completion = by_key.get((order_no, item_no, setting["key"]))
+                rows.append({
+                    **setting,
+                    "complete": completion is not None,
+                    "completedAt": str(row_value(completion, "completed_at", "") or "") if completion else "",
+                    "completedBy": str(row_value(completion, "completed_by", "") or "") if completion else "",
+                    "source": str(row_value(completion, "source", "") or "") if completion else "",
+                })
+            item["customProgress"] = rows
+
+    def _complete_custom_progress_con(self, con: sqlite3.Connection, setting: Any, *, delivery_date: str, order_no: str, item_no: str, user: str, source: str, evidence: dict[str, Any] | None = None) -> None:
+        con.execute(
+            """INSERT INTO progress_stage_completions
+               (stage_id, delivery_date, order_no, item_no, completed_at, completed_by, source, evidence_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(stage_id, delivery_date, order_no, item_no) DO UPDATE SET
+                 completed_at=excluded.completed_at, completed_by=excluded.completed_by,
+                 source=excluded.source, evidence_json=excluded.evidence_json""",
+            (int(row_value(setting, "id", 0) or 0), delivery_date, order_no, item_no, now_iso(), str(user or ""), source,
+             json.dumps(evidence or {}, separators=(",", ":"))),
+        )
+
+    def refresh_file_progress_for_requests(self, requests: list[dict[str, Any]], user: str = "system-file") -> dict[str, list[dict[str, Any]]]:
+        """Refresh file-driven custom checkpoints using the existing production-file index.
+
+        This method never walks production shares itself. ``item_assets`` reuses the
+        production-file service/index already exercised by the bounded FAB batch.
+        Completed checkpoints are persisted once and returned to the browser so the
+        visible progress row can repaint without a full delivery-list reload.
+        """
+        service = getattr(self, "production_files", None)
+        if service is None or not requests:
+            return {}
+        with self.connect() as con:
+            settings = con.execute(
+                """SELECT * FROM progress_stage_settings
+                   WHERE active=1 AND completion_mode='file' AND TRIM(file_pattern)<>''
+                   ORDER BY sort_order,id"""
+            ).fetchall()
+            if not settings:
+                return {}
+            public_settings = [self._progress_stage_public(row) for row in con.execute(
+                "SELECT * FROM progress_stage_settings WHERE active=1 ORDER BY sort_order,id"
+            ).fetchall()]
+            changed = False
+            response: dict[str, list[dict[str, Any]]] = {}
+            con.execute("BEGIN IMMEDIATE")
+            for request in requests[:80]:
+                if not isinstance(request, dict):
+                    continue
+                order_no = str(request.get("order") or "").strip()
+                raw_item = str(request.get("item") or "").strip()
+                item_no = raw_item.zfill(3) if raw_item.isdigit() else raw_item
+                delivery_date = str(request.get("deliveryDate") or "").strip()
+                job = str(request.get("job") or "").strip()
+                request_key = str(request.get("key") or f"{order_no}:{item_no}:{job}")
+                if not order_no or not item_no or not delivery_date:
+                    continue
+                existing = {
+                    int(row_value(row, "stage_id", 0) or 0): row
+                    for row in con.execute(
+                        """SELECT * FROM progress_stage_completions
+                           WHERE delivery_date=? AND order_no=? AND item_no=?""",
+                        (delivery_date, order_no, item_no),
+                    ).fetchall()
+                }
+                assets: dict[str, Any] | None = None
+                for setting in settings:
+                    stage_id = int(row_value(setting, "id", 0) or 0)
+                    if stage_id in existing:
+                        continue
+                    if assets is None:
+                        assets = service.item_assets(order_no, item_no, job)
+                    matched, asset = self._progress_file_pattern_matches(
+                        str(row_value(setting, "file_pattern", "") or ""), assets or {}
+                    )
+                    if not matched:
+                        continue
+                    self._complete_custom_progress_con(
+                        con, setting, delivery_date=delivery_date, order_no=order_no, item_no=item_no,
+                        user=user, source="file", evidence={
+                            "asset": asset or {},
+                            "pattern": str(row_value(setting, "file_pattern", "") or ""),
+                        },
+                    )
+                    changed = True
+                completions = {
+                    int(row_value(row, "stage_id", 0) or 0): row
+                    for row in con.execute(
+                        """SELECT * FROM progress_stage_completions
+                           WHERE delivery_date=? AND order_no=? AND item_no=?""",
+                        (delivery_date, order_no, item_no),
+                    ).fetchall()
+                }
+                rows: list[dict[str, Any]] = []
+                for public in public_settings:
+                    completion = completions.get(int(public.get("id") or 0))
+                    rows.append({
+                        **public,
+                        "complete": completion is not None,
+                        "completedAt": str(row_value(completion, "completed_at", "") or "") if completion else "",
+                        "completedBy": str(row_value(completion, "completed_by", "") or "") if completion else "",
+                        "source": str(row_value(completion, "source", "") or "") if completion else "",
+                    })
+                response[request_key] = rows
+            if changed:
+                con.commit()
+            else:
+                con.rollback()
+            return response
+
+    def complete_progress_stage(self, data: dict[str, Any], user: str) -> dict[str, Any]:
+        key = str(data.get("stageKey") or data.get("key") or "").strip().lower()
+        order_no = str(data.get("order") or "").strip()
+        item_no = str(data.get("item") or "").strip()
+        if item_no.isdigit(): item_no = item_no.zfill(3)
+        delivery_date = str(data.get("deliveryDate") or "").strip()
+        if not key or not order_no or not item_no or not delivery_date:
+            raise ValueError("Progress stage, delivery date, order, and item are required")
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            setting = con.execute("SELECT * FROM progress_stage_settings WHERE stage_key=? AND active=1", (key,)).fetchone()
+            if not setting:
+                raise ValueError("Progress stage is not active")
+            self._complete_custom_progress_con(con, setting, delivery_date=delivery_date, order_no=order_no, item_no=item_no, user=user, source=str(data.get("source") or "manual_scan"), evidence={"manual": True})
+            self.insert_audit(con, "progress_stage", key, "progress_stage_completed", str(user or ""), str(row_value(setting, "scanner_station", "") or ""), "", {"deliveryDate": delivery_date, "order": order_no, "item": item_no})
+            con.commit()
+        return {"ok": True, "stageKey": key, "order": order_no, "item": item_no, "deliveryDate": delivery_date}
+
+
+    @staticmethod
+    def _progress_anchor_rank(
+        anchor: str,
+        position: str = "after",
+        machine_ranks: dict[str, float] | None = None,
+    ) -> float:
+        """Return the same progress rank used by the visible Order Details workflow."""
+        clean = str(anchor or "").strip().lower()
+        if clean.startswith("machine:"):
+            code = clean.split(":", 1)[1].strip()
+            base = float((machine_ranks or {}).get(code, 0.0))
+        else:
+            base = {
+                "cutting": -10.0,
+                "airport_staging": 10.0,
+                "airport_outbound": 20.0,
+                "indian_trail": 30.0,
+                "greenville": 30.0,
+                "cpu": 30.0,
+                "dtc": 30.0,
+            }.get(clean, 10.0)
+        return base + (-0.25 if str(position or "after").lower() == "before" else 0.25)
+
+    @staticmethod
+    def _scanner_stage_rank(stage: Any, scanner: Any = "") -> float:
+        preset = stage_logic_preset(stage, scanner)
+        return {
+            "airport_staging": 10.0,
+            "airport_outbound": 20.0,
+            "indian_trail": 30.0,
+            "greenville": 30.0,
+            "cpu": 30.0,
+            "dtc": 30.0,
+        }.get(preset, 10.0)
+
+    @staticmethod
+    def _progress_file_pattern_matches(pattern: str, assets: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
+        clean_pattern = str(pattern or "").strip().lower()
+        if not clean_pattern:
+            return False, None
+        wildcard = any(token in clean_pattern for token in "*?[")
+        candidates: list[dict[str, Any]] = []
+        for bucket in ("hardware", "sketches", "programs"):
+            values = assets.get(bucket) if isinstance(assets, dict) else []
+            if isinstance(values, list):
+                candidates.extend(value for value in values if isinstance(value, dict))
+        fabrication = assets.get("fabrication") if isinstance(assets, dict) else {}
+        evidence = fabrication.get("evidence") if isinstance(fabrication, dict) else None
+        if isinstance(evidence, dict):
+            candidates.append(evidence)
+        for asset in candidates:
+            haystacks = [str(asset.get("name") or ""), str(asset.get("relativePath") or "")]
+            for haystack in haystacks:
+                clean = haystack.lower()
+                matched = fnmatch.fnmatch(clean, clean_pattern) if wildcard else clean_pattern in clean
+                if matched:
+                    return True, asset
+        return False, None
+
+    def _custom_progress_station_setting_con(self, con: sqlite3.Connection, station: str) -> Any | None:
+        clean_station = str(station or "").strip().casefold()
+        if not clean_station:
+            return None
+        for row in con.execute(
+            """SELECT * FROM progress_stage_settings
+               WHERE active=1 AND completion_mode='manual_scan' AND TRIM(scanner_station)<>''
+               ORDER BY sort_order,id"""
+        ).fetchall():
+            if str(row_value(row, "scanner_station", "") or "").strip().casefold() == clean_station:
+                return row
+        return None
+
+    def _custom_progress_scan_gate_con(
+        self,
+        con: sqlite3.Connection,
+        *,
+        list_id: str,
+        line_row: Any,
+        user: str,
+        station: str,
+        requested_overrides: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate custom checkpoints that sit before the scanner stage being entered.
+
+        File detection uses the existing cached production-file index only. It does not
+        walk shares synchronously. Auto/override completions are returned as deferred
+        writes so a later rack/destination gate cannot record progress for a failed scan.
+        """
+        list_row = con.execute("SELECT delivery_date, stage, scanner FROM delivery_lists WHERE id=?", (list_id,)).fetchone()
+        if not list_row:
+            return {"deferred": []}
+        target_rank = self._scanner_stage_rank(row_value(list_row, "stage", ""), row_value(list_row, "scanner", ""))
+        settings = con.execute(
+            "SELECT * FROM progress_stage_settings WHERE active=1 ORDER BY sort_order,id"
+        ).fetchall()
+        if not settings:
+            return {"deferred": []}
+        delivery_date = str(row_value(list_row, "delivery_date", "") or "")
+        order_no = str(row_value(line_row, "order_no", "") or "").strip()
+        item_no = str(row_value(line_row, "item_no", "") or "").strip()
+        if item_no.isdigit():
+            item_no = item_no.zfill(3)
+        completed = {
+            str(row_value(row, "stage_key", "") or "")
+            for row in con.execute(
+                """SELECT pss.stage_key FROM progress_stage_completions psc
+                   JOIN progress_stage_settings pss ON pss.id=psc.stage_id
+                   WHERE psc.delivery_date=? AND psc.order_no=? AND psc.item_no=?""",
+                (delivery_date, order_no, item_no),
+            ).fetchall()
+        }
+        overrides = {str(value or "").strip().lower() for value in (requested_overrides or set()) if str(value or "").strip()}
+        machine_ranks: dict[str, float] = {}
+        if any(str(row_value(row, "anchor_stage_key", "") or "").strip().lower().startswith("machine:") for row in settings):
+            production_settings = self.production_file_settings_con(con)
+            for machine in production_settings.get("machines", []) if isinstance(production_settings, dict) else []:
+                code = str(machine.get("code") or "").strip().lower()
+                if code:
+                    try:
+                        machine_ranks[code] = float(machine.get("progressRank") or 0.0)
+                    except (TypeError, ValueError):
+                        machine_ranks[code] = 0.0
+        deferred: list[dict[str, Any]] = []
+        file_assets: dict[str, Any] | None = None
+        for setting in settings:
+            key = str(row_value(setting, "stage_key", "") or "")
+            if key in completed:
+                continue
+            stage_rank = self._progress_anchor_rank(
+                row_value(setting, "anchor_stage_key", ""),
+                row_value(setting, "position", "after"),
+                machine_ranks,
+            )
+            if stage_rank >= target_rank:
+                continue
+            mode = str(row_value(setting, "completion_mode", "manual_scan") or "manual_scan")
+            if mode == "file":
+                if file_assets is None:
+                    service = getattr(self, "production_files", None)
+                    file_assets = service.item_assets(order_no, item_no, str(row_value(line_row, "job", "") or "")) if service else {}
+                matched, asset = self._progress_file_pattern_matches(str(row_value(setting, "file_pattern", "") or ""), file_assets or {})
+                if matched:
+                    self._complete_custom_progress_con(
+                        con, setting, delivery_date=delivery_date, order_no=order_no, item_no=item_no,
+                        user="system-file", source="file", evidence={"asset": asset or {}, "pattern": str(row_value(setting, "file_pattern", "") or "")},
+                    )
+                    completed.add(key)
+                    continue
+            policy = str(row_value(setting, "downstream_policy", "auto_complete") or "auto_complete")
+            public = self._progress_stage_public(setting)
+            if policy == "block":
+                return {"blocked": True, "stage": public, "deferred": []}
+            if policy == "require_override" and key not in overrides:
+                return {"overrideRequired": True, "stage": public, "deferred": []}
+            if policy in {"auto_complete", "require_override"}:
+                deferred.append({"setting": setting, "source": "downstream_override" if policy == "require_override" else "downstream_scan"})
+        return {"deferred": deferred, "deliveryDate": delivery_date, "order": order_no, "item": item_no}
 
     @staticmethod
     def aw_cutting_irregularities(cutting: dict[str, Any] | None) -> list[dict[str, str]]:
@@ -7508,6 +8464,12 @@ class BaseDeliveryStore:
                 "lastScannedAt": str(row_value(row, "last_scanned_at", "") or ""),
             })
         items = sorted(grouped.values(), key=lambda item: (int(re.sub(r"\D+", "", str(item.get("item") or "0")) or 0), str(item.get("item") or "")))
+        detail_delivery_date = max(
+            (str(stage.get("deliveryDate") or "") for item in items for stage in (item.get("stages") or []) if str(stage.get("deliveryDate") or "")),
+            default="",
+        )
+        with self.connect() as progress_con:
+            self._custom_progress_for_items_con(progress_con, detail_delivery_date, items)
         for item in items:
             item_no = str(item.get("item") or "").strip()
             cutting_item = item_no.zfill(3) if item_no.isdigit() else item_no
@@ -7548,10 +8510,12 @@ class BaseDeliveryStore:
         first = items[0]
         service = getattr(self, "production_files", None)
         if include_production and service is not None:
+            known_order_items = [str(item.get("item") or "") for item in items if str(item.get("item") or "").strip()]
             for item in items:
                 label_hint = dict(item.get("cutting") or {}) if isinstance(item.get("cutting"), dict) else {}
                 if item.get("product") and not str(label_hint.get("productDescription") or "").strip():
                     label_hint["productDescription"] = str(item.get("product") or "")
+                label_hint["knownOrderItems"] = list(known_order_items)
                 item_assets = service.item_assets(
                     clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt"),
                     label_hint=label_hint,
@@ -7662,12 +8626,15 @@ class BaseDeliveryStore:
             for item in items
         ]
         label_hints = self.aw_fabrication_hints_for_requests(hint_requests)
+        known_order_items = [str(item.get("item") or "") for item in items if str(item.get("item") or "").strip()]
         hydrated: list[dict[str, Any]] = []
         for item in items:
             hint_key = f"{clean_order}:{item.get('item')}:{item.get('job')}"
+            item_hint = dict(label_hints.get(hint_key) or {})
+            item_hint["knownOrderItems"] = list(known_order_items)
             assets = service.item_assets(
                 clean_order, item.get("item"), item.get("job"), evidence_after=item.get("lastRejectedAt"),
-                label_hint=label_hints.get(hint_key),
+                label_hint=item_hint,
             )
             hydrated.append({**item, "productionFiles": assets})
 
@@ -8754,15 +9721,88 @@ class BaseDeliveryStore:
         raise NotImplementedError
 
     def get_sheet_usage_settings(self) -> dict[str, Any]:
-        """Return maintained stock-sheet sizes and notification recipients."""
+        """Return maintained stock-sheet sizes plus A+W most-used-size suggestions."""
         with self.connect() as con:
             raw = self.system_metadata_value(con, "statistics_sheet_usage_settings_v527")
+            raw_plates = self.system_metadata_value(con, AW_OPTIMIZATION_PLATE_SNAPSHOT_METADATA_KEY)
+            generation_rows = con.execute(
+                """SELECT optimization_number, source_payload_json
+                   FROM aw_cutting_generations
+                   WHERE optimization_number > 0
+                   ORDER BY last_seen_at DESC"""
+            ).fetchall()
         try:
             value = json.loads(raw or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             value = {}
         profiles = value.get("profiles") if isinstance(value, dict) else {}
-        return {"profiles": profiles if isinstance(profiles, dict) else {}}
+        profiles = profiles if isinstance(profiles, dict) else {}
+        try:
+            plate_payload = json.loads(raw_plates or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            plate_payload = {}
+        plates = plate_payload.get("rows") if isinstance(plate_payload, dict) else []
+        plates = plates if isinstance(plates, list) else []
+
+        lookups = self.get_manual_edit_lookups()
+        alias_targets = {
+            glass_profile_identity_key(row.get("value")): str(row.get("label") or row.get("target") or row.get("value") or "").strip()
+            for row in (lookups.get("glassAliases") or [])
+            if glass_profile_identity_key(row.get("value"))
+        }
+        known_profiles: dict[str, str] = {}
+        for row in [*(lookups.get("products") or []), *(lookups.get("glassCosts") or []), *(lookups.get("glassColors") or [])]:
+            label = str(row.get("label") or row.get("value") or "").strip()
+            key = glass_profile_identity_key(label)
+            if key and label:
+                known_profiles.setdefault(key, label)
+
+        optimization_glass: dict[int, set[str]] = {}
+        for row in generation_rows:
+            optimization = int(row_value(row, "optimization_number", 0) or 0)
+            if optimization <= 0:
+                continue
+            try:
+                source = json.loads(str(row_value(row, "source_payload_json", "{}") or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                source = {}
+            label_context = source.get("labelContext") if isinstance(source, dict) and isinstance(source.get("labelContext"), dict) else {}
+            raw_product = str(label_context.get("productDescription") or "").strip()
+            if not raw_product:
+                continue
+            identity = glass_profile_identity_key(raw_product)
+            canonical = alias_targets.get(identity) or known_profiles.get(identity) or raw_product
+            optimization_glass.setdefault(optimization, set()).add(canonical)
+
+        usage: dict[str, dict[str, int]] = {}
+        for plate in plates:
+            if not isinstance(plate, dict):
+                continue
+            optimization = int(plate.get("optimizationNumber") or 0)
+            length_units = float(plate.get("lengthUnits") or 0)
+            height_units = float(plate.get("heightUnits") or 0)
+            if optimization <= 0 or length_units <= 0 or height_units <= 0:
+                continue
+            def pretty(value: float) -> str:
+                inches = value / 32.0
+                return str(int(round(inches))) if abs(inches - round(inches)) < 0.001 else f"{inches:.2f}".rstrip("0").rstrip(".")
+            size = f"{pretty(length_units)} x {pretty(height_units)}"
+            for glass in optimization_glass.get(optimization, set()):
+                bucket = usage.setdefault(glass, {})
+                bucket[size] = bucket.get(size, 0) + 1
+
+        suggestions: dict[str, dict[str, Any]] = {}
+        for glass, sizes in usage.items():
+            if not sizes:
+                continue
+            sheet_size, count = sorted(sizes.items(), key=lambda entry: (-entry[1], entry[0]))[0]
+            suggestions[glass] = {
+                "sheetSize": sheet_size,
+                "usageCount": int(count),
+                "observedSizes": [{"sheetSize": key, "count": int(value)} for key, value in sorted(sizes.items(), key=lambda entry: (-entry[1], entry[0]))],
+                "source": "A+W optimization plates",
+            }
+        return {"profiles": profiles, "suggestions": suggestions, "plateSnapshotSyncedAt": str(plate_payload.get("syncedAt") or "") if isinstance(plate_payload, dict) else ""}
 
     def save_sheet_usage_settings(self, data: dict[str, Any], user: str) -> dict[str, Any]:
         """Persist per-glass stock sizes and email recipients without a schema change."""
@@ -13002,10 +14042,17 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         Effects: This function reads or changes database records.
         Flow: Applies access and lookup rules, gathers the relevant records, and returns a caller-ready result.
         """
-        condition = "AND se.event_type = 'error'" if only_errors else ""
+        condition = "AND event_type = 'error'" if only_errors else ""
         outbound_stage_clause, outbound_stage_params = stage_where_clause("outbound_list.stage", "airport_outbound")
         rows = con.execute(
             f"""
+            WITH recent_scan_events AS (
+                SELECT *
+                FROM scan_events
+                WHERE list_id = ? {condition}
+                ORDER BY id DESC
+                LIMIT 30
+            )
             SELECT se.*, li.order_no, li.item_no, li.qty, li.scanned_qty, li.dimensions,
                    li.customer, li.route, li.job, li.product, li.suggested_bay,
                    dl.stage AS list_stage,
@@ -13194,14 +14241,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                            OR (outbound_item.order_no = li.order_no AND outbound_item.item_no = li.item_no)
                          )
                    ) AS outbound_scanned
-            FROM scan_events se
+            FROM recent_scan_events se
             LEFT JOIN line_items li ON li.id = se.line_item_id
             LEFT JOIN delivery_lists dl ON dl.id = li.list_id
-            WHERE se.list_id = ? {condition}
             ORDER BY se.id DESC
-            LIMIT 30
             """,
-            (*outbound_stage_params, list_id),
+            (list_id, *outbound_stage_params),
         ).fetchall()
         return [event_from_row(row) for row in rows]
 
@@ -13251,7 +14296,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     continue
                 records.append({
                     "list": meta,
-                    "payload": self._get_payload(con, str(row["id"]), user=user),
+                    "payload": self._get_payload(con, str(row["id"]), user=user, include_history=False),
                 })
 
             # v0.511: Scan now displays A+W Cutting as the production checkpoint
@@ -13312,7 +14357,43 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                         }))
         return {"deliveryDate": clean_date, "records": records, "listCount": len(records)}
 
-    def _get_payload(self, con: sqlite3.Connection, list_id: str, last_scan: dict[str, Any] | None = None, user: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_delivery_date_scan_events(
+        self,
+        delivery_date: str,
+        user: dict[str, Any] | None = None,
+        limit: int = 90,
+    ) -> dict[str, Any]:
+        """Return recent date-wide scan/audit history without slowing the main date bundle."""
+        clean_date = str(delivery_date or "").strip()[:10]
+        if not clean_date:
+            raise ValueError("deliveryDate is required")
+        bounded_limit = min(max(int(limit or 90), 1), 180)
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT id, stage, scanner
+                FROM delivery_lists
+                WHERE delivery_date = ? AND status = 'active'
+                ORDER BY id
+                """,
+                (clean_date,),
+            ).fetchall()
+            events: list[dict[str, Any]] = []
+            for row in rows:
+                if user is not None and not user_can_access_stage(user, row["stage"], row["scanner"]):
+                    continue
+                events.extend(self._get_scan_events(con, str(row["id"])))
+        events.sort(key=lambda event: (str(event.get("time") or ""), int(event.get("eventId") or 0)), reverse=True)
+        return {"deliveryDate": clean_date, "events": events[:bounded_limit]}
+
+    def _get_payload(
+        self,
+        con: sqlite3.Connection,
+        list_id: str,
+        last_scan: dict[str, Any] | None = None,
+        user: dict[str, Any] | None = None,
+        include_history: bool = True,
+    ) -> dict[str, Any]:
         """Purpose: Read payload for the delivery-list scanner workflow.
 
         Effects: This function reads or changes database records.
@@ -13325,6 +14406,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         if user is not None and not user_can_access_stage(user, meta["stage"], meta["scanner"]):
             raise PermissionError("You do not have access to this delivery-list stage")
         items = self._get_line_items(con, list_id)
+        self._custom_progress_for_items_con(con, str(meta.get("deliveryDate") or ""), items)
         priority_annotations = self.priority_banner_annotations(con, items)
         for item in items:
             annotation = priority_annotations.get(str(item.get("id") or ""))
@@ -13368,11 +14450,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 "manualRemakePieceQty": sum(int(item.get("qty") or 0) for item in manual_remake_items),
             }
         )
+        recent = self._get_scan_events(con, list_id) if include_history else []
+        errors = self._get_scan_events(con, list_id, only_errors=True) if include_history else []
         return {
             "meta": meta,
             "items": items,
-            "recent": self._get_scan_events(con, list_id),
-            "errors": self._get_scan_events(con, list_id, only_errors=True),
+            "recent": recent,
+            "errors": errors,
             "lastScan": last_scan,
             "rushMoveReferences": rush_move_references,
         }
@@ -18903,6 +19987,11 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         station = request_station(scan_request)
         is_manual = str(scan_request.get("isManual") or "").lower() in {"1", "true", "yes"}
         fabrication_override_requested = str(scan_request.get("fabricationOverride") or "").lower() in {"1", "true", "yes"}
+        progress_override_keys = {
+            str(value or "").strip().lower()
+            for value in (scan_request.get("progressOverrides") if isinstance(scan_request.get("progressOverrides"), list) else [])
+            if str(value or "").strip()
+        }
         requested_scan_qty = request_scan_quantity(scan_request)
         if not list_id or not barcode.strip():
             raise ValueError("listId and barcode are required")
@@ -18942,6 +20031,44 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 con.commit()
                 return self._get_payload(con, list_id, last)
 
+            custom_station_setting = self._custom_progress_station_setting_con(con, station)
+            if custom_station_setting is not None:
+                list_meta = con.execute("SELECT delivery_date FROM delivery_lists WHERE id=?", (list_id,)).fetchone()
+                delivery_date = str(row_value(list_meta, "delivery_date", "") or "")
+                order_no = str(row_value(row, "order_no", "") or "").strip()
+                item_no = str(row_value(row, "item_no", "") or "").strip()
+                if item_no.isdigit():
+                    item_no = item_no.zfill(3)
+                stage_key = str(row_value(custom_station_setting, "stage_key", "") or "")
+                exists = con.execute(
+                    """SELECT 1 FROM progress_stage_completions
+                       WHERE stage_id=? AND delivery_date=? AND order_no=? AND item_no=?""",
+                    (int(row_value(custom_station_setting, "id", 0) or 0), delivery_date, order_no, item_no),
+                ).fetchone()
+                label = str(row_value(custom_station_setting, "display_name", "") or stage_key)
+                if exists:
+                    last = self.insert_event(
+                        con, list_id, row["id"], barcode, canonical, user, station,
+                        "duplicate", f"{label} already complete", "Custom progress checkpoint already scanned", 0,
+                    )
+                else:
+                    self._complete_custom_progress_con(
+                        con, custom_station_setting, delivery_date=delivery_date, order_no=order_no, item_no=item_no,
+                        user=user, source="manual_scan", evidence={"listId": list_id, "station": station, "barcode": canonical},
+                    )
+                    last = self.insert_event(
+                        con, list_id, row["id"], barcode, canonical, user, station,
+                        "scan", f"{label} complete", "Custom progress checkpoint scan", 0,
+                    )
+                    self.insert_audit(
+                        con, "progress_stage", stage_key, "progress_stage_scanned", user, station, "",
+                        {"deliveryDate": delivery_date, "order": order_no, "item": item_no, "lineItemId": str(row["id"])},
+                    )
+                con.commit()
+                payload = self._get_payload(con, list_id, last)
+                payload["customProgressScan"] = {"stageKey": stage_key, "label": label, "alreadyComplete": bool(exists)}
+                return payload
+
             if row["scanned_qty"] >= row["qty"]:
                 last = self.insert_event(
                     con,
@@ -18958,6 +20085,35 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 self.insert_audit(con, "line_item", row["id"], "duplicate_scan", user, station, "Quantity already scanned", {"barcode": barcode})
                 con.commit()
                 return self._get_payload(con, list_id, last)
+
+            custom_progress_gate = self._custom_progress_scan_gate_con(
+                con,
+                list_id=list_id,
+                line_row=row,
+                user=user,
+                station=station,
+                requested_overrides=progress_override_keys,
+            )
+            if custom_progress_gate.get("blocked") or custom_progress_gate.get("overrideRequired"):
+                stage = custom_progress_gate.get("stage") if isinstance(custom_progress_gate.get("stage"), dict) else {}
+                label = str(stage.get("label") or "required progress stage")
+                override_required = bool(custom_progress_gate.get("overrideRequired"))
+                message = f"{label} must be completed before this scan"
+                reason = (
+                    f"{label} is incomplete. An authorized downstream override is required before scanning this piece at the next stage."
+                    if override_required else
+                    f"{label} is incomplete and this checkpoint is configured to block downstream scanning until it is completed."
+                )
+                last = self.insert_event(con, list_id, row["id"], barcode, canonical, user, station, "notice" if override_required else "error", message, reason)
+                self.insert_audit(
+                    con, "line_item", str(row["id"]), "custom_progress_gate", user, station, reason,
+                    {"stage": stage, "order": row["order_no"], "item": row["item_no"], "overrideRequired": override_required},
+                )
+                con.commit()
+                payload = self._get_payload(con, list_id, last)
+                payload["customProgressGate"] = {**stage, "message": reason, "overrideRequired": override_required}
+                payload["customProgressOverrideRequired"] = override_required
+                return payload
 
             if (
                 fabrication_preflight
@@ -19107,6 +20263,20 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if fabrication_override_confirmed:
                 self.record_fabrication_scan_override(
                     con, row, list_id, fabrication_preflight, user, station,
+                )
+            for pending_progress in custom_progress_gate.get("deferred", []):
+                setting = pending_progress.get("setting")
+                if setting is None:
+                    continue
+                self._complete_custom_progress_con(
+                    con,
+                    setting,
+                    delivery_date=str(custom_progress_gate.get("deliveryDate") or ""),
+                    order_no=str(custom_progress_gate.get("order") or ""),
+                    item_no=str(custom_progress_gate.get("item") or ""),
+                    user=user,
+                    source=str(pending_progress.get("source") or "downstream_scan"),
+                    evidence={"listId": list_id, "station": station, "barcode": canonical},
                 )
             con.execute("UPDATE line_items SET scanned_qty = scanned_qty + ? WHERE id = ?", (scan_qty, row["id"]))
             if rack_for_scan:
@@ -22537,11 +23707,12 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 row["glassType"] = glass_label
                 qty = max(int(row.get("qty") or 0), 0)
                 bucket = glass_buckets.setdefault(glass_label, {
-                    "glassType": glass_label, "pieces": 0, "itemCount": 0,
+                    "glassType": glass_label, "pieces": 0, "itemCount": 0, "sqft": 0.0,
                     "orders": set(), "deliveryDates": set(),
                 })
                 bucket["pieces"] += qty
                 bucket["itemCount"] += 1
+                bucket["sqft"] += dimensions_square_feet(row.get("dimensions")) * qty
                 order_no = str(row.get("order") or "").strip()
                 if order_no:
                     bucket["orders"].add(order_no)
@@ -22581,6 +23752,7 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                     "pieces": int(bucket["pieces"]),
                     "itemCount": int(bucket["itemCount"]),
                     "orderCount": len(bucket["orders"]),
+                    "sqft": round(float(bucket.get("sqft") or 0.0), 2),
                     "deliveryDates": sorted(bucket["deliveryDates"]),
                 }
                 for bucket in glass_buckets.values()
@@ -22651,18 +23823,22 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             }),
         }
 
+        # v0.574: the Statistics "Glass type quantity" table must use the
+        # same production-day ledger as Daily Production Count.  The old field
+        # was delivery-date inventory volume, so a large batch of mirrors first
+        # imported yesterday for a future delivery date could appear in Daily
+        # Production Count but be absent from yesterday's Glass Type Quantity.
+        # Use immutable first-import New Production instead; External Remakes
+        # remain excluded exactly as they are from the daily production count.
         glass_quantity_by_type = [
             {
-                "glassType": label,
-                "qty": int(bucket.get("pieces") or 0),
-                "rowCount": 0,
-                "sqft": round(float(bucket.get("sqft") or 0.0), 2),
+                "glassType": str(row.get("glassType") or "Other Glass"),
+                "qty": int(row.get("pieces") or 0),
+                "rowCount": int(row.get("itemCount") or 0),
+                "sqft": round(float(row.get("sqft") or 0.0), 2),
             }
-            for label, bucket in sorted(
-                production_glass.items(),
-                key=lambda entry: (-int(entry[1].get("pieces") or 0), entry[0].lower()),
-            )
-            if int(bucket.get("pieces") or 0) > 0
+            for row in (new_production_activity.get("byGlass") or [])
+            if int(row.get("pieces") or 0) > 0
         ]
         glass_size_frequency_by_type = []
         for glass_type, sizes in sorted(
@@ -30172,11 +31348,13 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
         return self.get_inventory_session(session_id, user)
 
     def complete_inventory_system_orders(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
-        """Mark inventory-confirmed orders out of every active workflow stage.
+        """Resolve frozen-system orders that are no longer physically at the counted location.
 
-        This is an explicit reconciliation correction. It never creates a rack
-        or bay assignment; active location records are closed so completed work
-        cannot remain visible in, or consume capacity from, a physical bay.
+        Airport Rd owns two outcomes: non-Indian-Trail routes are completed out of the
+        scanner workflow, while Indian Trail routes are advanced through Airport
+        Outbound so they immediately become Indian Trail/in-transit inventory. Indian
+        Trail reconciliation then owns the final completion decision if those panes are
+        absent from the physical IT count. No synthetic bay assignment is created.
         """
         requested = {
             str(value or "").strip()
@@ -30184,22 +31362,53 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             if str(value or "").strip()
         }
         complete_all = bool(data.get("all"))
+        missing_only = bool(data.get("missingOnly"))
         actor = str(user.get("username") or user.get("displayName") or "").strip()
         completed_at = now_iso()
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             session = self._inventory_session_row_con(con, session_id)
-            self._require_inventory_location(user, str(row_value(session, "location") or ""))
+            location = self._require_inventory_location(user, str(row_value(session, "location") or ""))
             snapshot_rows = con.execute(
-                """SELECT DISTINCT order_no, delivery_date
+                """SELECT DISTINCT order_no, delivery_date, route
                    FROM inventory_expected_items
                    WHERE session_id=? AND TRIM(order_no)<>'' AND TRIM(delivery_date)<>''""",
                 (session_id,),
             ).fetchall()
             snapshot_orders = {str(row["order_no"] or "").strip() for row in snapshot_rows}
-            selected = snapshot_orders if complete_all else requested.intersection(snapshot_orders)
+            if complete_all and missing_only:
+                missing_rows = con.execute(
+                    """SELECT e.order_no
+                       FROM inventory_expected_items e
+                       LEFT JOIN inventory_scans s
+                         ON s.session_id=e.session_id AND s.expected_item_id=e.id
+                       WHERE e.session_id=? AND TRIM(e.order_no)<>''
+                       GROUP BY e.id, e.order_no, e.qty
+                       HAVING COALESCE(SUM(CASE WHEN COALESCE(s.removed_at,'')='' THEN s.qty ELSE 0 END),0) < e.qty""",
+                    (session_id,),
+                ).fetchall()
+                selected = {str(row["order_no"] or "").strip() for row in missing_rows if str(row["order_no"] or "").strip()}
+            else:
+                selected = snapshot_orders if complete_all else requested.intersection(snapshot_orders)
             if not selected:
-                raise ValueError("Select at least one system order from this inventory")
+                raise ValueError("Select at least one unresolved system order from this inventory")
+
+            order_routes: dict[str, set[str]] = {}
+            order_dates: dict[str, set[str]] = {}
+            for row in snapshot_rows:
+                order_no = str(row["order_no"] or "").strip()
+                if order_no not in selected:
+                    continue
+                order_routes.setdefault(order_no, set()).add(str(row["route"] or "").strip())
+                order_dates.setdefault(order_no, set()).add(str(row["delivery_date"] or "").strip())
+
+            transfer_orders: set[str] = set()
+            if location == "airport_rd":
+                for order_no, routes in order_routes.items():
+                    if any(route_category({"route": route}) == "indian_trail" for route in routes):
+                        transfer_orders.add(order_no)
+            final_orders = set(selected) - transfer_orders
+
             selected_pairs = sorted({
                 (str(row["order_no"] or "").strip(), str(row["delivery_date"] or "").strip())
                 for row in snapshot_rows
@@ -30209,7 +31418,8 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
             pair_args = tuple(value for pair in selected_pairs for value in pair)
             lines = con.execute(
                 f"""
-                SELECT li.id, li.order_no, li.item_no, li.qty, li.scanned_qty, li.list_id
+                SELECT li.id, li.order_no, li.item_no, li.qty, li.scanned_qty, li.list_id,
+                       dl.stage, dl.scanner, dl.delivery_date
                 FROM line_items li
                 JOIN delivery_lists dl ON dl.id=li.list_id
                 WHERE dl.status='active' AND COALESCE(li.is_deleted,0)=0
@@ -30217,46 +31427,85 @@ class SQLiteDeliveryStore(BaseDeliveryStore):
                 """,
                 pair_args,
             ).fetchall()
-            line_ids = [str(row["id"]) for row in lines]
+
+            final_line_ids: list[str] = []
+            transfer_line_ids: list[str] = []
+            transfer_outbound_ids: list[str] = []
+            for row in lines:
+                line_id = str(row["id"])
+                order_no = str(row["order_no"] or "").strip()
+                if order_no in final_orders:
+                    final_line_ids.append(line_id)
+                    continue
+                preset = stage_logic_preset(row["stage"], row["scanner"])
+                if order_no in transfer_orders and preset in {"airport_staging", "airport_outbound"}:
+                    transfer_line_ids.append(line_id)
+                    if preset == "airport_outbound":
+                        transfer_outbound_ids.append(line_id)
+
+            affected_line_ids = [*final_line_ids, *transfer_line_ids]
             rack_ids: list[int] = []
-            if line_ids:
-                line_placeholders = ",".join("?" for _ in line_ids)
+            if affected_line_ids:
+                placeholders = ",".join("?" for _ in affected_line_ids)
                 rack_ids = [
                     int(row[0]) for row in con.execute(
-                        f"SELECT DISTINCT rack_id FROM rack_items WHERE status='Active' AND line_item_id IN ({line_placeholders})",
-                        tuple(line_ids),
+                        f"SELECT DISTINCT rack_id FROM rack_items WHERE status='Active' AND line_item_id IN ({placeholders})",
+                        tuple(affected_line_ids),
                     ).fetchall()
                 ]
                 con.execute(
-                    f"UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id IN ({line_placeholders})",
-                    (completed_at, *line_ids),
+                    f"UPDATE line_items SET scanned_qty=qty, updated_at_utc=? WHERE id IN ({placeholders})",
+                    (completed_at, *affected_line_ids),
                 )
+                # Anything resolved as gone from Airport or Indian Trail cannot remain
+                # physically loaded on an Airport rack.
                 con.execute(
                     f"""UPDATE rack_items SET status='Removed', removed_by=?, removed_at=?,
-                        reason='Inventory confirmed physically complete'
-                        WHERE status='Active' AND line_item_id IN ({line_placeholders})""",
-                    (actor, completed_at, *line_ids),
-                )
-                con.execute(
-                    f"""UPDATE bay_assignments SET status='Cleared', cleared_by=?, cleared_at=?,
-                        reason='Inventory confirmed physically complete'
-                        WHERE status NOT IN ('Cleared','Cancelled') AND line_item_id IN ({line_placeholders})""",
-                    (actor, completed_at, *line_ids),
+                        reason='Inventory reconciliation advanced workflow'
+                        WHERE status='Active' AND line_item_id IN ({placeholders})""",
+                    (actor, completed_at, *affected_line_ids),
                 )
                 for rack_id in rack_ids:
                     self.refresh_rack_destination(con, rack_id)
+
+            # Only final completion clears active Indian Trail bay occupancy. Airport
+            # IT transfers preserve any preassignment while Outbound makes the order
+            # visible to the next Indian Trail inventory as in-transit work.
+            if final_line_ids:
+                placeholders = ",".join("?" for _ in final_line_ids)
+                con.execute(
+                    f"""UPDATE bay_assignments SET status='Cleared', cleared_by=?, cleared_at=?,
+                        reason='Inventory confirmed physically complete'
+                        WHERE status NOT IN ('Cleared','Cancelled') AND line_item_id IN ({placeholders})""",
+                    (actor, completed_at, *final_line_ids),
+                )
+
             self.insert_audit(
-                con, "inventory_session", str(session_id), "inventory_orders_completed", actor, "", "",
-                {"orders": sorted(selected), "lineItemCount": len(line_ids), "completedAt": completed_at,
-                 "locationRecordsCleared": True},
+                con, "inventory_session", str(session_id), "inventory_orders_reconciled", actor, "", "",
+                {
+                    "orders": sorted(selected),
+                    "completedOrders": sorted(final_orders),
+                    "transferredToIndianTrail": sorted(transfer_orders),
+                    "lineItemCount": len(affected_line_ids),
+                    "completedAt": completed_at,
+                    "location": location,
+                    "missingOnly": missing_only,
+                },
             )
             con.commit()
+
+        parts = []
+        if final_orders:
+            parts.append(f"completed {len(final_orders)} order{'s' if len(final_orders) != 1 else ''}")
+        if transfer_orders:
+            parts.append(f"advanced {len(transfer_orders)} Indian Trail order{'s' if len(transfer_orders) != 1 else ''} through Airport Outbound")
         return {
             "ok": True,
-            "completedOrders": sorted(selected),
-            "lineItemCount": len(line_ids),
+            "completedOrders": sorted(final_orders),
+            "transferredToIndianTrail": sorted(transfer_orders),
+            "lineItemCount": len(affected_line_ids),
             "session": self.get_inventory_session(session_id, user),
-            "message": f"Completed {len(selected)} system order{'s' if len(selected) != 1 else ''} and cleared active rack/bay locations.",
+            "message": ("Inventory reconciliation " + " and ".join(parts) + ".") if parts else "Inventory reconciliation saved.",
         }
 
     def cancel_inventory_session(self, session_id: int, data: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:

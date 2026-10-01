@@ -906,6 +906,11 @@ BEGIN
         reason_label nvarchar(500) NOT NULL DEFAULT (N''),
         location_code int NOT NULL DEFAULT (0),
         location_label nvarchar(500) NOT NULL DEFAULT (N''),
+        legacy_reason_label nvarchar(500) NOT NULL DEFAULT (N''),
+        legacy_location_label nvarchar(500) NOT NULL DEFAULT (N''),
+        canonical_reason_label nvarchar(500) NOT NULL DEFAULT (N''),
+        canonical_location_label nvarchar(500) NOT NULL DEFAULT (N''),
+        canonical_resolution nvarchar(120) NOT NULL DEFAULT (N''),
         from_scanner int NOT NULL DEFAULT (0),
         breakage_user nvarchar(255) NOT NULL DEFAULT (N''),
         timeline_employee nvarchar(255) NOT NULL DEFAULT (N''),
@@ -928,6 +933,18 @@ BEGIN
         CONSTRAINT ck_aw_reject_events_payload_v484 CHECK (ISJSON(source_payload_json) = 1)
     );
 END;
+GO
+
+IF COL_LENGTH(N'dbo.aw_reject_events', N'legacy_reason_label') IS NULL
+    ALTER TABLE dbo.aw_reject_events ADD legacy_reason_label nvarchar(500) NOT NULL CONSTRAINT df_aw_reject_events_legacy_reason_v585 DEFAULT (N'');
+IF COL_LENGTH(N'dbo.aw_reject_events', N'legacy_location_label') IS NULL
+    ALTER TABLE dbo.aw_reject_events ADD legacy_location_label nvarchar(500) NOT NULL CONSTRAINT df_aw_reject_events_legacy_location_v585 DEFAULT (N'');
+IF COL_LENGTH(N'dbo.aw_reject_events', N'canonical_reason_label') IS NULL
+    ALTER TABLE dbo.aw_reject_events ADD canonical_reason_label nvarchar(500) NOT NULL CONSTRAINT df_aw_reject_events_canonical_reason_v585 DEFAULT (N'');
+IF COL_LENGTH(N'dbo.aw_reject_events', N'canonical_location_label') IS NULL
+    ALTER TABLE dbo.aw_reject_events ADD canonical_location_label nvarchar(500) NOT NULL CONSTRAINT df_aw_reject_events_canonical_location_v585 DEFAULT (N'');
+IF COL_LENGTH(N'dbo.aw_reject_events', N'canonical_resolution') IS NULL
+    ALTER TABLE dbo.aw_reject_events ADD canonical_resolution nvarchar(120) NOT NULL CONSTRAINT df_aw_reject_events_canonical_resolution_v585 DEFAULT (N'');
 GO
 
 IF OBJECT_ID(N'dbo.aw_reject_source_rows', N'U') IS NULL
@@ -977,6 +994,13 @@ IF NOT EXISTS (
 )
     CREATE INDEX idx_aw_reject_events_time
         ON dbo.aw_reject_events(breakage_date DESC);
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.aw_reject_events')
+      AND name = N'idx_aw_reject_events_context_identity'
+)
+    CREATE INDEX idx_aw_reject_events_context_identity
+        ON dbo.aw_reject_events(order_no, item_no, breakage_date, original_job_number);
 IF NOT EXISTS (
     SELECT 1 FROM sys.indexes
     WHERE object_id = OBJECT_ID(N'dbo.aw_reject_source_rows')
@@ -1339,3 +1363,104 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.manual_
 
 IF COL_LENGTH(N'dbo.inventory_scans', N'delivery_date') IS NULL
     ALTER TABLE dbo.inventory_scans ADD delivery_date nvarchar(32) NOT NULL CONSTRAINT df_inventory_scans_delivery_date_v529 DEFAULT N'';
+
+
+-- v0.586 / schema 24: keep scanner-entered Internal Reject choices aligned
+-- with the rebuilt A+W Complaint Reason/Cause libraries and repair historical
+-- generic POLISHER events to the plant-established Kodiak Polisher.
+IF OBJECT_ID(N'dbo.reject_reasons', N'U') IS NOT NULL
+BEGIN
+    DECLARE @v586_reason_now nvarchar(64) = CONVERT(nvarchar(64), SYSUTCDATETIME(), 127);
+    MERGE dbo.reject_reasons AS target
+    USING (VALUES
+    (N'Broken on Truck', 1),
+    (N'Broke in Machine', 2),
+    (N'Broke While Handling', 3),
+    (N'Broke', 4),
+    (N'Chipped in Machine', 5),
+    (N'Chipped While Handling', 6),
+    (N'Chipped', 7),
+    (N'Scratched in Machine', 8),
+    (N'Scratched While Handling', 9),
+    (N'Scratched', 10),
+    (N'Bad Breakout', 11),
+    (N'Mistagged', 12),
+    (N'Improper Edgework', 13),
+    (N'Missed Edgework', 14),
+    (N'Improper Fabrication', 15),
+    (N'Missed Fabrication', 16),
+    (N'Lost', 17),
+    (N'Machine Malfunction', 18),
+    (N'Operator Error', 19),
+    (N'Fell', 20),
+    (N'Heat Stain', 21),
+    (N'Warp/Bow', 22),
+    (N'Optimization Reject', 23),
+    (N'Supplier Defect', 24),
+    (N'Other/Unknown', 25)
+    ) AS source(label, sort_order)
+    ON LOWER(target.label) = LOWER(source.label)
+    WHEN MATCHED THEN UPDATE SET label=source.label, active=1, sort_order=source.sort_order, updated_at=@v586_reason_now
+    WHEN NOT MATCHED THEN
+        INSERT(label, active, sort_order, created_by, created_at, updated_at)
+        VALUES(source.label, 1, source.sort_order, N'system-aw-standard', @v586_reason_now, @v586_reason_now);
+END;
+GO
+
+IF OBJECT_ID(N'dbo.reject_locations', N'U') IS NOT NULL
+BEGIN
+    DECLARE @v586_location_now nvarchar(64) = CONVERT(nvarchar(64), SYSUTCDATETIME(), 127);
+    MERGE dbo.reject_locations AS target
+    USING (VALUES
+    (N'Indian Trail/Install', 1),
+    (N'Last Sheet', 2),
+    (N'Cutting Table', 3),
+    (N'Kodiak Polisher', 4),
+    (N'Skiati Polisher', 5),
+    (N'Denver CNC', 6),
+    (N'Waterjet', 7),
+    (N'Denver Washer', 8),
+    (N'Mirror Washer', 9),
+    (N'Seaming Table', 10),
+    (N'Oven Washer', 11),
+    (N'Oven', 12),
+    (N'Quench', 13),
+    (N'Oven Wrapper', 14),
+    (N'Mirror Wrapper', 15),
+    (N'Staging', 16),
+    (N'Framing Table', 17),
+    (N'A Frame Cart', 18),
+    (N'Truck', 19),
+    (N'In Transit', 20),
+    (N'Manufacturer', 21),
+    (N'Other/Unknown', 22)
+    ) AS source(label, sort_order)
+    ON LOWER(target.label) = LOWER(source.label)
+    WHEN MATCHED THEN UPDATE SET label=source.label, active=1, sort_order=source.sort_order, updated_at=@v586_location_now
+    WHEN NOT MATCHED THEN
+        INSERT(label, active, sort_order, created_by, created_at, updated_at)
+        VALUES(source.label, 1, source.sort_order, N'system-aw-standard', @v586_location_now, @v586_location_now);
+END;
+GO
+
+IF OBJECT_ID(N'dbo.aw_reject_events', N'U') IS NOT NULL
+   AND COL_LENGTH(N'dbo.aw_reject_events', N'legacy_location_label') IS NOT NULL
+BEGIN
+    UPDATE dbo.aw_reject_events
+    SET canonical_location_label = N'Kodiak Polisher'
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(legacy_location_label, N'')))) = N'POLISHER';
+END;
+GO
+
+IF OBJECT_ID(N'dbo.reject_events', N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.aw_reject_events', N'U') IS NOT NULL
+BEGIN
+    UPDATE r
+    SET location_label = N'Kodiak Polisher'
+    FROM dbo.reject_events r
+    JOIN dbo.aw_reject_events a ON a.event_key = r.source_external_key
+    WHERE r.source_type = N'aw'
+      AND UPPER(LTRIM(RTRIM(ISNULL(a.legacy_location_label, N'')))) = N'POLISHER'
+      AND NULLIF(LTRIM(RTRIM(ISNULL(JSON_VALUE(r.manual_override_json, '$.location'), N''))), N'') IS NULL;
+END;
+GO

@@ -43,3 +43,6 @@ data/production-sketch-page-cache/*.pdf
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local visual QA screenshots
+screenshots/

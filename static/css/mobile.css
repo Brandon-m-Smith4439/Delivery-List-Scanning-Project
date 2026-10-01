@@ -3368,3 +3368,27 @@
     grid-row: 1 !important;
   }
 }
+
+/* v0.555 All Scans mobile detail density */
+@media (max-width: 760px) {
+  .full-scans-modal .all-scans-table td[data-label="Details"] .all-scans-detail-cell {
+    max-height: 3.2em !important;
+    overflow: hidden !important;
+  }
+}
+
+
+/* v0.555: keep paired review actions exactly equal on touch layouts. The
+   general mobile tap-target rule raises icon buttons to 42px, so both Review
+   and Mark Reviewed explicitly share that final touch-safe geometry here. */
+@media (max-width: 760px) {
+  body .scan-page .scan-review-grid-v530 .scan-update-review-actions > button,
+  body .scan-page .scan-review-grid-v530 .scan-update-review-button,
+  body .scan-page .scan-review-grid-v530 .scan-update-reviewed-button {
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 5px 8px !important;
+    font-size: 10.25px !important;
+    line-height: 1.1 !important;
+  }
+}

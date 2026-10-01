@@ -9507,3 +9507,1305 @@ html:-webkit-full-screen .scan-page .scanner-panel:not(.bay-scanner-panel) {
     color-mix(in srgb, var(--attention-internal-reject) 4%, transparent) 27px,
     transparent 46px) !important;
 }
+
+/* ========================================================================== */
+/* v0.549 unified Scan filter language                                        */
+/* ========================================================================== */
+.scan-page .scan-filter-options .tab {
+  --filter-accent-v549:#366fa8;
+  box-sizing:border-box;
+  min-height:38px !important;
+  display:flex !important;
+  align-items:center;
+  gap:8px;
+  border:1px solid color-mix(in srgb,var(--filter-accent-v549) 28%,#d6e1ec) !important;
+  border-radius:10px !important;
+  background:#fff !important;
+  color:var(--filter-accent-v549) !important;
+  padding:7px 10px !important;
+  font-size:11px !important;
+  font-weight:850 !important;
+  box-shadow:none !important;
+  white-space:nowrap;
+}
+.scan-page .scan-filter-options .tab::before {
+  content:"";
+  flex:0 0 9px;
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:var(--filter-accent-v549);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--filter-accent-v549) 12%,transparent);
+}
+.scan-page .scan-filter-options .tab > :is(span:last-child,b[data-filter-count]) {
+  margin-left:auto;
+  color:var(--filter-accent-v549) !important;
+  font:900 11px/1 system-ui,sans-serif;
+}
+.scan-page .scan-filter-options .tab:is(.is-active,[aria-pressed="true"]) {
+  background:color-mix(in srgb,var(--filter-accent-v549) 9%,white) !important;
+  border-color:color-mix(in srgb,var(--filter-accent-v549) 55%,#c9d6e4) !important;
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--filter-accent-v549) 8%,transparent) !important;
+}
+.scan-page .scan-filter-options .tab:hover { background:color-mix(in srgb,var(--filter-accent-v549) 6%,white) !important; }
+.scan-page .scan-filter-options [data-filter="remaining"] { --filter-accent-v549:#61758a; }
+.scan-page .scan-filter-options [data-filter="partial"] { --filter-accent-v549:#b37716; }
+.scan-page .scan-filter-options [data-filter="complete"] { --filter-accent-v549:#248153; }
+.scan-page .scan-filter-options [data-filter="updated"] { --filter-accent-v549:var(--attention-new,#d89a17); }
+.scan-page .scan-filter-options [data-filter="errors"] { --filter-accent-v549:#c33d49; }
+.scan-page .scan-filter-options [data-filter="internal-rejects"] { --filter-accent-v549:var(--attention-internal-reject,#dc792d); }
+.scan-page .scan-filter-options [data-filter="remakes"] { --filter-accent-v549:var(--attention-external-remake,#4b5563); }
+.scan-page .scan-filter-options [data-filter="rushes"] { --filter-accent-v549:var(--attention-rush,#d64545); }
+.scan-page .scan-filter-options [data-filter$="-route"] { --filter-accent-v549:#376e9d; }
+.scan-page .scan-filter-options .scan-progress-filter-v534 { --filter-accent-v549:var(--progress-filter-color,#3776ab); }
+.scan-page .scan-filter-options .scan-progress-filter-v534 > i { display:none !important; }
+.scan-page .scan-filter-options .glass-filter-tab { --filter-accent-v549:var(--glass-type-color,#347e79); }
+.scan-page .route-filter-tab[hidden],
+.scan-page .scan-filter-options .tab[hidden] { display:none !important; }
+.scan-page .cutting-progress-spinner-v498.scan-cutting-spinner-v549 {
+  display:inline-block;
+  animation:cutting-v549-spin .8s linear infinite;
+}
+@keyframes cutting-v549-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .scan-page .cutting-progress-spinner-v498.scan-cutting-spinner-v549 { animation:none; } }
+
+
+/* ========================================================================== */
+/* v0.552 unified Scan filter chips + stable progress-filter presentation      */
+/* ========================================================================== */
+/* Every Scan filter now shares one neutral button surface. Meaning comes from
+   the small left dot only; selected state uses the same blue interaction cue
+   across Status, Attention, Route, Progress, and Glass Type. */
+.scan-page .scan-filter-options .tab,
+.scan-page .scan-filter-glass-section .glass-filter-tab {
+  --filter-dot-v552: #4f6f8f;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 7px !important;
+  min-height: 38px !important;
+  padding: 7px 10px !important;
+  border: 1px solid #cbd9e7 !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  color: #214361 !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+  font-weight: 850 !important;
+  line-height: 1.15 !important;
+  white-space: nowrap !important;
+  transform: none !important;
+}
+.scan-page .scan-filter-options .tab::before,
+.scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  content: "" !important;
+  display: block !important;
+  width: 8px !important;
+  min-width: 8px !important;
+  height: 8px !important;
+  flex: 0 0 8px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--filter-dot-v552) !important;
+  box-shadow: none !important;
+}
+.scan-page .scan-filter-options .tab:hover,
+.scan-page .scan-filter-options .tab:focus-visible,
+.scan-page .scan-filter-glass-section .glass-filter-tab:hover,
+.scan-page .scan-filter-glass-section .glass-filter-tab:focus-visible {
+  border-color: #91abc3 !important;
+  background: #f7fafc !important;
+  color: #173b5c !important;
+  box-shadow: 0 0 0 2px rgba(45, 105, 159, .08) !important;
+}
+.scan-page .scan-filter-options .tab:is(.is-active,[aria-pressed="true"]),
+.scan-page .scan-filter-glass-section .glass-filter-tab:is(.is-active,[aria-pressed="true"]) {
+  border-color: #4f7fa9 !important;
+  background: #eef5fb !important;
+  color: #173d5f !important;
+  box-shadow: inset 0 0 0 1px rgba(79,127,169,.10), 0 0 0 2px rgba(79,127,169,.06) !important;
+}
+.scan-page .scan-filter-options .tab > span:first-child,
+.scan-page .scan-filter-options .route-filter-tab > span:first-child,
+.scan-page .scan-filter-progress-section-v534 .scan-progress-filter-v534 > span {
+  display: inline !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+  font: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+.scan-page .scan-filter-options .tab > span[id^="count"],
+.scan-page .scan-filter-options .tab > b[data-filter-count],
+.scan-page .scan-filter-glass-section .glass-filter-tab > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 24px !important;
+  height: 20px !important;
+  margin-left: auto !important;
+  padding: 0 6px !important;
+  border: 1px solid #d7e1ea !important;
+  border-radius: 999px !important;
+  background: #f1f5f8 !important;
+  color: #597086 !important;
+  box-shadow: none !important;
+  font: 900 10.5px/1 system-ui, sans-serif !important;
+  -webkit-text-fill-color: #597086 !important;
+}
+.scan-page .scan-filter-options [data-filter="remaining"] { --filter-dot-v552: #75889a; }
+.scan-page .scan-filter-options [data-filter="partial"] { --filter-dot-v552: #d09a2c; }
+.scan-page .scan-filter-options [data-filter="complete"] { --filter-dot-v552: #43a676; }
+.scan-page .scan-filter-options [data-filter="updated"] { --filter-dot-v552: var(--attention-new-order, #1766d8); }
+.scan-page .scan-filter-options [data-filter="errors"] { --filter-dot-v552: #d05a64; }
+.scan-page .scan-filter-options [data-filter="internal-rejects"] { --filter-dot-v552: var(--attention-internal-reject, #f28c28); }
+.scan-page .scan-filter-options [data-filter="remakes"] { --filter-dot-v552: var(--attention-external-remake, #111); }
+.scan-page .scan-filter-options [data-filter="rushes"] { --filter-dot-v552: var(--attention-rush, #c62828); }
+.scan-page .scan-filter-options [data-filter="indian-trail-route"] { --filter-dot-v552: #2f9c72; }
+.scan-page .scan-filter-options [data-filter="cpu-route"] { --filter-dot-v552: #7c69bd; }
+.scan-page .scan-filter-options [data-filter="dtc-route"] { --filter-dot-v552: #3f83bd; }
+.scan-page .scan-filter-options [data-filter="greenville-route"] { --filter-dot-v552: #bd7f35; }
+.scan-page .scan-filter-options .scan-progress-filter-v534 { --filter-dot-v552: var(--progress-filter-color, #5e7f9d); }
+.scan-page .scan-filter-glass-section .glass-filter-tab { --filter-dot-v552: var(--glass-type-color, #3b827d); }
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"] { --filter-dot-v552: #356c9e; }
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"]::before { display: block !important; }
+.scan-page .scan-filter-options .priority-tab,
+.scan-page .scan-filter-options .route-filter-tab { justify-content: flex-start !important; }
+.scan-page .scan-filter-options .tab[hidden],
+.scan-page .route-filter-tab[hidden] { display: none !important; }
+
+/* v0.552 specificity guard: retire older attention/glass fills and pseudo-icon
+   rules so the final unified filter language owns every button consistently. */
+.scan-page .scan-filter-options > button.tab[data-filter]::before,
+.scan-page .scan-filter-options > button.priority-tab::before {
+  content: "" !important;
+  display: block !important;
+  background: var(--filter-dot-v552) !important;
+  border: 0 !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"],
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active {
+  border-color: #4f7fa9 !important;
+  background: #eef5fb !important;
+  color: #173d5f !important;
+  -webkit-text-fill-color: #173d5f !important;
+  box-shadow: inset 0 0 0 1px rgba(79,127,169,.10), 0 0 0 2px rgba(79,127,169,.06) !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active > span,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > span {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active > span[id^="count"],
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > span[id^="count"],
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active > span,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active > span {
+  border-color: #d7e1ea !important;
+  background: #f1f5f8 !important;
+  color: #597086 !important;
+  -webkit-text-fill-color: #597086 !important;
+}
+
+/* ========================================================================== */
+/* v0.553 crisp Scan filters + balanced Reject review actions                 */
+/* ========================================================================== */
+.scan-page .scan-filter-options .tab,
+.scan-page .scan-filter-glass-section .glass-filter-tab {
+  border-color:#bfcfdd !important;
+  background:linear-gradient(180deg,#fff,#f9fbfd) !important;
+  color:#233f58 !important;
+}
+.scan-page .scan-filter-options .tab > span[id^="count"],
+.scan-page .scan-filter-options .tab > b[data-filter-count],
+.scan-page .scan-filter-glass-section .glass-filter-tab > span {
+  border-color:transparent !important;
+  background:transparent !important;
+  color:#61758a !important;
+  padding-inline:2px !important;
+  min-width:18px !important;
+  font-weight:900 !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"],
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active {
+  border-color:#245f8d !important;
+  background:linear-gradient(180deg,#3d7dab 0%,#2a6089 100%) !important;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+  box-shadow:0 5px 12px rgba(35,87,128,.18) !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active::before,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"]::before,
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active::before,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active::before {
+  box-shadow:0 0 0 2px rgba(255,255,255,.72) !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active > span[id^="count"],
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > span[id^="count"],
+.scan-page .scan-filter-options > button.tab[data-filter].is-active > b[data-filter-count],
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > b[data-filter-count],
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active > span,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active > span {
+  border-color:rgba(255,255,255,.24) !important;
+  background:rgba(255,255,255,.13) !important;
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions {
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:7px !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions > button {
+  width:100% !important;
+  min-width:0 !important;
+  min-height:32px !important;
+  padding-inline:8px !important;
+  font-size:9.5px !important;
+}
+
+/* ========================================================================== */
+/* v0.555 filter alignment, attention visibility, review-card sizing          */
+/* ========================================================================== */
+.scan-page .scan-filter-options .tab,
+.scan-page .scan-filter-glass-section .glass-filter-tab {
+  display: grid !important;
+  grid-template-columns: 8px minmax(0, 1fr) max-content !important;
+  align-items: center !important;
+  column-gap: 8px !important;
+  min-height: 38px !important;
+  padding: 7px 10px !important;
+  border: 1px solid #bfcedb !important;
+  border-radius: 9px !important;
+  background: #fff !important;
+  color: #243f57 !important;
+  box-shadow: none !important;
+  line-height: 1.15 !important;
+  transform: none !important;
+}
+.scan-page .scan-filter-options .tab::before,
+.scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  grid-column: 1 !important;
+  width: 8px !important;
+  min-width: 8px !important;
+  height: 8px !important;
+  margin: 0 !important;
+  align-self: center !important;
+}
+.scan-page .scan-filter-options .scan-filter-label-v555,
+.scan-page .scan-filter-glass-section .scan-filter-label-v555 {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  color: inherit !important;
+  font: inherit !important;
+  line-height: 1.2 !important;
+  text-align: left !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+.scan-page .scan-filter-options .scan-filter-count-v555,
+.scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  grid-column: 3 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  min-width: 1.4em !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #61758a !important;
+  font: 900 10.5px/1 system-ui, sans-serif !important;
+  text-align: right !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+/* Neutral hover is deliberate: glass identity remains in the dot instead of
+   turning the entire button into a bright glass-color block. */
+.scan-page .scan-filter-options .tab:hover:not(.is-active),
+.scan-page .scan-filter-options .tab:focus-visible:not(.is-active),
+.scan-page .scan-filter-glass-section .glass-filter-tab:hover:not(.is-active),
+.scan-page .scan-filter-glass-section .glass-filter-tab:focus-visible:not(.is-active) {
+  border-color: #8fa8bd !important;
+  background: #f6f9fb !important;
+  color: #1e405d !important;
+  box-shadow: 0 0 0 2px rgba(48, 96, 139, .07) !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"],
+.scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip.is-active,
+.scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"].is-active {
+  border-color: color-mix(in srgb, var(--filter-dot-v552) 62%, #6d7f91) !important;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--filter-dot-v552) 24%, #fff) 0%,
+    color-mix(in srgb, var(--filter-dot-v552) 13%, #fff) 100%) !important;
+  color: color-mix(in srgb, var(--filter-dot-v552) 46%, #152f49) !important;
+  -webkit-text-fill-color: currentColor !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--filter-dot-v552) 13%, transparent) !important;
+}
+.scan-page .scan-filter-options > button.tab[data-filter].is-active .scan-filter-count-v555,
+.scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] .scan-filter-count-v555,
+.scan-page .scan-filter-glass-section .glass-filter-tab.is-active .scan-filter-count-v555 {
+  color: inherit !important;
+  background: transparent !important;
+  border: 0 !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+/* Attention filters with work waiting are visibly red even before selection. */
+.scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]) {
+  border-color: #d78e97 !important;
+  background: linear-gradient(180deg, #fff4f5 0%, #ffecee 100%) !important;
+  color: #842b38 !important;
+  box-shadow: inset 0 0 0 1px rgba(185, 52, 68, .05) !important;
+}
+.scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]) .scan-filter-count-v555 {
+  color: #9d2e3d !important;
+}
+.scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]):hover,
+.scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]):focus-visible {
+  border-color: #c76370 !important;
+  background: linear-gradient(180deg, #fff0f2 0%, #ffe3e7 100%) !important;
+  color: #762330 !important;
+}
+
+.scan-review-grid-v530 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  margin-top: 10px !important;
+}
+.scan-review-grid-v530 .scan-update-review-control {
+  min-height: 108px !important;
+  padding: 10px 11px !important;
+  gap: 8px 10px !important;
+  border-radius: 10px !important;
+}
+.scan-review-grid-v530 .scan-update-review-copy {
+  min-width: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions > button,
+.scan-review-grid-v530 .scan-update-review-button,
+.scan-review-grid-v530 .scan-update-reviewed-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 5px 9px !important;
+  gap: 6px !important;
+  font-size: 10.5px !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+}
+.scan-review-grid-v530 .scan-update-review-actions > button svg {
+  flex: 0 0 14px !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* v0.555 All Scans keeps audit context concise instead of repeating source and
+   action text in three adjacent columns. */
+.all-scans-table col.all-scans-col-details { width: 210px !important; }
+.all-scans-table .all-scans-detail-cell {
+  display: block !important;
+  max-width: 100% !important;
+  color: #52677b !important;
+  font-size: 10px !important;
+  line-height: 1.28 !important;
+}
+.all-scans-table .all-scans-detail-cell :is(strong,span,small) {
+  display: block !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.all-scans-table .all-scans-detail-cell span {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  white-space: normal !important;
+}
+.all-scans-no-item-v555 { color: #8a98a6; font-weight: 800; }
+
+@media (max-width: 760px) {
+  .scan-review-grid-v530 { grid-template-columns: 1fr !important; margin-inline: 7px !important; }
+  .scan-review-grid-v530 .scan-update-review-control { min-height: 104px !important; }
+  .scan-review-grid-v530 .scan-update-review-actions > button { font-size: 10.25px !important; }
+}
+
+/* ========================================================================== */
+/* v0.556 filter optical alignment + stable hover + three-card review row     */
+/* ========================================================================== */
+/* Keep every filter control on one optical centerline. The label and count use
+   the same text size/line box while the dot remains an independent identity
+   marker, so the label no longer rides above the dot/count pair. */
+body .scan-page .scan-filter-options .tab,
+body .scan-page .scan-filter-glass-section .glass-filter-tab {
+  align-items: center !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+body .scan-page .scan-filter-options .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-label-v555,
+body .scan-page .scan-filter-options .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  align-self: center !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  font-size: 11px !important;
+  line-height: 18px !important;
+}
+body .scan-page .scan-filter-options .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-label-v555 {
+  display: flex !important;
+  align-items: center !important;
+}
+body .scan-page .scan-filter-options .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+}
+body .scan-page .scan-filter-options .tab::before,
+body .scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  align-self: center !important;
+}
+/* Older filter generations targeted count/span children directly with accent
+   colors. This specificity guard makes the v0.556 black-copy contract final. */
+body .scan-page .scan-filter-options > button.tab[data-filter] > .scan-filter-label-v555,
+body .scan-page .scan-filter-options > button.tab[data-filter] > .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .glass-filter-tab > .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .glass-filter-tab > .scan-filter-count-v555 {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+
+/* Hover should never repaint a filter with its identity color. Inactive chips
+   only sharpen their border; selected chips keep the exact same restrained
+   tint they use at rest. */
+body .scan-page .scan-filter-options .tab:hover:not(.is-active):not([aria-pressed="true"]),
+body .scan-page .scan-filter-options .tab:focus-visible:not(.is-active):not([aria-pressed="true"]),
+body .scan-page .scan-filter-glass-section .glass-filter-tab:hover:not(.is-active):not([aria-pressed="true"]),
+body .scan-page .scan-filter-glass-section .glass-filter-tab:focus-visible:not(.is-active):not([aria-pressed="true"]) {
+  border-color: #8fa8bd !important;
+  background: #fff !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  box-shadow: 0 0 0 2px rgba(48, 96, 139, .06) !important;
+  transform: none !important;
+}
+body .scan-page .scan-filter-options > button.tab[data-filter]:is(.is-active,[aria-pressed="true"]),
+body .scan-page .scan-filter-glass-section .glass-filter-tab:is(.is-active,[aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--filter-dot-v552) 62%, #6d7f91) !important;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--filter-dot-v552) 24%, #fff) 0%,
+    color-mix(in srgb, var(--filter-dot-v552) 13%, #fff) 100%) !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--filter-dot-v552) 13%, transparent) !important;
+  transform: none !important;
+}
+body .scan-page .scan-filter-options > button.tab[data-filter]:is(.is-active,[aria-pressed="true"]):is(:hover,:focus-visible),
+body .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip:is(.is-active,[aria-pressed="true"]):is(:hover,:focus-visible),
+body .scan-page .scan-filter-glass-section .glass-filter-tab[data-glass-filter="all"]:is(.is-active,[aria-pressed="true"]):is(:hover,:focus-visible) {
+  border-color: color-mix(in srgb, var(--filter-dot-v552) 68%, #607386) !important;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--filter-dot-v552) 24%, #fff) 0%,
+    color-mix(in srgb, var(--filter-dot-v552) 13%, #fff) 100%) !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--filter-dot-v552) 13%, transparent),
+              0 0 0 2px rgba(48, 96, 139, .05) !important;
+}
+body .scan-page .scan-filter-options > button.tab[data-filter]:is(.is-active,[aria-pressed="true"]) > :is(.scan-filter-label-v555,.scan-filter-count-v555),
+body .scan-page .scan-filter-glass-section .glass-filter-tab:is(.is-active,[aria-pressed="true"]) > :is(.scan-filter-label-v555,.scan-filter-count-v555),
+body .scan-page .scan-filter-glass-section .glass-filter-tab.glass-tone-chip:is(.is-active,[aria-pressed="true"]):is(:hover,:focus-visible) > :is(.scan-filter-label-v555,.scan-filter-count-v555) {
+  border: 0 !important;
+  background: transparent !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+/* Attention-needed filters retain their soft red idle cue, but black copy keeps
+   the label and number readable against the red wash. */
+body .scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]),
+body .scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]):is(:hover,:focus-visible) {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+body .scan-page .scan-filter-options .priority-tab.has-attention-count-v555:not(.is-active):not([aria-pressed="true"]) > :is(.scan-filter-label-v555,.scan-filter-count-v555) {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+
+/* There are at most three primary review cards in normal operation. Keep them
+   on one desktop/tablet row, make the cards denser, and pin External Remakes to
+   the far-right slot even when New Orders or Internal Rejects are absent. */
+@media (min-width: 761px) {
+  body .scan-page .scan-review-grid-v530 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+  body .scan-page .scan-review-grid-v530 .is-new-orders-v530 { grid-column: 1 !important; }
+  body .scan-page .scan-review-grid-v530 .is-reject-v530 { grid-column: 2 !important; }
+  body .scan-page .scan-review-grid-v530 .is-remake-v530 { grid-column: 3 !important; }
+}
+body .scan-page .scan-review-grid-v530 .scan-update-review-control {
+  min-height: 84px !important;
+  padding: 8px 9px !important;
+  gap: 6px 8px !important;
+}
+body .scan-page .scan-review-grid-v530 .scan-update-review-copy {
+  font-size: 10.5px !important;
+  line-height: 1.22 !important;
+}
+body .scan-page .scan-review-grid-v530 .scan-update-review-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 7px !important;
+}
+/* shared-ui.css loads after this page sheet and owns primary-button internals.
+   Set its supported variables so Mark Reviewed and Review remain geometrically
+   identical instead of letting the primary style re-enlarge one side. */
+body .scan-page .scan-review-grid-v530 .scan-update-review-actions > button,
+body .scan-page .scan-review-grid-v530 .scan-update-review-button,
+body .scan-page .scan-review-grid-v530 .scan-update-reviewed-button {
+  --app-primary-min-height: 34px;
+  --app-primary-padding: 4px 4px;
+  --app-primary-font-size: 10px;
+  --app-primary-gap: 3px;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 4px !important;
+  gap: 3px !important;
+  font-size: 10px !important;
+  line-height: 1.05 !important;
+  white-space: nowrap !important;
+}
+body .scan-page .scan-review-grid-v530 .scan-update-review-actions > button svg {
+  flex: 0 0 12px !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+/* At tablet widths the Scan workspace itself is narrower than the viewport.
+   Keep all three cards on one row but stack their equal actions inside each
+   card so icon + label pairs never clip. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  body .scan-page .scan-review-grid-v530 .scan-update-review-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 5px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.557 filter content centering + selected-count contrast                  */
+/* ========================================================================== */
+/* v0.556 centered the filter child boxes, but an 18px text line-height left
+   Segoe UI glyphs sitting visually high inside those boxes. Give every chip a
+   single explicit content row and center a compact text line inside a 20px
+   flex box. This keeps the dot, label, and count on the same visual centerline
+   without changing the established button height or horizontal spacing. */
+body .scan-page .scan-filter-options .tab,
+body .scan-page .scan-filter-glass-section .glass-filter-tab {
+  grid-template-rows: 20px !important;
+  align-content: center !important;
+}
+body .scan-page .scan-filter-options .tab::before,
+body .scan-page .scan-filter-glass-section .glass-filter-tab::before {
+  grid-row: 1 !important;
+  align-self: center !important;
+}
+body .scan-page .scan-filter-options .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-label-v555,
+body .scan-page .scan-filter-options .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  grid-row: 1 !important;
+  align-self: center !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  padding-block: 0 !important;
+  line-height: 1 !important;
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  box-sizing: border-box !important;
+}
+body .scan-page .scan-filter-options .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-label-v555 {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+}
+body .scan-page .scan-filter-options .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+}
+/* Match the older child-selector specificity so labels and numerals really do
+   use the same 11px text metrics instead of inheriting the old 11.5/10.5 split. */
+body .scan-page .scan-filter-options > button.tab[data-filter] > .scan-filter-label-v555,
+body .scan-page .scan-filter-options > button.tab[data-filter] > .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab > .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab > .scan-filter-count-v555 {
+  font-family: "Segoe UI", Arial, sans-serif !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+/* Older v0.553 selected-state rules have an extra state selector and can beat
+   a generic !important color override. Match/exceed that specificity so every
+   selected Status/Attention/Route/Progress/Glass label and count stays black.
+   This specifically covers WaterJet/Denver progress counts, which previously
+   flipped to white after selection. */
+body .scan-page .scan-filter-options > button.tab[data-filter].is-active > .scan-filter-label-v555,
+body .scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > .scan-filter-label-v555,
+body .scan-page .scan-filter-options > button.tab[data-filter].is-active > .scan-filter-count-v555,
+body .scan-page .scan-filter-options > button.tab[data-filter][aria-pressed="true"] > .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab.is-active > .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab[aria-pressed="true"] > .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab.is-active > .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section > .glass-filter-tabs > button.glass-filter-tab[aria-pressed="true"] > .scan-filter-count-v555 {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+/* ========================================================================== */
+/* v0.558 filter ink centering                                                 */
+/* ========================================================================== */
+/*
+   v0.557 centered the child boxes mathematically. The real Windows/Edge
+   screenshot shows Segoe UI label glyph ink still paints about 3-5px above
+   the already-aligned identity dot and count numeral. Move only label ink down
+   4px. Counts/dots, button geometry, hit areas, and wrapping remain unchanged.
+*/
+body .scan-page .scan-filter-options .scan-filter-label-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-label-v555 {
+  transform: translateY(4px) !important;
+}
+body .scan-page .scan-filter-options .scan-filter-count-v555,
+body .scan-page .scan-filter-glass-section .scan-filter-count-v555 {
+  transform: none !important;
+}
+
+/* v0.565 operator-requested fabrication refresh for the active delivery date. */
+.scan-page .scan-refresh-fab-button-v565 {
+  min-height: 40px;
+  min-width: 124px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid #aac2df;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
+  color: #123f73;
+  font: 800 12px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(8, 38, 90, .07);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.scan-page .scan-refresh-fab-button-v565 svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
+.scan-page .scan-refresh-fab-button-v565:hover:not(:disabled) {
+  border-color: #6e9cd0;
+  background: linear-gradient(180deg, #ffffff 0%, #e5f0ff 100%);
+  box-shadow: 0 7px 15px rgba(8, 38, 90, .11);
+  transform: translateY(-1px);
+}
+
+.scan-page .scan-refresh-fab-button-v565:focus-visible {
+  outline: none;
+  border-color: #135cff;
+  box-shadow: 0 0 0 3px rgba(19, 92, 255, .15), 0 5px 12px rgba(8, 38, 90, .08);
+}
+
+.scan-page .scan-refresh-fab-button-v565:disabled {
+  cursor: wait;
+  opacity: .72;
+  transform: none;
+}
+
+.scan-page .scan-refresh-fab-button-v565.is-loading svg {
+  animation: scan-refresh-fab-spin-v565 .8s linear infinite;
+}
+
+@keyframes scan-refresh-fab-spin-v565 {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .scan-page .scan-refresh-fab-button-v565 {
+    width: 100%;
+    min-height: 42px;
+  }
+}
+
+
+/* ========================================================================== */
+/* v0.578 fabrication refresh control                                         */
+/* ========================================================================== */
+.scan-page .scan-fabrication-toolbar-v578 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 8px 0 10px;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid #cfdeec;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fbfdff 0%, #f3f8fd 100%);
+  box-shadow: 0 5px 16px rgba(24, 70, 108, .055);
+}
+.scan-page .scan-fabrication-toolbar-copy-v578 {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.scan-page .scan-fabrication-toolbar-copy-v578 strong {
+  color: #173f68;
+  font: 900 11px/1.2 "Segoe UI", Arial, sans-serif;
+}
+.scan-page .scan-fabrication-toolbar-copy-v578 small {
+  color: #688198;
+  font: 650 9px/1.35 "Segoe UI", Arial, sans-serif;
+}
+.scan-page .scan-refresh-fab-button-v565.scan-refresh-fab-button-v578 {
+  flex: 0 0 auto;
+  min-width: 184px;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 6px 12px 6px 8px;
+  border: 1px solid #8eb8dc;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #eaf4fc 100%);
+  color: #174f82;
+  box-shadow: 0 5px 13px rgba(20, 82, 132, .10);
+}
+.scan-page .scan-refresh-fab-button-v565.scan-refresh-fab-button-v578:hover:not(:disabled) {
+  border-color: #5b98c8;
+  background: linear-gradient(180deg, #ffffff 0%, #deeffb 100%);
+  box-shadow: 0 7px 16px rgba(20, 82, 132, .14);
+  transform: translateY(-1px);
+}
+.scan-page .scan-refresh-fab-button-v565.scan-refresh-fab-button-v578[hidden] {
+  display: none !important;
+}
+.scan-page .scan-refresh-fab-icon-v578 {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 31px;
+  border: 1px solid #bdd3e6;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.8);
+}
+.scan-page .scan-refresh-fab-icon-v578 svg {
+  width: 17px;
+  height: 17px;
+}
+.scan-page .scan-refresh-fab-copy-v578 {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+.scan-page .scan-refresh-fab-copy-v578 strong {
+  color: #153f69;
+  font: 900 10.5px/1.1 "Segoe UI", Arial, sans-serif;
+}
+.scan-page .scan-refresh-fab-copy-v578 small {
+  color: #6d8297;
+  font: 700 8px/1.2 "Segoe UI", Arial, sans-serif;
+}
+.scan-page .scan-fabrication-toolbar-v578.is-loading-v578 {
+  display: none !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-fabrication-toolbar-v578 {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .scan-page .scan-refresh-fab-button-v565.scan-refresh-fab-button-v578 {
+    width: 100%;
+  }
+}
+
+/* ========================================================================== */
+/* v0.580 fixed-footprint FAB refresh/progress transition                    */
+/* ========================================================================== */
+.scan-page .scan-fabrication-status-stage-v580 {
+  position: relative;
+  min-width: 0;
+  min-height: 66px;
+  display: grid;
+  grid-template: "fab-stage" 1fr / minmax(0, 1fr);
+  margin: 8px 0 10px;
+  border-radius: 12px;
+  background: #f1f6fa;
+  box-shadow: inset 0 0 0 1px rgba(167, 192, 213, .22);
+  overflow: hidden;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531 {
+  grid-area: fab-stage;
+  width: 100%;
+  min-height: 66px !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578 {
+  display: flex !important;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 0s;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578.is-checking-v580 {
+  background: linear-gradient(135deg, #f8fbfe 0%, #edf5fb 100%);
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578.is-loading-v578 {
+  display: flex !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 160ms ease, transform 220ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 220ms;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531:not([hidden]) {
+  display: flex !important;
+  min-height: 66px !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 9px 11px !important;
+  border: 1px solid #9fc5df !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, #eef8ff 0%, #e4f1fb 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.78), 0 3px 10px rgba(17,73,120,.055) !important;
+  opacity: 0;
+  visibility: hidden;
+  overflow: hidden;
+  transform: translateY(3px);
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 220ms !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 {
+  min-height: 66px !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 9px 11px !important;
+  border-top-width: 1px !important;
+  border-bottom-width: 1px !important;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 0s !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-complete-v531 {
+  background: linear-gradient(135deg, #f1fbf5 0%, #e7f6ed 100%) !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-fabrication-status-stage-v580 { min-height: 116px; }
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 { min-height: 116px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531:not([hidden]) { transition: none !important; transform: none !important; }
+}
+
+/* ========================================================================== */
+/* v0.581 shifting review cards + compact per-item FAB progress               */
+/* ========================================================================== */
+@media (min-width: 761px) {
+  body .scan-page .scan-review-grid-v530 {
+    grid-auto-flow: row !important;
+  }
+  body .scan-page .scan-review-grid-v530 .scan-update-review-control {
+    grid-column: auto !important;
+  }
+}
+
+/* Keep the FAB stage's footprint stable but trim it to a small status rail. */
+.scan-page .scan-fabrication-status-stage-v580 {
+  min-height: 48px !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531,
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 {
+  min-height: 48px !important;
+  height: 48px !important;
+  padding: 6px 9px !important;
+  border-radius: 10px !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531:not([hidden]) {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto !important;
+  grid-template-rows: auto auto !important;
+  column-gap: 8px !important;
+  row-gap: 2px !important;
+  align-items: center !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-badge-v531 {
+  grid-row: 1 / 3 !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  font-size: 8.5px !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 {
+  align-self: end !important;
+  gap: 0 !important;
+  line-height: 1.05 !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 strong {
+  font-size: 10px !important;
+  line-height: 1.05 !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 small {
+  display: block !important;
+  margin-top: 2px !important;
+  font-size: 8.5px !important;
+  line-height: 1.05 !important;
+  color: #58728a !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.scan-page .scan-fabrication-load-v531 > b {
+  align-self: start !important;
+  font-size: 10px !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-track-v531 {
+  grid-column: 2 / 4 !important;
+  height: 5px !important;
+  min-height: 5px !important;
+  margin: 0 !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-fabrication-status-stage-v580 { min-height: 62px !important; }
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 {
+    min-height: 62px !important;
+    height: 62px !important;
+  }
+  .scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 small { white-space: normal !important; }
+}
+
+
+/* ========================================================================== */
+/* v0.582 dense FAB rail + thicker real-progress presentation                 */
+/* ========================================================================== */
+/* The stage keeps one fixed footprint for Refresh/Checking, but removes the
+   excess vertical air around it. The progress detail deliberately sits under
+   the bar at the left edge of the progress column. */
+.scan-page .scan-fabrication-status-stage-v580 {
+  min-height: 46px !important;
+  margin: 3px 0 4px !important;
+  border-radius: 9px !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531,
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 {
+  min-height: 46px !important;
+  height: 46px !important;
+  margin: 0 !important;
+  padding: 4px 8px !important;
+  border-radius: 9px !important;
+}
+.scan-page .scan-refresh-fab-button-v565.scan-refresh-fab-button-v578 {
+  min-height: 36px !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+}
+.scan-page .scan-refresh-fab-icon-v578 {
+  width: 26px !important;
+  height: 26px !important;
+  flex-basis: 26px !important;
+  border-radius: 8px !important;
+}
+.scan-page .scan-refresh-fab-icon-v578 svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+.scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531:not([hidden]) {
+  display: grid !important;
+  grid-template-columns: 28px minmax(0, 1fr) auto !important;
+  grid-template-rows: auto 9px auto !important;
+  column-gap: 7px !important;
+  row-gap: 1px !important;
+  align-items: center !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-badge-v531 {
+  grid-column: 1 !important;
+  grid-row: 1 / 4 !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  font-size: 8px !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+  display: block !important;
+  min-width: 0 !important;
+  line-height: 1 !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-copy-v531 strong {
+  display: block !important;
+  font-size: 9.8px !important;
+  line-height: 1 !important;
+}
+.scan-page .scan-fabrication-load-v531 > b {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+  min-width: 34px !important;
+  font-size: 9.5px !important;
+  line-height: 1 !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-track-v531 {
+  grid-column: 2 / 4 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 9px !important;
+  min-height: 9px !important;
+  margin: 0 !important;
+  border-radius: 99px !important;
+}
+.scan-page .scan-fabrication-load-v531 .scan-fabrication-load-track-v531 > i {
+  transition: width 230ms cubic-bezier(.2,.8,.2,1) !important;
+}
+.scan-page .scan-fabrication-load-detail-v582 {
+  grid-column: 2 / 4 !important;
+  grid-row: 3 !important;
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  color: #58728a !important;
+  font: 700 8.2px/1 "Segoe UI", Arial, sans-serif !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-fabrication-status-stage-v580 {
+    min-height: 50px !important;
+    margin: 3px 0 4px !important;
+  }
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-toolbar-v578,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531,
+  .scan-page .scan-fabrication-status-stage-v580 > .scan-fabrication-load-v531.is-visible-v533 {
+    min-height: 50px !important;
+    height: 50px !important;
+  }
+  .scan-page .scan-fabrication-load-detail-v582 {
+    font-size: 7.8px !important;
+  }
+}
+
+/* ========================================================================== */
+/* v0.583 fast date switching + unobtrusive foreground loading feedback       */
+/* ========================================================================== */
+.scan-date-loading-v583 {
+  position: fixed;
+  inset: 0;
+  z-index: 9950;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+.scan-date-loading-v583[hidden] { display: none !important; }
+.scan-date-loading-v583.is-visible-v583 {
+  opacity: 1;
+  visibility: visible;
+}
+.scan-date-loading-card-v583 {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 230px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 11px 14px;
+  border: 1px solid #b8cde0;
+  border-radius: 12px;
+  background: rgba(250,253,255,.97);
+  box-shadow: 0 14px 34px rgba(20,52,82,.18), 0 2px 8px rgba(20,52,82,.1);
+  color: #183f64;
+  backdrop-filter: blur(6px);
+}
+.scan-date-loading-spinner-v583 {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 3px solid #d7e6f2;
+  border-top-color: #1e79ba;
+  border-right-color: #31a06b;
+  border-radius: 50%;
+  animation: scan-date-loading-spin-v583 .72s linear infinite;
+}
+.scan-date-loading-copy-v583 {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.scan-date-loading-copy-v583 strong {
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 900;
+  color: #173f68;
+}
+.scan-date-loading-copy-v583 small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #617b91;
+}
+@keyframes scan-date-loading-spin-v583 { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .scan-date-loading-v583 { transition: none; }
+  .scan-date-loading-spinner-v583 { animation: none; border-color: #1e79ba #d7e6f2 #31a06b #d7e6f2; }
+}
+@media (max-width: 520px) {
+  .scan-date-loading-card-v583 {
+    min-width: 0;
+    width: min(300px, calc(100vw - 28px));
+    padding: 10px 12px;
+  }
+}
+
+/* ========================================================================== */
+/* v0.584 date-switch focus state                                              */
+/* ========================================================================== */
+/* Slow date changes keep the scanner rail readable while the list surface
+   fades in place. Nothing is removed from layout, so there is no page jump. */
+.scan-page > .scan-heading,
+.scan-page .workspace > .list-panel {
+  transition: opacity 150ms ease, filter 150ms ease;
+}
+.scan-page.is-date-loading-v584 > .scan-heading,
+.scan-page.is-date-loading-v584 .workspace > .list-panel {
+  opacity: .13;
+  filter: saturate(.35) blur(.35px);
+  pointer-events: none;
+  user-select: none;
+}
+.scan-page.is-date-loading-v584 .workspace > .scanner-panel {
+  opacity: 1;
+  filter: none;
+}
+/* The status node is moved directly under body while active so transformed
+   application containers cannot change the containing block for position:fixed. */
+body > .scan-date-loading-v583 {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-page > .scan-heading,
+  .scan-page .workspace > .list-panel {
+    transition: none;
+  }
+}
+
+/* ========================================================================== */
+/* v0.587 fabrication freshness indicator                                     */
+/* ========================================================================== */
+.scan-page .scan-fabrication-toolbar-title-v587 {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.scan-page .scan-fabrication-toolbar-title-v587 > strong { min-width: 0; }
+.scan-page .scan-fabrication-freshness-v587 {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid #c7d5df;
+  border-radius: 999px;
+  background: #f2f6f9;
+  color: #5c7284;
+  font: 900 8.5px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.scan-page .scan-fabrication-freshness-v587.is-current {
+  border-color: #9bc9ae;
+  background: #edf8f1;
+  color: #246843;
+}
+.scan-page .scan-fabrication-freshness-v587.is-stale {
+  border-color: #e0bd78;
+  background: #fff7e8;
+  color: #8b5b12;
+}
+.scan-page .scan-fabrication-freshness-v587.is-checking {
+  border-color: #94bddc;
+  background: #edf6fd;
+  color: #1b6396;
+}
+@media (max-width: 760px) {
+  .scan-page .scan-fabrication-toolbar-title-v587 { gap: 5px; }
+  .scan-page .scan-fabrication-freshness-v587 { min-height: 18px; padding-inline: 6px; font-size: 7.8px; }
+}

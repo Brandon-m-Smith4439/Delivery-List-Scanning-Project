@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from backend.aw_reject_legacy import CURRENT_LOCATION_LABELS, CURRENT_REASON_LABELS
 from database.time_utils import normalize_utc_timestamp
 
 
@@ -58,6 +59,18 @@ def row_value(row: Any, key: str, default: Any = "") -> Any:
         return row[key] if key in row.keys() else default
     except (AttributeError, KeyError, TypeError, IndexError):
         return default
+
+
+def aw_standard_reject_label(kind: str, label: Any) -> str:
+    """Return the canonical A+W standard label for one scanner catalog value."""
+    clean_kind = str(kind or "").strip().lower()
+    standards = CURRENT_REASON_LABELS if clean_kind == "reason" else CURRENT_LOCATION_LABELS if clean_kind == "location" else ()
+    requested = str(label or "").strip().casefold()
+    return next((value for value in standards if value.casefold() == requested), "")
+
+
+def is_aw_standard_reject_label(kind: str, label: Any) -> bool:
+    return bool(aw_standard_reject_label(kind, label))
 
 
 def line_update_review_kind(process_state: Any = "", queue_state: Any = "") -> str:
@@ -637,7 +650,7 @@ class OperationsFeatureService:
         scanner_text = clean_text(scanner, 120).lower()
         return scanner_text == "airport rd" or stage_text.startswith("staging") or stage_text.startswith("outbound")
 
-    def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str, review_kind: str = "") -> dict[str, Any]:
+    def acknowledge_line_updates(self, list_id: str, notice_ids: list[Any], username: str, review_kind: str = "", include_flags: bool = True) -> dict[str, Any]:
         """Mark reviewed updates read for one user using the maintained stage scope.
 
         Staging/Outbound are the complete Airport Rd view, so reviewing the current
@@ -709,9 +722,15 @@ class OperationsFeatureService:
                     JOIN line_items li ON li.id = n.line_item_id AND li.list_id = n.list_id
                     WHERE dl.status = 'active'
                       AND n.delivery_date = ?
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM line_update_receipts existing_receipt
+                          WHERE existing_receipt.notice_id = n.id
+                            AND existing_receipt.user_id = ?
+                      )
                     ORDER BY n.id
                     """,
-                    (str(selected_list["delivery_date"] or ""),),
+                    (str(selected_list["delivery_date"] or ""), user_id),
                 ).fetchall()
                 if matches:
                     scoped_matches = [
@@ -750,17 +769,18 @@ class OperationsFeatureService:
             )
             con.commit()
 
-        result = self.line_flags(clean_list_id, username)
+        result = self.line_flags(clean_list_id, username) if include_flags else {"ok": True, "listId": clean_list_id}
         result.update(
             {
                 "reviewScope": "airport-delivery-date" if airport_scope else "selected-stage",
                 "acknowledgedNoticeIds": target_ids,
                 "acknowledgedListIds": sorted(value for value in target_list_ids if value),
+                "flagsDeferred": not include_flags,
             }
         )
         return result
 
-    def acknowledge_internal_rejects(self, list_id: str, reject_ids: list[Any], username: str) -> dict[str, Any]:
+    def acknowledge_internal_rejects(self, list_id: str, reject_ids: list[Any], username: str, include_flags: bool = True) -> dict[str, Any]:
         """Mark specific Internal Reject incidents reviewed for one user.
 
         Review receipts are event-scoped and user-scoped. A future reject creates
@@ -805,18 +825,19 @@ class OperationsFeatureService:
                 {"rejectIds": valid_ids, "deliveryDate": str(selected["delivery_date"] or ""), "reviewedAt": reviewed_at},
             )
             con.commit()
-        result = self.line_flags(clean_list_id, username)
+        result = self.line_flags(clean_list_id, username) if include_flags else {"ok": True, "listId": clean_list_id}
         result["acknowledgedRejectIds"] = valid_ids
+        result["flagsDeferred"] = not include_flags
         return result
 
     def reject_catalog(self) -> dict[str, Any]:
         self._require_sqlite()
         with self.store.connect() as con:
             reasons = con.execute(
-                "SELECT id, label, active, created_at FROM reject_reasons WHERE active = 1 ORDER BY sort_order, label"
+                "SELECT id, label, active, sort_order, created_at FROM reject_reasons WHERE active = 1 ORDER BY sort_order, label"
             ).fetchall()
             locations = con.execute(
-                "SELECT id, label, active, created_at FROM reject_locations WHERE active = 1 ORDER BY sort_order, label"
+                "SELECT id, label, active, sort_order, created_at FROM reject_locations WHERE active = 1 ORDER BY sort_order, label"
             ).fetchall()
         with self.store.connect() as con:
             historical_reasons = con.execute(
@@ -839,12 +860,33 @@ class OperationsFeatureService:
                 ORDER BY event_count DESC, location_label
                 """
             ).fetchall()
+        reason_order = {label.casefold(): index for index, label in enumerate(CURRENT_REASON_LABELS, start=1)}
+        location_order = {label.casefold(): index for index, label in enumerate(CURRENT_LOCATION_LABELS, start=1)}
+
+        def catalog_rows(rows: Any, standard_order: dict[str, int]) -> list[dict[str, Any]]:
+            values: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for row in rows:
+                item = dict(row)
+                label = str(item.get("label") or "").strip()
+                key = label.casefold()
+                if not label or key in seen:
+                    continue
+                seen.add(key)
+                item["awStandard"] = key in standard_order
+                item["awOrder"] = int(standard_order.get(key, 9999))
+                values.append(item)
+            values.sort(key=lambda item: (0 if item["awStandard"] else 1, item["awOrder"], str(item.get("label") or "").casefold()))
+            return values
+
         return {
-            "reasons": [dict(row) for row in reasons],
-            "locations": [dict(row) for row in locations],
+            "reasons": catalog_rows(reasons, reason_order),
+            "locations": catalog_rows(locations, location_order),
             "historyReasons": [dict(row) for row in historical_reasons],
             "historyLocations": [dict(row) for row in historical_locations],
             "awMappings": self.store.list_reject_value_mappings(),
+            "awStandardReasons": list(CURRENT_REASON_LABELS),
+            "awStandardLocations": list(CURRENT_LOCATION_LABELS),
         }
 
     def upsert_reject_catalog(self, kind: str, label: str, username: str) -> dict[str, Any]:
@@ -855,17 +897,29 @@ class OperationsFeatureService:
         clean_label = clean_text(label, 120)
         if not clean_label:
             raise ValueError("A label is required")
+        standard_label = aw_standard_reject_label(clean_kind, clean_label)
+        if standard_label:
+            clean_label = standard_label
         table = "reject_reasons" if clean_kind == "reason" else "reject_locations"
         with self.store.connect() as con:
             con.execute("BEGIN IMMEDIATE")
-            con.execute(
-                f"""
-                INSERT INTO {table} (label, active, sort_order, created_by, created_at, updated_at)
-                VALUES (?, 1, 999, ?, ?, ?)
-                ON CONFLICT(label) DO UPDATE SET active = 1, updated_at = excluded.updated_at
-                """,
-                (clean_label, username, utc_now(), utc_now()),
-            )
+            existing = con.execute(
+                f"SELECT id FROM {table} WHERE lower(label)=lower(?) ORDER BY active DESC, id LIMIT 1",
+                (clean_label,),
+            ).fetchone()
+            if existing:
+                con.execute(
+                    f"UPDATE {table} SET label=?, active=1, updated_at=? WHERE id=?",
+                    (clean_label, utc_now(), int(existing["id"])),
+                )
+            else:
+                con.execute(
+                    f"""
+                    INSERT INTO {table} (label, active, sort_order, created_by, created_at, updated_at)
+                    VALUES (?, 1, 999, ?, ?, ?)
+                    """,
+                    (clean_label, username, utc_now(), utc_now()),
+                )
             self._audit(con, "reject_catalog", clean_kind, "upsert_reject_catalog", username, {"label": clean_label})
             con.commit()
         return self.reject_catalog()
@@ -892,6 +946,8 @@ class OperationsFeatureService:
             row = con.execute(f"SELECT id, label FROM {table} WHERE id = ? AND active = 1", (clean_id,)).fetchone()
             if not row:
                 raise ValueError("Reject catalog value not found")
+            if is_aw_standard_reject_label(clean_kind, row["label"]):
+                raise ValueError("A+W standard Complaint Reason/Cause values cannot be renamed in the scanner")
             duplicate = con.execute(
                 f"SELECT id FROM {table} WHERE active = 1 AND lower(label) = lower(?) AND id <> ?",
                 (clean_label, clean_id),
@@ -918,6 +974,11 @@ class OperationsFeatureService:
         table = "reject_reasons" if clean_kind == "reason" else "reject_locations"
         with self.store.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            row = con.execute(f"SELECT id, label FROM {table} WHERE id=? AND active=1", (int(catalog_id),)).fetchone()
+            if not row:
+                raise ValueError("Reject catalog value not found")
+            if is_aw_standard_reject_label(clean_kind, row["label"]):
+                raise ValueError("A+W standard Complaint Reason/Cause values cannot be removed from the scanner")
             con.execute(f"UPDATE {table} SET active = 0, updated_at = ? WHERE id = ?", (utc_now(), int(catalog_id)))
             self._audit(con, "reject_catalog", str(catalog_id), "remove_reject_catalog", username, {"kind": clean_kind})
             con.commit()
@@ -1064,6 +1125,7 @@ class OperationsFeatureService:
         location: str = "",
         reason: str = "",
         rejected_by: str = "",
+        all_dates: bool = False,
     ) -> dict[str, Any]:
         """Return one unified Internal Reject timeline, including A+W mirrors.
 
@@ -1072,17 +1134,17 @@ class OperationsFeatureService:
         keep the exact same public shape, while A+W rows additionally expose the
         verified machine/work-center context used by Order Details and Statistics.
 
-        v0.489 makes the normal Rejects page a bounded, server-paged view. When
-        the browser does not explicitly request a range, only the current and
-        previous calendar week are queried. Older history remains available via
-        an explicit date range without making every page open scan all history.
+        v0.489 makes the Rejects page server-paged. v0.586 allows an explicit
+        all-dates page mode so operators can move through older reject history
+        without first building a custom date range; bounded date filters remain
+        available for focused review.
         """
         self._require_sqlite()
         base_clauses = ["1 = 1"]
         base_params: list[Any] = []
         clean_from = clean_text(date_from, 10)
         clean_to = clean_text(date_to, 10)
-        if not clean_from and not clean_to:
+        if not clean_from and not clean_to and not all_dates:
             today = date.today()
             current_week_start = today - timedelta(days=today.weekday())
             clean_from = (current_week_start - timedelta(days=7)).isoformat()
@@ -1201,6 +1263,7 @@ class OperationsFeatureService:
             "totalPages": total_pages,
             "dateFrom": clean_from,
             "dateTo": clean_to,
+            "allDates": bool(all_dates),
             "summary": {
                 "eventCount": as_int(row_value(summary, "event_count"), 0),
                 "pieceCount": as_int(row_value(summary, "piece_count"), 0),

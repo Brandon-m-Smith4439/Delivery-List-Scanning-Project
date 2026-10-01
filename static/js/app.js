@@ -43,7 +43,12 @@ const ADMIN_DELIVERY_LIST_WEEKS_PER_PAGE = 3;
 const MANUAL_EDIT_PAGE_SIZE = 20;
 const MANUAL_EDIT_WHOLE_LIST_VALUE_V468 = "__whole_delivery_list__";
 const PRINT_DATE_HISTORY_BATCH_WEEKS = 2;
-const SCAN_DATE_CACHE_LIMIT_V526 = 5;
+const SCAN_DATE_CACHE_LIMIT_V526 = 7;
+// v0.584: slow date changes keep the scanner rail visible while the list surface
+// fades and a viewport-centered status card paints. Future delivery dates are
+// warmed farther ahead, but any foreground date choice still cancels speculation.
+const SCAN_DATE_LOADING_DELAY_MS_V583 = 120;
+const SCAN_DATE_PREFETCH_DELAY_MS_V583 = 160;
 const FABRICATION_AUTO_RETRY_MS_V526 = 10 * 60 * 1000;
 const FABRICATION_TODAY_RETRY_MS_V542 = 60 * 1000;
 const FUTURE_FABRICATION_CACHE_LIMIT_V530 = 96;
@@ -52,6 +57,11 @@ const FABRICATION_MEMORY_MAX_ENTRIES_V533 = 1800;
 const FABRICATION_MEMORY_MAX_AGE_MS_V533 = 24 * 60 * 60 * 1000;
 const FABRICATION_LOAD_DELAY_MS_V533 = 1000;
 const FABRICATION_LOAD_COLLAPSE_MS_V533 = 360;
+// v0.582: foreground/current-date FAB checks use small sequential batches so the
+// progress rail receives genuine completion checkpoints while the operator waits.
+// Future-date speculative prewarming stays coarse to avoid extra HTTP/SQLite work.
+const FABRICATION_FOREGROUND_MAX_CHUNK_V582 = 6;
+const FABRICATION_BACKGROUND_CHUNK_SIZE_V582 = 40;
 const ATTENTION_COLOR_DEFAULTS_V530 = Object.freeze({
   new_order: "#1766D8",
   internal_reject: "#F28C28",
@@ -128,6 +138,9 @@ const state = {
   // Smart Search waits on network-share/PDF work before painting results.
   fabricationStatusCacheV474: new Map(),
   fabricationStatusPendingV474: new Set(),
+  // v0.552: stale-while-revalidate keeps the last known machine assignment visible
+  // while a due fabrication check refreshes in the background.
+  fabricationStatusRefreshDueV552: new Set(),
   fabricationStatusBatchTokenV474: 0,
   fabricationLoadProgressV531: { date: "", completed: 0, total: 0, active: false, message: "" },
   fabricationLoadHideTimerV531: 0,
@@ -187,6 +200,16 @@ const state = {
   scanDateWideCacheLimitV526: SCAN_DATE_CACHE_LIMIT_V526,
   scanDatePrefetchV527: new Map(),
   scanDatePrefetchTimerV527: 0,
+  // v0.583: keep AbortControllers separate from the promise map so a foreground
+  // date switch can stop unrelated speculative date requests immediately.
+  scanDatePrefetchAbortControllersV583: new Map(),
+  scanDateLoadingTimerV583: 0,
+  scanDateLoadingTokenV583: 0,
+  scanDateLoadingHideTimerV584: 0,
+  // v0.555: date history is deferred from the main Scan bundle so switching a
+  // delivery date paints items first instead of blocking on audit/location joins.
+  scanDateHistoryCacheV555: new Map(),
+  scanDateHistoryPendingV555: new Map(),
   futureFabricationPrewarmTimerV530: 0,
   futureFabricationPrewarmRunV530: null,
   fabricationWarmByDateV526: new Map(),
@@ -361,11 +384,18 @@ const state = {
   supersededSketchSafetyPromiseV540: null,
   supersededReviewSummary: { pendingSupersededOrderReviews: 0, approvedSupersededOrderReviews: 0, keptSupersededOrderReviews: 0 },
   supersededReviewFilter: "open",
+  optimizationReviewAlertsV549: [],
+  optimizationReviewSummaryV549: { pending: 0, working: 0, acknowledged: 0, falseAlarm: 0, cleared: 0, open: 0 },
+  progressStageSettingsV549: [],
+  progressSettingsEditorKeyV550: "",
+  progressSettingsDraftPlacementV550: null,
+  progressSettingsScrollLeftV551: 0,
   adminListSearchTimer: null,
   adminDeliveryListVisiblePastDays: ADMIN_DELIVERY_LIST_DEFAULT_PAST_DAYS,
   adminDeliveryListWeekPage: 1,
   adminDeliveryListCatalog: null,
   adminDeliveryListCatalogRequestId: 0,
+  adminSelectedDeliveryDatesV553: new Set(),
   rolePermissionOpenRoles: new Set(),
   rolePermissionOpenCategories: new Set(),
   rolePermissionScrollTop: 0,
@@ -381,10 +411,13 @@ const state = {
   presentationProfile: { ...DEFAULT_PRESENTATION_PROFILE_V355 },
   manualEditLookupLibraryLoadedAt: 0,
   lookupSheetUsageSettingsV529: { profiles: {} },
+  lookupSheetUsageLoadedV550: false,
   lookupManagerActiveType: "glass_profile",
   lookupManagerSearch: "",
   lookupGlassFamilyV350: "Annealed",
   manualEditDirty: false,
+  manualEditDirtyIdsV553: new Set(),
+  manualEditSelectedIdsV553: new Set(),
   manualEditListId: "",
   // v0.468: keep Whole Delivery List as a presentation/search scope while
   // retaining one real stage ID as the delivery-date anchor.
@@ -423,12 +456,17 @@ const state = {
   homeReportSummaryPromise: null,
   // v0.506: transient HTML/plain-text review payload for the daily production email.
   dailyProductionEmailDraftV506: null,
-  // v0.514: Today's production is range-independent. The analytics Production
-  // Count table owns its own detailed selected-range report and inclusion state.
+  // v0.574: Daily Production Count is range-independent and owns its own
+  // selectable production day. The analytics Production Count table below still
+  // owns its separate selected-range report and inclusion state.
+  statisticsDailyProductionDateV574: "",
   statisticsTodayProductionReportV514: null,
   statisticsTodayProductionLoadingV514: false,
   statisticsTodayProductionLoadedAtV542: 0,
   statisticsTodayProductionRefreshTimerV542: 0,
+  statisticsDailyProductionRequestDateV574: "",
+  statisticsDailyProductionRequestTokenV574: 0,
+  statisticsDailyProductionPromiseV574: null,
   statisticsProductionReportV514: null,
   statisticsProductionReportRangeV514: "",
   statisticsProductionReportLoadingV514: false,
@@ -514,10 +552,11 @@ const state = {
   pendingRejectStagesV529: new Map(),
   pendingUpdateDatesRequestId: 0,
   rejectCatalog: { reasons: [], locations: [], historyReasons: [], historyLocations: [], awMappings: [] },
+  rejectSettingsActiveTabV551: "reason",
   rejectHistory: [],
   rejectHistoryRequestId: 0,
   rejectHistoryPage: 1,
-  rejectHistoryPageSize: 50,
+  rejectHistoryPageSize: 25,
   rejectHistoryTotalCount: 0,
   rejectHistoryTotalPages: 1,
   rejectHistorySummary: null,
@@ -1188,6 +1227,7 @@ const els = {
   statisticsMiniCharts: document.getElementById("statisticsMiniCharts"),
   statisticsProductionActivity: document.getElementById("statisticsProductionActivity"),
   statisticsTodayProductionDateV514: document.getElementById("statisticsTodayProductionDateV514"),
+  statisticsDailyProductionDateV574: document.getElementById("statisticsDailyProductionDateV574"),
   statisticsDailyProductionEmailBtn: document.getElementById("statisticsDailyProductionEmailBtn"),
   statisticsProductionOptionsV514: document.getElementById("statisticsProductionOptionsV514"),
   statisticsProductionIncludeRemakesV514: document.getElementById("statisticsProductionIncludeRemakesV514"),
@@ -1248,6 +1288,9 @@ const els = {
   scannerName: document.getElementById("scannerName"),
   deliveryListSelect: document.getElementById("deliveryListSelect"),
   deliveryDateSelect: document.getElementById("deliveryDateSelect"),
+  scanDateLoadingV583: document.getElementById("scanDateLoadingV583"),
+  scanDateLoadingTitleV583: document.getElementById("scanDateLoadingTitleV583"),
+  scanDateLoadingDetailV583: document.getElementById("scanDateLoadingDetailV583"),
   deliveryStageSelect: document.getElementById("deliveryStageSelect"),
   stationSelect: document.getElementById("stationSelect"),
   stationProfileDisplay: document.getElementById("stationProfileDisplay"),
@@ -1335,6 +1378,8 @@ const els = {
   pageSizeBottom: document.getElementById("pageSizeBottom"),
   scanPagerTop: document.getElementById("scanPagerTop"),
   scanPagerBottom: document.getElementById("scanPagerBottom"),
+  scanFabricationToolbarV578: document.getElementById("scanFabricationToolbarV578"),
+  scanRefreshFabBtnV565: document.getElementById("scanRefreshFabBtnV565"),
   undoBtn: document.getElementById("undoBtn"),
   redoBtn: document.getElementById("redoBtn"),
 
@@ -1429,6 +1474,7 @@ const els = {
   rejectPagePrev: document.getElementById("rejectPagePrev"),
   rejectPageNext: document.getElementById("rejectPageNext"),
   rejectPageStatusText: document.getElementById("rejectPageStatusText"),
+  rejectPageSize: document.getElementById("rejectPageSize"),
   rejectClearFiltersBtn: document.getElementById("rejectClearFiltersBtn"),
   rejectLogOpenBtn: document.getElementById("rejectLogOpenBtn"),
 
@@ -2149,18 +2195,20 @@ const SPANISH_UI_TEXT = new Map([
 
 const SPANISH_UI_ADDITIONS = new Map([
   ["Daily production activity", "Actividad diaria de producción"],
+  ["Production day", "Día de producción"],
+  ["Daily Production Count", "Conteo diario de producción"],
+  ["Draft the formatted production count email for the selected day", "Redactar el correo con formato del conteo de producción para el día seleccionado"],
   ["Production count", "Conteo de producción"],
   ["Actual new-piece counts by glass type, plus Internal Rejects and external remakes for the selected reporting range.", "Conteo real de piezas nuevas por tipo de vidrio, más rechazos internos y rehacer externos para el rango seleccionado."],
   ["Draft daily email", "Redactar correo diario"],
-  ["Draft today's formatted production count email", "Redactar el correo con formato del conteo de producción de hoy"],
-  ["Formatted email draft", "Borrador de correo con formato"],
+    ["Formatted email draft", "Borrador de correo con formato"],
   ["Copy plain text", "Copiar texto sin formato"],
   ["Copy formatted email", "Copiar correo con formato"],
   ["New production", "Producción nueva"],
   ["Internal rejects", "Rechazos internos"],
   ["Yield Percentage rejects excluded", "Rechazos de porcentaje de rendimiento excluidos"],
   ["First imported during this range · remakes excluded", "Importado por primera vez en este rango · rehacer excluidos"],
-  ["First imported or first changed to REMAKE today", "Importado por primera vez o cambiado por primera vez a REHACER durante este rango"],
+  ["First imported or first changed to REMAKE on this day", "Importado por primera vez o cambiado por primera vez a REHACER en este día"],
   ["Email draft", "Borrador de correo"],
   ["Copy body", "Copiar cuerpo"],
   ["Open in Email App", "Abrir en la aplicación de correo"],
@@ -3179,6 +3227,14 @@ const SPANISH_UI_V486 = new Map([
   ["Predates latest Internal Reject", "Es anterior al rechazo interno más reciente"],
 ]);
 SPANISH_UI_V486.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
+
+const SPANISH_UI_V578 = new Map([
+  ["Fabrication status", "Estado de fabricación"],
+  ["Recheck machine assignments and current completion evidence for this delivery date.", "Vuelva a comprobar las asignaciones de máquinas y la evidencia actual de finalización para esta fecha de entrega."],
+  ["Refresh fabrication", "Actualizar fabricación"],
+  ["Recheck this delivery date", "Volver a comprobar esta fecha de entrega"],
+]);
+SPANISH_UI_V578.forEach((spanish, english) => SPANISH_UI_TEXT.set(english, spanish));
 
 const SPANISH_OPERATIONAL_TEXT = new Map([
   ["Staging", "Preparación"],
@@ -8032,6 +8088,7 @@ async function loadSession() {
   if (state.authenticated) {
     hideLogin();
     if (els.operatorInput) els.operatorInput.value = state.user.displayName || state.user.username || "Scanner";
+    if (isAdminUser() && hasPermission("review_superseded_orders")) window.setTimeout(() => refreshSupersededReviewSummary(), 0);
   }
   return payload;
 }
@@ -8052,6 +8109,7 @@ async function login(username, password) {
   hideLogin();
   if (els.loginPassword) els.loginPassword.value = "";
   if (els.operatorInput) els.operatorInput.value = state.user.displayName || state.user.username || "Scanner";
+  if (isAdminUser() && hasPermission("review_superseded_orders")) window.setTimeout(() => refreshSupersededReviewSummary(), 0);
   playAppSound("login", { force: true });
 }
 
@@ -8828,7 +8886,150 @@ function rememberScanDateBundleV526(deliveryDate = "", signature = "", records =
 
 function invalidateScanDateBundleV526(deliveryDate = "") {
   const date = String(deliveryDate || "").trim();
-  if (date) state.scanDateWideCacheV526.delete(date);
+  if (date) {
+    state.scanDateWideCacheV526.delete(date);
+    state.scanDateHistoryCacheV555.delete(date);
+  }
+}
+
+function cachedScanDateHistoryV555(deliveryDate = "") {
+  const date = String(deliveryDate || "").trim();
+  const entry = date ? state.scanDateHistoryCacheV555.get(date) : null;
+  if (!entry) return null;
+  const signature = scanDateWideCatalogSignatureV486(date);
+  if (!signature || signature !== String(entry.signature || "")) {
+    state.scanDateHistoryCacheV555.delete(date);
+    return null;
+  }
+  return Array.isArray(entry.events) ? entry.events.slice() : [];
+}
+
+async function loadScanDateHistoryV555(deliveryDate = "", { force = false, apply = true } = {}) {
+  const date = String(deliveryDate || "").trim();
+  if (!state.backend || !date) return [];
+  if (!force) {
+    const cached = cachedScanDateHistoryV555(date);
+    if (cached) {
+      if (apply && String(state.meta?.deliveryDate || "") === date) {
+        state.recent = cached;
+        state.errors = cached.filter((entry) => String(entry?.eventType || "").toLowerCase() === "error");
+        state.lastScan = cached[0] || null;
+      }
+      return cached;
+    }
+  }
+  const pending = state.scanDateHistoryPendingV555.get(date);
+  if (pending) return pending;
+  const signature = scanDateWideCatalogSignatureV486(date);
+  const request = fetchJson(`/api/scan/date-events?deliveryDate=${encodeURIComponent(date)}`)
+    .then((payload) => {
+      const events = dedupeRecentEventsV527(Array.isArray(payload?.events) ? payload.events : []);
+      state.scanDateHistoryCacheV555.set(date, { signature, events });
+      while (state.scanDateHistoryCacheV555.size > Number(state.scanDateWideCacheLimitV526 || SCAN_DATE_CACHE_LIMIT_V526)) {
+        const oldest = state.scanDateHistoryCacheV555.keys().next().value;
+        state.scanDateHistoryCacheV555.delete(oldest);
+      }
+      if (apply && String(state.meta?.deliveryDate || "") === date) {
+        state.recent = events;
+        state.errors = events.filter((entry) => String(entry?.eventType || "").toLowerCase() === "error");
+        state.lastScan = events[0] || null;
+        if (state.page === "scan") {
+          renderRecent();
+          renderLastScan();
+        }
+        if (els.adminModal?.dataset.kind === "recentScans" && !els.adminModal.hidden && els.adminModalBody) {
+          els.adminModalBody.innerHTML = recentScansModalHtml();
+          applyLanguageToRoot(els.adminModalBody);
+        }
+      }
+      return events;
+    })
+    .finally(() => {
+      if (state.scanDateHistoryPendingV555.get(date) === request) state.scanDateHistoryPendingV555.delete(date);
+    });
+  state.scanDateHistoryPendingV555.set(date, request);
+  return request;
+}
+
+function scanDateLoadingTextV583(deliveryDate = "") {
+  const date = String(deliveryDate || "").trim();
+  return date ? `Preparing ${formatNumericDeliveryDate(date)}...` : "Preparing delivery list...";
+}
+
+function setScanDateLoadingSurfaceV584(active = false) {
+  const scanPage = document.getElementById("scanPage");
+  const listPanel = document.getElementById("listPanel");
+  scanPage?.classList.toggle("is-date-loading-v584", Boolean(active));
+  if (listPanel) listPanel.setAttribute("aria-busy", active ? "true" : "false");
+}
+
+function showScanDateLoadingV583(deliveryDate = "", token = 0) {
+  const cleanToken = Number(token || 0);
+  state.scanDateLoadingTokenV583 = cleanToken;
+  window.clearTimeout(state.scanDateLoadingTimerV583);
+  window.clearTimeout(state.scanDateLoadingHideTimerV584);
+  state.scanDateLoadingHideTimerV584 = 0;
+  if (els.scanDateLoadingDetailV583) els.scanDateLoadingDetailV583.textContent = scanDateLoadingTextV583(deliveryDate);
+  state.scanDateLoadingTimerV583 = window.setTimeout(() => {
+    if (state.scanDateLoadingTokenV583 !== cleanToken || !state.scanDateWideLoadingV485 || state.page !== "scan") return;
+    if (els.scanDateLoadingV583) {
+      // Keep the loading card relative to the actual viewport. A transformed page
+      // ancestor can otherwise turn position:fixed into page-relative placement.
+      if (els.scanDateLoadingV583.parentElement !== document.body) document.body.append(els.scanDateLoadingV583);
+      els.scanDateLoadingV583.hidden = false;
+      els.scanDateLoadingV583.setAttribute("aria-busy", "true");
+      setScanDateLoadingSurfaceV584(true);
+      window.requestAnimationFrame(() => els.scanDateLoadingV583?.classList.add("is-visible-v583"));
+    }
+  }, SCAN_DATE_LOADING_DELAY_MS_V583);
+}
+
+function hideScanDateLoadingV583(token = 0) {
+  const cleanToken = Number(token || 0);
+  if (cleanToken && state.scanDateLoadingTokenV583 !== cleanToken) return;
+  window.clearTimeout(state.scanDateLoadingTimerV583);
+  state.scanDateLoadingTimerV583 = 0;
+  setScanDateLoadingSurfaceV584(false);
+  if (!els.scanDateLoadingV583) return;
+  els.scanDateLoadingV583.classList.remove("is-visible-v583");
+  els.scanDateLoadingV583.setAttribute("aria-busy", "false");
+  window.clearTimeout(state.scanDateLoadingHideTimerV584);
+  state.scanDateLoadingHideTimerV584 = window.setTimeout(() => {
+    if (!els.scanDateLoadingV583?.classList.contains("is-visible-v583")) els.scanDateLoadingV583.hidden = true;
+    state.scanDateLoadingHideTimerV584 = 0;
+  }, 150);
+}
+
+function pauseScanDateBackgroundWorkV583(targetDate = "") {
+  const keepDate = String(targetDate || "").trim();
+  window.clearTimeout(state.scanDatePrefetchTimerV527);
+  state.scanDatePrefetchTimerV527 = 0;
+  window.clearTimeout(state.futureFabricationPrewarmTimerV530);
+  state.futureFabricationPrewarmTimerV530 = 0;
+  for (const [date, controller] of state.scanDatePrefetchAbortControllersV583.entries()) {
+    if (date === keepDate) continue;
+    if (controller && !controller.signal.aborted) controller.abort();
+  }
+}
+
+function scanDatePrefetchCandidatesV583(activeDate = "") {
+  const dates = listsByDeliveryDate().map((group) => String(group.date || "")).filter(Boolean);
+  const index = dates.indexOf(String(activeDate || ""));
+  if (index < 0) return [];
+  const limit = Math.max(Number(state.scanDateWideCacheLimitV526 || SCAN_DATE_CACHE_LIMIT_V526) - 1, 0);
+  const candidates = [];
+  // Operators most often move forward through upcoming delivery work. Warm the
+  // next dates first (including dates such as next week's 10/8), then use any
+  // remaining bounded cache slots for recent dates behind the current selection.
+  for (let offset = 1; offset < dates.length && candidates.length < limit; offset += 1) {
+    const date = dates[index + offset];
+    if (date && !candidates.includes(date)) candidates.push(date);
+  }
+  for (let offset = 1; offset < dates.length && candidates.length < limit; offset += 1) {
+    const date = dates[index - offset];
+    if (date && !candidates.includes(date)) candidates.push(date);
+  }
+  return candidates;
 }
 
 function prefetchScanDateBundleV527(deliveryDate = "") {
@@ -8838,8 +9039,9 @@ function prefetchScanDateBundleV527(deliveryDate = "") {
   if (existing) return existing;
   const signature = scanDateWideCatalogSignatureV486(date);
   const controller = new AbortController();
+  state.scanDatePrefetchAbortControllersV583.set(date, controller);
   const timeout = window.setTimeout(() => controller.abort(), 12000);
-  const request = fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controller.signal })
+  const request = fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}&includeFlags=0`, { signal: controller.signal })
     .then((bundle) => {
       const records = Array.isArray(bundle?.records) ? bundle.records.filter(Boolean) : [];
       if (records.length && signature === scanDateWideCatalogSignatureV486(date)) rememberScanDateBundleV526(date, signature, records);
@@ -8849,6 +9051,7 @@ function prefetchScanDateBundleV527(deliveryDate = "") {
     .finally(() => {
       window.clearTimeout(timeout);
       if (state.scanDatePrefetchV527.get(date) === request) state.scanDatePrefetchV527.delete(date);
+      if (state.scanDatePrefetchAbortControllersV583.get(date) === controller) state.scanDatePrefetchAbortControllersV583.delete(date);
     });
   state.scanDatePrefetchV527.set(date, request);
   return request;
@@ -8856,18 +9059,23 @@ function prefetchScanDateBundleV527(deliveryDate = "") {
 
 function scheduleScanDatePrefetchV527(activeDate = "") {
   window.clearTimeout(state.scanDatePrefetchTimerV527);
-  const run = () => {
+  const run = async () => {
     if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
-    const dates = listsByDeliveryDate().map((group) => group.date);
-    const index = dates.indexOf(String(activeDate || ""));
-    if (index < 0) return;
-    // Most operators move one day backward or forward. Warming only those two
-    // dates keeps memory/network use bounded while making the next change local.
-    const neighbors = [dates[index - 1], dates[index + 1]].filter(Boolean);
-    void neighbors.reduce((chain, date) => chain.then(() => prefetchScanDateBundleV527(date)), Promise.resolve());
+    const candidates = scanDatePrefetchCandidatesV583(activeDate);
+    if (!candidates.length) {
+      scheduleFutureFabricationPrewarmV530();
+      return;
+    }
+    // Warm the two closest upcoming dates together, then continue through the
+    // bounded candidate set one at a time. A foreground choice aborts this work.
+    await Promise.allSettled(candidates.slice(0, 2).map((date) => prefetchScanDateBundleV527(date)));
+    for (const date of candidates.slice(2)) {
+      if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
+      await prefetchScanDateBundleV527(date);
+    }
+    scheduleFutureFabricationPrewarmV530();
   };
-  state.scanDatePrefetchTimerV527 = window.setTimeout(run, 450);
-  scheduleFutureFabricationPrewarmV530();
+  state.scanDatePrefetchTimerV527 = window.setTimeout(() => { void run(); }, SCAN_DATE_PREFETCH_DELAY_MS_V583);
 }
 
 function scheduleFutureFabricationPrewarmV530() {
@@ -8875,14 +9083,17 @@ function scheduleFutureFabricationPrewarmV530() {
   const run = async () => {
     if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
     const today = todayKey();
-    const dates = listsByDeliveryDate().map((group) => String(group.date || "")).filter((date) => date && date >= today);
+    const dates = listsByDeliveryDate()
+      .map((group) => String(group.date || ""))
+      .filter((date) => date && date >= today && state.scanDateWideCacheV526.has(date))
+      .sort();
     for (const date of dates) {
-      if (document.hidden || state.page !== "scan") return;
-      let records = cachedScanDateBundleV526(date)?.records || [];
-      if (!records.length) {
-        const bundle = await prefetchScanDateBundleV527(date);
-        records = Array.isArray(bundle?.records) ? bundle.records.filter(Boolean) : cachedScanDateBundleV526(date)?.records || [];
-      }
+      if (document.hidden || state.page !== "scan" || state.scanDateWideLoadingV485) return;
+      const entry = state.scanDateWideCacheV526.get(date);
+      const signature = scanDateWideCatalogSignatureV486(date);
+      const records = entry && String(entry.signature || "") === signature && Array.isArray(entry.records)
+        ? entry.records.filter(Boolean)
+        : [];
       if (!records.length) continue;
       const projected = buildDateWideScanItemsV485(records);
       await warmFabricationDeliveryV521(date, projected, { background: true });
@@ -8903,7 +9114,10 @@ function cancelScanDateWideLoadV512() {
   state.scanDateWideAbortControllerV512 = null;
   state.scanDateWideLoadStartedAtV512 = 0;
   state.scanDateWideLoadingV485 = false;
-  ++state.scanDateWideLoadTokenV485;
+  const cancelledTokenV583 = ++state.scanDateWideLoadTokenV485;
+  hideScanDateLoadingV583();
+  pauseScanDateBackgroundWorkV583();
+  return cancelledTokenV583;
 }
 
 async function activateScanDateV485(deliveryDate, navigate = true, { preferredListId = "", selectionFallbackId = "", selectionKey = "" } = {}) {
@@ -8911,6 +9125,14 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
   if (!date || !state.backend) return;
   const dateLists = state.lists.filter((list) => String(list.deliveryDate || "") === date);
   if (!dateLists.length) return;
+  const likelyReviewListV584 = dateLists.find((list) => scanStagePresetV485(list) === "airport_staging")
+    || dateLists.find((list) => String(list.id || "") === String(preferredListId || ""))
+    || dateLists[0];
+  const likelyReviewListIdV584 = String(likelyReviewListV584?.id || "").trim();
+  // Review metadata used to hold the whole date bundle hostage. Keep the likely
+  // stage identity now, but do not start its heavier flag read until after the
+  // selected date has painted. This prevents a cold review query from competing
+  // with the operator's foreground date bundle for SQLite/CPU time.
   const previousControllerV512 = state.scanDateWideAbortControllerV512;
   if (previousControllerV512 && !previousControllerV512.signal.aborted) previousControllerV512.abort();
   const controllerV512 = new AbortController();
@@ -8918,6 +9140,8 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
   const token = ++state.scanDateWideLoadTokenV485;
   state.scanDateWideLoadingV485 = true;
   state.scanDateWideLoadStartedAtV512 = Date.now();
+  pauseScanDateBackgroundWorkV583(date);
+  showScanDateLoadingV583(date, token);
   const previousDate = String(state.meta?.deliveryDate || "").trim();
   const previousSelected = state.items.find((item) => String(item.id || "") === String(state.selectedId || ""));
   const wantedSelectionKey = selectionKey || previousSelected?.workflowLogicalKeyV485 || "";
@@ -8932,7 +9156,7 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     const prefetchedBundleV527 = !cachedBundleV526 && pendingPrefetchV527 ? await pendingPrefetchV527 : null;
     const bundle = cachedBundleV526
       ? { deliveryDate: date, records: cachedBundleV526.records, cachedV526: true }
-      : prefetchedBundleV527 || await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}`, { signal: controllerV512.signal });
+      : prefetchedBundleV527 || await fetchJson(`/api/scan/date?deliveryDate=${encodeURIComponent(date)}&includeFlags=0`, { signal: controllerV512.signal });
     if (token !== state.scanDateWideLoadTokenV485) return;
     const records = Array.isArray(bundle.records) ? bundle.records.filter(Boolean) : [];
     if (!bundle.cachedV526) rememberScanDateBundleV526(date, requestedCatalogSignature, records);
@@ -8940,8 +9164,10 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     const representative = records.find((record) => scanStagePresetV485(record.payload?.meta || record.list) === "airport_staging")
       || records.find((record) => String(record.list?.id || "") === String(preferredListId || "")) || records[0];
     const projectedItems = buildDateWideScanItemsV485(records);
-    const recent = records.flatMap((record) => record.payload?.recent || []).sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 60);
-    const errors = records.flatMap((record) => record.payload?.errors || []).sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 60);
+    // v0.555: history is intentionally not part of the date bundle. Reuse a
+    // warm history cache when available and refresh it after the page paints.
+    const recent = cachedScanDateHistoryV555(date) || [];
+    const errors = recent.filter((entry) => String(entry?.eventType || "").toLowerCase() === "error");
     const meta = { ...(representative.payload?.meta || representative.list), dateWideScanV485: true };
     state.meta = meta;
     state.activeListId = String(meta.id || representative.list?.id || "");
@@ -8982,14 +9208,27 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
     // first Scan paint. This prevents a stale/empty card state from flashing
     // while a second line-flags request catches up after date navigation.
     const activeRecordV531 = records.find((record) => String(record.list?.id || record.payload?.meta?.id || "") === String(state.activeListId || "")) || representative;
-    if (activeRecordV531?.flags && window.DLSLineUpdates?.applyPayload) {
-      window.DLSLineUpdates.applyPayload(activeRecordV531.flags, state.activeListId, { prompt: false, render: false });
+    const cachedReviewFlagsV584 = activeRecordV531?.flags || window.DLSLineUpdates?.getCached?.(state.activeListId);
+    if (cachedReviewFlagsV584 && window.DLSLineUpdates?.applyPayload) {
+      window.DLSLineUpdates.applyPayload(cachedReviewFlagsV584, state.activeListId, { prompt: false, render: false });
     }
     // Claim the date-wide warm before Scan renders. This prevents the visible
     // page hydrator and the full-date hydrator from queuing the same pieces.
     if (typeof warmFabricationDeliveryV521 === "function") void warmFabricationDeliveryV521(date, projectedItems).catch(() => {});
     if (navigate) showPage("scan"); else if (state.page === "scan") renderScanPage();
+    // Paint the selected date before requesting review metadata. Cached flags are
+    // already applied above; a cold flag rebuild now runs only after the operator
+    // can see and use the new date.
+    if (likelyReviewListIdV584 && window.DLSLineUpdates?.loadAndApply) {
+      window.setTimeout(() => {
+        if (String(state.activeListId || "") !== likelyReviewListIdV584 || state.page !== "scan") return;
+        void window.DLSLineUpdates.loadAndApply(likelyReviewListIdV584, { force: true, prompt: false, render: true }).catch(() => null);
+      }, 0);
+    }
     if (typeof ensureMachineConfigurationV521 === "function") void ensureMachineConfigurationV521().catch(() => {});
+    // Paint first, then hydrate audit history in parallel. All Scans also waits
+    // on this same deduplicated request if the operator opens it immediately.
+    void loadScanDateHistoryV555(date).catch(() => {});
     scheduleScanDatePrefetchV527(date);
     return { meta, items: projectedItems };
   } catch (error) {
@@ -9004,6 +9243,7 @@ async function activateScanDateV485(deliveryDate, navigate = true, { preferredLi
       state.scanDateWideLoadingV485 = false;
       state.scanDateWideLoadStartedAtV512 = 0;
       if (state.scanDateWideAbortControllerV512 === controllerV512) state.scanDateWideAbortControllerV512 = null;
+      hideScanDateLoadingV583(token);
     }
   }
 }
@@ -9738,7 +9978,7 @@ function renderScanMachineFiltersV521() {
     { key: "progress-staging", label: workflowPresentationV355().stagingStage || "Staging", color: "#4d74e6" },
     { key: "progress-outbound", label: workflowPresentationV355().outboundStage || "Outbound", color: "#d89a1f" },
   ];
-  target.innerHTML = buttons.map((row) => `<button class="tab scan-progress-filter-v534" style="--progress-filter-color:${escapeHtml(safeProgressColorV476(row.color, "#64748b"))}" data-filter="${escapeHtml(row.key)}" type="button"><i aria-hidden="true"></i><span>${escapeHtml(row.label)}</span><b data-filter-count>0</b></button>`).join("");
+  target.innerHTML = buttons.map((row) => `<button class="tab scan-progress-filter-v534" style="--progress-filter-color:${escapeHtml(safeProgressColorV476(row.color, "#64748b"))}" data-filter="${escapeHtml(row.key)}" type="button"><span class="scan-filter-label-v555">${escapeHtml(row.label)}</span><b class="scan-filter-count-v555" data-filter-count>0</b></button>`).join("");
   syncScanFilterButtons();
 }
 
@@ -10157,6 +10397,37 @@ function cachedFabricationStatusV474(item = {}) {
   return state.fabricationStatusCacheV474.get(fabricationStatusItemKeyV521(item)) || null;
 }
 
+/**
+ * v0.552: Keep the last known machine identity when a refresh explicitly says
+ * its production source is unavailable. A disconnected sketch/program share is
+ * not evidence that a Denver/WaterJet assignment disappeared. Authoritative
+ * reachable responses still replace the cached classification normally.
+ */
+function mergeFabricationStatusV552(previous = null, incoming = null) {
+  const next = incoming && typeof incoming === "object" ? { ...incoming } : {};
+  if (!previous || typeof previous !== "object") return next;
+  const priorSignal = previous.actualMachineCode || previous.machineCode || previous.assignedMachineCode
+    || previous.actualMachine || previous.machine || previous.assignedMachine || "";
+  const nextSignal = next.actualMachineCode || next.machineCode || next.assignedMachineCode
+    || next.actualMachine || next.machine || next.assignedMachine || "";
+  const sketchUnavailable = Boolean(next.availability && next.availability.sketch === false);
+  if (!priorSignal || nextSignal || !(next.checkUnavailable === true || sketchUnavailable)) return next;
+  const machineFields = [
+    "machine", "machineCode", "assignedMachine", "assignedMachineCode",
+    "actualMachine", "actualMachineCode", "machineOverride", "machineConfidence",
+    "machineSource", "machineAssignmentReason", "labelFabricationSignal", "required",
+    "sketchMatched", "sketchRemake", "sketchCancelled",
+  ];
+  for (const field of machineFields) {
+    if ((next[field] === undefined || next[field] === null || next[field] === "") && previous[field] !== undefined) {
+      next[field] = previous[field];
+    }
+  }
+  if (next.fabricated == null && previous.fabricated != null) next.fabricated = previous.fabricated;
+  next.rememberedMachineV552 = true;
+  return next;
+}
+
 function canonicalMachineCodeV529(value = "") {
   const raw = String(value || "").trim().toLowerCase();
   const compact = raw.replace(/[^a-z0-9]+/g, "");
@@ -10378,6 +10649,43 @@ function scanCuttingProgressPresentationV511(item = {}) {
   };
 }
 
+function customProgressAnchorRankV549(anchor = "") {
+  const clean = String(anchor || "").trim().toLowerCase();
+  if (clean === "cutting") return -10;
+  if (clean.startsWith("machine:")) return machineProgressRankV521(clean.slice(8));
+  const presetRanks = {
+    airport_staging: 10,
+    airport_outbound: 20,
+    indian_trail: 30,
+    greenville: 30,
+    cpu: 30,
+    dtc: 30,
+  };
+  return Number(presetRanks[clean] ?? 10);
+}
+
+function customProgressStepsV549(item = {}) {
+  return (Array.isArray(item.customProgress) ? item.customProgress : [])
+    .filter((stage) => stage && stage.active !== false)
+    .map((stage, index) => {
+      const anchorRank = customProgressAnchorRankV549(stage.anchor);
+      const rank = anchorRank + (String(stage.position || "after") === "before" ? -0.25 : 0.25) + (Number(stage.sortOrder || index) / 10000);
+      return {
+        label: stage.label || stage.key || "Custom stage",
+        scanned: stage.complete ? 1 : 0,
+        qty: 1,
+        complete: Boolean(stage.complete),
+        kind: "custom-progress",
+        color: "#7b61b7",
+        timestamp: stage.completedAt || "",
+        rank,
+        stageKey: stage.key || "",
+        completionMode: stage.completionMode || "manual_scan",
+        downstreamPolicy: stage.downstreamPolicy || "auto_complete",
+      };
+    });
+}
+
 function scanDateWideProgressStepsV485(item = {}) {
   if (!state.meta?.dateWideScanV485 || !Array.isArray(item.workflowStagesV485)) return null;
   const cutting = scanCuttingProgressPresentationV511(item);
@@ -10398,7 +10706,8 @@ function scanDateWideProgressStepsV485(item = {}) {
     timestamp: stage.lastScannedAt || "",
     rank: workflowProgressStageRankV477(stage),
   }));
-  const steps = [{ ...cutting, rank: -10 }, ...(fabrication ? [fabrication] : []), ...stages]
+  const customSteps = customProgressStepsV549(item);
+  const steps = [{ ...cutting, rank: -10 }, ...(fabrication ? [fabrication] : []), ...customSteps, ...stages]
     .sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0));
   return { steps, noFab, fabricationStatus };
 }
@@ -10477,8 +10786,11 @@ function progressStepHtmlV475(step, role = "") {
   const toneClass = step.tone === "no-fab-v478" ? "is-no-fab-v478" : "";
   const kindClass = step.kind === "fabrication" ? "is-fabrication-pending-v480" : step.kind === "cutting" ? "is-cutting-step-v511" : step.kind === "no-fab" ? "is-no-fab-slot-v512" : "";
   const iconKind = step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label || "Progress");
+  const icon = step.kind === "cutting" && step.active
+    ? `<i class="cutting-progress-spinner-v498 scan-cutting-spinner-v549" aria-hidden="true"></i>`
+    : globalSearchIconV433(iconKind);
   const value = step.kind === "no-fab" ? "N/A" : `${scanned}/${qty}`;
-  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${globalSearchIconV433(iconKind)}<span class="scan-progress-copy-v539"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span></span>`;
+  return `<span class="scan-progress-step-v475 ${stateClass} ${toneClass} ${kindClass}" style="--progress-step-color:${escapeHtml(progressStepColorV480(step))}">${icon}<span class="scan-progress-copy-v539"><b>${escapeHtml(step.label || "Progress")}</b><strong>${escapeHtml(value)}</strong></span></span>`;
 }
 
 function scanProgressMarkupV475(item = {}) {
@@ -11059,9 +11371,9 @@ function renderCounts() {
   const manualRemakeAll = pieceCount(remakeItems.filter((item) => item.manualOnly || String(item.manualSource || "").trim()));
   const sourceRemakeAll = Math.max(remakeAll - manualRemakeAll, 0);
   if (els.countRemakes) {
-    els.countRemakes.textContent = manualRemakeAll
-      ? `${sourceRemakeAll} A+W + ${manualRemakeAll} manual`
-      : `${sourceRemakeAll}`;
+    // v0.549: every Scan filter ends with one numeric count. Keep the A+W/manual
+    // provenance in the tooltip instead of widening this one button uniquely.
+    els.countRemakes.textContent = `${remakeAll}`;
     els.countRemakes.title = manualRemakeAll
       ? `${remakeAll} active remake pieces total: ${sourceRemakeAll} from A+W and ${manualRemakeAll} preserved manual`
       : `${sourceRemakeAll} active A+W remake pieces`;
@@ -11078,6 +11390,16 @@ function renderCounts() {
   document.querySelectorAll('[data-filter="internal-rejects"]').forEach((button) => {
     button.classList.toggle("has-alert", Boolean(internalRejectCount));
     button.classList.toggle("is-clear", !internalRejectCount);
+  });
+  const attentionCountsV555 = {
+    "internal-rejects": internalRejectCount,
+    remakes: remakeAll,
+    rushes: rushAll,
+  };
+  Object.entries(attentionCountsV555).forEach(([filter, count]) => {
+    document.querySelectorAll(`[data-filter="${filter}"]`).forEach((button) => {
+      button.classList.toggle("has-attention-count-v555", Number(count || 0) > 0);
+    });
   });
   if (els.countUpdated) els.countUpdated.textContent = `${updatedCount}`;
   updateScanFilterGlanceBadge(els.scanFilterErrorBadge, stats.errorCount, "scan errors");
@@ -11096,8 +11418,10 @@ function renderCounts() {
     document.querySelectorAll(`[data-filter="${filter}"]`).forEach((button) => {
       const counter = button.querySelector("[data-filter-count]");
       if (counter) counter.textContent = String(count);
-      button.hidden = count === 0;
-      if (count === 0 && state.activeFilters.delete(filter)) filterSelectionChanged = true;
+      // v0.552: machine counts can be temporarily zero while the full-date FAB
+      // catalog is warming. Keep a selected progress filter visible/selected
+      // rather than silently clearing the operator's choice mid-refresh.
+      button.hidden = count === 0 && !state.activeFilters.has(filter);
     });
   });
   const workflowStatusCountsV514 = {
@@ -11139,10 +11463,10 @@ function renderCounts() {
     const signature = JSON.stringify([selectedGlassTypes, sortedGlassEntries]);
     if (signature !== state.lastGlassFilterSignature) {
       els.glassFilterTabs.innerHTML = [
-        `<button class="tab glass-filter-tab ${editingSet.size ? "" : "is-active"} " data-glass-filter="all" type="button" aria-pressed="${editingSet.size ? "false" : "true"}">All Glass Types <span>${totalItems}</span></button>`,
+        `<button class="tab glass-filter-tab ${editingSet.size ? "" : "is-active"} " data-glass-filter="all" type="button" aria-pressed="${editingSet.size ? "false" : "true"}"><span class="scan-filter-label-v555">All Glass Types</span><span class="scan-filter-count-v555">${totalItems}</span></button>`,
         ...sortedGlassEntries.map(([label, count]) => {
           const active = editingSet.has(label);
-          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""} " ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span>${escapeHtml(count)}</span></button>`;
+          return `<button class="tab glass-filter-tab glass-tone-chip ${active ? "is-active" : ""} " ${glassToneAttributes(label)} data-glass-filter="${escapeHtml(label)}" type="button" aria-pressed="${active ? "true" : "false"}"><span class="scan-filter-label-v555">${escapeHtml(label)}</span><span class="scan-filter-count-v555">${escapeHtml(count)}</span></button>`;
         }),
       ].join("");
       state.lastGlassFilterSignature = signature;
@@ -13979,8 +14303,27 @@ function scanEntryCompactMessage(entry) {
  * Effects: May call the backend api.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+function scanEntryImportSummaryV555(entry) {
+  const reason = String(entry?.reason || "").trim();
+  const segments = reason.split("|").map((value) => value.trim()).filter(Boolean).slice(1);
+  const labels = [];
+  for (const segment of segments) {
+    const match = segment.match(/^(\d+)\s+(changed|added|removed)\s+(line|piece)\(s\)$/i);
+    if (!match || Number(match[1]) <= 0) continue;
+    const count = Number(match[1]);
+    const noun = `${match[3].toLowerCase()}${count === 1 ? "" : "s"}`;
+    const verb = match[2].toLowerCase() === "added" ? "added" : match[2].toLowerCase() === "removed" ? "removed" : "changed";
+    labels.push(`${count} ${noun} ${verb}`);
+  }
+  return labels.join(" · ");
+}
+
 function scanEntryFullDetail(entry) {
   const eventType = String(entry?.eventType || "").toLowerCase();
+  if (["import", "update"].includes(eventType)) {
+    const summary = scanEntryImportSummaryV555(entry);
+    return summary ? `<span>${escapeHtml(summary)}</span>` : `<span>${escapeHtml(scanEntryCompactMessage(entry))}</span>`;
+  }
   if (eventType === "reject_reset") {
     const presentation = scanRejectResetPresentationV500(entry);
     return `<strong>${escapeHtml(presentation.label)}</strong><span>${escapeHtml(presentation.compact)}</span>`;
@@ -14272,6 +14615,13 @@ function renderRecent() {
  */
 async function openRecentScansModal() {
   openAdminModal("recentScans");
+  const date = String(state.meta?.deliveryDate || state.scanDateWideDateV485 || "").trim();
+  if (!state.backend || !state.meta?.dateWideScanV485 || !date) return;
+  try {
+    await loadScanDateHistoryV555(date, { force: !state.recent.length, apply: true });
+  } catch (error) {
+    showInlineError(`All Scans history could not be refreshed: ${error.message}`, false);
+  }
 }
 
 /**
@@ -14319,8 +14669,20 @@ function scanEventLocationPresentation(entry) {
 
 function dedupeRecentEventsV527(entries = []) {
   const seenRejects = new Set();
+  const seenImportsV555 = new Set();
   return (entries || []).filter((entry) => {
     const eventType = String(entry?.eventType || "").toLowerCase();
+    if (["import", "update"].includes(eventType)) {
+      // A single A+W/Excel import writes one audit event per maintained stage.
+      // In the date-wide All Scans view those stage copies are one operator
+      // event, so collapse only semantically identical import/update rows.
+      const reason = String(entry?.reason || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const message = String(entry?.message || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const key = [eventType, entry?.time || "", reason, message].join("|");
+      if (seenImportsV555.has(key)) return false;
+      seenImportsV555.add(key);
+      return true;
+    }
     if (!eventType.includes("reject")) return true;
     const item = scanEntryDisplayItem(entry) || {};
     const exactId = entry?.rejectId || entry?.details?.rejectId || item?.lastRejectId || "";
@@ -14374,7 +14736,7 @@ function recentScansModalHtml() {
               <th>Qty</th>
               <th>Customer</th>
               <th>Location</th>
-              <th>Full details</th>
+              <th>Details</th>
               <th>User / Station</th>
               <th>Date & Time</th>
               <th>Check</th>
@@ -14399,7 +14761,7 @@ function recentScansModalHtml() {
                           : Math.abs(Number(entry.qtyDelta || 0)) || "-";
                       const jobOrderItem = item
                         ? `<strong>Order ${escapeHtml(item.order)} / Item ${escapeHtml(item.item)}</strong><span>Job Nr. ${escapeHtml(item.job || "Not provided")}</span>`
-                        : `<strong>${escapeHtml(eventLabel)}</strong><span>No line item attached</span>`;
+                        : `<span class="all-scans-no-item-v555">—</span>`;
                       const scanGlassLabel = item ? glassTypeLabel(item) : "";
                       const glassMarkup = scanGlassLabel
                         ? `<span class="all-scans-glass-type-v381 glass-tone-inline" ${glassToneAttributes(scanGlassLabel)}>${escapeHtml(scanGlassLabel)}</span>`
@@ -14420,7 +14782,7 @@ function recentScansModalHtml() {
                           <td data-label="Quantity">${quantity}</td>
                           <td data-label="Customer">${item ? escapeHtml(item.customer || "-") : "-"}</td>
                           <td data-label="Location">${locationMarkup}</td>
-                          <td data-label="Full details"><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
+                          <td data-label="Details"><div class="all-scans-detail-cell">${scanEntryFullDetail(entry) || `<span>${escapeHtml(scanEntryCompactMessage(entry) || "No additional details")}</span>`}</div></td>
                           <td data-label="User / Station"><strong>${escapeHtml(entry.user || "System")}</strong><span>${escapeHtml(entry.station || "No station")}</span></td>
                           <td data-label="Date & Time">${Number.isNaN(time.getTime()) ? "" : time.toLocaleString(appLocale())}</td>
                           <td data-label="Check"><span class="check-dot ${entry.ok ? "" : "error"}" role="img" title="${entry.ok ? "Successful" : "Needs review"}" aria-label="${entry.ok ? "Successful" : "Needs review"}"></span></td>
@@ -15035,7 +15397,7 @@ function bayTargetStatusMetaV442(bay) {
 
 function bayTargetOptionHtmlV440(bay, selectedCode = "") {
   const name = bayLocationDisplayLabel(bay.bayCode, bay.displayName);
-  const status = bayTargetStatusMetaV440(bay);
+  const status = bayTargetStatusMetaV442(bay);
   const isSelected = bay.bayCode === selectedCode;
   const selectable = status.kind === "available" || status.kind === "manual";
   return `<option value="${escapeHtml(bay.bayCode)}" ${isSelected ? "selected" : ""} ${selectable ? "" : "disabled"} data-bay-selected-label="${escapeHtml(name)}" data-bay-status-badge="${escapeHtml(status.abbr)}" data-bay-status-kind="${escapeHtml(status.kind)}" data-bay-status-label="${escapeHtml(status.label)}">${escapeHtml(name)} ${escapeHtml(status.abbr)}</option>`;
@@ -15939,7 +16301,7 @@ function statisticsChartDataset(metric = state.homeChartMetric, breakageMeasureO
       metric,
       icon: "glass",
       title: "Glass mix by quantity",
-      subtitle: "",
+      subtitle: "New A+W production first seen in the selected reporting range. External Remakes are excluded.",
       suffix: "",
       entries: glassRows.map((row) => ({
         label: row.label,
@@ -16835,7 +17197,26 @@ function productionDeliveryDatesV506(values = []) {
   return dates.map((value) => formatNumericDeliveryDate(value) || value).join(" · ");
 }
 
-/** Open the exact Order/Item rows behind one Today's Production Count glass bucket. */
+/** Return the independent production day shown by the Daily Production Count card. */
+function statisticsDailyProductionDateKeyV574(value = state.statisticsDailyProductionDateV574) {
+  const today = todayKey() || dateInputValue(new Date());
+  const candidate = String(value || "").trim();
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : today;
+  return valid > today ? today : valid;
+}
+
+/** Keep the Daily Production Count date input synchronized and future-safe. */
+function syncStatisticsDailyProductionDateV574() {
+  const selected = statisticsDailyProductionDateKeyV574();
+  state.statisticsDailyProductionDateV574 = selected;
+  if (els.statisticsDailyProductionDateV574) {
+    els.statisticsDailyProductionDateV574.max = todayKey() || dateInputValue(new Date());
+    els.statisticsDailyProductionDateV574.value = selected;
+  }
+  return selected;
+}
+
+/** Open the exact Order/Item rows behind one Daily Production Count glass bucket. */
 function openTodayProductionGlassAuditV536(glassType = "") {
   const cleanGlass = String(glassType || "").trim();
   if (!cleanGlass) return;
@@ -16860,7 +17241,7 @@ function openTodayProductionGlassAuditV536(glassType = "") {
   </tr>`).join("");
   openAdminModal("custom", {
     title: `${cleanGlass} production audit`,
-    eyebrow: "Today's Production Count",
+    eyebrow: "Daily Production Count",
     description: `${pieces} piece${pieces === 1 ? "" : "s"} across ${rows.length} logical Order/Item row${rows.length === 1 ? "" : "s"}. These are the exact rows contributing to this glass total.`,
     body: `<div class="statistics-production-audit-v536">
       <div class="statistics-production-audit-summary-v536">
@@ -16902,38 +17283,62 @@ async function hydrateProductionActivityMachinesV514(report) {
   return report;
 }
 
-/** Load the independent today-only activity ledger used by the prominent Statistics card and email. */
+/** Load the independent selected-day activity ledger used by the prominent Statistics card and email. */
 async function ensureTodayProductionReportV514({ force = false } = {}) {
-  const today = todayKey() || dateInputValue(new Date());
+  const productionDate = syncStatisticsDailyProductionDateV574();
   if (!state.backend || !hasPermission("view_reports")) return state.statisticsTodayProductionReportV514;
   const reportAgeV542 = Date.now() - Number(state.statisticsTodayProductionLoadedAtV542 || 0);
-  if (!force && state.statisticsTodayProductionReportV514?.dateKeyV514 === today && reportAgeV542 < 60_000) {
+  if (!force && state.statisticsTodayProductionReportV514?.dateKeyV514 === productionDate && reportAgeV542 < 60_000) {
     return state.statisticsTodayProductionReportV514;
   }
-  if (state.statisticsTodayProductionLoadingV514) return state.statisticsTodayProductionReportV514;
+  if (state.statisticsTodayProductionLoadingV514
+      && state.statisticsDailyProductionRequestDateV574 === productionDate
+      && state.statisticsDailyProductionPromiseV574) {
+    return state.statisticsDailyProductionPromiseV574;
+  }
+  const requestToken = Number(state.statisticsDailyProductionRequestTokenV574 || 0) + 1;
+  state.statisticsDailyProductionRequestTokenV574 = requestToken;
+  state.statisticsDailyProductionRequestDateV574 = productionDate;
   state.statisticsTodayProductionLoadingV514 = true;
   if (state.page === "statistics") renderStatisticsProductionActivityV506();
-  try {
-    const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
-    report.dateKeyV514 = today;
-    state.statisticsTodayProductionReportV514 = report;
-    state.statisticsTodayProductionLoadedAtV542 = Date.now();
-    // Machine evidence enriches the already visible report. Do not hold the
-    // production count behind network-share fabrication probes.
-    void hydrateProductionActivityMachinesV514(report).then(() => {
-      if (state.page === "statistics") renderStatisticsProductionActivityV506();
-    }).catch(() => {});
-    return report;
-  } catch (_error) {
-    if (force) {
-      state.statisticsTodayProductionReportV514 = null;
-      state.statisticsTodayProductionLoadedAtV542 = 0;
+  const requestPromise = (async () => {
+    try {
+      const report = await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(productionDate)}&dateTo=${encodeURIComponent(productionDate)}&detailRows=1`);
+      report.dateKeyV514 = productionDate;
+      const stillCurrent = state.statisticsDailyProductionRequestTokenV574 === requestToken
+        && statisticsDailyProductionDateKeyV574() === productionDate;
+      if (stillCurrent) {
+        state.statisticsTodayProductionReportV514 = report;
+        state.statisticsTodayProductionLoadedAtV542 = Date.now();
+      }
+      // Machine evidence enriches the already visible report. Do not hold the
+      // production count behind network-share fabrication probes.
+      void hydrateProductionActivityMachinesV514(report).then(() => {
+        if (state.page === "statistics"
+            && state.statisticsDailyProductionRequestTokenV574 === requestToken
+            && statisticsDailyProductionDateKeyV574() === productionDate) {
+          renderStatisticsProductionActivityV506();
+        }
+      }).catch(() => {});
+      return report;
+    } catch (_error) {
+      const stillCurrent = state.statisticsDailyProductionRequestTokenV574 === requestToken
+        && statisticsDailyProductionDateKeyV574() === productionDate;
+      if (force && stillCurrent) {
+        state.statisticsTodayProductionReportV514 = null;
+        state.statisticsTodayProductionLoadedAtV542 = 0;
+      }
+      return stillCurrent ? state.statisticsTodayProductionReportV514 : null;
+    } finally {
+      if (state.statisticsDailyProductionRequestTokenV574 === requestToken) {
+        state.statisticsTodayProductionLoadingV514 = false;
+        state.statisticsDailyProductionPromiseV574 = null;
+        if (state.page === "statistics") renderStatisticsProductionActivityV506();
+      }
     }
-    return state.statisticsTodayProductionReportV514;
-  } finally {
-    state.statisticsTodayProductionLoadingV514 = false;
-    if (state.page === "statistics") renderStatisticsProductionActivityV506();
-  }
+  })();
+  state.statisticsDailyProductionPromiseV574 = requestPromise;
+  return requestPromise;
 }
 
 /** Load detailed production activity for the active chart range, independent of aggregate chart data. */
@@ -17045,11 +17450,12 @@ function statisticsProductionCountTableHtmlV514(dataset, entries) {
 /** Render true piece counts by glass type plus separate reject/remake totals. */
 function renderStatisticsProductionActivityV506() {
   if (!els.statisticsProductionActivity) return;
-  const report = state.statisticsTodayProductionReportV514;
-  const today = todayKey() || dateInputValue(new Date());
-  if (els.statisticsTodayProductionDateV514) els.statisticsTodayProductionDateV514.textContent = formatNumericDeliveryDate(today) || today;
+  const productionDate = syncStatisticsDailyProductionDateV574();
+  const cachedReport = state.statisticsTodayProductionReportV514;
+  const report = cachedReport?.dateKeyV514 === productionDate ? cachedReport : null;
+  if (els.statisticsTodayProductionDateV514) els.statisticsTodayProductionDateV514.textContent = formatNumericDeliveryDate(productionDate) || productionDate;
   if (!report) {
-    const message = state.statisticsTodayProductionLoadingV514 ? "Loading today’s production activity…" : "Today’s production activity is not available yet.";
+    const message = state.statisticsTodayProductionLoadingV514 ? "Loading production activity for this day…" : "Production activity is not available for this day yet.";
     els.statisticsProductionActivity.innerHTML = `<div class="statistics-production-count-empty-v505">${escapeHtml(message)}</div>`;
     return;
   }
@@ -17085,7 +17491,7 @@ function renderStatisticsProductionActivityV506() {
           <span class="statistics-production-glass-open-v536" aria-hidden="true">View rows →</span>
         </button>`;
       }).join("")
-    : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported today.</div>`;
+    : `<div class="statistics-production-glass-empty-v506">No new production pieces were first imported on this production day.</div>`;
 
   const todayMachineBucketsV514 = new Map();
   for (const row of newWork.rows || []) {
@@ -17098,14 +17504,14 @@ function renderStatisticsProductionActivityV506() {
   const machineMarkupV514 = [...todayMachineBucketsV514.entries()]
     .sort((a, b) => Number(b[1].pieces || 0) - Number(a[1].pieces || 0) || a[0].localeCompare(b[0]))
     .map(([machine, values]) => `<article class="statistics-production-machine-row-v514 statistics-production-machine-row-v539"><span><small>Machine</small><strong>${escapeHtml(machine)}</strong></span><b>${escapeHtml(values.pieces)}<small> pcs</small></b><em>${escapeHtml(values.items)} item${values.items === 1 ? "" : "s"}</em></article>`).join("")
-    || `<div class="statistics-production-glass-empty-v506">No machine production has been recorded today.</div>`;
+    || `<div class="statistics-production-glass-empty-v506">No machine production has been recorded on this production day.</div>`;
   const excludedPieces = Number(activity.yieldPercentageExcluded?.pieces || 0);
   els.statisticsProductionActivity.innerHTML = `
     <article class="statistics-production-count-card-v505 statistics-production-new-v506 is-new">
       <header class="statistics-production-new-header-v506">
         <span class="statistics-production-count-icon-v505" aria-hidden="true"></span>
         <div>
-          <small>New orders first seen from A+W today</small>
+          <small>New orders first seen from A+W on this day</small>
           <strong>${escapeHtml(Number(newWork.pieces || 0))}<span> pieces</span></strong>
           <p>${escapeHtml(Number(newWork.itemCount || 0))} item${Number(newWork.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(newWork.orderCount || 0))} order${Number(newWork.orderCount || 0) === 1 ? "" : "s"} · External Remakes excluded</p>
         </div>
@@ -17115,7 +17521,7 @@ function renderStatisticsProductionActivityV506() {
         ${glassMarkup}
       </div>
       <div class="statistics-sheet-total-v527 statistics-sheet-total-v540"><span>Physical stock sheets used</span><strong>${escapeHtml(Number(sheetUsageV527.totalSheets || 0))}</strong><small>${sheetUsageV527.snapshotAvailable ? `${escapeHtml(Number(sheetUsageV527.optimizationCount || 0))} current A+W optimization${Number(sheetUsageV527.optimizationCount || 0) === 1 ? "" : "s"} · exact plate sizes` : "Run an A+W update to load the current plate snapshot"}</small></div>
-      <div class="statistics-production-machine-ledger-v514" aria-label="Today’s new production by machine"><header><span>By machine</span><small>New orders only</small></header>${machineMarkupV514}</div>
+      <div class="statistics-production-machine-ledger-v514" aria-label="Selected-day new production by machine"><header><span>By machine</span><small>New orders only</small></header>${machineMarkupV514}</div>
     </article>
     <div class="statistics-production-side-stack-v506">
       <article class="statistics-production-count-card-v505 is-reject statistics-production-side-card-v506">
@@ -17133,7 +17539,7 @@ function renderStatisticsProductionActivityV506() {
           <small>External remakes</small>
           <strong>${escapeHtml(Number(remakes.pieces || 0))}</strong>
           <p>${escapeHtml(Number(remakes.itemCount || 0))} item${Number(remakes.itemCount || 0) === 1 ? "" : "s"} · ${escapeHtml(Number(remakes.orderCount || 0))} order${Number(remakes.orderCount || 0) === 1 ? "" : "s"}</p>
-          <em>First imported or first changed to REMAKE today</em>
+          <em>First imported or first changed to REMAKE on this day</em>
         </div>
       </article>
     </div>`;
@@ -17184,7 +17590,7 @@ function dailyProductionEmailDraftV506(report, dateKey) {
     .map(([machine, values]) => ({ machine, pieces: values.pieces, items: values.items, orders: values.orders.size }))
     .sort((a, b) => Number(b.pieces || 0) - Number(a.pieces || 0) || a.machine.localeCompare(b.machine));
 
-  const plain = [`DAILY PRODUCTION COUNT - ${displayDate}`, "", "TODAY AT A GLANCE:", `  New production: ${Number(newWork.pieces || 0)} pieces`, `  Internal rejects: ${Number(rejects.pieces || 0)} pieces`, `  External remakes: ${Number(remakes.pieces || 0)} pieces`, "", "NEW PRODUCTION BY MACHINE:"];
+  const plain = [`DAILY PRODUCTION COUNT - ${displayDate}`, "", "DAY AT A GLANCE:", `  New production: ${Number(newWork.pieces || 0)} pieces`, `  Internal rejects: ${Number(rejects.pieces || 0)} pieces`, `  External remakes: ${Number(remakes.pieces || 0)} pieces`, "", "NEW PRODUCTION BY MACHINE:"];
   if (!emailMachineRowsV514.length) plain.push("  No machine production recorded.");
   emailMachineRowsV514.forEach((row) => plain.push(`  ${row.machine}: ${row.pieces} pieces | ${row.items} items | ${row.orders} orders`));
   plain.push("", "NEW ORDERS BY GLASS:");
@@ -17268,7 +17674,7 @@ function dailyProductionEmailDraftV506(report, dateKey) {
         <tr><td style="padding:0 23px 18px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
           <thead><tr>${dailyProductionHeaderCellV506("Glass Type")}${dailyProductionHeaderCellV506("Pieces", "#0b3158", "center")}${dailyProductionHeaderCellV506("Items", "#0b3158", "center")}${dailyProductionHeaderCellV506("Orders", "#0b3158", "center")}${dailyProductionHeaderCellV506("Delivery Date(s)")}</tr></thead><tbody>${newRowsHtml}</tbody>
         </table></td></tr>
-        <tr><td style="padding:2px 23px 7px;"><div style="font-size:17px;font-weight:850;color:#103a61;">New Production by Machine</div><div style="font-size:11px;color:#718599;margin-top:2px;">Shows where today’s newly imported glass is expected to run. Remakes and Internal Rejects remain separate below.</div></td></tr>
+        <tr><td style="padding:2px 23px 7px;"><div style="font-size:17px;font-weight:850;color:#103a61;">New Production by Machine</div><div style="font-size:11px;color:#718599;margin-top:2px;">Shows where the selected day’s newly imported glass is expected to run. Remakes and Internal Rejects remain separate below.</div></td></tr>
         <tr><td style="padding:0 23px 20px;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d9e4ed;">
           <thead><tr>${dailyProductionHeaderCellV506("Machine", "#135d8b")}${dailyProductionHeaderCellV506("Pieces", "#135d8b", "center")}${dailyProductionHeaderCellV506("Items", "#135d8b", "center")}${dailyProductionHeaderCellV506("Orders", "#135d8b", "center")}</tr></thead><tbody>${machineRowsHtmlV514}</tbody>
         </table></td></tr>
@@ -17276,7 +17682,7 @@ function dailyProductionEmailDraftV506(report, dateKey) {
         <tr><td style="padding:0 23px 18px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #ead8d5;">
           <thead><tr>${["Date / Time","Order #","Line","Qty","Glass Type","Size","Sq Ft.","Delivery Date","Reason","Machine","Reported By"].map((value) => dailyProductionHeaderCellV506(value, "#b63c30", ["Line","Qty","Sq Ft."].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${rejectRowsHtml}</tbody>
         </table></div>${Number(excluded.pieces || 0) > 0 ? `<div style="padding:8px 10px;margin-top:8px;background:#fff8e8;border:1px solid #f0d79c;color:#765516;font-size:11px;"><b>${Number(excluded.pieces || 0)} Yield Percentage piece${Number(excluded.pieces || 0) === 1 ? "" : "s"}</b> excluded from production statistics.</div>` : ""}</td></tr>
-        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#5d468a;">External Remakes</div><div style="font-size:11px;color:#718599;margin-top:2px;">Replacement work first imported or first changed to REMAKE today.</div></td></tr>
+        <tr><td style="padding:4px 23px 6px;"><div style="font-size:17px;font-weight:800;color:#5d468a;">External Remakes</div><div style="font-size:11px;color:#718599;margin-top:2px;">Replacement work first imported or first changed to REMAKE on this day.</div></td></tr>
         <tr><td style="padding:0 23px 20px;"><div style="overflow-x:auto;"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #dfd8eb;">
           <thead><tr>${["Reported","Order #","Line","Qty","Customer","Job ID","Glass Type","Size","Delivery Date"].map((value) => dailyProductionHeaderCellV506(value, "#654c90", ["Line","Qty"].includes(value) ? "center" : "left")).join("")}</tr></thead><tbody>${remakeRowsHtml}</tbody>
         </table></div></td></tr>
@@ -17329,16 +17735,16 @@ function closeDailyProductionEmailPreviewV506() {
   if (backdrop) backdrop.hidden = true;
 }
 
-/** Always draft today's production email regardless of the Statistics range being viewed. */
+/** Draft the Daily Production Count email for the independently selected production day. */
 async function draftDailyProductionEmailV506() {
   const button = els.statisticsDailyProductionEmailBtn;
-  const today = todayKey() || dateInputValue(new Date());
+  const productionDate = syncStatisticsDailyProductionDateV574();
   if (button) button.disabled = true;
   try {
     const report = await ensureTodayProductionReportV514({ force: false })
-      || await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(today)}&dateTo=${encodeURIComponent(today)}&detailRows=1`);
+      || await fetchJson(`/api/reports/summary?dateFrom=${encodeURIComponent(productionDate)}&dateTo=${encodeURIComponent(productionDate)}&detailRows=1`);
     await hydrateProductionActivityMachinesV514(report);
-    const draft = dailyProductionEmailDraftV506(report, today);
+    const draft = dailyProductionEmailDraftV506(report, productionDate);
     state.dailyProductionEmailDraftV506 = draft;
     const modal = ensureDailyProductionEmailPreviewV506();
     const backdrop = document.getElementById("dailyProductionEmailBackdropV506");
@@ -18257,7 +18663,7 @@ const HELP_PAGE_CONTENT = Object.freeze({
       { selector: "#statisticsProductionActivity", title: "Production count", body: "Review newly imported pieces by glass type, Internal Rejects, and external remakes." },
       { selector: "#statisticsChartRangeButton", title: "Choose report dates", body: "Select a preset or custom From and Through date range before comparing results." },
       { selector: "#statisticsAnalyticsWorkspace", title: "Explore the data", body: "Choose a metric, view style, sort order, and category filter. The chart updates from those selections." },
-      { selector: "#homeStatsPdfBtn", title: "Create a report", body: "Generate a PDF for the current range, or draft today's formatted production email." },
+      { selector: "#homeStatsPdfBtn", title: "Create a report", body: "Generate a PDF for the current range, or draft the formatted production email for the selected production day." },
     ]),
   }),
   scan: Object.freeze({
@@ -18395,7 +18801,7 @@ function helpAssistantAnswer(question) {
     { terms: ["user", "permission", "role", "password", "station"], answer: "Open Settings. Edit Users controls profiles and station assignments; Edit Role Permissions controls what each role may do." },
     { terms: ["import", "delivery list", "update list"], answer: "Open Settings, then Delivery List Management and Edit automated DL import. Review the date window and source, run the import, then inspect the batch results." },
     { terms: ["find", "search", "order", "job", "customer"], answer: "Use Global Search for an Order, Item, Job Nr., customer, rack, or bay. Select a result to open its current workflow location." },
-    { terms: ["statistic", "report", "production count", "chart"], answer: "Open Statistics, choose the reporting dates, then select the metric and chart view. PDF Report uses the current range; Draft Daily Email reloads today's activity." },
+    { terms: ["statistic", "report", "production count", "chart"], answer: "Open Statistics, choose the reporting dates, then select the metric and chart view. PDF Report uses the current range; Draft Daily Email uses the production day selected in Daily Production Count." },
     { terms: ["undo", "redo", "mistake"], answer: "Use Undo beside the scanner to reverse the latest eligible action. Redo restores that reversal. Safeguarded actions explain when they cannot be changed." },
   ];
   let best = null;
@@ -18776,38 +19182,46 @@ async function loadInventorySessionV524(sessionId) {
   return state.inventorySessionV524;
 }
 
-async function completeInventorySystemOrdersV527({ all = false } = {}) {
+async function completeInventorySystemOrdersV527({ all = false, missingOnly = false } = {}) {
   const session = state.inventorySessionV524;
   if (!session || !hasPermission("manage_inventory")) return;
   const orders = [...state.inventorySelectedOrdersV527];
-  if (!all && !orders.length) throw new Error("Select at least one system order.");
-  const countLabel = all ? "every order in the frozen system snapshot" : `${orders.length} selected order${orders.length === 1 ? "" : "s"}`;
+  if (!all && !orders.length) throw new Error("Select at least one unresolved system order.");
+  const airport = String(session.location || "") === "airport_rd";
+  const countLabel = all
+    ? (missingOnly ? "every unresolved system order in this inventory" : "every order in the frozen system snapshot")
+    : `${orders.length} selected order${orders.length === 1 ? "" : "s"}`;
+  const outcome = airport
+    ? "Non-Indian-Trail routes will be completed out of the scanner workflow. Indian Trail routes will advance through Airport Outbound so they become in-transit work for Indian Trail inventory."
+    : "These orders will be completed out of the scanner workflow and any active Indian Trail bay/rack occupancy will be cleared.";
   const confirmed = await confirmWebAppAction({
-    title: "Mark system work complete?",
-    message: `This will advance ${countLabel} through every prior scanner step and out of Indian Trail. Active rack and bay records will be cleared so bay capacity stays accurate.`,
-    confirmLabel: all ? "Complete all orders" : "Complete selected",
-    cancelLabel: "Keep inventory unchanged",
+    title: "Resolve missing system work?",
+    message: `This will reconcile ${countLabel}. ${outcome}`,
+    details: "The physical inventory remains frozen for audit. This action updates scanner workflow progress only after the inventory decision is confirmed.",
+    confirmLabel: all ? "Resolve all missing" : "Resolve selected",
+    cancelLabel: "Keep unresolved",
     danger: true,
   });
   if (!confirmed) return;
-  inventorySetBusyV524(true, "Completing confirmed system orders...");
+  inventorySetBusyV524(true, "Reconciling missing system orders...");
   try {
     const payload = await fetchJson("/api/inventory/system-complete", {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, orders, all }),
+      body: JSON.stringify({ sessionId: session.id, orders, all, missingOnly }),
     });
     state.inventorySessionV524 = payload.session || session;
     state.inventorySelectedOrdersV527.clear();
     state.inventoryViewDataV524.system = [];
+    state.inventoryViewDataV524.reconciliation = [];
     state.inventoryViewMetaV524.system = null;
+    state.inventoryViewMetaV524.reconciliation = null;
     await loadInventoryHistoryV524();
-    await loadInventoryTabV524("system", { reset: true });
-    showFloatingNotice(payload.message || "System orders completed.", "success");
+    await loadInventoryTabV524(state.inventoryTabV524 === "reconciliation" ? "reconciliation" : "system", { reset: true });
+    showFloatingNotice(payload.message || "Inventory reconciliation saved.", "success");
   } finally {
     inventorySetBusyV524(false);
     renderInventorySessionV524();
   }
-
 }
 
 async function refreshInventoryPageV524() {
@@ -18848,12 +19262,27 @@ function inventorySetControlHiddenV524(control, hidden) {
   else control.style.removeProperty("display");
 }
 
+/** Keep the Inventory command bar below the *rendered* app header at browser zoom. */
+function syncInventoryStickyOffsetV549() {
+  if (!els.inventoryWorkspace || !els.appHeader || window.innerWidth <= 720) {
+    els.inventoryWorkspace?.style.removeProperty("--inventory-session-sticky-top-v548");
+    return;
+  }
+  const rect = els.appHeader.getBoundingClientRect();
+  // Browser zoom changes CSS viewport height and can make the maintained header
+  // taller than --app-header-height. Use the actual lower edge so no invisible
+  // header layer can intercept the upper portion of Export/Finish/Cancel.
+  const top = Math.max(8, Math.ceil(rect.bottom) + 8);
+  els.inventoryWorkspace.style.setProperty("--inventory-session-sticky-top-v548", `${top}px`);
+}
+
 function renderInventorySessionV524() {
   const session = state.inventorySessionV524;
   const historyOpen = state.inventoryHistoryOpenV524;
   if (els.inventoryHistoryPanel) els.inventoryHistoryPanel.hidden = !historyOpen;
   if (els.inventoryStartPanel) els.inventoryStartPanel.hidden = Boolean(session) || historyOpen;
   if (els.inventoryWorkspace) els.inventoryWorkspace.hidden = !session || historyOpen;
+  if (session && !historyOpen) window.requestAnimationFrame?.(syncInventoryStickyOffsetV549);
   if (!session) {
     if (els.inventoryStartNote) els.inventoryStartNote.textContent = inventoryLocationRuleTextV524(els.inventoryLocationSelect?.value || "airport_rd");
     return;
@@ -18928,7 +19357,20 @@ function inventoryCompareCardV524(item, side) {
 
 function inventoryRenderReconciliationV524(items, meta) {
   if (!items.length) return `<div class="inventory-empty">There are no comparison rows in this inventory.</div>`;
-  const finalized = state.inventorySessionV524?.status === "completed";
+  const session = state.inventorySessionV524;
+  const finalized = session?.status === "completed";
+  const canResolve = finalized && hasPermission("manage_inventory");
+  const missingRows = items.filter((row) => row.status === "missing_physical" && row.system?.order);
+  const missingOrders = [...new Set(missingRows.map((row) => String(row.system?.order || "").trim()).filter(Boolean))];
+  const selectedCount = [...state.inventorySelectedOrdersV527].filter((order) => missingOrders.includes(order)).length;
+  const airport = String(session?.location || "") === "airport_rd";
+  const controls = canResolve && missingRows.length ? `<div class="inventory-reconcile-actions-v549">
+    <div><strong>Resolve physically missing orders</strong><span>${airport ? "Airport Rd: non-Indian-Trail routes complete out; Indian Trail routes advance to Outbound / in transit." : "Indian Trail: confirmed-missing orders complete out and active bay/rack occupancy is cleared."}</span></div>
+    <button class="app-secondary-button" type="button" data-inventory-select-missing-v549>Select visible missing</button>
+    <button class="app-secondary-button" type="button" data-inventory-clear-selected-v527 ${selectedCount ? "" : "disabled"}>Clear</button>
+    <button class="app-primary-button" type="button" data-inventory-complete-selected-v527 ${selectedCount ? "" : "disabled"}>Resolve selected (${selectedCount})</button>
+    <button class="app-destructive-confirm-v549" type="button" data-inventory-complete-missing-v549>Resolve all missing</button>
+  </div>` : "";
   const rows = items.map((row) => {
     const partial = row.status === "partial" && !finalized;
     const pending = (row.status === "missing_physical" || partial) && !finalized;
@@ -18936,13 +19378,17 @@ function inventoryRenderReconciliationV524(items, meta) {
     const alert = !match && !pending;
     const icon = match ? "✓" : pending ? "…" : "!";
     const label = match ? "Matched" : partial ? "Partially counted" : pending ? "Awaiting physical scan" : row.status === "not_in_system" ? "Physical item not in system" : row.status === "missing_physical" ? "System item missing physically" : "Mismatch";
-    return `<div class="inventory-reconcile-row ${match ? "is-match" : alert ? "is-alert" : "is-pending"}">
+    const order = String(row.system?.order || "").trim();
+    const checked = order && state.inventorySelectedOrdersV527.has(order);
+    const select = canResolve && row.status === "missing_physical" && order
+      ? `<label class="inventory-reconcile-select-v549"><input type="checkbox" data-inventory-select-order-v527="${escapeHtml(order)}" ${checked ? "checked" : ""}><span>Resolve Order ${escapeHtml(order)}</span></label>` : "";
+    return `<div class="inventory-reconcile-row ${match ? "is-match" : alert ? "is-alert" : "is-pending"} ${checked ? "is-selected-v527" : ""}">
       <div class="inventory-reconcile-status"><span class="inventory-result-icon ${match ? "good" : alert ? "bad" : "pending"}">${icon}</span></div>
       ${inventoryCompareCardV524(row.system, "system")}${inventoryCompareCardV524(row.physical, "physical")}
-      <div class="inventory-difference"><strong>${escapeHtml(label)}</strong><br>${escapeHtml((row.differences || []).join(" · ") || "System and physical values match")}</div>
+      <div class="inventory-difference"><strong>${escapeHtml(label)}</strong><br>${escapeHtml((row.differences || []).join(" · ") || "System and physical values match")}${select}</div>
     </div>`;
   }).join("");
-  return `<div class="inventory-reconcile-grid"><div></div><div class="inventory-reconcile-head">System Snapshot</div><div class="inventory-reconcile-head">Physical Count</div><div class="inventory-reconcile-head">Result</div>${rows}</div>${inventoryShowMoreV524(meta)}`;
+  return `${controls}<div class="inventory-reconcile-grid"><div></div><div class="inventory-reconcile-head">System Snapshot</div><div class="inventory-reconcile-head">Physical Count</div><div class="inventory-reconcile-head">Result</div>${rows}</div>${inventoryShowMoreV524(meta)}`;
 }
 
 function inventoryRenderTotalsV524() {
@@ -19344,6 +19790,7 @@ function suspendInventoryUiV525() {
 }
 
 function wireInventoryEventsV524() {
+  window.addEventListener("resize", syncInventoryStickyOffsetV549, { passive: true });
   addOptionalUiEventListener(els.inventoryTypeSelect, "change", refreshInventoryCycleControlsV524);
   addOptionalUiEventListener(els.inventoryCycleFieldSelect, "change", refreshInventoryCycleControlsV524);
   addOptionalUiEventListener(els.inventoryCycleValueSelect, "change", refreshInventoryCycleControlsV524);
@@ -19394,12 +19841,21 @@ function wireInventoryEventsV524() {
       });
       renderInventoryTabV524();
     }
+    if (event.target.closest("[data-inventory-select-missing-v549]")) {
+      (state.inventoryViewDataV524.reconciliation || []).forEach((row) => {
+        if (row.status !== "missing_physical") return;
+        const order = String(row.system?.order || "").trim();
+        if (order) state.inventorySelectedOrdersV527.add(order);
+      });
+      renderInventoryTabV524();
+    }
     if (event.target.closest("[data-inventory-clear-selected-v527]")) {
       state.inventorySelectedOrdersV527.clear();
       renderInventoryTabV524();
     }
     if (event.target.closest("[data-inventory-complete-selected-v527]")) completeInventorySystemOrdersV527().catch((error) => showInlineError(error.message, true));
     if (event.target.closest("[data-inventory-complete-all-v527]")) completeInventorySystemOrdersV527({ all: true }).catch((error) => showInlineError(error.message, true));
+    if (event.target.closest("[data-inventory-complete-missing-v549]")) completeInventorySystemOrdersV527({ all: true, missingOnly: true }).catch((error) => showInlineError(error.message, true));
   });
   addOptionalUiEventListener(els.inventoryView, "change", (event) => {
     const checkbox = event.target.closest("[data-inventory-select-order-v527]");
@@ -20498,6 +20954,7 @@ async function processScanInternal(rawScan, options = {}) {
         outboundOverride: Boolean(options.outboundOverride),
         destinationOverride: Boolean(options.destinationOverride),
         fabricationOverride: Boolean(options.fabricationOverride),
+        progressOverrides: Array.isArray(options.progressOverrides) ? options.progressOverrides : [],
         isManual: Boolean(options.isManual),
         scanQty: Math.max(1, Math.trunc(Number(options.scanQty || 1))),
         crossDateListId: options.crossDateListId || "",
@@ -20523,6 +20980,34 @@ async function processScanInternal(rawScan, options = {}) {
       });
     } else {
       state.lastScan = payload.lastScan || state.lastScan;
+    }
+    if (payload.customProgressOverrideRequired || payload.customProgressGate?.overrideRequired) {
+      scanFlash("notice", "scan_warning");
+      renderScanPage();
+      if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
+      const gate = payload.customProgressGate || {};
+      const stageKey = String(gate.key || "").trim();
+      const label = String(gate.label || stageKey || "required progress stage");
+      const approved = await confirmWebAppAction({
+        title: `Override ${label}?`,
+        message: String(gate.message || `${label} is incomplete and requires an override before this downstream scan.`),
+        details: "If approved, the checkpoint is completed only after the downstream scan passes every other scanner/rack/destination gate. The decision is retained with the piece progress history.",
+        confirmLabel: "Override and scan",
+        cancelLabel: "Do not scan",
+        danger: true,
+      });
+      if (approved && stageKey) {
+        const overrides = [...new Set([...(Array.isArray(options.progressOverrides) ? options.progressOverrides : []), stageKey])];
+        await processScan(scanText, { ...options, progressOverrides: overrides });
+      }
+      return;
+    }
+    if (payload.customProgressGate && payload.customProgressGate.overrideRequired === false) {
+      scanFlash("error", "scan_error");
+      renderScanPage();
+      if (payload.crossDateSwitched) await applyCrossDateSwitchUi(payload);
+      showFloatingNotice(payload.customProgressGate.message || "A required progress checkpoint must be completed before this scan.", "error");
+      return;
     }
     if (payload.fabricationOverrideRequired || payload.fabricationGate?.blockStaging) {
       scanFlash("notice", "scan_warning");
@@ -21501,18 +21986,24 @@ function syncFabricationRevisionV522(revision = "") {
   state.fabricationRevisionV522 = next;
   if (!changed) return;
   state.fabricationStatusEpochV522 = Number(state.fabricationStatusEpochV522 || 0) + 1;
-  // v0.523: a production-share revision can reveal new programs for unfinished
-  // pieces, but it cannot undo physical fabrication that the server has already
-  // proven complete. Retain completed lifecycle-keyed entries and invalidate
-  // only pending/unknown results. Rejects/remakes change the lifecycle key, so
-  // those pieces naturally become eligible for a fresh machine check.
+  // v0.552: production-share revisions make unfinished evidence due for a fresh
+  // check, but the last known machine assignment stays visible until replacement
+  // evidence arrives. Deleting it here made WaterJet/Denver rows collapse back to
+  // Cutting during a normal background refresh and could also clear an active
+  // machine filter before the request finished.
   for (const [key, status] of state.fabricationStatusCacheV474.entries()) {
-    if (status?.fabricated !== true) state.fabricationStatusCacheV474.delete(key);
+    if (status?.fabricated !== true) state.fabricationStatusRefreshDueV552.add(key);
   }
-  // Source changes are uncommon. No new timer or share walk is attached to the
-  // existing catalog heartbeat; only unfinished pieces are warmed again.
   scheduleFabricationMemorySaveV533();
   if (state.page === "scan") void warmFabricationDeliveryV521(state.meta?.deliveryDate, state.items);
+}
+
+function fabricationForegroundChunkSizeV582(total = 0) {
+  const count = Math.max(0, Number(total || 0));
+  if (count <= 16) return 1;
+  if (count <= 48) return 2;
+  if (count <= 120) return 4;
+  return FABRICATION_FOREGROUND_MAX_CHUNK_V582;
 }
 
 function requestFabricationBatchV522(items, forceCheck = false, foreground = false, refreshIncomplete = false) {
@@ -21528,6 +22019,175 @@ function requestFabricationBatchV522(items, forceCheck = false, foreground = fal
   return pending;
 }
 
+
+/** Apply one production-status response consistently across Scan and cached Order Details. */
+function applyFabricationBatchResultV565(result = {}, fallbackDeliveryDate = "") {
+  if (!result || typeof result !== "object") return null;
+  const key = String(result.key || fabricationStatusKeyV474(
+    result.order, result.item, result.job, result.status?.evidenceAfter,
+  ));
+  if (!key) return null;
+  const mergedStatus = mergeFabricationStatusV552(state.fabricationStatusCacheV474.get(key), result.status || {});
+  state.fabricationStatusCacheV474.set(key, mergedStatus);
+  state.fabricationStatusRefreshDueV552.delete(key);
+  if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(key, result.cutting);
+  const checkedAt = Date.now();
+  const retryAfterSeconds = Number(result.progressRetryAfterSeconds || result.status?.retryAfterSeconds || 300);
+  state.productionProgressCheckedV522.set(key, { at: checkedAt, retryAfterSeconds });
+
+  const updateRows = (values) => {
+    for (const row of values || []) {
+      if (fabricationStatusItemKeyV521(row) !== key) continue;
+      if (result.cutting && typeof result.cutting === "object") row.cutting = { ...(row.cutting || {}), ...result.cutting };
+      if (Array.isArray(result.customProgress)) row.customProgress = result.customProgress.map((stage) => ({ ...stage }));
+      const rowKey = fabricationStatusItemKeyV521(row);
+      state.fabricationStatusCacheV474.set(rowKey, mergedStatus);
+      if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(rowKey, result.cutting);
+      state.productionProgressCheckedV522.set(rowKey, {
+        at: checkedAt,
+        retryAfterSeconds: fabricationAutomaticRetrySecondsV542(
+          String(row?.deliveryDate || result.deliveryDate || fallbackDeliveryDate || ""), retryAfterSeconds,
+        ),
+      });
+      if (row.productionFiles && typeof row.productionFiles === "object") {
+        row.productionFiles = { ...row.productionFiles, fabrication: mergedStatus };
+      }
+    }
+  };
+  updateRows(state.items);
+  updateRows(state.globalSearchLastResults);
+  updateRows(state.orderDetailRenderedPayloadV507?.items);
+  for (const cachedOrder of state.orderDetailProductionCacheV507.values()) updateRows(cachedOrder?.payload?.items);
+  return mergedStatus;
+}
+
+function scanFabricationRowsV565() {
+  const rows = [];
+  const seen = new Set();
+  for (const row of state.items || []) {
+    const order = String(row?.order || "").trim();
+    if (!order) continue;
+    const key = fabricationStatusItemKeyV521(row);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ ...row, key, deliveryDate: String(row?.deliveryDate || state.meta?.deliveryDate || "") });
+  }
+  return rows;
+}
+
+/** Operator-requested full-date FAB refresh: classify once, then live-check machine evidence. */
+async function refreshScanFabricationDateV565() {
+  const button = els.scanRefreshFabBtnV565;
+  if (!button || button.disabled) return;
+  if (!state.backend || !hasAnyPermission(["global_search", "view_delivery_lists", "view_reports"])) {
+    showFloatingNotice("Fabrication refresh is not available for this account.", "notice");
+    return;
+  }
+  const rows = scanFabricationRowsV565();
+  const date = String(state.meta?.deliveryDate || els.deliveryDateSelect?.value || "").trim();
+  if (!rows.length) {
+    showFloatingNotice("There are no pieces on this delivery date to refresh.", "notice");
+    return;
+  }
+
+  const label = button.querySelector(".scan-refresh-fab-copy-v578 strong") || button.querySelector("span");
+  const originalLabel = String(label?.textContent || "Refresh fabrication");
+  button.disabled = true;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
+  syncScanFabricationRefreshControlV578();
+  if (label) label.textContent = "Refreshing FAB...";
+
+  // Ignore any older in-flight hydration response and stop automatic warm work
+  // from fighting the operator-requested refresh. Existing display values stay
+  // visible until each replacement result is received.
+  state.fabricationStatusEpochV522 = Number(state.fabricationStatusEpochV522 || 0) + 1;
+  for (const row of rows) {
+    state.fabricationStatusPendingV474.add(row.key);
+    state.fabricationStatusRefreshDueV552.add(row.key);
+    state.productionProgressCheckedV522.delete(row.key);
+  }
+
+  let checked = 0;
+  let failures = 0;
+  // Reserve a second work slot per row until machine classification tells us
+  // which pieces require a live Denver/WaterJet completion probe. This keeps the
+  // progress percentage monotonic instead of reaching 100% after pass 1 and then
+  // dropping backward when pass 2 is discovered.
+  let totalWork = rows.length * 2;
+  setFabricationLoadProgressV531(date, 0, totalWork, true, `Preparing ${rows.length} fabrication checks`);
+
+  try {
+    // Pass 1 refreshes A+W Cutting + machine classification in bounded batches.
+    // Concrete assignments learned here are durable on the backend; they are not
+    // reparsed on the live evidence pass below.
+    const foregroundChunkSizeV582 = fabricationForegroundChunkSizeV582(rows.length);
+    for (let offset = 0; offset < rows.length; offset += foregroundChunkSizeV582) {
+      const batch = rows.slice(offset, offset + foregroundChunkSizeV582);
+      try {
+        const payload = await requestFabricationBatchV522(batch, false, true, true);
+        syncFabricationRevisionV522(payload.fabricationRevision);
+        let processedInBatchV581 = 0;
+        for (const result of payload.results || []) {
+          applyFabricationBatchResultV565(result, date);
+          processedInBatchV581 += 1;
+          checked = Math.min(offset + processedInBatchV581, rows.length);
+          setFabricationLoadProgressV531(date, checked, totalWork, true, `Checking A+W machine assignment · ${Math.max(rows.length - checked, 0)} pieces left in this phase`);
+        }
+      } catch (_error) {
+        failures += batch.length;
+      }
+      checked = Math.min(offset + batch.length, rows.length);
+      setFabricationLoadProgressV531(date, checked, totalWork, true, `Checking A+W machine assignment · ${Math.max(rows.length - checked, 0)} pieces left in this phase`);
+    }
+
+    // Pass 2 directly probes completion evidence only for pieces with a concrete
+    // fabrication machine. This is intentionally operator-triggered and runs one
+    // piece at a time so the Programs/Completed-WJ shares are never hammered.
+    const forceRows = rows.filter((row) => {
+      const status = state.fabricationStatusCacheV474.get(row.key);
+      return Boolean(status?.required && status?.assignedMachineCode);
+    });
+    totalWork = rows.length + forceRows.length;
+    setFabricationLoadProgressV531(
+      date, checked, totalWork, forceRows.length > 0,
+      forceRows.length ? `Checking live fabrication completion · ${forceRows.length} pieces remaining` : "Fabrication refresh complete",
+    );
+    for (const row of forceRows) {
+      try {
+        const payload = await requestFabricationBatchV522([row], true, true, true);
+        syncFabricationRevisionV522(payload.fabricationRevision);
+        const result = payload.results?.[0];
+        if (result) applyFabricationBatchResultV565(result, date);
+        else failures += 1;
+      } catch (_error) {
+        failures += 1;
+      }
+      checked += 1;
+      setFabricationLoadProgressV531(date, checked, totalWork, checked < totalWork, checked < totalWork ? `Checking live fabrication completion · ${Math.max(totalWork - checked, 0)} pieces remaining` : "Fabrication refresh complete");
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+
+    scheduleFabricationMemorySaveV533();
+    if (state.page === "scan") scheduleScanRender();
+    const completedCount = rows.filter((row) => state.fabricationStatusCacheV474.get(row.key)?.fabricated === true).length;
+    const assignedCount = rows.filter((row) => state.fabricationStatusCacheV474.get(row.key)?.assignedMachineCode).length;
+    const detail = `${assignedCount} assigned · ${completedCount} fabricated`;
+    showFloatingNotice(
+      failures ? `FAB refresh finished with ${failures} unavailable check${failures === 1 ? "" : "s"}. ${detail}.` : `FAB refreshed for ${date || "this delivery date"}. ${detail}.`,
+      failures ? "notice" : "success",
+    );
+  } finally {
+    for (const row of rows) state.fabricationStatusPendingV474.delete(row.key);
+    setFabricationLoadProgressV531(date, totalWork, totalWork, false, failures ? "Fabrication refresh finished with unavailable checks" : "Fabrication refresh complete");
+    button.disabled = false;
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+    if (label) label.textContent = originalLabel;
+    syncScanFabricationRefreshControlV578();
+  }
+}
+
 function fabricationAutomaticRetrySecondsV542(deliveryDate = "", reportedSeconds = 0) {
   const date = String(deliveryDate || "").trim();
   const reported = Math.max(0, Number(reportedSeconds || 0));
@@ -21538,16 +22198,16 @@ function fabricationAutomaticRetrySecondsV542(deliveryDate = "", reportedSeconds
 function invalidateIncompleteTodayFabricationV542(deliveryDate = "", rows = []) {
   const date = String(deliveryDate || "").trim();
   if (!date || date !== todayKey()) return;
-  let changed = false;
+  // v0.552: entering today's list requests one fresh check for unfinished FAB,
+  // but keeps the prior machine classification on screen while that check runs.
+  // The request-attempt timestamp still throttles failures/repaints normally.
   for (const row of rows || []) {
     const key = fabricationStatusItemKeyV521(row);
     if (!key) continue;
     const cached = state.fabricationStatusCacheV474.get(key);
     if (cached?.fabricated === true) continue;
-    if (state.fabricationStatusCacheV474.delete(key)) changed = true;
-    if (state.productionProgressCheckedV522.delete(key)) changed = true;
+    state.fabricationStatusRefreshDueV552.add(key);
   }
-  if (changed) scheduleFabricationMemorySaveV533();
 }
 
 async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onProgress = null } = {}) {
@@ -21574,22 +22234,23 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
       ? fabricationAutomaticRetrySecondsV542(rowDeliveryDateV542, cached?.retryAfterSeconds)
       : Math.max(0, Number(cached?.retryAfterSeconds || 0));
     const checkedAtMs = Date.parse(cached?.checkedAt || "");
-    // Some pending status payloads historically reached Scan without checkedAt.
-    // The successful batch timestamp is authoritative enough to enforce the
-    // automatic retry window instead of treating every repaint as immediately due.
-    const cachedAge = Number.isFinite(checkedAtMs)
-      ? Date.now() - checkedAtMs
-      : progressCheck.at ? Date.now() - Number(progressCheck.at) : Number.POSITIVE_INFINITY;
+    // v0.552: freshness is the newer of the last status observation and the last
+    // request attempt. This preserves stale machine evidence while a refresh is
+    // due and prevents a failed refresh from retrying on every Scan repaint.
+    const statusCheckedAtV552 = Number.isFinite(checkedAtMs) ? checkedAtMs : 0;
+    const requestAttemptAtV552 = Math.max(0, Number(progressCheck.at || 0));
+    const freshnessAtV552 = Math.max(statusCheckedAtV552, requestAttemptAtV552);
+    const cachedAge = freshnessAtV552 ? Date.now() - freshnessAtV552 : Number.POSITIVE_INFINITY;
     // A missing payload is not permission to retry on every render. Failed or
     // incomplete share responses still record an attempt below, so Scan waits
     // for the same bounded retry window before asking again.
     const missingRetrySecondsV542 = automaticScanContextV526
       ? fabricationAutomaticRetrySecondsV542(rowDeliveryDateV542, progressCheck.retryAfterSeconds)
       : Math.max(minimumRetrySecondsV526, Number(progressCheck.retryAfterSeconds || 0));
-    const fabricationDue = cached
+    const forcedRefreshV552 = state.fabricationStatusRefreshDueV552.has(key);
+    const fabricationDue = forcedRefreshV552 || (cached
       ? (retrySeconds > 0 && cachedAge >= retrySeconds * 1000)
-      : (!progressCheck.at || cachedAge >= missingRetrySecondsV542 * 1000);
-    if (cached && fabricationDue) state.fabricationStatusCacheV474.delete(key);
+      : (!progressCheck.at || cachedAge >= missingRetrySecondsV542 * 1000));
     const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
     const cuttingComplete = Boolean(cuttingProgressPresentationV498(cutting).complete);
     const progressRetrySeconds = automaticScanContextV526
@@ -21602,7 +22263,7 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     if ((!fabricationDue && !cuttingDue) || state.fabricationStatusPendingV474.has(key)) continue;
     state.fabricationStatusPendingV474.add(key);
     candidates.push({
-      key, order, item, job, product, lastRejectedAt,
+      key, order, item, job, product, lastRejectedAt, forceRefreshV552: forcedRefreshV552,
       deliveryDate: String(row?.deliveryDate || state.meta?.deliveryDate || ""),
       remake: Boolean(row?.remake || isRemakeItem(row)),
       processState: row?.processState || "", queueState: row?.queueState || "",
@@ -21632,10 +22293,14 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     }
   };
 
-  // Smaller sequential requests publish the first machine result quickly while
-  // keeping PDF/network-share work bounded. Total work is unchanged and the
-  // scanner still paints before any production evidence is requested.
-  const chunkSize = ["prewarm", "future-prewarm"].includes(context) ? 40 : 10;
+  // v0.582 keeps operator-visible/current-date progress genuinely incremental.
+  // Only foreground Scan/prewarm work uses the small chunk size; speculative
+  // future-date prewarming remains coarse so it does not multiply background
+  // HTTP/SQLite work. Production-file lookups themselves are unchanged and still
+  // reuse the existing bounded service caches/indexes rather than rescanning shares.
+  const chunkSize = context === "future-prewarm"
+    ? FABRICATION_BACKGROUND_CHUNK_SIZE_V582
+    : (["scan", "prewarm"].includes(context) ? fabricationForegroundChunkSizeV582(candidates.length) : 10);
   let scanPublishedV527 = false;
   for (let offset = 0; offset < candidates.length; offset += chunkSize) {
     const chunk = candidates.slice(offset, offset + chunkSize);
@@ -21646,11 +22311,12 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
     // A second renderer may have selected these items while an earlier request
     // was draining through the shared queue. Recheck freshness immediately
     // before I/O and discard work that the earlier response already satisfied.
-    const requestedChunkV527 = chunk.filter(({ key }) => {
+    const requestedChunkV527 = chunk.filter(({ key, forceRefreshV552, deliveryDate }) => {
       const cached = state.fabricationStatusCacheV474.get(key);
       if (cached?.fabricated === true) return false;
+      if (forceRefreshV552) return true;
       const progress = state.productionProgressCheckedV522.get(key) || {};
-      const rowDeliveryDateV542 = String(chunk.find((entry) => entry.key === key)?.deliveryDate || state.meta?.deliveryDate || "");
+      const rowDeliveryDateV542 = String(deliveryDate || state.meta?.deliveryDate || "");
       const retrySeconds = ["scan", "prewarm", "future-prewarm"].includes(context)
         ? fabricationAutomaticRetrySecondsV542(
             rowDeliveryDateV542,
@@ -21658,13 +22324,20 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
           )
         : Math.max(60, Number(cached?.retryAfterSeconds || 0), Number(progress.retryAfterSeconds || 0));
       const statusCheckedAt = Date.parse(cached?.checkedAt || "");
-      const checkedAt = Number.isFinite(statusCheckedAt) ? statusCheckedAt : Number(progress.at || 0);
+      const checkedAt = Math.max(
+        Number.isFinite(statusCheckedAt) ? statusCheckedAt : 0,
+        Math.max(0, Number(progress.at || 0)),
+      );
       return !checkedAt || Date.now() - checkedAt >= retrySeconds * 1000;
     });
     if (!requestedChunkV527.length) {
       chunk.forEach(({ key }) => state.fabricationStatusPendingV474.delete(key));
       continue;
     }
+    // Consume explicit due markers only when the request is genuinely about to
+    // run. If the page was hidden or the batch was skipped, the due request is
+    // retained for the next safe warm cycle.
+    requestedChunkV527.forEach(({ key }) => state.fabricationStatusRefreshDueV552.delete(key));
     let chunkPublishedV527 = false;
     try {
       const epoch = Number(state.fabricationStatusEpochV522 || 0);
@@ -21690,9 +22363,12 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
           state.productionProgressCheckedV522.get(key)?.retryAfterSeconds,
         ),
       }));
+      let processedInChunkV581 = 0;
       for (const result of resultsV527) {
         const key = String(result.key || fabricationStatusKeyV474(result.order, result.item, result.job, result.status?.evidenceAfter));
-        state.fabricationStatusCacheV474.set(key, result.status || {});
+        const mergedStatusV552 = mergeFabricationStatusV552(state.fabricationStatusCacheV474.get(key), result.status || {});
+        state.fabricationStatusCacheV474.set(key, mergedStatusV552);
+        state.fabricationStatusRefreshDueV552.delete(key);
         if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(key, result.cutting);
         const resultDeliveryDateV542 = String(
           result.deliveryDate || requestedChunkV527.find((entry) => entry.key === key)?.deliveryDate || state.meta?.deliveryDate || "",
@@ -21707,8 +22383,12 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
           for (const row of values || []) {
             if (fabricationStatusItemKeyV521(row) !== key) continue;
             if (result.cutting && typeof result.cutting === "object") row.cutting = { ...(row.cutting || {}), ...result.cutting };
+            if (Array.isArray(result.customProgress)) row.customProgress = result.customProgress.map((stage) => ({ ...stage }));
             const currentKey = fabricationStatusItemKeyV521(row);
-            state.fabricationStatusCacheV474.set(currentKey, result.status || {});
+            const currentStatusV552 = currentKey === key
+              ? mergedStatusV552
+              : mergeFabricationStatusV552(state.fabricationStatusCacheV474.get(currentKey), result.status || {});
+            state.fabricationStatusCacheV474.set(currentKey, currentStatusV552);
             if (result.cutting && typeof result.cutting === "object") state.cuttingStatusCacheV522.set(currentKey, result.cutting);
             state.productionProgressCheckedV522.set(currentKey, {
               at: Date.now(),
@@ -21725,6 +22405,10 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
         updateRows(state.globalSearchLastResults);
         updateRows(state.orderDetailRenderedPayloadV507?.items);
         for (const cachedOrder of state.orderDetailProductionCacheV507.values()) updateRows(cachedOrder?.payload?.items);
+        processedInChunkV581 += 1;
+        if (typeof onProgress === "function") {
+          try { onProgress(Math.min(offset + processedInChunkV581, candidates.length), candidates.length); } catch (_progressError) {}
+        }
       }
       chunkPublishedV527 = resultsV527.length > 0;
     } catch (_error) {
@@ -21753,8 +22437,8 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
       if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(publishVisibleProgressV541);
       else publishVisibleProgressV541();
     }
-    if (typeof onProgress === "function") {
-      try { onProgress(Math.min(offset + chunk.length, candidates.length), candidates.length); } catch (_progressError) {}
+    if (typeof onProgress === "function" && requestedChunkV527.length > 0) {
+      try { onProgress(Math.min(offset + requestedChunkV527.length, candidates.length), candidates.length); } catch (_progressError) {}
     }
     if (chunkPublishedV527 && context === "scan") scanPublishedV527 = true;
     else if (chunkPublishedV527 && context !== "future-prewarm") repaint();
@@ -21765,15 +22449,15 @@ async function hydrateFabricationStatusesV474(rows = [], { context = "scan", onP
 }
 
 async function hydrateFabricationFilterCatalogV512() {
-  // Machine filters are an explicit operator request to classify the whole
-  // selected delivery date. Process it in bounded 80-row windows so the UI can
-  // repaint between batches and production shares never receive one unbounded
-  // request. Ordinary Scan rendering continues to hydrate only visible rows.
+  // v0.552: WaterJet/Denver filtering classifies the complete selected date, not
+  // just the currently visible page. Reuse the single-date warm lock so an
+  // explicit filter click cannot start a duplicate share scan beside background
+  // FAB checking. The warm path already batches requests and reports progress.
   const rows = Array.isArray(state.items) ? state.items.slice() : [];
-  for (let offset = 0; offset < rows.length; offset += 80) {
-    if (state.page !== "scan") return;
-    await hydrateFabricationStatusesV474(rows.slice(offset, offset + 80), { context: "scan" });
-  }
+  const date = String(state.meta?.deliveryDate || "").trim();
+  if (!date || !rows.length || state.page !== "scan") return;
+  await warmFabricationDeliveryV521(date, rows);
+  if (state.page === "scan" && String(state.meta?.deliveryDate || "") === date) scheduleScanRender();
 }
 
 function rememberFabricationDeliveryV521(deliveryDate = "", rows = []) {
@@ -21816,8 +22500,13 @@ function fabricationRowNeedsRefreshV532(row = {}, now = Date.now()) {
     ? FABRICATION_TODAY_RETRY_MS_V542
     : Math.max(FABRICATION_AUTO_RETRY_MS_V526, retryMs * 1000);
   const cachedAt = Date.parse(cached?.checkedAt || "");
-  const checkedAt = Number.isFinite(cachedAt) ? cachedAt : Number(progress.at || 0);
-  const fabricationDue = cached?.fabricated === true ? false : (!checkedAt || now - checkedAt >= automaticRetryMsV542);
+  const checkedAt = Math.max(
+    Number.isFinite(cachedAt) ? cachedAt : 0,
+    Math.max(0, Number(progress.at || 0)),
+  );
+  const fabricationDue = cached?.fabricated === true
+    ? false
+    : (state.fabricationStatusRefreshDueV552.has(key) || !checkedAt || now - checkedAt >= automaticRetryMsV542);
   const cutting = state.cuttingStatusCacheV522.get(key) || row?.cutting || {};
   const cuttingDue = !cuttingProgressPresentationV498(cutting).complete && (!checkedAt || now - checkedAt >= automaticRetryMsV542);
   return fabricationDue || cuttingDue;
@@ -21826,6 +22515,49 @@ function fabricationRowNeedsRefreshV532(row = {}, now = Date.now()) {
 function fabricationRowsNeedRefreshV527(rows = []) {
   const now = Date.now();
   return (rows || []).some((row) => fabricationRowNeedsRefreshV532(row, now));
+}
+
+function scanFabricationFreshnessV587(rows = scanFabricationRowsV565()) {
+  const currentDate = String(state.meta?.deliveryDate || els.deliveryDateSelect?.value || "");
+  const progress = state.fabricationLoadProgressV531 || {};
+  if (progress.active && String(progress.date || "") === currentDate) {
+    return { state: "checking", label: "Checking", title: "Fabrication status is being refreshed now." };
+  }
+  const values = Array.isArray(rows) ? rows : [];
+  if (!values.length) return { state: "current", label: "Up to date", title: "No fabrication items require checking on this delivery date." };
+  const now = Date.now();
+  let checked = 0;
+  let stale = 0;
+  let newestCheckedAt = 0;
+  for (const row of values) {
+    const key = fabricationStatusItemKeyV521(row);
+    const cached = state.fabricationStatusCacheV474.get(key) || {};
+    const remembered = state.productionProgressCheckedV522.get(key) || {};
+    const cachedAt = Date.parse(cached.checkedAt || "");
+    const checkedAt = Math.max(Number.isFinite(cachedAt) ? cachedAt : 0, Math.max(0, Number(remembered.at || 0)));
+    if (checkedAt) { checked += 1; newestCheckedAt = Math.max(newestCheckedAt, checkedAt); }
+    if (fabricationRowNeedsRefreshV532(row, now)) stale += 1;
+  }
+  if (stale > 0 || checked < values.length) {
+    return {
+      state: "stale",
+      label: "Stale",
+      title: `${stale || (values.length - checked)} of ${values.length} fabrication item${values.length === 1 ? "" : "s"} need a current check.`,
+    };
+  }
+  const checkedLabel = newestCheckedAt ? formatFabricationCheckedAtV527(newestCheckedAt) : "";
+  return { state: "current", label: "Up to date", title: checkedLabel ? `Fabrication is current. Last checked ${checkedLabel}.` : "Fabrication is current for this delivery date." };
+}
+
+function renderScanFabricationFreshnessV587() {
+  const badge = document.getElementById("scanFabricationFreshnessV587");
+  if (!badge) return;
+  const freshness = scanFabricationFreshnessV587();
+  badge.textContent = freshness.label;
+  badge.title = freshness.title;
+  badge.classList.toggle("is-current", freshness.state === "current");
+  badge.classList.toggle("is-stale", freshness.state === "stale");
+  badge.classList.toggle("is-checking", freshness.state === "checking");
 }
 
 function setFabricationLoadVisibleV533(visible) {
@@ -21838,19 +22570,39 @@ function setFabricationLoadVisibleV533(visible) {
   if (visible) {
     state.fabricationLoadVisibleV533 = true;
     host.hidden = false;
+    syncScanFabricationRefreshControlV578();
     window.requestAnimationFrame(() => host.classList.add("is-visible-v533"));
     return;
   }
   state.fabricationLoadVisibleV533 = false;
   host.classList.remove("is-visible-v533");
+  syncScanFabricationRefreshControlV578();
   state.fabricationLoadCollapseTimerV533 = window.setTimeout(() => {
     if (!state.fabricationLoadVisibleV533) host.hidden = true;
     state.fabricationLoadCollapseTimerV533 = 0;
   }, FABRICATION_LOAD_COLLAPSE_MS_V533);
 }
 
+function syncScanFabricationRefreshControlV578() {
+  const button = els.scanRefreshFabBtnV565;
+  const toolbar = els.scanFabricationToolbarV578;
+  renderScanFabricationFreshnessV587();
+  if (!button) return;
+  const progress = state.fabricationLoadProgressV531 || {};
+  const currentDate = String(state.meta?.deliveryDate || els.deliveryDateSelect?.value || "");
+  const loadingCurrentDate = Boolean(progress.active && String(progress.date || "") === currentDate);
+  const manuallyRefreshing = button.classList.contains("is-loading");
+  const hideButton = loadingCurrentDate || manuallyRefreshing;
+  const progressVisible = Boolean(state.fabricationLoadVisibleV533 && String(progress.date || "") === currentDate);
+  button.hidden = hideButton;
+  button.setAttribute("aria-hidden", String(hideButton));
+  toolbar?.classList.toggle("is-loading-v578", progressVisible);
+  toolbar?.classList.toggle("is-checking-v580", hideButton && !progressVisible);
+}
+
 function renderFabricationLoadProgressV531() {
   const host = document.getElementById("scanFabricationLoadV531");
+  syncScanFabricationRefreshControlV578();
   if (!host) return;
   const progress = state.fabricationLoadProgressV531 || {};
   const currentDate = String(state.meta?.deliveryDate || "");
@@ -21965,7 +22717,7 @@ async function warmFabricationDeliveryV521(deliveryDate = "", rows = [], { backg
     return;
   }
   const total = refreshRows.length;
-  if (!background) setFabricationLoadProgressV531(date, 0, total, true, `Checking 0 of ${total} fabrication items`);
+  if (!background) setFabricationLoadProgressV531(date, 0, total, true, `Checking machine and completion evidence · ${total} remaining`);
   const run = (async () => {
     for (let offset = 0; offset < refreshRows.length; offset += 80) {
       if (document.hidden || (background && state.page !== "scan") || (!background && String(state.meta?.deliveryDate || "") !== date)) {
@@ -21980,12 +22732,12 @@ async function warmFabricationDeliveryV521(deliveryDate = "", rows = [], { backg
           batchProgress = Math.max(batchProgress, Number(completedInBatch || 0));
           if (!background) {
             const completed = Math.min(offset + batchProgress, total);
-            setFabricationLoadProgressV531(date, completed, total, true, `Checked ${completed} of ${total} fabrication items`);
+            setFabricationLoadProgressV531(date, completed, total, true, `Checking machine and completion evidence · ${Math.max(total - completed, 0)} remaining`);
           }
         },
       });
       const completed = Math.min(offset + batch.length, total);
-      if (!background) setFabricationLoadProgressV531(date, completed, total, completed < total, `Checked ${completed} of ${total} fabrication items`);
+      if (!background) setFabricationLoadProgressV531(date, completed, total, completed < total, completed < total ? `Checking machine and completion evidence · ${Math.max(total - completed, 0)} remaining` : `${total} fabrication items checked`);
       await new Promise((resolve) => window.setTimeout(resolve, 25));
     }
     if (!background) setFabricationLoadProgressV531(date, total, total, false, `${total} fabrication items checked`);
@@ -27805,14 +28557,21 @@ function fabricationStatusHtmlV470(status = {}, item = {}) {
   return `<span class="production-fab-status-v470 ${stateClass} ${override ? "is-machine-override-v472" : ""}" title="${escapeHtml(title)}">${escapeHtml(label)}${override ? `<small>Assigned: ${escapeHtml(status.assignedMachine)}</small>` : ""}</span>`;
 }
 
-function productionSketchFrameUrlV479(assetId, pageNumber = 0, { toolbar = false } = {}) {
+function productionSketchFrameUrlV479(assetId, pageNumber = 0, { toolbar = false, sourcePageDirect = false } = {}) {
   const controls = toolbar ? "toolbar=1" : "toolbar=0";
   // v0.529: inline previews fill the available width so Chrome's PDF viewer
   // cannot leave a variable gray gutter beside narrower source pages. The
   // large viewer keeps page-fit because operators may want the entire page.
   const zoom = toolbar ? "page-fit" : "page-width";
   const view = toolbar ? "Fit" : "FitH";
-  return `${productionAssetUrlV470(assetId, pageNumber)}#page=1&zoom=${zoom}&view=${view}&navpanes=0&scrollbar=0&${controls}`;
+  // v0.562: a few A+W PDFs are renderable by Chrome even when the server-side
+  // parser cannot split them into cached one-page PDFs. For those explicit
+  // fallbacks, point Chrome at the original document and select the physical
+  // page in the PDF fragment instead of silently showing page 1 again.
+  const physicalPage = Math.max(1, Number(pageNumber || 1));
+  const assetUrl = sourcePageDirect ? productionAssetUrlV470(assetId, 0) : productionAssetUrlV470(assetId, pageNumber);
+  const fragmentPage = sourcePageDirect ? physicalPage : 1;
+  return `${assetUrl}#page=${fragmentPage}&zoom=${zoom}&view=${view}&navpanes=0&scrollbar=0&${controls}`;
 }
 
 function parseGeneratedSketchDimensionV516(value = "") {
@@ -27911,8 +28670,21 @@ function generatedProductionSketchV516(item = {}, payload = {}, fabrication = {}
   </div>`;
 }
 
+function productionPrimarySketchV560(sketches = []) {
+  const valid = (Array.isArray(sketches) ? sketches : []).filter((asset) => asset?.id);
+  const machinePage = valid.find((asset) => String(asset.machineHint || "").trim());
+  if (machinePage) return machinePage;
+  const directPages = valid.filter((asset) => Boolean(asset.sourcePageDirect));
+  // Parser-fallback documents commonly use page 1 as the order/cover sheet and
+  // the final physical page as the pane drawing. Prefer that real drawing over
+  // the generated reference sketch while retaining the page selector.
+  if (directPages.length) return directPages[directPages.length - 1];
+  return valid[0] || null;
+}
+
 function productionSketchVisualV476(sketches = [], itemLabel = "", meta = {}) {
-  const sketch = (Array.isArray(sketches) ? sketches : []).find((asset) => asset?.id);
+  const validSketches = (Array.isArray(sketches) ? sketches : []).filter((asset) => asset?.id);
+  const sketch = productionPrimarySketchV560(validSketches);
   if (!sketch) {
     if (meta.itemData && typeof meta.itemData === "object") {
       return generatedProductionSketchV516(meta.itemData, meta.payload || {}, meta.fabrication || {}, meta.referenceGeometry);
@@ -27924,27 +28696,41 @@ function productionSketchVisualV476(sketches = [], itemLabel = "", meta = {}) {
   const order = String(meta.order || "").trim();
   const item = String(meta.item || "").trim();
   const identity = [order ? `Order ${order}` : "", item ? `Item ${item}` : ""].filter(Boolean).join(" · ") || label;
+  // v0.587: item cards show only their primary sketch. Page navigation belongs to the order/shower overview above.
+  const pageButtons = "";
   return `<div class="production-sketch-visual-v476 production-sketch-visual-v478 production-sketch-visual-v479 production-sketch-visual-v480">
     <div class="production-sketch-canvas-v480">
-      <button type="button" class="production-sketch-maximize-v478 production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open large sketch viewer" title="Open large sketch viewer">
+      <button type="button" class="production-sketch-maximize-v478 production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(identity)}" data-production-sketch-direct-v562="${sketch.sourcePageDirect ? "1" : "0"}" aria-label="Open large sketch viewer" title="Open large sketch viewer">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg>
       </button>
-      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="${escapeHtml(page)}" aria-label="Print this sketch page" title="Print this sketch page"></button>
-      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page))}" title="Sketch ${escapeHtml(label)}" tabindex="-1"></iframe>
+      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="${escapeHtml(page)}" data-production-sketch-direct-v562="${sketch.sourcePageDirect ? "1" : "0"}" aria-label="Print this sketch page" title="Print this sketch page"></button>
+      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page, { sourcePageDirect: Boolean(sketch.sourcePageDirect) }))}" title="Sketch ${escapeHtml(label)}" tabindex="-1"></iframe>
+      ${pageButtons}
     </div>
   </div>`;
 }
 
 function productionOrderOverviewSketchV480(orderFiles = {}, payload = {}, productionLoaded = true) {
-  const sketch = (orderFiles.sketches || []).find((asset) => asset?.id);
+  const sketches = (Array.isArray(orderFiles.sketches) ? orderFiles.sketches : []).filter((asset) => asset?.id);
+  const sketch = sketches[0] || null;
   if (!productionLoaded) return '<div class="production-overview-sketch-empty-v480 is-loading"><span>Loading order sketch...</span></div>';
   if (!sketch) return `<div class="production-overview-sketch-empty-v480"><span>${globalSearchIconV433("staging")}</span><strong>No order sketch found</strong><small>Item-level sketch pages may still be available below.</small></div>`;
-  const identity = `Order ${payload.order || "-"} · Page 1`;
+  const page = Math.max(0, Number(sketch.pageNumber || 1));
+  const identity = `Order ${payload.order || "-"} · Page ${page || 1}`;
+  const pageButtons = sketches.length > 1
+    ? `<div class="production-sketch-pages-v560 production-overview-sketch-pages-v587" role="tablist" aria-label="Shower overview sketch pages">${sketches.map((asset, index) => {
+        const assetPage = Math.max(0, Number(asset.pageNumber || index + 1));
+        const assetLabel = `Order ${payload.order || "-"} · Page ${assetPage || index + 1}`;
+        const active = asset.id === sketch.id && assetPage === page;
+        return `<button type="button" role="tab" class="production-sketch-page-button-v560${active ? " is-active" : ""}" aria-selected="${active ? "true" : "false"}" data-production-sketch-switch-v560 data-production-sketch-asset-v560="${escapeHtml(asset.id)}" data-production-sketch-page-v560="${escapeHtml(assetPage)}" data-production-sketch-label-v560="${escapeHtml(assetLabel)}" data-production-sketch-direct-v562="${asset.sourcePageDirect ? "1" : "0"}" title="Overview page ${escapeHtml(assetPage || index + 1)}">${escapeHtml(assetPage || index + 1)}</button>`;
+      }).join("")}</div>`
+    : "";
   return `<div class="production-overview-sketch-v480">
     <div class="production-overview-sketch-canvas-v480">
-      <button type="button" class="production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="1" data-production-sketch-label-v479="${escapeHtml(identity)}" aria-label="Open order sketch large viewer" title="Open order sketch large viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg></button>
-      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="1" aria-label="Print overview sketch page" title="Print overview sketch page"></button>
-      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, 1))}" title="Order ${escapeHtml(payload.order || "")} sketch overview" tabindex="-1"></iframe>
+      <button type="button" class="production-sketch-maximize-v479 production-sketch-maximize-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(identity)}" data-production-sketch-direct-v562="${sketch.sourcePageDirect ? "1" : "0"}" aria-label="Open order sketch large viewer" title="Open order sketch large viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path><path d="M4 9 9 4M20 9l-5-5M4 15l5 5M20 15l-5 5"></path></svg></button>
+      <button type="button" class="icon-print-btn production-sketch-print-v521" data-production-print-asset-v470="${escapeHtml(sketch.id)}" data-production-page-v474="${escapeHtml(page)}" data-production-sketch-direct-v562="${sketch.sourcePageDirect ? "1" : "0"}" aria-label="Print overview sketch page" title="Print overview sketch page"></button>
+      <iframe loading="lazy" scrolling="no" data-order-sketch-src-v507="${escapeHtml(productionSketchFrameUrlV479(sketch.id, page, { sourcePageDirect: Boolean(sketch.sourcePageDirect) }))}" title="Order ${escapeHtml(payload.order || "")} sketch overview" tabindex="-1"></iframe>
+      ${pageButtons}
     </div>
   </div>`;
 }
@@ -27954,7 +28740,7 @@ function closeProductionSketchLightboxV479() {
   document.body.classList.remove("production-sketch-lightbox-open-v479");
 }
 
-function openProductionSketchLightboxV479(assetId, pageNumber = 0, label = "Sketch") {
+function openProductionSketchLightboxV479(assetId, pageNumber = 0, label = "Sketch", sourcePageDirect = false) {
   const cleanAssetId = String(assetId || "").trim();
   if (!cleanAssetId) return;
   closeProductionSketchLightboxV479();
@@ -27966,7 +28752,7 @@ function openProductionSketchLightboxV479(assetId, pageNumber = 0, label = "Sket
     <button type="button" class="production-sketch-lightbox-backdrop-v479" data-production-close-sketch-v479 aria-label="Close large sketch viewer"></button>
     <section class="production-sketch-lightbox-panel-v479" role="dialog" aria-modal="true" aria-label="Large sketch viewer - ${escapeHtml(cleanLabel)}">
       <header class="production-sketch-lightbox-header-v479"><div><small>Sketch Review</small><strong>${escapeHtml(cleanLabel)}</strong></div><button type="button" class="production-sketch-lightbox-close-v479 gui-close-button" data-production-close-sketch-v479 aria-label="Close sketch viewer" title="Close sketch viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></header>
-      <div class="production-sketch-lightbox-canvas-v479"><iframe src="${escapeHtml(productionSketchFrameUrlV479(cleanAssetId, pageNumber, { toolbar: true }))}" title="Large sketch ${escapeHtml(cleanLabel)}"></iframe></div>
+      <div class="production-sketch-lightbox-canvas-v479"><iframe src="${escapeHtml(productionSketchFrameUrlV479(cleanAssetId, pageNumber, { toolbar: true, sourcePageDirect }))}" title="Large sketch ${escapeHtml(cleanLabel)}"></iframe></div>
     </section>`;
   document.body.appendChild(shell);
   document.body.classList.add("production-sketch-lightbox-open-v479");
@@ -28134,7 +28920,12 @@ function cuttingLabelProcessRowsV504(cutting = {}) {
       const edgeData = String(row.edgeData || "").trim();
       const sides = Array.from(edgeData.slice(0, 8)).map((value, index) => (value !== "0" && value !== " " ? index + 1 : 0)).filter(Boolean);
       const sideText = sides.length ? ` side(s) ${sides.join("/")}` : "";
-      label = `Flat Polish${sideText}${machine ? ` - ${machine}` : ""}`;
+      // v0.553: the exact item sketch is authoritative for edge-finish wording.
+      // A+W can still expose this as WorkType 20/polish while the production
+      // drawing calls the edges SE. Keep the A+W side mask but print Seamed Edge.
+      const sketchEdgeFinish = String(cutting.sketchEdgeFinishCodeV553 || "").trim().toUpperCase();
+      const edgeFinishLabel = sketchEdgeFinish === "SE" ? "Seamed Edge" : "Flat Polish";
+      label = `${edgeFinishLabel}${sideText}${machine ? ` - ${machine}` : ""}`;
     } else if (workTypeId === 60 || /temper/i.test(work)) {
       label = `Tempering${machine ? ` - ${machine}` : ""}`;
     } else {
@@ -28296,18 +29087,15 @@ function cuttingLabelPieceHtmlV507(item = {}, payload = {}, piece = 1) {
 
 function orderDetailCuttingLabelsV501(item = {}, payload = {}) {
   const cutting = item.cutting || {};
-  const generationPlan = cuttingLabelGenerationPlanV502(item);
-  const requestedTotal = Math.max(1, Number(generationPlan.total || 1));
   const sourceNote = cutting.downstreamFabricationObserved
     ? `Downstream ${String(cutting.fabricationMachine || "fabrication").trim()} evidence observed; A+W Cutting completion still requires Booked.`
     : cutting.dataAvailable === false ? "No synchronized A+W cutting generation is stored yet." : "A+W production evidence";
   const itemKey = String(item.item || "");
-  const selector = requestedTotal > 1
-    ? `<label class="production-cutting-piece-selector-v507"><span>Piece</span><select data-cutting-label-piece-select-v507="${escapeHtml(itemKey)}">${Array.from({ length: requestedTotal }, (_, index) => `<option value="${index + 1}">${index + 1} / ${requestedTotal}</option>`).join("")}</select></label>`
-    : "";
+  // v0.587: one Item Nr. owns one visible label preview. Quantity does not imply
+  // a different label identity, so do not show a 1/N piece selector.
   // v0.507: render one physical label, not hundreds of hidden SVG/barcodes.
   return `<section class="production-cutting-label-set-v501 production-cutting-label-set-v502" aria-label="Cutting labels for item ${escapeHtml(item.item || "")}">
-    <header><div><small>CUTTING LABEL</small></div><button type="button" class="icon-print-btn production-label-print-v521" data-production-print-cutting-label-v521 aria-label="Print Cutting Label" title="Print Cutting Label"></button><span>${escapeHtml(sourceNote)}</span>${selector}</header>
+    <header><div><small>CUTTING LABEL</small></div><button type="button" class="icon-print-btn production-label-print-v521" data-production-print-cutting-label-v521 aria-label="Print Cutting Label" title="Print Cutting Label"></button><span>${escapeHtml(sourceNote)}</span></header>
     <div class="production-cutting-piece-list-v501" data-cutting-label-piece-body-v507="${escapeHtml(itemKey)}">${cuttingLabelPieceHtmlV507(item, payload, 1)}</div>
   </section>`;
 }
@@ -28353,13 +29141,16 @@ function printCuttingLabelV521(button) {
   const set = button?.closest(".production-cutting-label-set-v501");
   const label = set?.querySelector(".production-cutting-label-v502");
   if (!label) return;
-  const printWindow = window.open("", "cuttingLabelPrintV521", "popup=yes,width=720,height=860,resizable=yes,scrollbars=yes");
+  const printWindow = window.open("", "cuttingLabelPrintV521", "popup=yes,width=520,height=760,resizable=yes,scrollbars=yes");
   if (!printWindow) {
     showInlineError("Allow popups to print the Cutting Label.", false);
     return;
   }
+  // v0.577: preserve the v0.576 reference-matched anchors while reducing the
+  // visible physical-label content by about 8% without transform scaling.
+  const printMarkup = label.outerHTML;
   printWindow.document.open();
-  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Cutting Label</title><link rel="stylesheet" href="/static/css/shared-ui.css?v=521"><style>html,body{margin:0;background:#fff}.production-cutting-label-v502{margin:18px auto;box-shadow:none!important}</style></head><body>${label.outerHTML}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),100));<\/script></body></html>`);
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Cutting Label</title><link rel="stylesheet" href="/static/css/shared-ui.css?v=20260929-v0.577"><style>@page{size:4.5in 5.5in;margin:0}html,body{width:4.5in!important;height:5.5in!important;margin:0!important;padding:0!important;background:#fff!important;overflow:hidden!important}body{position:relative!important;display:block!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}</style></head><body><main class="cutting-label-print-root-v577">${printMarkup}</main><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),150));<\/script></body></html>`);
   printWindow.document.close();
   printWindow.focus();
 }
@@ -28402,8 +29193,9 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   if (["unknown", "not_optimized"].includes(String(cuttingSource.state || "")) && options.productionLoaded === false) cuttingSource.state = "loading";
   const cutting = cuttingProgressPresentationV498(cuttingSource);
   const cuttingQty = Math.max(1, Math.round(Number(cuttingSource.quantity || item.qty || 1)));
-  const rawCutQty = Math.max(0, Number(cuttingSource.cutQuantity || 0));
-  const cuttingScanned = cutting.complete ? cuttingQty : Math.min(cuttingQty, Math.round(rawCutQty));
+  // v0.549: A+W optimization quantity is not Cutting completion. Optimized and
+  // Released remain 0/N until the current optimization is Booked.
+  const cuttingScanned = cutting.complete ? cuttingQty : 0;
   steps.push({
     label: cutting.label,
     scanned: cuttingScanned,
@@ -28423,6 +29215,7 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   } else if (fabricationNoFabConfirmedV481(fabrication, { loaded: options.productionLoaded !== false })) {
     steps.push({ ...noFabProgressStepV512(), rank: 0 });
   }
+  for (const custom of customProgressStepsV549(item)) steps.push(custom);
   const orderedStages = (item.stages || []).map((stage, index) => ({ stage, index, rank: workflowProgressStageRankV477(stage) }))
     .sort((left, right) => left.rank - right.rank || left.index - right.index);
   for (const { stage, rank } of orderedStages) {
@@ -28436,7 +29229,7 @@ function orderDetailProgressV476(item = {}, fabrication = {}, options = {}) {
   return `<div class="production-item-progress-v476">${steps.map((step) => {
     const stateClass = step.kind === "cutting"
       ? `is-pending ${step.className || "is-cutting-pending-v498"}${step.complete ? " is-complete is-complete-v477" : ""}`
-      : step.kind === "no-fab" ? "is-no-fab-v512" : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477 is-fabrication-pending-v480" : "is-pending is-stage-pending-v477";
+      : step.kind === "no-fab" ? "is-no-fab-v512" : step.complete ? "is-complete is-complete-v477" : step.kind === "fabrication" ? "is-pending is-fabrication-pending-v477 is-fabrication-pending-v480" : step.kind === "custom-progress" ? "is-pending is-custom-progress-v549" : "is-pending is-stage-pending-v477";
     const icon = step.kind === "cutting" && step.active
       ? `<i class="cutting-progress-spinner-v498" aria-hidden="true"></i>`
       : globalSearchIconV433(step.kind === "cutting" ? "cutting" : step.kind === "no-fab" ? "cube" : progressStageIconKindV476(step.label));
@@ -28465,7 +29258,9 @@ function focusOrderDetailItemV477(itemNumber = "") {
     if (!target) return;
     const modalBody = target.closest(".production-explorer-body-v470");
     if (modalBody) {
-      const targetTop = target.offsetTop - Math.max(20, (modalBody.clientHeight - target.offsetHeight) / 2);
+      const bodyRect = modalBody.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetTop = modalBody.scrollTop + (targetRect.top - bodyRect.top) - 12;
       modalBody.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
     }
     target.classList.remove("is-focused-v477");
@@ -28500,7 +29295,7 @@ function formatFabricationCheckedAtV527(value) {
 }
 
 function productionItemActionsV476(files = {}, orderFiles = {}, item = {}) {
-  const sketch = (files.sketches || [])[0];
+  const sketch = productionPrimarySketchV560(files.sketches || []);
   const program = (files.programs || [])[0];
   const actions = [];
   if (sketch?.id) {
@@ -28508,10 +29303,6 @@ function productionItemActionsV476(files = {}, orderFiles = {}, item = {}) {
     actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-production-maximize-sketch-v478 data-production-sketch-asset-v479="${escapeHtml(sketch.id)}" data-production-sketch-page-v479="${escapeHtml(page)}" data-production-sketch-label-v479="${escapeHtml(sketch.itemMarker || "Item sketch")}">${globalSearchIconV433("scan")}<span>Open Sketch</span></button>`);
   }
   if (program?.id) actions.push(`<button type="button" class="app-primary-button production-detail-action-v476 production-detail-action-v480" data-production-open-asset-v470="${escapeHtml(program.id)}">${globalSearchIconV433("denver")}<span>Program</span></button>`);
-  if (item.order && item.item) {
-    const checkedAt = formatFabricationCheckedAtV527(files.fabrication?.checkedAt);
-    if (checkedAt) actions.push(`<small class="production-fab-memory-v522">Progress checked ${escapeHtml(checkedAt)}</small>`);
-  }
   return actions.join("") || `<span class="production-no-actions-v476">No recent production files</span>`;
 }
 
@@ -28644,7 +29435,7 @@ function renderOrderDetailV470(payload = {}) {
       <section class="production-order-overview-v480 production-order-overview-v519">
         <div class="production-order-overview-visual-v480 production-order-overview-visual-v519">${productionOrderOverviewSketchV480(orderFiles, payload, productionLoaded)}</div>
         <div class="production-order-overview-copy-v480 production-order-overview-copy-v519">
-          <header><small>ORDER OVERVIEW</small><strong>Full shower sketch</strong><span>Page 1 · Job Nr. ${escapeHtml(payload.job || "-")}</span></header>
+          <header><small>ORDER OVERVIEW</small><strong>Full shower sketch</strong><span>${escapeHtml(Math.max(1, (orderFiles.sketches || []).filter((asset) => asset?.id).length))} sketch page${(orderFiles.sketches || []).filter((asset) => asset?.id).length === 1 ? "" : "s"} · Job Nr. ${escapeHtml(payload.job || "-")}</span></header>
           ${orderDetailProductionSnapshotV518(items, { productionLoaded })}
           <div class="production-order-overview-actions-v480 production-order-overview-actions-v518 production-order-overview-actions-v519">${productionLoaded ? (orderButtons || `<span>Order-level files not listed</span>`) : `<span>Loading production files…</span>`}</div>
         </div>
@@ -28658,9 +29449,14 @@ function renderOrderDetailV470(payload = {}) {
           const priorityDetail = productionPriorityDetailV481(item);
           const itemDeliveryDate = orderDetailDeliveryDateV518({}, [item]);
           const glassStyle = escapeHtml(glassVisualCssVariables(item.product || "Glass"));
+          const progressMemory = state.productionProgressCheckedV522.get(fabricationStatusItemKeyV521(item)) || {};
+          const payloadCheckedAtV587 = Date.parse(fabrication.checkedAt || "");
+          const progressCheckedValueV587 = Math.max(Number.isFinite(payloadCheckedAtV587) ? payloadCheckedAtV587 : 0, Math.max(0, Number(progressMemory.at || 0)));
+          const progressCheckedAtV587 = progressCheckedValueV587 ? formatFabricationCheckedAtV527(progressCheckedValueV587) : "";
           return `<article class="production-order-item-v470 production-order-item-v474 production-order-item-v475 production-order-item-v476 production-order-item-v480 production-order-item-v481 production-order-item-v512 production-order-item-v518" data-order-detail-item-v477="${escapeHtml(item.item || "")}">
             <header class="production-item-card-header-v518 production-item-card-header-v521" style="${glassStyle}">
               <span class="production-item-header-field-v521 is-identity"><small>ORDER / ITEM</small><strong>${escapeHtml(payload.order || item.order || "-")} / ${escapeHtml(item.item || "-")}</strong></span>
+              <span class="production-item-header-field-v521 is-job"><small>JOB NR.</small><b>${escapeHtml(item.job || payload.job || "—")}</b></span>
               <span class="production-item-header-field-v521 is-customer"><small>CUSTOMER</small><b>${escapeHtml(item.customer || payload.customer || "—")}</b></span>
               <span class="production-item-header-field-v521 is-glass"><small>GLASS</small><b>${escapeHtml(item.product || "Glass")}</b></span>
               <span class="production-item-header-field-v521 is-size"><small>SIZE</small><b>${escapeHtml(item.dimensions || "—")}</b></span>
@@ -28671,7 +29467,7 @@ function renderOrderDetailV470(payload = {}) {
             <div class="production-item-cutting-label-v512 production-item-cutting-label-v518">${orderDetailCuttingLabelsV501(item, payload)}</div>
             <div class="production-item-main-v476 production-item-main-v480 production-item-main-v481 production-item-main-v518 production-item-main-v519">
               <section class="production-progress-section-v476 production-progress-section-v518 production-progress-section-v519">
-                <header class="production-progress-heading-v543"><small>PROGRESS</small><button type="button" class="production-progress-refresh-v543" data-refresh-progress-v543 data-order="${escapeHtml(item.order || payload.order || "")}" data-item="${escapeHtml(item.item || "")}" title="Refresh progress and fabrication" aria-label="Refresh progress and fabrication for item ${escapeHtml(item.item || "")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.3 6.8L4 9M5.8 15A7 7 0 0 0 17.7 17.2L20 15"/></svg></button></header>
+                <header class="production-progress-heading-v543"><small>PROGRESS</small><span class="production-progress-tools-v587">${progressCheckedAtV587 ? `<small class="production-fab-memory-v522">Progress checked ${escapeHtml(progressCheckedAtV587)}</small>` : `<small class="production-fab-memory-v522 is-missing-v587">Progress not checked yet</small>`}<button type="button" class="production-progress-refresh-v543" data-refresh-progress-v543 data-order="${escapeHtml(item.order || payload.order || "")}" data-item="${escapeHtml(item.item || "")}" title="Refresh progress and fabrication" aria-label="Refresh progress and fabrication for item ${escapeHtml(item.item || "")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.3 6.8L4 9M5.8 15A7 7 0 0 0 17.7 17.2L20 15"/></svg></button></span></header>
                 ${orderDetailProgressV476(item, fabrication, { productionLoaded })}
               </section>
               ${orderDetailAwInformationV516(item)}
@@ -28686,12 +29482,20 @@ function renderOrderDetailV470(payload = {}) {
   if (state.orderDetailFocusItemV477) focusOrderDetailItemV477(state.orderDetailFocusItemV477);
 }
 
+function sketchEdgeFinishCodeV553(productionFiles = {}) {
+  const sketches = Array.isArray(productionFiles?.sketches) ? productionFiles.sketches : [];
+  const code = sketches.map((row) => String(row?.edgeFinishCode || "").trim().toUpperCase()).find(Boolean) || "";
+  return code === "SE" ? "SE" : "";
+}
+
 function mergeOrderProductionDetailV507(core = {}, production = {}) {
   const productionByItem = new Map((production.items || []).map((item) => [normalizedOrderDetailItemV477(item.item), item]));
   const mergedItems = (core.items || []).map((item) => {
     const productionItem = productionByItem.get(normalizedOrderDetailItemV477(item.item)) || {};
     const productionFiles = productionItem.productionFiles || item.productionFiles || {};
     let cutting = { ...(item.cutting || {}) };
+    const sketchEdgeFinishCode = sketchEdgeFinishCodeV553(productionFiles);
+    if (sketchEdgeFinishCode) cutting.sketchEdgeFinishCodeV553 = sketchEdgeFinishCode;
     const fabrication = productionFiles.fabrication || {};
     if (fabrication.fabricated === true && !cutting.complete) {
       // v0.545: production-file hydration may confirm Denver/WaterJet, but
@@ -28911,8 +29715,11 @@ async function openProductionProgramV470(assetId) {
   if (!popup) showInlineError(result.message || "Allow popups to open this production file.", false);
 }
 
-function printProductionAssetV470(assetId, pageNumber = 0) {
-  const url = productionAssetUrlV470(assetId, pageNumber);
+function printProductionAssetV470(assetId, pageNumber = 0, sourcePageDirect = false) {
+  const physicalPage = Math.max(1, Number(pageNumber || 1));
+  const url = sourcePageDirect
+    ? `${productionAssetUrlV470(assetId, 0)}#page=${physicalPage}`
+    : productionAssetUrlV470(assetId, pageNumber);
   const popup = window.open(url, "productionFilePrintV470", "popup=yes,width=1100,height=800,resizable=yes,scrollbars=yes");
   if (!popup) {
     showInlineError("Allow popups to print this production file.", false);
@@ -29002,12 +29809,47 @@ document.addEventListener("click", (event) => {
     closeProductionSketchLightboxV479();
     return;
   }
+  const sketchSwitch = event.target.closest("[data-production-sketch-switch-v560]");
+  if (sketchSwitch) {
+    const visual = sketchSwitch.closest(".production-sketch-visual-v476, .production-overview-sketch-v480");
+    const frame = visual?.querySelector("iframe");
+    const maximize = visual?.querySelector("[data-production-maximize-sketch-v478]");
+    const printButton = visual?.querySelector("[data-production-print-asset-v470]");
+    const assetId = String(sketchSwitch.dataset.productionSketchAssetV560 || "");
+    const pageNumber = Number(sketchSwitch.dataset.productionSketchPageV560 || 0);
+    const label = String(sketchSwitch.dataset.productionSketchLabelV560 || "Sketch");
+    const sourcePageDirect = sketchSwitch.dataset.productionSketchDirectV562 === "1";
+    if (frame && assetId) {
+      frame.loading = "eager";
+      frame.removeAttribute("data-order-sketch-src-v507");
+      frame.src = productionSketchFrameUrlV479(assetId, pageNumber, { sourcePageDirect });
+      frame.title = `Sketch ${label}`;
+    }
+    if (maximize) {
+      maximize.dataset.productionSketchAssetV479 = assetId;
+      maximize.dataset.productionSketchPageV479 = String(pageNumber);
+      maximize.dataset.productionSketchLabelV479 = label;
+      maximize.dataset.productionSketchDirectV562 = sourcePageDirect ? "1" : "0";
+    }
+    if (printButton) {
+      printButton.dataset.productionPrintAssetV470 = assetId;
+      printButton.dataset.productionPageV474 = String(pageNumber);
+      printButton.dataset.productionSketchDirectV562 = sourcePageDirect ? "1" : "0";
+    }
+    visual?.querySelectorAll("[data-production-sketch-switch-v560]").forEach((button) => {
+      const active = button === sketchSwitch;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    return;
+  }
   const maximizeSketch = event.target.closest("[data-production-maximize-sketch-v478]");
   if (maximizeSketch) {
     openProductionSketchLightboxV479(
       maximizeSketch.dataset.productionSketchAssetV479 || "",
       Number(maximizeSketch.dataset.productionSketchPageV479 || 0),
       maximizeSketch.dataset.productionSketchLabelV479 || "Sketch",
+      maximizeSketch.dataset.productionSketchDirectV562 === "1",
     );
     return;
   }
@@ -29048,7 +29890,11 @@ document.addEventListener("click", (event) => {
   }
   const print = event.target.closest("[data-production-print-asset-v470]");
   if (print) {
-    printProductionAssetV470(print.dataset.productionPrintAssetV470 || "", Number(print.dataset.productionPageV474 || 0));
+    printProductionAssetV470(
+      print.dataset.productionPrintAssetV470 || "",
+      Number(print.dataset.productionPageV474 || 0),
+      print.dataset.productionSketchDirectV562 === "1",
+    );
     return;
   }
   const openProgram = event.target.closest("[data-production-open-asset-v470]");
@@ -32132,7 +32978,7 @@ document.addEventListener("dls:delivery-list-catalog-synced", () => {
   if (printWorkspaceNeedsDetailReload()) void restorePrintWorkspaceAfterInactivity();
 });
 
-// A completed A+W/catalog update can publish today's plate snapshot after the
+// A completed A+W/catalog update can publish the selected day's plate snapshot after the
 // Statistics page was already opened. Invalidate the one-minute card cache and
 // refresh it immediately only while Statistics is visible.
 document.addEventListener("dls:delivery-list-catalog-synced", () => {
@@ -32179,7 +33025,7 @@ function setPrintOrientation(value, refresh = true) {
 /** Return the global and Print-specific stylesheets used by popup printing. */
 function localPrintPackageStylesheetUrls() {
   return [
-    new URL("static/css/styles.css?v=20260916-v0.542", window.location.href).href,
+    new URL("static/css/styles.css?v=20260930-v0.580", window.location.href).href,
     new URL("static/css/print.css?v=20260916-v0.542", window.location.href).href,
   ];
 }
@@ -32991,6 +33837,35 @@ function renderAdminDeliveryListModalResults(lists = state.lists, query = "") {
   wireOwnedVerticalScroll(target);
 }
 
+function adminDeliverySelectionToolbarHtmlV553() {
+  const count = state.adminSelectedDeliveryDatesV553.size;
+  const canComplete = hasPermission("edit_delivery_list_items");
+  const canDelete = hasPermission("delete_delivery_lists");
+  if (!canComplete && !canDelete) return "";
+  return `
+    <section class="admin-delivery-bulk-toolbar-v553" aria-label="Selected delivery-list actions">
+      <div class="admin-delivery-bulk-copy-v553"><small>Selected delivery dates</small><strong><b data-admin-delivery-selected-count-v553>${escapeHtml(count)}</b> selected</strong></div>
+      <div class="admin-delivery-bulk-actions-v553">
+        ${canComplete ? `<button type="button" class="app-save-action-v553 admin-delivery-bulk-complete-v553" data-admin-delivery-bulk-complete-v553 ${count ? "" : "disabled"}><span aria-hidden="true">✓</span>Complete Selected</button>` : ""}
+        ${canDelete ? `<button type="button" class="app-clear-action-v553" data-admin-delivery-bulk-delete-v553 ${count ? "" : "disabled"}>Delete Selected</button>` : ""}
+        <button type="button" class="app-secondary-button" data-admin-delivery-bulk-clear-v553 ${count ? "" : "disabled"}>Clear Selection</button>
+      </div>
+    </section>`;
+}
+
+function syncAdminDeliverySelectionToolbarV553() {
+  const count = state.adminSelectedDeliveryDatesV553.size;
+  document.querySelectorAll("[data-admin-delivery-selected-count-v553]").forEach((node) => { node.textContent = String(count); });
+  document.querySelectorAll("[data-admin-delivery-bulk-complete-v553],[data-admin-delivery-bulk-delete-v553],[data-admin-delivery-bulk-clear-v553]").forEach((button) => {
+    button.disabled = count === 0;
+  });
+  document.querySelectorAll("[data-admin-delivery-select-v553]").forEach((checkbox) => {
+    const date = String(checkbox.dataset.adminDeliverySelectV553 || "");
+    checkbox.checked = state.adminSelectedDeliveryDatesV553.has(date);
+    checkbox.closest("[data-admin-delivery-date-v553]")?.classList.toggle("is-selected-v553", checkbox.checked);
+  });
+}
+
 /** Build the shared Edit Delivery Lists modal shell around a supplied result state. */
 function adminDeliveryListModalShellHtml(resultsHtml = adminDeliveryListModalResultsHtml()) {
   return `
@@ -33000,6 +33875,7 @@ function adminDeliveryListModalShellHtml(resultsHtml = adminDeliveryListModalRes
         <input id="adminDeliveryListModalSearch" type="search" autocomplete="off" placeholder="Search delivery lists...">
         <button type="button" class="admin-standard-search-clear-v340" data-admin-delivery-search-clear aria-label="Clear delivery list search" title="Clear search">×</button>
       </label>
+      ${adminDeliverySelectionToolbarHtmlV553()}
       <div class="modal-action-history-filter-footer admin-delivery-list-paging-bar-v338">
         <span id="adminDeliveryListPagingSummary">Loading delivery lists...</span>
         <nav class="modal-action-history-pager app-numbered-pager-v337" id="adminDeliveryListHeaderPager" aria-label="Delivery list pages"></nav>
@@ -33070,6 +33946,7 @@ function renderAdminDeliveryListCatalog(payload = state.adminDeliveryListCatalog
   mergeAdminDeliveryListCatalogIntoState(lists);
 
   target.innerHTML = adminDeliveryListCatalogResultsHtml(state.adminDeliveryListCatalog);
+  syncAdminDeliverySelectionToolbarV553();
   pager.innerHTML = sharedNumberedPagerMarkup(page, totalPages, "data-admin-delivery-week-page");
   summary.textContent = `Page ${page} of ${totalPages} · ${dateCount} delivery date${dateCount === 1 ? "" : "s"}`;
   range.textContent = pageStart && pageEnd
@@ -33143,9 +34020,12 @@ function adminDeliveryListDateGroupHtml(group, editable = false) {
   const percent = totalQty ? Math.round((scannedQty / totalQty) * 100) : 0;
   const compactDate = formatNumericDeliveryDate(group.date);
 
+  const selectableV553 = editable && hasAnyPermission(["edit_delivery_list_items", "delete_delivery_lists"]);
+  const selectedV553 = state.adminSelectedDeliveryDatesV553.has(group.date);
   return `
-    <section class="admin-delivery-date-group admin-delivery-whole-list-v527">
+    <section class="admin-delivery-date-group admin-delivery-whole-list-v527${selectedV553 ? " is-selected-v553" : ""}" data-admin-delivery-date-v553="${escapeHtml(group.date)}">
       <div class="admin-delivery-date-summary">
+        ${selectableV553 ? `<label class="admin-delivery-date-select-v553" title="Select ${escapeHtml(compactDate)}"><input type="checkbox" data-admin-delivery-select-v553="${escapeHtml(group.date)}" ${selectedV553 ? "checked" : ""} aria-label="Select delivery list ${escapeHtml(compactDate)}"><span aria-hidden="true"></span></label>` : ""}
         <span class="admin-delivery-date-main">
           <strong>${escapeHtml(compactDate)}</strong>
           <small><span>Whole delivery list</span> | ${escapeHtml(totalQty)} pcs | ${escapeHtml(percent)}% <span>at the furthest recorded step</span></small>
@@ -33635,6 +34515,30 @@ function importPreviewPayloadsFromContext(contextKey, listIds) {
   });
 }
 
+const deliveryUpdatePreviewCacheV581 = new Map();
+const deliveryUpdatePreviewInflightV581 = new Map();
+const DELIVERY_UPDATE_PREVIEW_CACHE_MS_V581 = 30000;
+
+function deliveryUpdatePreviewPayloadV581(listId, { force = false } = {}) {
+  const key = String(listId || "").trim();
+  if (!key) return Promise.reject(new Error("listId is required"));
+  const cached = deliveryUpdatePreviewCacheV581.get(key);
+  if (!force && cached && Date.now() - Number(cached.at || 0) < DELIVERY_UPDATE_PREVIEW_CACHE_MS_V581) return Promise.resolve(cached.payload);
+  if (!force && deliveryUpdatePreviewInflightV581.has(key)) return deliveryUpdatePreviewInflightV581.get(key);
+  const request = fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(key)}`)
+    .then((payload) => { deliveryUpdatePreviewCacheV581.set(key, { at: Date.now(), payload }); return payload; })
+    .finally(() => { if (deliveryUpdatePreviewInflightV581.get(key) === request) deliveryUpdatePreviewInflightV581.delete(key); });
+  deliveryUpdatePreviewInflightV581.set(key, request);
+  return request;
+}
+
+function prewarmDeliveryListUpdatePreviewV581(listIds) {
+  const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
+  if (!state.backend || !ids.length) return;
+  window.setTimeout(() => { ids.forEach((listId) => { void deliveryUpdatePreviewPayloadV581(listId).catch(() => {}); }); }, 0);
+  void ensurePrintProductLookupLibrary().catch(() => {});
+}
+
 async function openDeliveryListUpdatePreview(listIds, routeGroup = "", contextKey = "") {
   const ids = [...new Set(String(listIds || "").split(",").map((value) => value.trim()).filter(Boolean))];
   if (!ids.length) throw new Error("No changed delivery-list stages were supplied for preview.");
@@ -33648,18 +34552,15 @@ async function openDeliveryListUpdatePreview(listIds, routeGroup = "", contextKe
   });
 
   try {
-    await ensurePrintProductLookupLibrary();
+    const lookupPromiseV581 = ensurePrintProductLookupLibrary().catch(() => []);
     let payloads = importPreviewPayloadsFromContext(contextKey, ids);
     let failedRequests = [];
     if (!payloads.length) {
-      const requests = await Promise.allSettled(ids.map((listId) => (
-        fetchJson(`/api/admin/delivery-list-update-preview?listId=${encodeURIComponent(listId)}`)
-      )));
-      payloads = requests
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value);
+      const requests = await Promise.allSettled(ids.map((listId) => deliveryUpdatePreviewPayloadV581(listId)));
+      payloads = requests.filter((result) => result.status === "fulfilled").map((result) => result.value);
       failedRequests = requests.filter((result) => result.status === "rejected");
     }
+    await lookupPromiseV581;
     if (!payloads.length) {
       throw failedRequests[0]?.reason || new Error("No delivery-list changes could be loaded.");
     }
@@ -34503,21 +35404,44 @@ function setBayModalSection(kind, section = "workspace") {
 }
 
 function renderSupersededReviewCount() {
-  if (!els.supersededOrderReviewCount) return;
-  const count = Number(state.supersededReviewSummary?.pendingSupersededOrderReviews || 0);
-  els.supersededOrderReviewCount.textContent = String(count);
-  els.supersededOrderReviewCount.hidden = count <= 0;
-  els.supersededOrderReviewCount.closest("button")?.classList.toggle("has-pending-review", count > 0);
+  const supersededCount = Number(state.supersededReviewSummary?.pendingSupersededOrderReviews || 0);
+  const optimizationCount = Number(state.optimizationReviewSummaryV549?.open || 0);
+  const reviewCount = supersededCount + optimizationCount;
+  if (els.supersededOrderReviewCount) {
+    els.supersededOrderReviewCount.textContent = reviewCount > 99 ? "99+" : String(reviewCount);
+    els.supersededOrderReviewCount.title = `${supersededCount} superseded order review${supersededCount === 1 ? "" : "s"} · ${optimizationCount} duplicate optimization warning${optimizationCount === 1 ? "" : "s"}`;
+    els.supersededOrderReviewCount.hidden = reviewCount <= 0;
+    els.supersededOrderReviewCount.closest("button")?.classList.toggle("has-pending-review", reviewCount > 0);
+  }
+  const sidebarBadge = document.getElementById("sidebarSupersededBadgeV549");
+  if (sidebarBadge) {
+    const visible = isAdminUser() && reviewCount > 0;
+    sidebarBadge.textContent = reviewCount > 99 ? "99+" : String(reviewCount);
+    sidebarBadge.title = `${supersededCount} superseded order review${supersededCount === 1 ? "" : "s"} · ${optimizationCount} optimization warning${optimizationCount === 1 ? "" : "s"}`;
+    sidebarBadge.hidden = !visible;
+    sidebarBadge.closest("button")?.classList.toggle("has-superseded-badge-v549", visible);
+  }
 }
 
 async function refreshSupersededReviewSummary() {
   if (!state.backend || !hasAnyPermission(["view_admin", "review_superseded_orders"])) return;
   try {
-    const summary = await fetchJson("/api/admin/superseded-order-reviews/summary");
+    const [summary, optimizationSummary] = await Promise.all([
+      fetchJson("/api/admin/superseded-order-reviews/summary"),
+      fetchJson("/api/admin/optimization-reviews/summary").catch(() => ({ open: 0 })),
+    ]);
     state.supersededReviewSummary = {
       pendingSupersededOrderReviews: Number(summary.pendingSupersededOrderReviews || 0),
       approvedSupersededOrderReviews: Number(summary.approvedSupersededOrderReviews || 0),
       keptSupersededOrderReviews: Number(summary.keptSupersededOrderReviews || 0),
+    };
+    state.optimizationReviewSummaryV549 = {
+      pending: Number(optimizationSummary.pending || 0),
+      working: Number(optimizationSummary.working || 0),
+      acknowledged: Number(optimizationSummary.acknowledged || 0),
+      falseAlarm: Number(optimizationSummary.falseAlarm || 0),
+      cleared: Number(optimizationSummary.cleared || 0),
+      open: Number(optimizationSummary.open || 0),
     };
     renderSupersededReviewCount();
   } catch {
@@ -34588,7 +35512,8 @@ function supersededReviewItemRows(items = []) {
   }).join("");
 }
 
-function supersededOrderReviewCardHtml(review = {}) {
+function supersededOrderReviewCardHtml(review = {}, options = {}) {
+  const historyModeV580 = Boolean(options.historyMode);
   const originalImpact = review.originalImpact || review.liveImpact || {};
   const replacementImpact = review.replacementImpact || {};
   const evidence = review.evidence || {};
@@ -34662,7 +35587,7 @@ function supersededOrderReviewCardHtml(review = {}) {
       </div>
     </section>
     ${sketchSafetyMarkup ? `<section class="superseded-sketch-safety-stack-v534">${sketchSafetyMarkup}</section>` : ""}
-    <details class="superseded-review-evidence-details-v328" open>
+    <details class="superseded-review-evidence-details-v328" ${historyModeV580 ? "" : "open"}>
       <summary>Item evidence <span>${Number(review.originalItems?.length || 0)} original · ${Number(review.replacementItems?.length || 0)} replacement</span></summary>
       <div class="superseded-review-compare">
         <section>
@@ -34675,58 +35600,181 @@ function supersededOrderReviewCardHtml(review = {}) {
         </section>
       </div>
     </details>
-    <div class="superseded-review-removal-choice-v328" role="radiogroup" aria-label="Choose which candidate order to remove">
+    ${historyModeV580 ? "" : `<div class="superseded-review-removal-choice-v328" role="radiogroup" aria-label="Choose which candidate order to remove">
       <div class="superseded-review-choice-intro-v328"><strong>Approve a removal</strong><small>The suggested order is preselected. Use the item evidence above to verify the recommendation before approving it.</small></div>
       ${choiceMarkup(originalOrder, replacementOrder, originalImpact, suggestedOrder === originalOrder)}
       ${choiceMarkup(replacementOrder, originalOrder, replacementImpact, suggestedOrder === replacementOrder)}
-    </div>
+    </div>`}
     ${review.decisionReason ? `<p class="superseded-review-reason"><strong>Decision note:</strong> ${escapeHtml(review.decisionReason)}</p>` : ""}
-    <footer class="superseded-review-actions">
+    ${historyModeV580
+      ? (status !== "pending" ? `<footer class="superseded-review-actions superseded-review-history-actions-v581"><button type="button" class="secondary" data-superseded-decision="reopen" data-review-id="${escapeHtml(review.id)}">Send back to review</button></footer>` : "")
+      : `<footer class="superseded-review-actions">
       <button type="button" class="danger" data-superseded-decision="approve" data-review-id="${escapeHtml(review.id)}">Approve removal of order ${escapeHtml(selectedRemoveOrder)}</button>
       <button type="button" class="danger superseded-remove-both-v540" data-superseded-decision="remove_both" data-review-id="${escapeHtml(review.id)}">Remove both orders</button>
       <button type="button" class="secondary" data-superseded-decision="keep_both" data-review-id="${escapeHtml(review.id)}">Keep both</button>
       <button type="button" class="secondary" data-superseded-decision="review_later" data-review-id="${escapeHtml(review.id)}">Review later</button>
-    </footer>
+    </footer>`}
   </article>`;
+}
+
+
+function optimizationReviewStatusLabelV549(status = "") {
+  return ({ pending: "Needs review", working: "Working on it", acknowledged: "Acknowledged", false_alarm: "False alarm", cleared: "Cleared" })[String(status || "").toLowerCase()] || "Needs review";
+}
+
+function optimizationReviewCardHtmlV549(alert = {}, options = {}) {
+  const historyModeV580 = Boolean(options.historyMode);
+  const status = String(alert.status || "pending");
+  const resolvedHistoryV580 = ["false_alarm", "cleared"].includes(status);
+  const currentOptimization = Number(alert.currentOptimization || 0);
+  const previousOptimizations = Array.isArray(alert.previousOptimizations)
+    ? alert.previousOptimizations.map((value) => Number(value || 0)).filter((value) => value > 0)
+    : [Number(alert.previousOptimization || 0)].filter((value) => value > 0);
+  const previousOptLabel = previousOptimizations.length === 1
+    ? `Opt ${previousOptimizations[0]}`
+    : previousOptimizations.length > 1
+      ? `Opts ${previousOptimizations.join(", ")}`
+      : "Opt —";
+  const previous = `${alert.previousStatus || "Released/Booked"} · ${previousOptLabel}`;
+  const current = `${alert.currentStatus || "Current"} · Opt ${currentOptimization || "—"}`;
+  const affectedItems = Array.isArray(alert.affectedItems) ? alert.affectedItems : [];
+  const affectedCount = Math.max(Number(alert.affectedItemCount || 0), affectedItems.length, 1);
+  const orderCount = Math.max(Number(alert.orderCount || 0), Array.isArray(alert.orders) ? alert.orders.length : 0);
+  const batchCount = Math.max(Number(alert.batchCount || 0), Array.isArray(alert.batches) ? alert.batches.length : 0);
+  const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+  const affectedRows = affectedItems.map((item) => `<span><strong>Order ${escapeHtml(item.order || "—")} · Item ${escapeHtml(String(item.item || "").replace(/^0+/, "") || "—")}</strong><small>Batch ${escapeHtml(item.batch || "—")} · ${escapeHtml(item.previousStatus || "Released/Booked")} · Opt ${Number(item.previousOptimization || 0) || "—"}</small></span>`).join("");
+  return `<article class="optimization-review-card-v549 is-${escapeHtml(status)}" data-optimization-review-card-v549="${Number(alert.id || 0)}">
+    <header><span class="optimization-warning-mark-v549" aria-hidden="true">!</span><div><small>Potential duplicate optimization</small><strong>Optimization ${currentOptimization || "—"} · ${plural(affectedCount, "affected item")}</strong><em class="optimization-review-group-subtitle-v579">${plural(orderCount, "order")} · ${plural(batchCount, "batch", "batches")}</em></div><b>${escapeHtml(optimizationReviewStatusLabelV549(status))}</b></header>
+    <div class="optimization-review-timeline-v549"><span><small>Earlier production</small><strong>${escapeHtml(previous)}</strong><em>${escapeHtml(formatDateTime(alert.previousStatusAt) || "Time unavailable")}</em></span><i aria-hidden="true">→</i><span><small>Reoptimized</small><strong>${escapeHtml(current)}</strong><em>${escapeHtml(formatDateTime(alert.currentStatusAt) || "Time unavailable")}</em></span></div>
+    <p>This optimization contains ${plural(affectedCount, "item")} whose batch had already reached Released/Booked production before being moved to this optimization. Review the optimization once; the decision applies to every affected item shown below.</p>
+    ${affectedRows ? `<details class="optimization-review-members-v579"><summary>Affected production <span>${plural(affectedCount, "item")}</span></summary><div>${affectedRows}</div></details>` : ""}
+    ${historyModeV580
+      ? `<div class="optimization-review-history-meta-v580"><span><small>${resolvedHistoryV580 ? "Resolution" : "Review status"}</small><strong>${escapeHtml(optimizationReviewStatusLabelV549(status))}</strong></span><span><small>Updated</small><strong>${escapeHtml(formatDateTime(alert.updatedAt) || "Time unavailable")}</strong></span>${alert.updatedBy ? `<span><small>Reviewed by</small><strong>${escapeHtml(alert.updatedBy)}</strong></span>` : ""}${alert.note ? `<p><small>Review note</small><strong>${escapeHtml(alert.note)}</strong></p>` : ""}</div>${status !== "pending" ? `<footer class="optimization-review-history-actions-v581"><button type="button" class="app-secondary-button" data-optimization-review-status-v549="pending" data-alert-id="${Number(alert.id || 0)}">Send back to review</button></footer>` : ""}`
+      : `<label class="optimization-review-note-v549"><span>Review note</span><textarea data-optimization-review-note-v549 rows="2" placeholder="What happened / what is being checked...">${escapeHtml(alert.note || "")}</textarea></label>
+    <footer>
+      <button type="button" class="app-secondary-button" data-optimization-review-status-v549="working" data-alert-id="${Number(alert.id || 0)}">Working on it</button>
+      <button type="button" class="app-secondary-button" data-optimization-review-status-v549="acknowledged" data-alert-id="${Number(alert.id || 0)}">Acknowledge</button>
+      <button type="button" class="app-secondary-button" data-optimization-review-status-v549="false_alarm" data-alert-id="${Number(alert.id || 0)}">False alarm</button>
+      <button type="button" class="app-primary-button" data-optimization-review-status-v549="cleared" data-alert-id="${Number(alert.id || 0)}">Clear resolved</button>
+    </footer>`}
+  </article>`;
+}
+
+function optimizationReviewSectionHtmlV549() {
+  const summary = state.optimizationReviewSummaryV549 || {};
+  const alerts = (state.optimizationReviewAlertsV549 || []).filter((row) => ["pending", "working", "acknowledged"].includes(String(row.status || "")));
+  return `<section class="optimization-review-section-v549" data-optimization-review-open-section-v580>
+    <header><div><span>Production safety</span><strong>Duplicate optimization warnings</strong><p>Flags a batch that had already reached Released or Booked and was later assigned a different optimization.</p></div><b class="${Number(summary.open || 0) ? "has-alert" : ""}">${Number(summary.open || 0)} open</b></header>
+    <div class="optimization-review-list-v549">${alerts.length ? alerts.map((alert) => optimizationReviewCardHtmlV549(alert)).join("") : '<div class="admin-empty success"><strong>No open optimization warnings.</strong><span>Released/Booked batches that are reoptimized will appear here automatically.</span></div>'}</div>
+  </section>`;
+}
+
+function supersededReviewHistoryGroupV580({ eyebrow = "Review history", title = "Review records", description = "", count = 0, body = "", emptyTitle = "No records yet.", emptyCopy = "Nothing has been recorded in this section yet." } = {}) {
+  const safeCount = Math.max(Number(count || 0), 0);
+  return `<details class="superseded-review-history-group-v580">
+    <summary>
+      <span><small>${escapeHtml(eyebrow)}</small><strong>${escapeHtml(title)}</strong>${description ? `<em>${escapeHtml(description)}</em>` : ""}</span>
+      <b>${safeCount} ${safeCount === 1 ? "record" : "records"}</b>
+      <i aria-hidden="true"></i>
+    </summary>
+    <div class="superseded-review-history-body-v580">${body || `<div class="admin-empty success"><strong>${escapeHtml(emptyTitle)}</strong><span>${escapeHtml(emptyCopy)}</span></div>`}</div>
+  </details>`;
+}
+
+function supersededReviewHistoryHtmlV580(filter = "approved") {
+  const allReviews = state.supersededOrderReviews || [];
+  const allOptimizationAlerts = state.optimizationReviewAlertsV549 || [];
+  if (filter === "approved") {
+    const approvedReviews = allReviews.filter((review) => String(review.status || "") === "approved");
+    const resolvedOptimizationAlerts = allOptimizationAlerts.filter((alert) => ["false_alarm", "cleared"].includes(String(alert.status || "")));
+    return [
+      supersededReviewHistoryGroupV580({
+        eyebrow: "Approved superseded orders",
+        title: "Approved removal decisions",
+        description: "Expand to review the orders that were approved for removal and their retained A+W replacement evidence.",
+        count: approvedReviews.length,
+        body: approvedReviews.map((review) => supersededOrderReviewCardHtml(review, { historyMode: true })).join(""),
+        emptyTitle: "No approved superseded orders.",
+        emptyCopy: "Approved removal decisions will be kept here for review.",
+      }),
+      supersededReviewHistoryGroupV580({
+        eyebrow: "Duplicate optimization safety",
+        title: "Resolved duplicate optimization warnings",
+        description: "Cleared and false-alarm optimization warnings are retained here with their grouped production evidence.",
+        count: resolvedOptimizationAlerts.length,
+        body: resolvedOptimizationAlerts.map((alert) => optimizationReviewCardHtmlV549(alert, { historyMode: true })).join(""),
+        emptyTitle: "No resolved duplicate optimization warnings.",
+        emptyCopy: "Resolved optimization warnings will appear here after they are cleared or marked as false alarms.",
+      }),
+    ].join("");
+  }
+  if (filter === "all") {
+    return [
+      supersededReviewHistoryGroupV580({
+        eyebrow: "Superseded-order history",
+        title: "All superseded order reviews",
+        description: "Open, approved, deferred, and kept decisions are available here without crowding the review workspace.",
+        count: allReviews.length,
+        body: allReviews.map((review) => supersededOrderReviewCardHtml(review, { historyMode: true })).join(""),
+        emptyTitle: "No superseded-order review history.",
+        emptyCopy: "Detected replacement candidates will appear here after the next review check.",
+      }),
+      supersededReviewHistoryGroupV580({
+        eyebrow: "Duplicate optimization history",
+        title: "All duplicate optimization warnings",
+        description: "Open and resolved optimization warnings are grouped here by optimization with their affected production evidence.",
+        count: allOptimizationAlerts.length,
+        body: allOptimizationAlerts.map((alert) => optimizationReviewCardHtmlV549(alert, { historyMode: true })).join(""),
+        emptyTitle: "No duplicate optimization warning history.",
+        emptyCopy: "Reoptimized Released/Booked production will appear here when detected.",
+      }),
+    ].join("");
+  }
+  return "";
+}
+
+function supersededReviewListHtmlV580(filter = "open") {
+  if (["approved", "all"].includes(filter)) return supersededReviewHistoryHtmlV580(filter);
+  const reviews = (state.supersededOrderReviews || []).filter((review) => {
+    if (filter === "open") return ["pending", "review_later"].includes(review.status);
+    return review.status === filter;
+  });
+  return reviews.length
+    ? reviews.map((review) => supersededOrderReviewCardHtml(review)).join("")
+    : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>Use Refresh checks to re-run exact duplicate detection against the current scanner orders.</span></div>`;
 }
 
 function supersededOrderReviewModalHtml() {
   const filter = state.supersededReviewFilter || "open";
-  const reviews = (state.supersededOrderReviews || []).filter((review) => {
-    if (filter === "open") return ["pending", "review_later"].includes(review.status);
-    if (filter === "all") return true;
-    return review.status === filter;
-  });
   const summary = state.supersededReviewSummary || {};
+  const optimizationSummary = state.optimizationReviewSummaryV549 || {};
+  const resolvedOptimizationCount = Number(optimizationSummary.falseAlarm || 0) + Number(optimizationSummary.cleared || 0);
+  const approvedResolvedCount = Number(summary.approvedSupersededOrderReviews || 0) + resolvedOptimizationCount;
   return `<div class="superseded-review-shell">
     <section class="superseded-review-hero">
       <div><span>Superseded-order safety review</span><strong>Approve only the order that should disappear.</strong><p>The suggested removal is preselected. The retained order stays active and the approved source order is suppressed from future imports.</p><button type="button" class="secondary superseded-review-refresh-v540" data-superseded-refresh-v540>Refresh checks</button></div>
-      <div class="superseded-review-kpis"><span><small>Needs review</small><strong>${Number(summary.pendingSupersededOrderReviews || 0)}</strong></span><span><small>Approved</small><strong>${Number(summary.approvedSupersededOrderReviews || 0)}</strong></span><span><small>Kept</small><strong>${Number(summary.keptSupersededOrderReviews || 0)}</strong></span></div>
+      <div class="superseded-review-kpis"><span><small>Needs review</small><strong>${Number(summary.pendingSupersededOrderReviews || 0) + Number(optimizationSummary.open || 0)}</strong></span><span><small>Approved / resolved</small><strong>${approvedResolvedCount}</strong></span><span><small>Kept</small><strong>${Number(summary.keptSupersededOrderReviews || 0)}</strong></span></div>
     </section>
+    <div ${filter === "open" ? "" : "hidden"} data-optimization-review-open-host-v580>${optimizationReviewSectionHtmlV549()}</div>
     <nav class="superseded-review-tabs" aria-label="Superseded-order review filters">
       ${[["open", "Needs review"], ["approved", "Approved"], ["keep_both", "Keep both"], ["all", "All"]].map(([value, label]) => `<button type="button" class="${filter === value ? "is-active" : ""}" aria-pressed="${filter === value}" data-superseded-filter="${value}">${label}</button>`).join("")}
     </nav>
-    <div class="superseded-review-list" data-superseded-review-list-v361>${reviews.length ? reviews.map(supersededOrderReviewCardHtml).join("") : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>Use Refresh checks to re-run exact duplicate detection against the current scanner orders.</span></div>`}</div>
+    <div class="superseded-review-list" data-superseded-review-list-v361>${supersededReviewListHtmlV580(filter)}</div>
   </div>`;
 }
 
 /** v0.361: Update Superseded Order filters in place to avoid modal-white repaint flashes. */
 function renderSupersededReviewFilterV361() {
   const filter = state.supersededReviewFilter || "open";
-  const reviews = (state.supersededOrderReviews || []).filter((review) => {
-    if (filter === "open") return ["pending", "review_later"].includes(review.status);
-    if (filter === "all") return true;
-    return review.status === filter;
-  });
   els.adminModalBody?.querySelectorAll("[data-superseded-filter]").forEach((button) => {
     const active = button.dataset.supersededFilter === filter;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+  const openOptimizationHost = els.adminModalBody?.querySelector("[data-optimization-review-open-host-v580]");
+  if (openOptimizationHost) openOptimizationHost.hidden = filter !== "open";
   const list = els.adminModalBody?.querySelector("[data-superseded-review-list-v361]");
-  if (list) list.innerHTML = reviews.length
-    ? reviews.map(supersededOrderReviewCardHtml).join("")
-    : `<div class="admin-empty success"><strong>No matching reviews.</strong><span>Use Refresh checks to re-run exact duplicate detection against the current scanner orders.</span></div>`;
+  if (list) list.innerHTML = supersededReviewListHtmlV580(filter);
 }
 
 async function hydrateSupersededSketchSafetyV540() {
@@ -34749,16 +35797,42 @@ async function hydrateSupersededSketchSafetyV540() {
 }
 
 async function loadSupersededOrderReviews(options = {}) {
-  const payload = await fetchJson("/api/admin/superseded-order-reviews");
+  const [payload, optimizationPayload] = await Promise.all([
+    fetchJson("/api/admin/superseded-order-reviews"),
+    fetchJson("/api/admin/optimization-reviews?status=all").catch(() => ({ alerts: [], open: 0 })),
+  ]);
   state.supersededOrderReviews = payload.reviews || [];
   state.supersededReviewSummary = {
     pendingSupersededOrderReviews: Number(payload.pendingSupersededOrderReviews || 0),
     approvedSupersededOrderReviews: Number(payload.approvedSupersededOrderReviews || 0),
     keptSupersededOrderReviews: Number(payload.keptSupersededOrderReviews || 0),
   };
+  state.optimizationReviewAlertsV549 = optimizationPayload.alerts || [];
+  state.optimizationReviewSummaryV549 = {
+    pending: Number(optimizationPayload.pending || 0), working: Number(optimizationPayload.working || 0),
+    acknowledged: Number(optimizationPayload.acknowledged || 0), falseAlarm: Number(optimizationPayload.falseAlarm || 0),
+    cleared: Number(optimizationPayload.cleared || 0), open: Number(optimizationPayload.open || 0),
+  };
   renderSupersededReviewCount();
   if (options.hydrateSketchSafety !== false) window.setTimeout(() => { void hydrateSupersededSketchSafetyV540(); }, 0);
   return payload;
+}
+
+async function updateOptimizationReviewV549(alertId, status) {
+  const card = els.adminModalBody?.querySelector(`[data-optimization-review-card-v549="${CSS.escape(String(alertId))}"]`);
+  const currentAlert = (state.optimizationReviewAlertsV549 || []).find((entry) => Number(entry.id) === Number(alertId));
+  const noteField = card?.querySelector("[data-optimization-review-note-v549]");
+  const note = String(noteField ? noteField.value : currentAlert?.note || "").trim();
+  await fetchJson("/api/admin/optimization-reviews/update", {
+    method: "POST",
+    body: JSON.stringify({ alertId: Number(alertId), status, note, ...requestContext() }),
+  });
+  await loadSupersededOrderReviews({ hydrateSketchSafety: false });
+  if (els.adminModalBody && els.adminModal?.dataset.kind === "supersededOrders") {
+    els.adminModalBody.innerHTML = supersededOrderReviewModalHtml();
+    applyLanguageToRoot(els.adminModalBody);
+  }
+  showFloatingNotice(status === "pending" ? "Optimization warning sent back to review." : `Optimization warning marked ${optimizationReviewStatusLabelV549(status)}.`, "success");
 }
 
 async function decideSupersededOrderReview(reviewId, action) {
@@ -34782,6 +35856,20 @@ async function decideSupersededOrderReview(reviewId, action) {
       danger: true,
     });
     if (!confirmed) return;
+  } else if (action === "reopen") {
+    const wasApproved = String(review.status || "") === "approved";
+    const confirmed = await confirmWebAppAction({
+      title: "Send this decision back to review?",
+      message: wasApproved
+        ? "The approved suppression will be removed and the source-owned order rows retired by this decision will be restored to the active delivery lists before the review returns to Needs review."
+        : "This decision will be cleared and returned to Needs review so a different choice can be made.",
+      details: wasApproved
+        ? "Rack membership retired by the approval is restored when it can be identified safely. Any bay assignment cancelled by the approval is left cancelled for operator verification rather than guessing its previous bay state."
+        : "No delivery-list rows were removed by this decision.",
+      confirmLabel: "Send Back to Review",
+      danger: false,
+    });
+    if (!confirmed) return;
   } else if (action === "remove_both") {
     const originalImpact = review.originalImpact || {};
     const replacementImpact = review.replacementImpact || {};
@@ -34797,7 +35885,7 @@ async function decideSupersededOrderReview(reviewId, action) {
     });
     if (!confirmed) return;
   }
-  await fetchJson("/api/admin/superseded-order-reviews/decision", {
+  const decisionPayload = await fetchJson("/api/admin/superseded-order-reviews/decision", {
     method: "POST",
     body: JSON.stringify({ reviewId: Number(reviewId), action, removeOrderNumber, ...requestContext() }),
   });
@@ -34811,6 +35899,11 @@ async function decideSupersededOrderReview(reviewId, action) {
   state.adminTodayImportLoaded = false;
   await refreshAdminTodayImportRuns({ render: false });
   renderAdminDeliveryLists();
+  if (action === "reopen") {
+    const restored = Number(decisionPayload?.restoredPieceQty || 0);
+    const locationNote = decisionPayload?.locationReviewRequired ? " Bay location history should be reviewed before floor use." : "";
+    showFloatingNotice(`Decision sent back to review${restored ? ` · ${restored} piece${restored === 1 ? "" : "s"} restored` : ""}.${locationNote}`, decisionPayload?.locationReviewRequired ? "notice" : "success");
+  }
 }
 
 async function refreshSupersededOrderReviewsV540() {
@@ -34938,9 +36031,9 @@ const ADMIN_MODAL_PROFILES = {
     group: "configuration",
   },
   rejectSettings: {
-    title: "Reject Reasons & Locations",
+    title: "Reject Settings",
     eyebrow: "Quality Control",
-    description: "Maintain the approved reject reasons and break locations used by Internal Reject Tracking.",
+    description: "Maintain scanner custom choices alongside the protected A+W Complaint Reasons and Causes used by Internal Reject Tracking.",
     context: "Reject settings",
     status: "Quality data",
     group: "quality",
@@ -34959,6 +36052,14 @@ const ADMIN_MODAL_PROFILES = {
     description: "Control cross-date scan behavior and the mixed-destination approval window used by the scanning workflow.",
     context: "Scan page settings",
     status: "Scanner behavior",
+    group: "configuration",
+  },
+  progressSettings: {
+    title: "Progress Settings",
+    eyebrow: "Workflow Configuration",
+    description: "Add maintained checkpoints around Cutting, fabrication machines, and scanner stages without replacing the built-in workflow.",
+    context: "Progress checkpoint rules",
+    status: "Schema-managed workflow",
     group: "configuration",
   },
   productionFiles: {
@@ -35030,6 +36131,35 @@ function adminModalProfile(kind, options = null) {
     profile[key] = portableOperationalTextV355(profile[key]);
   }
   return profile;
+}
+
+function lookupManagerTabDefinitionsV550() {
+  const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [], inventoryItemMappings: [] };
+  const glassProfileCount = new Set([...(lookups.products || []), ...(lookups.glassCosts || []), ...(lookups.glassColors || [])]
+    .map((item) => String(item?.value || item?.label || "").trim().toLowerCase()).filter(Boolean)).size;
+  return [
+    { type: "glass_profile", label: "Glass Types", count: glassProfileCount },
+    { type: "sheet_sizes", label: "Sheet Sizes", count: Object.keys(state.lookupSheetUsageSettingsV529?.profiles || {}).length },
+    { type: "inventory_item_id", label: "Item IDs", count: (lookups.inventoryItemMappings || []).length },
+    { type: "route", label: "Routes", count: (lookups.routes || []).length },
+    { type: "process", label: "Process States", count: (lookups.processes || []).length },
+    { type: "machine", label: "Machines", count: machineDefinitionsV521({ activeOnly: false }).length },
+    { type: "station", label: "Stations", count: (state.stations || []).length, permission: "manage_stations" },
+  ].filter((tab) => !tab.permission || hasPermission(tab.permission));
+}
+
+function lookupManagerTypeAvailableV550(type = "") {
+  return lookupManagerTabDefinitionsV550().some((tab) => tab.type === type);
+}
+
+function refreshLookupSheetSettingsV550() {
+  if (state.lookupSheetUsageLoadedV550 || !state.backend) return Promise.resolve(state.lookupSheetUsageSettingsV529);
+  return fetchJson("/api/reports/sheet-usage-settings").then((payload) => {
+    state.lookupSheetUsageSettingsV529 = payload || { profiles: {} };
+    state.lookupSheetUsageLoadedV550 = true;
+    if (els.adminModal?.dataset.kind === "lookups" && state.lookupManagerActiveType === "sheet_sizes") renderLookupManagerModal();
+    return payload;
+  });
 }
 
 /**
@@ -35119,25 +36249,38 @@ function configureAdminModalSectionTabsV345(kind) {
     return;
   }
 
-  if (kind === "lookups") {
-    const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-    const glassProfileCount = new Set([...(lookups.products || []), ...(lookups.glassCosts || []), ...(lookups.glassColors || [])].map((item) => String(item?.value || item?.label || "").trim().toLowerCase()).filter(Boolean)).size;
-    els.adminModalWorkspaceTab.dataset.adminModalSection = "lookup:glass_profile";
-    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Glass Types";
+  if (kind === "rejectSettings") {
+    const reasons = state.rejectCatalog?.reasons || [];
+    const locations = state.rejectCatalog?.locations || [];
+    if (!["reason", "location"].includes(state.rejectSettingsActiveTabV551)) state.rejectSettingsActiveTabV551 = "reason";
+    els.adminModalWorkspaceTab.dataset.adminModalSection = "rejectSettings:reason";
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = "Complaint Reasons";
     const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
     workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
-    workspaceBadge.textContent = String(glassProfileCount);
+    workspaceBadge.textContent = String(reasons.length);
     if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
-    insertTab("lookup:sheet_sizes", "Sheet Sizes", Object.keys(state.lookupSheetUsageSettingsV529?.profiles || {}).length);
-    insertTab("lookup:inventory_item_id", "Item IDs", (lookups.inventoryItemMappings || []).length);
-    insertTab("lookup:route", "Routes", (lookups.routes || []).length);
-    insertTab("lookup:process", "Process States", (lookups.processes || []).length);
-    insertTab("lookup:machine", "Machines", machineDefinitionsV521({ activeOnly: false }).length);
-    if (hasPermission("manage_stations")) insertTab("lookup:station", "Stations", (state.stations || []).length);
-    insertTab("lookup:stage_definition", "Stages", (lookups.stages || []).length);
-    insertTab("lookup:color_manager", "Color Manager");
-    insertTab("lookup:presentation", "Presentation");
-    const selectedSection = `lookup:${state.lookupManagerActiveType || "glass_profile"}`;
+    insertTab("rejectSettings:location", "Complaint Causes", locations.length);
+    const selectedSection = `rejectSettings:${state.rejectSettingsActiveTabV551}`;
+    els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
+      const selected = button.dataset.adminModalSection === selectedSection;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    return;
+  }
+
+  if (kind === "lookups") {
+    const tabs = lookupManagerTabDefinitionsV550();
+    const first = tabs[0] || { type: "glass_profile", label: "Glass Types", count: 0 };
+    if (!tabs.some((tab) => tab.type === state.lookupManagerActiveType)) state.lookupManagerActiveType = first.type;
+    els.adminModalWorkspaceTab.dataset.adminModalSection = `lookup:${first.type}`;
+    if (els.adminModalWorkspaceTabLabel) els.adminModalWorkspaceTabLabel.textContent = first.label;
+    const workspaceBadge = els.adminModalWorkspaceTab.querySelector("b[data-admin-workspace-count-v345]") || document.createElement("b");
+    workspaceBadge.dataset.adminWorkspaceCountV345 = "true";
+    workspaceBadge.textContent = String(first.count ?? 0);
+    if (!workspaceBadge.isConnected) els.adminModalWorkspaceTab.appendChild(workspaceBadge);
+    tabs.slice(1).forEach((tab) => insertTab(`lookup:${tab.type}`, tab.label, tab.count));
+    const selectedSection = `lookup:${state.lookupManagerActiveType}`;
     els.adminModalSectionTabs.querySelectorAll("[data-admin-modal-section]").forEach((button) => {
       const selected = button.dataset.adminModalSection === selectedSection;
       button.classList.toggle("is-active", selected);
@@ -35160,11 +36303,24 @@ function setAdminModalSection(section = "workspace") {
     const tab = section.split(":", 2)[1] || "rules";
     state.customerEmailActiveTab = ["rules", "test", "activity"].includes(tab) ? tab : "rules";
     renderCustomerEmailModal();
+  } else if (!historySelected && section.startsWith("rejectSettings:")) {
+    const tab = section.split(":", 2)[1] || "reason";
+    state.rejectSettingsActiveTabV551 = ["reason", "location"].includes(tab) ? tab : "reason";
+    if (kind === "rejectSettings" && els.adminModalBody) {
+      els.adminModalBody.innerHTML = rejectSettingsModalHtml();
+      els.adminModalBody.scrollTop = 0;
+      applyLanguageToRoot(els.adminModalBody);
+    }
   } else if (!historySelected && section.startsWith("lookup:")) {
-    const type = section.split(":", 2)[1] || "glass_profile";
-    state.lookupManagerActiveType = ["glass_profile", "sheet_sizes", "inventory_item_id", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"].includes(type) ? type : "glass_profile";
+    const requestedType = section.split(":", 2)[1] || "glass_profile";
+    const firstType = lookupManagerTabDefinitionsV550()[0]?.type || "glass_profile";
+    state.lookupManagerActiveType = lookupManagerTypeAvailableV550(requestedType) ? requestedType : firstType;
     state.lookupManagerSearch = "";
+    closeLookupEditorV470();
     renderLookupManagerModal();
+    if (state.lookupManagerActiveType === "sheet_sizes" && !state.lookupSheetUsageLoadedV550) {
+      refreshLookupSheetSettingsV550().catch((error) => showInlineError(error?.message || "Unable to load sheet-size settings.", true));
+    }
   } else if (!historySelected && section.startsWith("scanPage:")) {
     const tab = section.split(":", 2)[1] || "crossDate";
     state.scanPageSettingsActiveTab = ["crossDate", "mixedDestination"].includes(tab) ? tab : "crossDate";
@@ -35260,6 +36416,8 @@ function openAdminModal(kind, options = null) {
   configureAdminModalSectionTabsV345(kind);
   const initialSection = kind === "customerEmails"
     ? `customerEmail:${state.customerEmailActiveTab || "rules"}`
+    : kind === "rejectSettings"
+      ? `rejectSettings:${state.rejectSettingsActiveTabV551 || "reason"}`
     : kind === "lookups"
       ? `lookup:${state.lookupManagerActiveType || "glass_profile"}`
       : kind === "crossDateScanning"
@@ -35278,9 +36436,12 @@ function openAdminModal(kind, options = null) {
   }
   if (kind === "lookups") {
     if (state.lookupManagerActiveType === "glass_profile") syncGlassProfilePreviewV349();
-    else if (state.lookupManagerActiveType !== "machine") syncLookupManagerFormGuidance();
-    filterLookupManagerLibrary(state.lookupManagerSearch || "");
-    enhanceLookupManagerWorkflowV470();
+    else if (!["machine", "sheet_sizes"].includes(state.lookupManagerActiveType)) syncLookupManagerFormGuidance();
+    if (state.lookupManagerActiveType !== "sheet_sizes") filterLookupManagerLibrary(state.lookupManagerSearch || "");
+    if (state.lookupManagerActiveType !== "sheet_sizes") enhanceLookupManagerWorkflowV470();
+  }
+  if (kind === "progressSettings") {
+    wireProgressSettingsV549();
   }
   if (kind === "users") {
     wireUserManagerControls();
@@ -35325,21 +36486,15 @@ function openAdminModal(kind, options = null) {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function closeAdminModal() {
-  if (state.manualEditDirty) {
-    const confirmed = await confirmWebAppAction({
-      title: "Close without saving?",
-      message: "You have unsaved manual delivery-list edits.",
-      details: "Closing now will discard those unsaved changes.",
-      confirmLabel: "Close Without Saving",
-    });
-    if (!confirmed) return false;
+  if (els.adminModal?.dataset.kind === "manualEdit" && state.manualEditDirty) {
+    if (!(await resolveManualEditUnsavedV553())) return false;
   }
 
   if (!els.adminModal?.hidden && els.adminModalBody?.querySelector(".role-permission-editor")) {
     resetRolePermissionUiSession();
   }
 
-  state.manualEditDirty = false;
+  clearManualEditDirtyStateV553();
 
   // v0.340 child creation dialogs belong to the Admin workspace and must never
   // survive after their parent modal is dismissed.
@@ -35374,6 +36529,402 @@ async function closeAdminModal() {
  * Effects: Updates visible dom state.
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
+
+function progressAnchorOptionsV549(selected = "") {
+  const options = [
+    ["cutting", "Cutting"],
+    ...machineDefinitionsV521({ activeOnly: true }).map((machine) => [`machine:${machine.code}`, machine.name || machine.code]),
+    ["airport_staging", "Staging"],
+    ["airport_outbound", "Outbound"],
+    ["indian_trail", "Indian Trail / Receiving"],
+    ["greenville", "Greenville"],
+    ["cpu", "Customer Pickup"],
+    ["dtc", "Direct Customer Delivery"],
+  ];
+  return options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${String(selected) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+}
+
+function progressStationOptionsV549(selected = "") {
+  const stations = uniqueText([...(state.stations || []), selected].filter(Boolean));
+  return `<option value="">Choose station...</option>${stations.map((station) => `<option value="${escapeHtml(station)}" ${station === selected ? "selected" : ""}>${escapeHtml(stationDisplayLabelV355(station))}</option>`).join("")}`;
+}
+
+function progressWorkflowFixedStepsV550() {
+  const machines = machineDefinitionsV521({ activeOnly: true }).map((machine, machineOrder) => ({
+    id: `machine:${machine.code}`,
+    kind: "machine",
+    type: "machine",
+    label: machineDisplayNameV521(machine.code) || machine.name || "Machine",
+    detail: "Fabrication machine",
+    anchor: `machine:${machine.code}`,
+    rank: Number(machine.progressRank || 0),
+    order: machineOrder,
+    color: safeProgressColorV476(machine.color, "#64748b"),
+    machine,
+  }));
+  return [
+    { id: "fixed:cutting", kind: "fixed", type: "cutting", label: "Cutting", detail: "A+W cutting", anchor: "cutting", rank: -10, color: "#0f80c4" },
+    ...machines,
+    { id: "fixed:staging", kind: "fixed", type: "staging", label: "Staging", detail: "Airport staging", anchor: "airport_staging", rank: 10, color: "#2c8a65" },
+    { id: "fixed:outbound", kind: "fixed", type: "outbound", label: "Outbound", detail: "Leaves Airport Rd", anchor: "airport_outbound", rank: 20, color: "#b77a20" },
+    { id: "fixed:destination", kind: "fixed", type: "destination", label: "Destination", detail: "Receiving / route", anchor: "indian_trail", rank: 30, color: "#485f9a" },
+  ].sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0) || Number(left.order || 0) - Number(right.order || 0) || String(left.label).localeCompare(String(right.label)));
+}
+
+function progressWorkflowModelV550() {
+  const custom = (state.progressStageSettingsV549 || []).filter((stage) => stage?.active !== false).map((stage, index) => ({
+    id: `custom:${stage.key}`,
+    kind: "custom",
+    type: "custom",
+    label: stage.label || stage.key || "Custom checkpoint",
+    detail: stage.completionMode === "file" ? (stage.filePattern || "File detected") : (stationDisplayLabelV355(stage.scannerStation) || "Scanner"),
+    anchor: stage.anchor || "cutting",
+    rank: customProgressAnchorRankV549(stage.anchor) + (String(stage.position || "after") === "before" ? -0.25 : 0.25) + (Number(stage.sortOrder || index) / 10000),
+    order: index,
+    color: "#7558b8",
+    stage,
+  }));
+  const priority = { fixed: 0, machine: 1, custom: 2 };
+  return [...progressWorkflowFixedStepsV550(), ...custom].sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0) || Number(priority[left.kind] ?? 9) - Number(priority[right.kind] ?? 9) || Number(left.order || 0) - Number(right.order || 0) || String(left.label).localeCompare(String(right.label)));
+}
+
+function progressPlacementForDropIndexV550(rawIndex, model = progressWorkflowModelV550()) {
+  const index = Math.max(0, Math.min(Number(rawIndex || 0), model.length));
+  const previousAnchor = [...model.slice(0, index)].reverse().find((node) => node.kind !== "custom" && node.anchor);
+  const nextAnchor = model.slice(index).find((node) => node.kind !== "custom" && node.anchor);
+  if (previousAnchor) return { anchor: previousAnchor.anchor, position: "after", sortOrder: (model.slice(0, index).filter((node) => node.kind === "custom").length + 1) * 10 };
+  if (nextAnchor) return { anchor: nextAnchor.anchor, position: "before", sortOrder: 0 };
+  return { anchor: "cutting", position: "after", sortOrder: 10 };
+}
+
+function progressWorkflowIconV550(type = "custom") {
+  const paths = {
+    cutting: '<path d="M5 17 17 5M8 5h9v9M5 12v5h5"/>',
+    machine: '<rect x="4" y="7" width="16" height="11" rx="2"/><path d="M8 7V4h8v3M8 12h8M8 15h5"/>',
+    staging: '<path d="M4 17h16M6 17V8h12v9M9 12h6M9 8V5h6v3"/>',
+    outbound: '<path d="M4 12h12M12 8l4 4-4 4M18 6h2v12h-2"/>',
+    destination: '<path d="M12 21s6-5.3 6-11a6 6 0 1 0-12 0c0 5.7 6 11 6 11Z"/><circle cx="12" cy="10" r="2"/>',
+    custom: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
+  };
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[type] || paths.custom}</svg>`;
+}
+
+function progressWorkflowNodeHtmlV550(node) {
+  if (node.kind === "custom") {
+    const stage = node.stage || {};
+    const completion = stage.completionMode === "file" ? "File" : "Scanner";
+    return `<article class="progress-workflow-node-v550 is-custom is-draggable-v551" draggable="true" data-progress-drag-token-v551="custom:${escapeHtml(stage.key)}" style="--progress-node-color:${escapeHtml(node.color)}">
+      <span class="progress-workflow-drag-handle-v550" aria-hidden="true">⋮⋮</span>
+      <button type="button" data-progress-setting-edit-v549="${escapeHtml(stage.key)}" aria-label="Edit ${escapeHtml(node.label)}">
+        <span class="progress-workflow-icon-v550">${progressWorkflowIconV550("custom")}</span>
+        <span class="progress-workflow-copy-v550"><small>Custom · ${escapeHtml(completion)}</small><strong>${escapeHtml(node.label)}</strong><em>${escapeHtml(node.detail || "Checkpoint")}</em></span>
+      </button>
+    </article>`;
+  }
+  if (node.kind === "machine") {
+    const machine = node.machine || {};
+    return `<article class="progress-workflow-node-v550 is-machine is-draggable-v551" draggable="true" data-progress-drag-token-v551="machine:${escapeHtml(machine.code || "")}" style="--progress-node-color:${escapeHtml(node.color)}" title="Drag left or right to change this machine's progress position">
+      <span class="progress-workflow-drag-handle-v550" aria-hidden="true">⋮⋮</span>
+      <span class="progress-workflow-icon-v550">${progressWorkflowIconV550("machine")}</span>
+      <span class="progress-workflow-copy-v550"><small>Machine · drag to move</small><strong>${escapeHtml(node.label)}</strong><em>${escapeHtml(node.detail)}</em></span>
+    </article>`;
+  }
+  return `<article class="progress-workflow-node-v550 is-fixed" data-progress-fixed-node-v550="${escapeHtml(node.id)}" style="--progress-node-color:${escapeHtml(node.color)}" title="Core workflow milestone">
+    <span class="progress-workflow-lock-v551" aria-hidden="true">●</span>
+    <span class="progress-workflow-icon-v550">${progressWorkflowIconV550(node.type)}</span>
+    <span class="progress-workflow-copy-v550"><small>Core stage</small><strong>${escapeHtml(node.label)}</strong><em>${escapeHtml(node.detail)}</em></span>
+  </article>`;
+}
+
+function progressDropZoneHtmlV550(index) {
+  return `<button type="button" class="progress-workflow-dropzone-v550" data-progress-drop-index-v550="${Number(index)}" title="Add or drop a checkpoint here" aria-label="Add or drop a checkpoint here"><span>+</span></button>`;
+}
+
+function progressSettingsEditorHtmlV550() {
+  const key = String(state.progressSettingsEditorKeyV550 || "");
+  const editing = key && key !== "__new__" ? (state.progressStageSettingsV549 || []).find((row) => String(row.key) === key) : null;
+  const isNew = key === "__new__";
+  if (!editing && !isNew) {
+    return `<aside class="progress-settings-inspector-v550 is-empty">
+      <div class="progress-settings-inspector-icon-v550">${progressWorkflowIconV550("custom")}</div>
+      <div><small>Step settings</small><strong>Select a custom checkpoint</strong><p>Click a purple step to edit it. Drag purple or machine steps left/right to reorganize the process.</p></div>
+      <button type="button" class="app-primary-button" data-progress-setting-add-v550>Add checkpoint</button>
+    </aside>`;
+  }
+  const placement = editing
+    ? { anchor: editing.anchor || "cutting", position: editing.position || "after", sortOrder: Number(editing.sortOrder || 0) }
+    : (state.progressSettingsDraftPlacementV550 || { anchor: "cutting", position: "after", sortOrder: 10 });
+  const completionMode = editing?.completionMode || "manual_scan";
+  return `<aside class="progress-settings-inspector-v550 is-editing">
+    <header><div><small>${editing ? "Edit checkpoint" : "New checkpoint"}</small><strong>${escapeHtml(editing?.label || "Configure checkpoint")}</strong></div></header>
+    <form id="progressSettingsFormV549" class="progress-settings-form-v550">
+      <label><span>Name</span><input name="displayName" maxlength="80" value="${escapeHtml(editing?.label || "")}" placeholder="Quality Review" required></label>
+      <label><span>Key</span><input name="stageKey" maxlength="64" value="${escapeHtml(editing?.key || "")}" placeholder="quality-review" ${editing ? "readonly" : ""} required></label>
+      <label><span>Completion</span><select name="completionMode" data-progress-completion-mode-v549><option value="manual_scan" ${completionMode === "manual_scan" ? "selected" : ""}>Scanner</option><option value="file" ${completionMode === "file" ? "selected" : ""}>File detected</option></select></label>
+      <label data-progress-station-field-v549 ${completionMode === "file" ? "hidden" : ""}><span>Scanner station</span><select name="scannerStation">${progressStationOptionsV549(editing?.scannerStation || "")}</select></label>
+      <label data-progress-file-field-v549 ${completionMode === "file" ? "" : "hidden"}><span>File pattern</span><input name="filePattern" value="${escapeHtml(editing?.filePattern || "")}" placeholder="*QUALITY*.*"></label>
+      <label><span>Position</span><select name="position"><option value="after" ${placement.position === "after" ? "selected" : ""}>After</option><option value="before" ${placement.position === "before" ? "selected" : ""}>Before</option></select></label>
+      <label><span>Anchor stage</span><select name="anchorStageKey">${progressAnchorOptionsV549(placement.anchor)}</select></label>
+      <label><span>Next-stage rule</span><select name="downstreamPolicy"><option value="auto_complete" ${(editing?.downstreamPolicy || "auto_complete") === "auto_complete" ? "selected" : ""}>Auto-complete</option><option value="require_override" ${editing?.downstreamPolicy === "require_override" ? "selected" : ""}>Require override</option><option value="block" ${editing?.downstreamPolicy === "block" ? "selected" : ""}>Block next stage</option></select></label>
+      <input type="hidden" name="sortOrder" value="${Number(placement.sortOrder || 0)}">
+      <footer>${editing ? `<button type="button" class="danger secondary" data-progress-setting-remove-v549="${escapeHtml(editing.key)}">Remove</button>` : ""}<span></span><button type="button" class="app-secondary-button" data-progress-setting-clear-v549>Cancel</button><button type="submit" class="app-primary-button">${editing ? "Save changes" : "Add checkpoint"}</button></footer>
+    </form>
+  </aside>`;
+}
+
+function progressSettingsModalHtmlV549() {
+  const model = progressWorkflowModelV550();
+  const customCount = model.filter((node) => node.kind === "custom").length;
+  const machineCount = model.filter((node) => node.kind === "machine").length;
+  const track = model.map((node, index) => `${progressDropZoneHtmlV550(index)}${progressWorkflowNodeHtmlV550(node)}`).join("") + progressDropZoneHtmlV550(model.length);
+  return `<div class="progress-settings-shell-v550">
+    <section class="progress-workflow-board-v550">
+      <header class="progress-workflow-header-v550"><div><small>Live process map</small><strong>Progress workflow</strong><p>Drag machine or custom stages left/right. Core scanner milestones stay in process order.</p></div><div><span>${machineCount} machines · ${customCount} custom</span><button type="button" class="app-primary-button" data-progress-setting-add-v550>Add checkpoint</button></div></header>
+      <div class="progress-workflow-legend-v550"><span><i class="is-fixed"></i>Core stage</span><span><i class="is-machine"></i>Draggable machine</span><span><i class="is-custom"></i>Draggable checkpoint</span></div>
+      <div class="progress-workflow-scroll-v550" aria-label="Configured production workflow"><div class="progress-workflow-track-v550" role="list">${track}</div></div>
+    </section>
+    ${progressSettingsEditorHtmlV550()}
+  </div>`;
+}
+
+async function loadProgressSettingsV549() {
+  const payload = await fetchJson("/api/admin/progress-settings");
+  state.progressStageSettingsV549 = payload.stages || [];
+  state.progressSettingsEditorKeyV550 = "";
+  state.progressSettingsDraftPlacementV550 = null;
+  state.progressSettingsScrollLeftV551 = 0;
+  return payload;
+}
+
+function syncProgressSettingsFormV549() {
+  const form = document.getElementById("progressSettingsFormV549");
+  if (!form) return;
+  const fileMode = form.elements.completionMode?.value === "file";
+  form.querySelector("[data-progress-station-field-v549]")?.toggleAttribute("hidden", fileMode);
+  form.querySelector("[data-progress-file-field-v549]")?.toggleAttribute("hidden", !fileMode);
+}
+
+function renderProgressSettingsV550({ focus = "" } = {}) {
+  if (!els.adminModalBody || els.adminModal?.dataset.kind !== "progressSettings") return;
+  const currentScroll = els.adminModalBody.querySelector(".progress-workflow-scroll-v550")?.scrollLeft;
+  if (Number.isFinite(currentScroll)) state.progressSettingsScrollLeftV551 = currentScroll;
+  els.adminModalBody.innerHTML = progressSettingsModalHtmlV549();
+  applyLanguageToRoot(els.adminModalBody);
+  wireProgressSettingsV549();
+  const scroller = els.adminModalBody.querySelector(".progress-workflow-scroll-v550");
+  if (scroller) scroller.scrollLeft = Number(state.progressSettingsScrollLeftV551 || 0);
+  if (focus) window.setTimeout(() => document.querySelector(focus)?.focus(), 0);
+}
+
+function clearProgressSettingsFormV549() {
+  state.progressSettingsEditorKeyV550 = "";
+  state.progressSettingsDraftPlacementV550 = null;
+  renderProgressSettingsV550();
+}
+
+function editProgressSettingV549(key) {
+  const stage = (state.progressStageSettingsV549 || []).find((row) => String(row.key) === String(key));
+  if (!stage) return;
+  state.progressSettingsEditorKeyV550 = stage.key;
+  state.progressSettingsDraftPlacementV550 = null;
+  renderProgressSettingsV550({ focus: '#progressSettingsFormV549 input[name="displayName"]' });
+}
+
+function beginProgressSettingV550(dropIndex = null) {
+  const model = progressWorkflowModelV550();
+  const index = dropIndex === null ? Math.max(0, model.findIndex((node) => node.id === "fixed:staging")) : Number(dropIndex);
+  state.progressSettingsEditorKeyV550 = "__new__";
+  state.progressSettingsDraftPlacementV550 = progressPlacementForDropIndexV550(index < 0 ? model.length : index, model);
+  renderProgressSettingsV550({ focus: '#progressSettingsFormV549 input[name="displayName"]' });
+}
+
+function progressSettingPayloadV550(stage, overrides = {}) {
+  return {
+    stageKey: stage.key,
+    displayName: stage.label,
+    position: stage.position || "after",
+    anchorStageKey: stage.anchor || "cutting",
+    completionMode: stage.completionMode || "manual_scan",
+    scannerStation: stage.scannerStation || "",
+    filePattern: stage.filePattern || "",
+    downstreamPolicy: stage.downstreamPolicy || "auto_complete",
+    sortOrder: Number(stage.sortOrder || 0),
+    active: stage.active !== false,
+    ...overrides,
+  };
+}
+
+async function persistProgressWorkflowDropV550(key, rawDropIndex) {
+  const stages = (state.progressStageSettingsV549 || []).filter((stage) => stage?.active !== false);
+  const dragged = stages.find((stage) => String(stage.key) === String(key));
+  if (!dragged) return;
+  const originalModel = progressWorkflowModelV550();
+  const draggedId = `custom:${dragged.key}`;
+  const originalIndex = originalModel.findIndex((node) => node.id === draggedId);
+  const withoutDragged = originalModel.filter((node) => node.id !== draggedId);
+  let dropIndex = Math.max(0, Math.min(Number(rawDropIndex || 0), originalModel.length));
+  if (originalIndex >= 0 && originalIndex < dropIndex) dropIndex -= 1;
+  dropIndex = Math.max(0, Math.min(dropIndex, withoutDragged.length));
+  const placement = progressPlacementForDropIndexV550(dropIndex, withoutDragged);
+  const draggedNode = originalModel.find((node) => node.id === draggedId);
+  withoutDragged.splice(dropIndex, 0, draggedNode);
+  const orderByKey = new Map();
+  let customIndex = 0;
+  withoutDragged.forEach((node) => {
+    if (node?.kind !== "custom") return;
+    customIndex += 1;
+    orderByKey.set(String(node.stage?.key || ""), customIndex * 10);
+  });
+  const changed = stages.filter((stage) => {
+    const nextAnchor = String(stage.key) === String(key) ? placement.anchor : stage.anchor;
+    const nextPosition = String(stage.key) === String(key) ? placement.position : stage.position;
+    const nextOrder = orderByKey.get(String(stage.key)) ?? Number(stage.sortOrder || 0);
+    return nextAnchor !== stage.anchor || nextPosition !== stage.position || Number(nextOrder) !== Number(stage.sortOrder || 0);
+  });
+  if (!changed.length) return;
+  let latest = null;
+  for (const stage of changed) {
+    const overrides = {
+      anchorStageKey: String(stage.key) === String(key) ? placement.anchor : stage.anchor,
+      position: String(stage.key) === String(key) ? placement.position : stage.position,
+      sortOrder: orderByKey.get(String(stage.key)) ?? Number(stage.sortOrder || 0),
+    };
+    latest = await fetchJson("/api/admin/progress-settings", { method: "POST", body: JSON.stringify(progressSettingPayloadV550(stage, overrides)) });
+  }
+  if (latest) state.progressStageSettingsV549 = latest.stages || state.progressStageSettingsV549;
+  state.progressSettingsEditorKeyV550 = String(key);
+  state.progressSettingsDraftPlacementV550 = null;
+  renderProgressSettingsV550();
+  showFloatingNotice("Progress checkpoint moved.", "success");
+}
+
+function distributedMachineRanksV551(count, minRank, maxRank) {
+  if (count <= 0) return [];
+  const span = Math.max(0, maxRank - minRank + 1);
+  const values = [];
+  let previous = minRank - 1;
+  for (let index = 0; index < count; index += 1) {
+    const remaining = count - index - 1;
+    const ideal = Math.round(minRank + ((index + 1) * (maxRank - minRank)) / (count + 1));
+    const value = span >= count
+      ? Math.min(maxRank - remaining, Math.max(previous + 1, ideal))
+      : Math.min(maxRank, Math.max(minRank, ideal));
+    values.push(value);
+    previous = value;
+  }
+  return values;
+}
+
+function machineRanksForProgressModelV551(model) {
+  const segments = [[], [], [], [], []];
+  let segment = 0;
+  for (const node of model) {
+    if (node.id === "fixed:cutting") { segment = 1; continue; }
+    if (node.id === "fixed:staging") { segment = 2; continue; }
+    if (node.id === "fixed:outbound") { segment = 3; continue; }
+    if (node.id === "fixed:destination") { segment = 4; continue; }
+    if (node.kind === "machine" && node.machine?.code) segments[segment].push(node.machine.code);
+  }
+  const ranges = [[-20, -11], [-9, 9], [11, 19], [21, 29], [31, 50]];
+  const result = new Map();
+  segments.forEach((codes, index) => {
+    const ranks = distributedMachineRanksV551(codes.length, ranges[index][0], ranges[index][1]);
+    codes.forEach((code, itemIndex) => result.set(String(code), Number(ranks[itemIndex])));
+  });
+  return result;
+}
+
+async function persistProgressMachineDropV551(code, rawDropIndex) {
+  const cleanCode = String(code || "").trim().toLowerCase();
+  if (!cleanCode) return;
+  const originalModel = progressWorkflowModelV550();
+  const draggedId = `machine:${cleanCode}`;
+  const draggedNode = originalModel.find((node) => node.id === draggedId);
+  if (!draggedNode) return;
+  const originalIndex = originalModel.findIndex((node) => node.id === draggedId);
+  const withoutDragged = originalModel.filter((node) => node.id !== draggedId);
+  let dropIndex = Math.max(0, Math.min(Number(rawDropIndex || 0), originalModel.length));
+  if (originalIndex >= 0 && originalIndex < dropIndex) dropIndex -= 1;
+  dropIndex = Math.max(0, Math.min(dropIndex, withoutDragged.length));
+  withoutDragged.splice(dropIndex, 0, draggedNode);
+  const rankByCode = machineRanksForProgressModelV551(withoutDragged);
+  const machines = machineDefinitionsV521({ activeOnly: false }).map((machine) => ({
+    ...machine,
+    progressRank: rankByCode.has(String(machine.code)) ? rankByCode.get(String(machine.code)) : Number(machine.progressRank || 0),
+  }));
+  const changed = machines.some((machine) => Number(machine.progressRank || 0) !== Number(machineDefinitionV521(machine.code)?.progressRank || 0));
+  if (!changed) return;
+  const payload = await fetchJson("/api/machine-configuration", { method: "POST", body: JSON.stringify({ machines }) });
+  state.productionFileSettings = { ...(state.productionFileSettings || {}), ...(payload || {}) };
+  state.machineConfigurationLoadedV521 = true;
+  state.fabricationStatusCacheV474.clear();
+  state.fabricationStatusPendingV474.clear();
+  state.fabricationDeliveryCacheV521.clear();
+  renderScanMachineFiltersV521();
+  renderProgressSettingsV550();
+  showFloatingNotice("Machine progress position moved.", "success");
+}
+
+async function persistProgressNodeDropV551(token, rawDropIndex) {
+  const value = String(token || "");
+  if (value.startsWith("custom:")) return persistProgressWorkflowDropV550(value.slice(7), rawDropIndex);
+  if (value.startsWith("machine:")) return persistProgressMachineDropV551(value.slice(8), rawDropIndex);
+}
+
+function wireProgressSettingsV549() {
+  const root = els.adminModalBody;
+  if (!root || els.adminModal?.dataset.kind !== "progressSettings") return;
+  const form = document.getElementById("progressSettingsFormV549");
+  form?.elements.completionMode?.addEventListener("change", syncProgressSettingsFormV549);
+  form?.querySelector("[data-progress-setting-clear-v549]")?.addEventListener("click", clearProgressSettingsFormV549);
+  root.querySelectorAll("[data-progress-setting-add-v550]").forEach((button) => button.addEventListener("click", () => beginProgressSettingV550()));
+  root.querySelectorAll("[data-progress-drop-index-v550]").forEach((zone) => {
+    zone.addEventListener("click", () => beginProgressSettingV550(Number(zone.dataset.progressDropIndexV550 || 0)));
+    zone.addEventListener("dragover", (event) => { event.preventDefault(); zone.classList.add("is-drag-over"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("is-drag-over"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("is-drag-over");
+      root.querySelector(".progress-workflow-board-v550")?.classList.remove("is-dragging");
+      const token = event.dataTransfer?.getData("text/progress-node") || event.dataTransfer?.getData("text/plain") || "";
+      persistProgressNodeDropV551(token, Number(zone.dataset.progressDropIndexV550 || 0)).catch((error) => showInlineError(error?.message || "Unable to move progress stage.", true));
+    });
+  });
+  root.querySelectorAll("[data-progress-drag-token-v551]").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      const token = card.dataset.progressDragTokenV551 || "";
+      if (!token || !event.dataTransfer) return;
+      state.progressSettingsScrollLeftV551 = root.querySelector(".progress-workflow-scroll-v550")?.scrollLeft || 0;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/progress-node", token);
+      event.dataTransfer.setData("text/plain", token);
+      card.classList.add("is-dragging");
+      root.querySelector(".progress-workflow-board-v550")?.classList.add("is-dragging");
+    });
+    card.addEventListener("dragend", () => {
+      card.classList.remove("is-dragging");
+      root.querySelector(".progress-workflow-board-v550")?.classList.remove("is-dragging");
+      root.querySelectorAll(".progress-workflow-dropzone-v550.is-drag-over").forEach((zone) => zone.classList.remove("is-drag-over"));
+    });
+  });
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(form).entries());
+    const button = form.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+    try {
+      const payload = await fetchJson("/api/admin/progress-settings", { method: "POST", body: JSON.stringify(body) });
+      state.progressStageSettingsV549 = payload.stages || [];
+      state.progressSettingsEditorKeyV550 = String(body.stageKey || "");
+      state.progressSettingsDraftPlacementV550 = null;
+      renderProgressSettingsV550();
+      showSaveConfirmation("Progress checkpoint saved.");
+    } catch (error) { showInlineError(error.message, true); }
+    finally { if (button?.isConnected) button.disabled = false; }
+  });
+  syncProgressSettingsFormV549();
+}
+
 function adminModalContent(kind) {
   if (kind === "rejectSettings") {
     return rejectSettingsModalHtml();
@@ -35427,6 +36978,9 @@ function adminModalContent(kind) {
   }
   if (kind === "lookups") {
     return lookupManagerModalHtml();
+  }
+  if (kind === "progressSettings") {
+    return progressSettingsModalHtmlV549();
   }
   if (kind === "recentScans") {
     return recentScansModalHtml();
@@ -35562,7 +37116,7 @@ function lookupEditorMeta(type) {
     return {
       type: "process",
       title: "Process state",
-      explanation: "Maintains workflow status choices. The importer applies Updated Line when A+W changes an existing source line; manual edits are tracked separately in Action History and highlighted in the editor immediately after save.",
+      explanation: "Controls the approved Process State values available when an administrator manually corrects a delivery-list line. These labels support New/Updated/Rush/Remake/SDI presentation and manual corrections; they do not define scanner progress stages or A+W Cutting/Fabrication. Keep this library when manual delivery-list editing is enabled.",
       valueLabel: "Saved process value",
       valuePlaceholder: "Rush",
       labelPlaceholder: "Rush",
@@ -35734,7 +37288,7 @@ function stationLookupManagerHtmlV346() {
   const rows = lookupItemsForType("station");
   return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 is-stations">
     <section class="lookup-config-editor-v346">
-      <header>${lookupLibraryIconHtml("station")}<div><strong>Add a physical work station</strong><p>A Station is a scan/work area, not a workflow step. Stations are stable identities: add the real internal station once, then use its Display Name for company/location-specific wording without changing scan attribution or access rules.</p></div></header>
+      <header>${lookupLibraryIconHtml("station")}<div><strong>Add station</strong><p>Create the station used for scan attribution.</p></div></header>
       <div class="station-add-row station-add-row-v346"><input id="newStationInputModal" type="text" autocomplete="off" placeholder="Example: receiving-scanner-2"><button id="addStationBtnModal" class="app-primary-button" type="button">${lookupActionIconHtmlV346("add")}<span>Add Station</span></button></div>
       <form class="station-alias-editor-v470" id="stationAliasEditorV470" hidden>
         <label><span>Display name</span><input id="stationAliasInputV470" type="text" autocomplete="off"><small id="stationAliasInternalV470"></small></label>
@@ -36194,6 +37748,7 @@ async function saveGlassProfileV349() {
   if (sheetSize || sheetEmails.length) profiles[value] = { sheetSize, emails: sheetEmails };
   else delete profiles[value];
   state.lookupSheetUsageSettingsV529 = await fetchJson("/api/reports/sheet-usage-settings", { method: "POST", body: JSON.stringify({ profiles }) });
+  state.lookupSheetUsageLoadedV550 = true;
   state.lookupManagerActiveType = "glass_profile";
   renderLookupManagerModal();
   await loadHomeReportSummary();
@@ -36418,7 +37973,7 @@ function machineLookupManagerHtmlV521() {
   }).join("") : '<div class="lookup-empty-state"><strong>No machines configured</strong><span>Add the first machine to define fabrication matching and progress placement.</span></div>';
   return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 machine-lookup-manager-v521">
     <section class="lookup-config-editor-v346 machine-lookup-editor-v521">
-      <header>${lookupLibraryIconHtml("process")}<div><strong>${editing ? `Edit ${escapeHtml(name)}` : "Add a production machine"}</strong><p>One machine definition controls its display name, matching terms, color, and where its fabrication checkpoint appears throughout Scan, Smart Search, Order Details, and Print / Export.</p></div></header>
+      <header>${lookupLibraryIconHtml("process")}<div><strong>${editing ? `Edit ${escapeHtml(name)}` : "Add machine"}</strong><p>Name, detection, color, and progress position.</p></div></header>
       <form id="machineLookupFormV521" class="machine-lookup-form-v521">
         <input id="machineLookupCodeV521" type="hidden" value="${escapeHtml(code)}">
         <label><span>Machine name</span><input id="machineLookupNameV521" type="text" maxlength="64" autocomplete="off" value="${escapeHtml(name)}" placeholder="Example: Denver CNC" required><small>Operator-facing name used everywhere in the web app.</small></label>
@@ -36592,17 +38147,30 @@ function wireAttentionColorManagerV530() {
 function sheetSizeManagerHtmlV539() {
   const profiles = glassProfileItemsV349();
   const settings = state.lookupSheetUsageSettingsV529?.profiles || {};
+  const suggestions = state.lookupSheetUsageSettingsV529?.suggestions || {};
+  const suggestionEntries = Object.entries(suggestions);
+  const suggestionFor = (profile) => {
+    const direct = suggestions[profile.value] || suggestions[profile.label];
+    if (direct) return direct;
+    const identity = glassProfileIdentityKeyV353(profile.value || profile.label);
+    const match = suggestionEntries.find(([label]) => glassProfileIdentityKeyV353(label) === identity);
+    return match?.[1] || null;
+  };
   const rows = profiles.map((profile) => {
     const configured = settings[profile.value] || settings[profile.label] || {};
-    return `<article class="lookup-row sheet-size-row-v539" data-sheet-size-row-v539="${escapeHtml(profile.value)}">
-      <div class="lookup-row-main"><strong>${escapeHtml(profile.label || profile.value)}</strong><small>Configure the stock sheet dimensions used by A+W sheet-usage reporting and optional report recipients.</small></div>
-      <label><span>Stock sheet size</span><input data-sheet-size-input-v539 value="${escapeHtml(configured.sheetSize || "")}" placeholder="96 x 130"></label>
+    const suggestion = suggestionFor(profile);
+    const effectiveSize = configured.sheetSize || suggestion?.sheetSize || "";
+    const auto = !configured.sheetSize && Boolean(suggestion?.sheetSize);
+    return `<article class="lookup-row sheet-size-row-v539 ${auto ? "has-auto-sheet-v549" : ""}" data-sheet-size-row-v539="${escapeHtml(profile.value)}">
+      <div class="lookup-row-main"><span class="lookup-row-heading"><strong>${escapeHtml(profile.label || profile.value)}</strong>${auto ? '<em class="lookup-source-badge is-discovered">Auto</em>' : configured.sheetSize ? '<em class="lookup-source-badge is-manual">Maintained</em>' : ''}</span><small>${auto ? `Most-used A+W stock plate: ${escapeHtml(suggestion.sheetSize)} across ${Number(suggestion.usageCount || 0)} observed plate${Number(suggestion.usageCount || 0) === 1 ? "" : "s"}. Saving accepts this discovered size.` : "Maintain the stock sheet dimensions used by A+W sheet-usage reporting and optional report recipients."}</small></div>
+      <label><span>Stock sheet size</span><input data-sheet-size-input-v539 value="${escapeHtml(effectiveSize)}" placeholder="96 x 130"></label>
       <label><span>Email recipients</span><input data-sheet-email-input-v539 value="${escapeHtml(Array.isArray(configured.emails) ? configured.emails.join("; ") : "")}" placeholder="name@company.com; another@company.com"></label>
     </article>`;
   }).join("");
-  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 sheet-size-manager-v539">
+  const discoveredCount = profiles.filter((profile) => !((settings[profile.value] || settings[profile.label] || {}).sheetSize) && suggestionFor(profile)?.sheetSize).length;
+  return `<div class="lookup-manager-shell lookup-manager-v345 lookup-config-manager-v346 sheet-size-manager-v539 lookup-manager-polish-v549">
     <section class="lookup-config-editor-v346">
-      <header>${lookupLibraryIconHtml("product")}<div><strong>Stock Sheet Sizes</strong><p>Maintain sheet size and report recipients for every glass type in one place. This replaces the old Statistics Sheet Settings popup.</p></div></header>
+      <header>${lookupLibraryIconHtml("product")}<div><strong>Stock Sheet Sizes</strong><p>Maintain stock sizes by glass type. A+W plate history automatically fills missing sizes with the most-used observed stock dimension; review and Save to accept them as maintained settings.</p></div><strong>${discoveredCount ? `${discoveredCount} discovered` : "Current"}</strong></header>
       <div class="lookup-row-list sheet-size-list-v539">${rows || '<div class="lookup-empty-state"><strong>No glass types configured</strong><span>Add a Glass Type first, then configure its stock sheet size here.</span></div>'}</div>
       ${hasPermission("manage_lookup_values") ? '<footer class="sheet-size-actions-v539"><button type="button" class="app-primary-button" data-sheet-sizes-save-v539>Save Sheet Sizes</button></footer>' : ''}
     </section>
@@ -36623,6 +38191,7 @@ async function saveSheetSizesV539() {
     method: "POST",
     body: JSON.stringify({ profiles }),
   });
+  state.lookupSheetUsageLoadedV550 = true;
   state.statisticsTodayProductionReportV514 = null;
   state.homeReportSummary = null;
   renderLookupManagerModal();
@@ -36672,7 +38241,7 @@ function colorManagerHtmlV539() {
 
 function lookupManagerModalHtml() {
   const lookups = state.manualEditLookups || { products: [], routes: [], processes: [], glassCosts: [], glassColors: [] };
-  const supportedTypes = ["glass_profile", "sheet_sizes", "inventory_item_id", "route", "process", "machine", "station", "stage_definition", "color_manager", "attention_color", "presentation"];
+  const supportedTypes = lookupManagerTabDefinitionsV550().map((tab) => tab.type);
   const activeType = supportedTypes.includes(state.lookupManagerActiveType)
     ? state.lookupManagerActiveType
     : "glass_profile";
@@ -36696,8 +38265,8 @@ function lookupManagerModalHtml() {
           <header>
             ${lookupLibraryIconHtml(activeType, "is-editor")}
             <div>
-              <strong>Add or update a ${escapeHtml(meta.title.toLowerCase())}</strong>
-              <p>${escapeHtml(meta.explanation)}</p>
+              <strong>${escapeHtml(meta.title)}</strong>
+              <p>Add a new value or edit the selected one.</p>
             </div>
           </header>
 
@@ -36748,7 +38317,7 @@ function lookupManagerModalHtml() {
             <aside class="lookup-live-preview" aria-live="polite">
               ${lookupPreviewIconHtmlV346()}
               <div>
-                <small>Preview before saving</small>
+                <small>Preview</small>
                 <strong data-lookup-preview-label>${escapeHtml(meta.example.split(" → ")[1])}</strong>
                 <span><b>${isGlassCost || isGlassColor ? "Glass type" : isInventoryItemId ? "Item ID" : "Saved value"}:</b> <em data-lookup-preview-value>${escapeHtml(meta.example.split(" → ")[0])}</em></span>
                 <p data-lookup-preview-note>${escapeHtml(meta.explanation)}</p>
@@ -36815,7 +38384,11 @@ function closeLookupEditorV470() {
   const editor = modalShell?.querySelector(".lookup-editor-surface-v470.is-editor-open-v470")
     || document.querySelector(".lookup-editor-surface-v470.is-editor-open-v470");
   const slot = document.querySelector("[data-lookup-editor-slot-v476]");
-  if (editor) editor.classList.remove("is-editor-open-v470");
+  if (editor) {
+    editor.classList.remove("is-editor-open-v470", "lookup-editor-dialog-v550");
+    editor.removeAttribute("role");
+    editor.removeAttribute("aria-modal");
+  }
   // v0.476: restore the real form to its original Lookup shell before any
   // re-render. A lightweight top-level shell mirrors the original Lookup
   // modifier classes so tab-specific editor styling is retained while open.
@@ -36850,6 +38423,10 @@ function openLookupEditorV470({ focusSelector = "" } = {}) {
   const sourceShell = editor.closest(".lookup-manager-shell");
   const modalShell = document.createElement("div");
   modalShell.className = "lookup-editor-modal-shell-v476";
+  modalShell.dataset.lookupEditorTypeV550 = state.lookupManagerActiveType || "";
+  editor.classList.add("lookup-editor-dialog-v550");
+  editor.setAttribute("role", "dialog");
+  editor.setAttribute("aria-modal", "true");
   sourceShell?.classList.forEach((className) => {
     if (className !== "lookup-manager-shell") modalShell.classList.add(className);
   });
@@ -36906,6 +38483,8 @@ function openNewLookupEditorV470() {
     if (station) station.value = "";
     const aliasEditor = document.getElementById("stationAliasEditorV470");
     if (aliasEditor) aliasEditor.hidden = true;
+    const addRow = document.querySelector(".station-add-row-v346");
+    if (addRow) addRow.hidden = false;
   } else if (type !== "presentation") clearLookupManagerForm();
   const focusSelector = type === "glass_profile" ? "#glassProfileValueV349" : type === "stage_definition" ? "#stageDefinitionKeyV346" : type === "station" ? "#newStationInputModal" : type === "presentation" ? "#presentationCompanyNameV355" : "#lookupValueInput";
   openLookupEditorV470({ focusSelector });
@@ -36919,6 +38498,8 @@ function editStationAliasV470(internalStation) {
   const internalNote = document.getElementById("stationAliasInternalV470");
   const aliasEditor = document.getElementById("stationAliasEditorV470");
   if (!input || !internalInput || !aliasEditor) return;
+  const addRow = document.querySelector(".station-add-row-v346");
+  if (addRow) addRow.hidden = true;
   input.value = stationDisplayLabelV355(internalName);
   input.dataset.stationAliasV355 = internalName;
   internalInput.value = internalName;
@@ -36930,6 +38511,9 @@ function editStationAliasV470(internalStation) {
 
 function renderLookupManagerModal() {
   if (!els.adminModalBody || els.adminModal?.dataset.kind !== "lookups") return;
+  if (!lookupManagerTypeAvailableV550(state.lookupManagerActiveType)) {
+    state.lookupManagerActiveType = lookupManagerTabDefinitionsV550()[0]?.type || "glass_profile";
+  }
   closeLookupEditorV470();
   els.adminModalBody.innerHTML = lookupManagerModalHtml();
   applyLanguageToRoot(els.adminModalBody);
@@ -38562,6 +40146,81 @@ function refreshManualEditFilterDrawer(openState = null) {
   drawer.replaceWith(nextDrawer);
 }
 
+function manualEditSelectionToolbarHtmlV553() {
+  const selectedCount = state.manualEditSelectedIdsV553.size;
+  const dirtySelected = [...state.manualEditSelectedIdsV553].filter((id) => state.manualEditDirtyIdsV553.has(String(id))).length;
+  return `
+    <section class="manual-edit-bulk-toolbar-v553" aria-label="Selected order item actions">
+      <div><small>Selected order / items</small><strong><b data-manual-edit-selected-count-v553>${escapeHtml(selectedCount)}</b> selected</strong></div>
+      <label><span>Unsaved selected</span><strong data-manual-edit-dirty-selected-v553>${escapeHtml(dirtySelected)}</strong></label>
+      <div class="manual-edit-bulk-actions-v553">
+        ${hasPermission("edit_delivery_list_items") ? `<button type="button" class="app-save-action-v553" data-manual-edit-save-selected-v553 ${dirtySelected ? "" : "disabled"}>Save Selected</button>` : ""}
+        ${hasPermission("delete_delivery_list_items") ? `<button type="button" class="app-clear-action-v553" data-manual-edit-delete-selected-v553 ${selectedCount ? "" : "disabled"}>Delete Selected</button>` : ""}
+        <button type="button" class="app-secondary-button" data-manual-edit-clear-selected-v553 ${selectedCount ? "" : "disabled"}>Clear Selection</button>
+      </div>
+    </section>`;
+}
+
+function syncManualEditSelectionToolbarV553() {
+  const selectedCount = state.manualEditSelectedIdsV553.size;
+  const dirtySelected = [...state.manualEditSelectedIdsV553].filter((id) => state.manualEditDirtyIdsV553.has(String(id))).length;
+  document.querySelectorAll("[data-manual-edit-selected-count-v553]").forEach((node) => { node.textContent = String(selectedCount); });
+  document.querySelectorAll("[data-manual-edit-dirty-selected-v553]").forEach((node) => { node.textContent = String(dirtySelected); });
+  document.querySelectorAll("[data-manual-edit-save-selected-v553]").forEach((button) => { button.disabled = dirtySelected === 0; });
+  document.querySelectorAll("[data-manual-edit-delete-selected-v553],[data-manual-edit-clear-selected-v553]").forEach((button) => { button.disabled = selectedCount === 0; });
+  document.querySelectorAll("[data-manual-edit-select-v553]").forEach((checkbox) => {
+    const id = String(checkbox.dataset.manualEditSelectV553 || "");
+    checkbox.checked = state.manualEditSelectedIdsV553.has(id);
+  });
+}
+
+function markManualEditRowDirtyV553(row) {
+  const id = String(row?.dataset?.editRow || "");
+  if (!id) return;
+  state.manualEditDirtyIdsV553.add(id);
+  state.manualEditDirty = true;
+  row.classList.add("is-dirty-v553");
+  syncManualEditSelectionToolbarV553();
+}
+
+function clearManualEditDirtyStateV553() {
+  state.manualEditDirtyIdsV553.clear();
+  state.manualEditSelectedIdsV553.clear();
+  state.manualEditDirty = false;
+  document.querySelectorAll("[data-edit-row].is-dirty-v553").forEach((row) => row.classList.remove("is-dirty-v553"));
+  syncManualEditSelectionToolbarV553();
+}
+
+async function confirmManualEditRefreshV553(actionLabel = "continue") {
+  if (!state.manualEditDirty || !state.manualEditDirtyIdsV553.size) return true;
+  const confirmed = await confirmWebAppAction({
+    title: "Discard unsaved delivery-list edits?",
+    message: `You have unsaved Order / Item edits. ${escapeHtml(actionLabel)} will reload the editable rows.`,
+    details: "Save the edited rows first if you want to keep those values.",
+    confirmLabel: `Discard and ${actionLabel.toLowerCase()}`,
+    cancelLabel: "Keep editing",
+    danger: false,
+  });
+  if (!confirmed) return false;
+  clearManualEditDirtyStateV553();
+  return true;
+}
+
+function removeManualEditRowsFromViewV553(lineItemIds = []) {
+  const ids = new Set(lineItemIds.map((value) => String(value || "")).filter(Boolean));
+  if (!ids.size) return;
+  state.manualEditResultRows = (state.manualEditResultRows || []).filter((row) => !ids.has(String(row.lineItemId || "")));
+  state.manualEditTotalRows = Math.max(0, Number(state.manualEditTotalRows || 0) - ids.size);
+  state.manualEditVisibleCount = state.manualEditResultRows.length;
+  ids.forEach((id) => {
+    const row = document.querySelector(`[data-edit-row="${CSS.escape(id)}"]`);
+    const group = row?.closest?.(".manual-edit-job-group-v553");
+    row?.remove();
+    if (group && !group.querySelector("[data-edit-row]")) group.remove();
+  });
+  syncManualEditSelectionToolbarV553();
+}
+
 function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a delivery list to load editable rows.</div>`) {
   const selected = state.manualEditListId || state.activeListId || state.lists[0]?.id || "";
   const deliveryDate = manualEditDeliveryDateForList(selected);
@@ -38580,7 +40239,7 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
           <span>Delivery list</span>
           <strong>${escapeHtml(formatNumericDeliveryDate(deliveryDate))} · Whole Delivery List</strong>
           <input id="manualEditModalStage" type="hidden" value="${MANUAL_EDIT_WHOLE_LIST_VALUE_V468}">
-          <small class="manual-edit-scope-help-v468">Each Order/Item appears once. Use Progress to advance the item, order, or complete list through the scanner workflow.</small>
+          <small class="manual-edit-scope-help-v468">Each Order/Item appears once. Use Progress for an item or order; complete whole delivery dates from All Delivery Lists.</small>
         </section>
 
         <div class="manual-edit-search-with-filter">
@@ -38594,11 +40253,11 @@ function manualEditModalHtml(resultsHtml = `<div class="admin-empty">Select a de
         <div class="manual-edit-tool-actions">
           <button id="manualEditModalSearchBtn" class="app-primary-button manual-edit-search-button-v334" type="button">Search</button>
           <button id="manualEditModalReloadBtn" class="secondary" type="button">Load All</button>
-          ${hasPermission("edit_delivery_list_items") ? `<button class="app-primary-button manual-edit-complete-list-v527" type="button" data-manual-progress-list-v527="${escapeHtml(deliveryDate)}">Complete Delivery List</button>` : ""}
           ${hasPermission("create_delivery_list_orders") ? `<button type="button" class="app-primary-button manual-edit-create-order-button-v338" data-manual-order-toggle><span class="manual-edit-create-order-icon-v338" aria-hidden="true"></span><span>Create New Order</span></button>` : ""}
         </div>
       </div>
 
+      ${manualEditSelectionToolbarHtmlV553()}
       <div id="manualEditModalResults" class="admin-table manual-edit-modal-results">${resultsHtml}</div>
     </div>
   `;
@@ -38647,6 +40306,7 @@ async function ensureManualEditLookupsLoaded() {
   const sheetSettingsResult = lookups[3];
   if (sheetSettingsResult?.status === "fulfilled" && sheetSettingsResult.value) {
     state.lookupSheetUsageSettingsV529 = sheetSettingsResult.value;
+    state.lookupSheetUsageLoadedV550 = true;
   }
 }
 
@@ -38656,7 +40316,7 @@ async function ensureManualEditLookupsLoaded() {
  * Flow: Normalizes inputs, performs one named responsibility, and returns data or control to the caller.
  */
 async function openManualEditForList(listId) {
-  state.manualEditDirty = false;
+  clearManualEditDirtyStateV553();
   state.manualEditListId = listId || state.activeListId || state.lists[0]?.id || "";
   state.manualEditScopeV468 = "whole";
   state.manualEditQuery = "";
@@ -38790,7 +40450,8 @@ async function runManualEditModalSearch(loadAll = false, requestedPage = 1, para
 
   if (target) target.innerHTML = html;
   if (els.manualEditResults) els.manualEditResults.innerHTML = html;
-  state.manualEditDirty = false;
+  state.manualEditDirty = state.manualEditDirtyIdsV553.size > 0;
+  syncManualEditSelectionToolbarV553();
 }
 
 /** Move the manual editor to a server-backed result page instead of appending more rows. */
@@ -39629,6 +41290,70 @@ async function resetAdminScansForList(listId) {
  * Effects: May call the backend api, may update shared client state.
  * Flow: Validates the user action, delegates to the shared workflow/API, and presents success or error feedback.
  */
+async function completeAdminSelectedDeliveryDatesV553() {
+  const dates = [...state.adminSelectedDeliveryDatesV553].filter(Boolean).sort();
+  if (!dates.length) return;
+  const confirmed = await confirmWebAppAction({
+    title: `Complete ${dates.length} selected delivery list${dates.length === 1 ? "" : "s"}?`,
+    message: `Complete every active Order / Item on <strong>${escapeHtml(dates.map(formatNumericDeliveryDate).join(", "))}</strong>.`,
+    details: "Each selected date advances to Complete / out of system. Earlier required scanner stages are completed and active rack/bay locations are cleared.",
+    confirmLabel: "Complete Selected",
+    cancelLabel: "Keep selected",
+    danger: false,
+    requiredText: "COMPLETE",
+    requiredTextLabel: "Type COMPLETE to finish the selected delivery lists",
+  });
+  if (!confirmed) return;
+  for (const deliveryDate of dates) {
+    await fetchJson("/api/admin/delivery-progress", {
+      method: "POST",
+      body: JSON.stringify({ scope: "list", target: "complete", deliveryDate }),
+    });
+  }
+  state.adminSelectedDeliveryDatesV553.clear();
+  await loadDeliveryLists(state.activeListId);
+  renderHome();
+  renderScanPage();
+  renderDeliveryListSelect();
+  await refreshAdminDeliveryListModal();
+  showSaveConfirmation(`${dates.length} delivery list${dates.length === 1 ? "" : "s"} completed.`);
+}
+
+async function deleteAdminSelectedDeliveryDatesV553() {
+  const dates = [...state.adminSelectedDeliveryDatesV553].filter(Boolean).sort();
+  if (!dates.length) return;
+  const confirmed = await confirmWebAppAction({
+    title: `Delete ${dates.length} selected delivery list${dates.length === 1 ? "" : "s"}?`,
+    message: `Delete every workflow stage for <strong>${escapeHtml(dates.map(formatNumericDeliveryDate).join(", "))}</strong>.`,
+    details: "This removes all selected delivery dates from the scanner app and cannot be undone from the web app.",
+    confirmLabel: "Delete Selected",
+    cancelLabel: "Keep selected",
+    requiredText: "DELETE",
+    requiredTextLabel: "Type DELETE to remove the selected delivery lists",
+  });
+  if (!confirmed) return;
+  let latestLists = state.lists;
+  for (const deliveryDate of dates) {
+    const result = await fetchJson("/api/admin/delete-date", {
+      method: "POST",
+      body: JSON.stringify({ deliveryDate, confirmText: "DELETE", ...requestContext() }),
+    });
+    latestLists = result.lists || latestLists;
+  }
+  state.adminSelectedDeliveryDatesV553.clear();
+  state.lists = latestLists || [];
+  if (!state.lists.some((list) => list.id === state.activeListId)) state.activeListId = state.lists[0]?.id || "";
+  if (state.activeListId) await activateList(state.activeListId, false);
+  else { state.meta = null; state.items = []; state.recent = []; state.errors = []; state.lastScan = null; }
+  await loadDeliveryLists(state.activeListId);
+  renderHome();
+  renderScanPage();
+  renderDeliveryListSelect();
+  await refreshAdminDeliveryListModal();
+  playAppSound("destructive_action", { force: true });
+  showSaveConfirmation(`${dates.length} delivery list${dates.length === 1 ? "" : "s"} deleted.`);
+}
+
 async function resetAdminScansForDate(deliveryDate) {
   const lists = state.lists.filter((list) => list.deliveryDate === deliveryDate);
 
@@ -40320,7 +42045,7 @@ function confirmWebAppAction({
 
         <div class="action-confirm-actions">
           <button type="button" class="action-confirm-cancel app-cancel-button app-cancel-action-v343" data-action-confirm-cancel><span class="app-cancel-icon-v343" aria-hidden="true"></span><span>${escapeHtml(cancelLabel)}</span></button>
-          <button type="button" class="action-confirm-confirm" data-action-confirm-confirm ${requiresTypedConfirmation ? "disabled" : ""}>${escapeHtml(confirmLabel)}</button>
+          <button type="button" class="action-confirm-confirm ${danger ? "app-destructive-confirm-v549" : "app-primary-button"}" data-action-confirm-confirm ${requiresTypedConfirmation ? "disabled" : ""}>${escapeHtml(confirmLabel)}</button>
         </div>
       </section>
     `;
@@ -42794,7 +44519,7 @@ function manualEditSetChoiceValue(control, value, markDirty = true) {
   hiddenInput.value = value;
 
   if (markDirty) {
-    state.manualEditDirty = true;
+    markManualEditRowDirtyV553(control.closest("[data-edit-row]"));
     hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
@@ -43001,8 +44726,12 @@ function manualEditRouteOptions() {
   const seen = new Set();
   const lookupRoutes = lookupOptions(state.manualEditLookups?.routes || [], "Indian Trail / Standard")
     .map(([value, label]) => [manualEditRouteSelectionValue(value), label])
-    .filter(([value]) => {
+    .filter(([value, label]) => {
       const key = String(value || "").trim().toUpperCase();
+      const labelKey = String(label || "").trim().toUpperCase();
+      // Delivery List Management edits the route destination only. Airport Rd is
+      // the plant/origin and must never appear alongside actual route choices.
+      if ([key, labelKey].some((text) => /^(AIRPORT(?: RD| ROAD)?|AIRPORT RD\.?|AIRPORT ROAD)$/.test(text))) return false;
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -43269,19 +44998,27 @@ function manualEditProgressControlV527(item = {}) {
     ["indian_trail", "Indian Trail / destination received"],
     ["complete", "Complete / out of system"],
   ];
-  // v0.529: the card header already owns the current -> next summary. Keep the
-  // editor itself compact by treating Progress like the other editable fields.
-  return `<label class="manual-field manual-edit-progress-field-v529">
-    <span>Advance progress to</span>
-    <select data-manual-progress-target-v527 aria-label="Progress stage for ${escapeHtml(item.order)}-${escapeHtml(item.item)}">
-      ${options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === summary.nextTarget ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-    </select>
-    <small>Earlier required steps complete automatically.</small>
-  </label>
-  <div class="manual-edit-progress-actions-v529 wide">
-    <button class="app-primary-button" type="button" data-manual-progress-item-v527="${escapeHtml(item.lineItemId)}">Advance Item</button>
-    <button class="app-secondary-button manual-edit-complete-order-v529" type="button" data-manual-progress-order-v527="${escapeHtml(item.lineItemId)}" data-order="${escapeHtml(item.order)}">Complete Order</button>
-  </div>`;
+  // v0.553: Progress remains operationally separate from editable A+W/order
+  // fields. Group the current/next state, target selector, and progress actions
+  // in one full-width panel so operators do not mistake progression for a text
+  // edit or overlook the difference between item and order completion.
+  return `<section class="manual-edit-progress-panel-v553" aria-label="Progress for ${escapeHtml(item.order)} / ${escapeHtml(item.item)}">
+    <header class="manual-edit-progress-copy-v529">
+      <small>Progress</small>
+      <strong>${escapeHtml(summary.current)} <i aria-hidden="true">→</i> ${escapeHtml(summary.next)}</strong>
+      <span>Earlier required steps complete automatically.</span>
+    </header>
+    <label class="manual-field manual-edit-progress-field-v529">
+      <span>Advance progress to</span>
+      <select data-manual-progress-target-v527 aria-label="Progress stage for ${escapeHtml(item.order)}-${escapeHtml(item.item)}">
+        ${options.map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === summary.nextTarget ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+      </select>
+    </label>
+    <div class="manual-edit-progress-actions-v529 wide">
+      <button class="app-primary-button" type="button" data-manual-progress-item-v527="${escapeHtml(item.lineItemId)}">Advance Item</button>
+      <button class="app-secondary-button manual-edit-complete-order-v529" type="button" data-manual-progress-order-v527="${escapeHtml(item.lineItemId)}" data-order="${escapeHtml(item.order)}">Complete Order</button>
+    </div>
+  </section>`;
 }
 
 /**
@@ -43292,6 +45029,13 @@ function manualEditProgressControlV527(item = {}) {
 function manualEditResultsHtml(results, page = state.manualEditPage, totalCount = results.length, showPager = false) {
   const visibleRows = Array.isArray(results) ? results : [];
   const wholeListMode = manualEditWholeListScopeV468();
+  const displayRowsV553 = wholeListMode ? visibleRows.slice().sort((left, right) => {
+    const leftKey = `${String(left.job || "").trim()}|${String(left.customer || "").trim()}`;
+    const rightKey = `${String(right.job || "").trim()}|${String(right.customer || "").trim()}`;
+    return leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" })
+      || String(left.order || "").localeCompare(String(right.order || ""), undefined, { numeric: true })
+      || String(left.item || "").localeCompare(String(right.item || ""), undefined, { numeric: true });
+  }) : visibleRows;
   const totalRows = Math.max(Number(totalCount || 0), visibleRows.filter((item) => !item._manualEditFilterMismatch).length);
   const pinnedRows = visibleRows.filter((item) => item._manualEditFilterMismatch).length;
   const matchingVisibleRows = Math.max(visibleRows.length - pinnedRows, 0);
@@ -43312,8 +45056,8 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
       </div>
 
       <div class="manual-edit-card-list">
-        ${visibleRows
-          .map((item) => {
+        ${displayRowsV553
+          .map((item, rowIndexV553) => {
             const rowLabel = `${item.order || ""}-${item.item || ""}`;
             const progressSummaryV527 = manualEditProgressSummaryV527(item);
             const stageText = wholeListMode
@@ -43326,6 +45070,15 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
             const completeClass = qtyValue > 0 && scannedValue >= qtyValue ? " is-complete" : "";
             const updatedClass = item._manualEditJustUpdated ? " is-just-updated" : "";
             const mismatchClass = item._manualEditFilterMismatch ? " is-filter-mismatch" : "";
+            const groupKeyV553 = `${String(item.job || "").trim()}|${String(item.customer || "").trim()}`;
+            const previousV553 = displayRowsV553[rowIndexV553 - 1];
+            const nextV553 = displayRowsV553[rowIndexV553 + 1];
+            const previousKeyV553 = previousV553 ? `${String(previousV553.job || "").trim()}|${String(previousV553.customer || "").trim()}` : "";
+            const nextKeyV553 = nextV553 ? `${String(nextV553.job || "").trim()}|${String(nextV553.customer || "").trim()}` : "";
+            const groupOpenV553 = wholeListMode && groupKeyV553 !== previousKeyV553
+              ? `<section class="manual-edit-job-group-v553"><header><span><small>JOB NR.</small><strong>${escapeHtml(item.job || "No Job Nr.")}</strong></span><span><small>CUSTOMER</small><strong>${escapeHtml(item.customer || "No customer")}</strong></span></header><div class="manual-edit-job-items-v553">`
+              : "";
+            const groupCloseV553 = wholeListMode && groupKeyV553 !== nextKeyV553 ? `</div></section>` : "";
             const originalValues = {
               order: item.order || "",
               item: item.item || "",
@@ -43342,20 +45095,23 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
               protectFromAwImport: Boolean(item.protectFromAwImport),
             };
 
-            return `
+            const selectedV553 = state.manualEditSelectedIdsV553.has(String(item.lineItemId || ""));
+            const dirtyV553 = state.manualEditDirtyIdsV553.has(String(item.lineItemId || ""));
+            return `${groupOpenV553}
               <details
-                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}${wholeListMode ? " is-whole-list-v468" : ""}"
+                class="manual-edit-card${scannedClass}${completeClass}${updatedClass}${mismatchClass}${wholeListMode ? " is-whole-list-v468" : ""}${dirtyV553 ? " is-dirty-v553" : ""}"
                 data-edit-row="${escapeHtml(item.lineItemId)}"
                 data-manual-edit-scope="${wholeListMode ? "whole" : "stage"}"
                 data-manual-edit-original="${escapeHtml(JSON.stringify(originalValues))}"
                 ${item._manualEditJustUpdated ? "open" : ""}
               >
                 <summary class="manual-edit-card-header">
+                  <label class="manual-edit-select-control-v553" title="Select ${escapeHtml(rowLabel)}"><input type="checkbox" data-manual-edit-select-v553="${escapeHtml(item.lineItemId)}" ${selectedV553 ? "checked" : ""} aria-label="Select ${escapeHtml(rowLabel)}"><span aria-hidden="true"></span></label>
                   <div class="manual-edit-card-title">
                     <div class="manual-edit-card-title-line">
-                      <strong>${escapeHtml(item.order)}-${escapeHtml(item.item)}</strong>
+                      <strong>${escapeHtml(item.order)} / ${escapeHtml(item.item)}</strong>
                     </div>
-                    <span>${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}</span>
+                    <span>${wholeListMode ? escapeHtml(item.product || item.dimensions || "Order item") : `${escapeHtml(item.job || "No Job Nr.")} &bull; ${escapeHtml(item.customer || "No customer")}`}</span>
                     ${item._manualEditFilterMismatch ? `<small class="manual-edit-saved-filter-note">Saved successfully — this item no longer matches the active filters.</small>` : ""}
                   </div>
 
@@ -43475,7 +45231,7 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
 
                   <div class="manual-edit-row-error" hidden aria-live="polite"></div>
                 </div>
-              </details>
+              </details>${groupCloseV553}
             `;
           })
           .join("")}
@@ -43485,7 +45241,116 @@ function manualEditResultsHtml(results, page = state.manualEditPage, totalCount 
     : `<div class="admin-empty">No editable rows found.</div>`;
 }
 
+async function saveManualSelectedRowsV553(lineItemIds = [...state.manualEditSelectedIdsV553], { closeAfter = false } = {}) {
+  const ids = [...new Set(lineItemIds.map((value) => String(value || "")).filter(Boolean))];
+  if (!ids.length) return false;
+  closeCustomSelect(false);
+  const pending = [];
+  for (const id of ids) {
+    const row = document.querySelector(`[data-edit-row="${CSS.escape(id)}"]`);
+    if (!row || !state.manualEditDirtyIdsV553.has(id)) continue;
+    if (!manualEditValidateRow(row)) { row.querySelector(".is-invalid")?.focus(); return false; }
+    const data = manualEditCollectRowData(row, id);
+    const changedFields = manualEditChangedFields(row, data);
+    if (!changedFields.length) { state.manualEditDirtyIdsV553.delete(id); row.classList.remove("is-dirty-v553"); continue; }
+    data.clientChangedFields = changedFields;
+    data.originalValues = manualEditOriginalRowData(row);
+    pending.push({ id, row, data });
+  }
+  if (!pending.length) {
+    state.manualEditDirty = state.manualEditDirtyIdsV553.size > 0;
+    syncManualEditSelectionToolbarV553();
+    if (!closeAfter) showFloatingNotice("No edited values were detected in the selected rows.", "notice");
+    return !state.manualEditDirty;
+  }
+  for (const entry of pending) {
+    entry.row.classList.add("is-saving");
+    try {
+      const payload = await fetchJson("/api/admin/line-item", { method: "POST", body: JSON.stringify(entry.data) });
+      if (!Number(payload.logicalUpdatedCount || 0)) throw new Error(`The server did not apply changes for Order ${entry.data.order} / Item ${entry.data.item}.`);
+      entry.row.dataset.manualEditOriginal = JSON.stringify({
+        order: entry.data.order, item: entry.data.item, customer: entry.data.customer, qty: Number(entry.data.qty || 0),
+        scanned: Number(entry.data.scanned || 0), location: entry.data.location || "", route: entry.data.route || "",
+        processState: entry.data.processState || "", product: entry.data.product || "", dimensions: entry.data.dimensions || "",
+        job: entry.data.job || "", queueState: entry.data.queueState || "", protectFromAwImport: Boolean(entry.data.protectFromAwImport),
+      });
+      state.manualEditDirtyIdsV553.delete(entry.id);
+      state.manualEditSelectedIdsV553.delete(entry.id);
+      entry.row.classList.remove("is-dirty-v553");
+    } finally { entry.row.classList.remove("is-saving"); }
+  }
+  state.manualEditDirty = state.manualEditDirtyIdsV553.size > 0;
+  syncManualEditSelectionToolbarV553();
+  await loadDeliveryLists(state.manualEditListId || state.activeListId);
+  await refreshOpenModalActionHistory().catch(() => {});
+  if (!closeAfter) showSaveConfirmation(`${pending.length} selected order item${pending.length === 1 ? "" : "s"} saved.`);
+  return true;
+}
+
+async function deleteManualSelectedRowsV553() {
+  const ids = [...state.manualEditSelectedIdsV553].filter(Boolean);
+  if (!ids.length) return;
+  const rows = ids.map((id) => state.manualEditResultRows.find((row) => String(row.lineItemId || "") === String(id))).filter(Boolean);
+  const confirmed = await confirmWebAppAction({
+    title: `Delete ${ids.length} selected order item${ids.length === 1 ? "" : "s"}?`,
+    message: `Delete the selected Order / Item${ids.length === 1 ? "" : "s"} from the entire delivery-list workflow?`,
+    details: "Every synchronized workflow copy for this delivery date is removed. Unsaved edits on selected rows are discarded.",
+    confirmLabel: "Delete Selected",
+    cancelLabel: "Keep selected",
+    requiredText: "DELETE",
+    requiredTextLabel: "Type DELETE to remove the selected order items",
+  });
+  if (!confirmed) return;
+  for (const id of ids) await fetchJson("/api/admin/line-item/delete", { method: "POST", body: JSON.stringify({ lineItemId: id }) });
+  ids.forEach((id) => state.manualEditDirtyIdsV553.delete(String(id)));
+  state.manualEditSelectedIdsV553.clear();
+  state.manualEditDirty = state.manualEditDirtyIdsV553.size > 0;
+  removeManualEditRowsFromViewV553(ids);
+  await loadDeliveryLists(state.activeListId);
+  renderScanPage();
+  playAppSound("destructive_action", { force: true });
+  showSaveConfirmation(`${rows.length || ids.length} selected order item${ids.length === 1 ? "" : "s"} deleted.`);
+}
+
+function manualEditUnsavedChoiceV553() {
+  return new Promise((resolve) => {
+    document.querySelector(".action-confirm-backdrop")?.remove();
+    const dialog = document.createElement("div");
+    dialog.className = "action-confirm-backdrop";
+    dialog.innerHTML = `
+      <section class="action-confirm-dialog manual-edit-unsaved-dialog-v553" role="dialog" aria-modal="true" aria-labelledby="manualEditUnsavedTitleV553">
+        <button type="button" class="action-confirm-close gui-close-button" data-manual-unsaved-choice-v553="review" aria-label="Review changes">&times;</button>
+        <span class="action-confirm-icon" aria-hidden="true"></span>
+        <div class="action-confirm-copy"><h2 id="manualEditUnsavedTitleV553">Unsaved delivery-list changes</h2><p>You have unsaved Order / Item edits.</p><small>Choose whether to discard them, return to review them, or save every changed row before closing.</small></div>
+        <div class="manual-edit-unsaved-actions-v553">
+          <button type="button" class="app-clear-action-v553" data-manual-unsaved-choice-v553="discard">Don’t Save</button>
+          <button type="button" class="app-secondary-button" data-manual-unsaved-choice-v553="review">Review Changes</button>
+          <button type="button" class="app-save-action-v553" data-manual-unsaved-choice-v553="save">Save and Close</button>
+        </div>
+      </section>`;
+    const finish = (choice) => { document.removeEventListener("keydown", keyHandler, true); dialog.remove(); resolve(choice); };
+    const keyHandler = (event) => { if (event.key === "Escape") { event.preventDefault(); finish("review"); } };
+    dialog.addEventListener("click", (event) => { const button = event.target.closest("[data-manual-unsaved-choice-v553]"); if (button) finish(button.dataset.manualUnsavedChoiceV553 || "review"); });
+    document.addEventListener("keydown", keyHandler, true);
+    document.body.append(dialog);
+    dialog.querySelector('[data-manual-unsaved-choice-v553="review"]')?.focus();
+  });
+}
+
+async function resolveManualEditUnsavedV553() {
+  if (!state.manualEditDirty || !state.manualEditDirtyIdsV553.size) return true;
+  const choice = await manualEditUnsavedChoiceV553();
+  if (choice === "review") return false;
+  if (choice === "discard") { clearManualEditDirtyStateV553(); return true; }
+  const saved = await saveManualSelectedRowsV553([...state.manualEditDirtyIdsV553], { closeAfter: true });
+  return Boolean(saved && !state.manualEditDirtyIdsV553.size);
+}
+
 async function advanceManualDeliveryProgressV527(button, scope) {
+  if (state.manualEditDirty && state.manualEditDirtyIdsV553.size) {
+    showFloatingNotice("Save or discard unsaved Order / Item edits before advancing Progress.", "notice");
+    return;
+  }
   const row = button?.closest?.("[data-edit-row]");
   const lineItemId = String(button?.dataset?.manualProgressItemV527 || button?.dataset?.manualProgressOrderV527 || row?.dataset?.editRow || "");
   const deliveryDate = String(button?.dataset?.manualProgressListV527 || manualEditDeliveryDateForList(state.manualEditListId));
@@ -43526,6 +45391,11 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
     || document.querySelector(`[data-edit-row="${CSS.escape(lineItemId)}"]`);
 
   if (!row) return;
+
+  if (state.manualEditDirtyIdsV553.size > 1) {
+    await saveManualSelectedRowsV553([String(lineItemId)]);
+    return;
+  }
 
   closeCustomSelect(false);
   if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement) {
@@ -43654,7 +45524,10 @@ async function saveManualLineItem(lineItemId, sourceButton = null) {
     const resultsTarget = document.getElementById("manualEditModalResults");
     if (resultsTarget) resultsTarget.innerHTML = manualEditResultsHtml(state.manualEditResultRows, state.manualEditPage, state.manualEditTotalRows, true);
 
+    state.manualEditDirtyIdsV553.clear();
+    state.manualEditSelectedIdsV553.clear();
     state.manualEditDirty = false;
+    syncManualEditSelectionToolbarV553();
     await refreshOpenModalActionHistory().catch(() => {});
     showSaveConfirmation(payload.message || "Line item updated and verified.");
   } finally {
@@ -43683,10 +45556,12 @@ async function deleteManualLineItem(lineItemId) {
     body: JSON.stringify({ lineItemId }),
   });
   if (payload.meta?.id === state.activeListId) applyBackendPayload(payload);
+  state.manualEditDirtyIdsV553.delete(String(lineItemId));
+  state.manualEditSelectedIdsV553.delete(String(lineItemId));
+  state.manualEditDirty = state.manualEditDirtyIdsV553.size > 0;
+  removeManualEditRowsFromViewV553([lineItemId]);
   await loadDeliveryLists(state.activeListId);
-  if (!els.adminModal?.hidden && state.manualEditListId) await runManualEditModalSearch(false, state.manualEditPage);
-  else await runManualEditSearch();
-  state.manualEditDirty = false;
+  if (els.adminModal?.hidden || !state.manualEditListId) await runManualEditSearch();
   renderScanPage();
   playAppSound("destructive_action", { force: true });
   const deletedCount = Number(payload.deletedLineItemCount || 0);
@@ -44768,10 +46643,7 @@ function rejectTwoWeekWindow() {
 function ensureRejectDefaultRange() {
   if (!els.rejectDateFrom || !els.rejectDateTo) return;
   if (els.rejectDateFrom.value || els.rejectDateTo.value) return;
-  const range = rejectTwoWeekWindow();
-  els.rejectDateFrom.value = range.from;
-  els.rejectDateTo.value = range.to;
-  if (els.rejectDatePreset) els.rejectDatePreset.value = "two-weeks";
+  if (els.rejectDatePreset) els.rejectDatePreset.value = "all-history";
   syncRejectDateLimits();
 }
 
@@ -44798,12 +46670,19 @@ function rejectFilterDescription() {
 function syncRejectDateLimits() {
   const from = els.rejectDateFrom?.value || "";
   const to = els.rejectDateTo?.value || "";
-  if (els.rejectDateFrom) els.rejectDateFrom.max = to;
-  if (els.rejectDateTo) els.rejectDateTo.min = from;
+  const allHistory = String(els.rejectDatePreset?.value || "all-history") === "all-history";
+  if (els.rejectDateFrom) {
+    els.rejectDateFrom.disabled = allHistory;
+    els.rejectDateFrom.max = allHistory ? "" : to;
+  }
+  if (els.rejectDateTo) {
+    els.rejectDateTo.disabled = allHistory;
+    els.rejectDateTo.min = allHistory ? "" : from;
+  }
 }
 
 function setRejectDatePreset(value, { refresh = true } = {}) {
-  const preset = String(value || "two-weeks");
+  const preset = String(value || "all-history");
   if (els.rejectDatePreset) els.rejectDatePreset.value = preset;
   if (!els.rejectDateFrom || !els.rejectDateTo) return;
   if (preset === "custom") {
@@ -44812,7 +46691,10 @@ function setRejectDatePreset(value, { refresh = true } = {}) {
     if (refresh) els.rejectDateFrom.focus();
     return;
   }
-  if (preset === "two-weeks") {
+  if (preset === "all-history") {
+    els.rejectDateFrom.value = "";
+    els.rejectDateTo.value = "";
+  } else if (preset === "two-weeks") {
     const range = rejectTwoWeekWindow();
     els.rejectDateFrom.value = range.from;
     els.rejectDateTo.value = range.to;
@@ -44840,7 +46722,7 @@ function markRejectDateRangeCustom() {
 }
 
 function rejectActiveFilterCount() {
-  const countableDate = String(els.rejectDatePreset?.value || "two-weeks") !== "two-weeks";
+  const countableDate = !["all-history", "two-weeks"].includes(String(els.rejectDatePreset?.value || "all-history"));
   return [
     countableDate ? `${els.rejectDateFrom?.value || ""}:${els.rejectDateTo?.value || ""}` : "",
     rejectSelectedLocation(),
@@ -44869,7 +46751,7 @@ function clearRejectFilters() {
     window.clearTimeout(els.rejectSearchInput._timer);
     els.rejectSearchInput.value = "";
   }
-  setRejectDatePreset("two-weeks", { refresh: false });
+  setRejectDatePreset("all-history", { refresh: false });
   if (els.rejectLocationFilter) els.rejectLocationFilter.value = "";
   if (els.rejectReasonFilter) els.rejectReasonFilter.value = "";
   if (els.rejectUserFilter) els.rejectUserFilter.value = "";
@@ -44894,7 +46776,7 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
       ? catalogError
       : catalogReady
         ? "Enter the order and item, verify the exact piece, then record the reject."
-        : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
+        : "A+W Complaint Reasons and Causes are not available. Refresh the page or contact an Admin.";
   return `
     <form id="rejectLogForm" class="reject-log-form reject-log-form-v182">
 
@@ -44917,8 +46799,8 @@ function rejectLogModalHtml({ catalogLoading = false, catalogError = "" } = {}) 
       <section class="reject-log-step-v182 reject-details-step-v182">
         <header><span>3</span><div><strong>Reject Details</strong><small>Provide the standard reason, rejected quantity, source/location, and useful notes.</small></div></header>
         <div class="reject-log-incident-grid-v182">
-          <label><span>Reject Reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons)}</select></label>
-          <label><span>Source / Location *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading locations..." : "Choose location..."}</option>${rejectCatalogOptions(locations)}</select></label>
+          <label><span>Complaint Reason *</span><select id="rejectReasonSelect" name="reason" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading reasons..." : "Choose reason..."}</option>${rejectCatalogOptions(reasons, "", "A+W Complaint Reasons")}</select></label>
+          <label><span>Complaint Cause / Machine *</span><select id="rejectLocationSelect" name="location" required ${catalogLoading ? "disabled" : ""}><option value="">${catalogLoading ? "Loading causes..." : "Choose cause / machine..."}</option>${rejectCatalogOptions(locations, "", "A+W Complaint Causes")}</select></label>
           <label class="reject-notes"><span>Notes / Comments</span><textarea name="notes" rows="3" maxlength="500" placeholder="Optional details about the defect, handling issue, or equipment condition..."></textarea></label>
         </div>
       </section>
@@ -45039,13 +46921,14 @@ function renderRejectSummary(rejects = rejectRowsForView(), summary = state.reje
 function renderRejectPagination() {
   const total = Number(state.rejectHistoryTotalCount || 0);
   const page = Math.max(1, Number(state.rejectHistoryPage || 1));
-  const pageSize = Math.max(1, Number(state.rejectHistoryPageSize || 50));
+  const pageSize = Math.max(1, Number(state.rejectHistoryPageSize || 25));
   const totalPages = Math.max(1, Number(state.rejectHistoryTotalPages || 1));
   const first = total ? ((page - 1) * pageSize) + 1 : 0;
   const last = total ? Math.min(page * pageSize, total) : 0;
-  if (els.rejectPagination) els.rejectPagination.hidden = total <= pageSize;
+  if (els.rejectPagination) els.rejectPagination.hidden = total === 0;
   if (els.rejectPagePrev) els.rejectPagePrev.disabled = page <= 1;
   if (els.rejectPageNext) els.rejectPageNext.disabled = page >= totalPages;
+  if (els.rejectPageSize) els.rejectPageSize.value = String(pageSize);
   if (els.rejectPageStatusText) {
     els.rejectPageStatusText.textContent = total
       ? `${first}-${last} of ${total.toLocaleString(appLocale())} · Page ${page} of ${totalPages}`
@@ -45150,12 +47033,25 @@ function rejectDateTimeLocalValue(value) {
   return local.toISOString().slice(0, 16);
 }
 
-function rejectCatalogOptions(rows, currentValue) {
-  const labels = [...new Set([
-    String(currentValue || "").trim(),
-    ...(Array.isArray(rows) ? rows.map((row) => String(row.label || "").trim()) : []),
-  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  return labels.map((label) => `<option value="${escapeHtml(label)}" ${label === currentValue ? "selected" : ""}>${escapeHtml(label)}</option>`).join("");
+function rejectCatalogOptions(rows, currentValue, standardGroupLabel = "A+W standard") {
+  const current = String(currentValue || "").trim();
+  const seen = new Set();
+  const normalizedRows = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const label = String(row?.label || "").trim();
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    normalizedRows.push({ label, awStandard: Boolean(row?.awStandard), awOrder: Number(row?.awOrder || 9999) });
+  }
+  const standards = normalizedRows.filter((row) => row.awStandard).sort((a, b) => a.awOrder - b.awOrder || a.label.localeCompare(b.label));
+  const custom = normalizedRows.filter((row) => !row.awStandard).sort((a, b) => a.label.localeCompare(b.label));
+  const option = (label) => `<option value="${escapeHtml(label)}" ${label === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  const chunks = [];
+  if (current && !seen.has(current.toLowerCase())) chunks.push(`<optgroup label="Current / historical">${option(current)}</optgroup>`);
+  if (standards.length) chunks.push(`<optgroup label="${escapeHtml(standardGroupLabel)}">${standards.map((row) => option(row.label)).join("")}</optgroup>`);
+  if (custom.length) chunks.push(`<optgroup label="Scanner custom choices">${custom.map((row) => option(row.label)).join("")}</optgroup>`);
+  return chunks.join("");
 }
 
 function rejectEditModalHtml(row) {
@@ -45171,8 +47067,8 @@ function rejectEditModalHtml(row) {
         <div><small>Source</small><strong>${String(row.source_type || "scanner").toLowerCase() === "aw" ? "A+W Internal Reject" : "Scanner Internal Reject"}</strong></div>
       </section>
       <section class="reject-edit-grid-v154">
-        <label><span>Reject reason</span><select name="reason" required>${rejectCatalogOptions(state.rejectCatalog.reasons, String(row.reason_label || ""))}</select></label>
-        <label><span>Machine / location</span><select name="location" required>${rejectCatalogOptions(state.rejectCatalog.locations, String(row.location_label || ""))}</select></label>
+        <label><span>Reject reason</span><select name="reason" required>${rejectCatalogOptions(state.rejectCatalog.reasons, String(row.reason_label || ""), "A+W Complaint Reasons")}</select></label>
+        <label><span>Complaint Cause / Machine</span><select name="location" required>${rejectCatalogOptions(state.rejectCatalog.locations, String(row.location_label || ""), "A+W Complaint Causes")}</select></label>
         <label><span>Rejected quantity</span><input name="qty" type="number" min="1" step="1" value="${escapeHtml(row.qty || 1)}" required></label>
         <label><span>Incident date and time</span><input name="rejectedAt" type="datetime-local" value="${escapeHtml(rejectDateTimeLocalValue(row.rejected_at))}" required></label>
         <label class="reject-edit-notes-v154"><span>Investigation notes</span><textarea name="notes" rows="5" maxlength="500" placeholder="Add investigation details...">${escapeHtml(row.notes || "")}</textarea></label>
@@ -45290,13 +47186,14 @@ async function refreshRejectPage() {
     throw new Error(message);
   }
   if (query) params.set("q", query);
+  if (String(els.rejectDatePreset?.value || "all-history") === "all-history") params.set("allDates", "1");
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   if (location) params.set("location", location);
   if (reason) params.set("reason", reason);
   if (rejectedBy) params.set("rejectedBy", rejectedBy);
   params.set("page", String(Math.max(1, Number(state.rejectHistoryPage || 1))));
-  params.set("limit", String(Math.max(10, Number(state.rejectHistoryPageSize || 50))));
+  params.set("limit", String(Math.max(10, Number(state.rejectHistoryPageSize || 25))));
 
   if (status) {
     status.hidden = false;
@@ -45307,9 +47204,10 @@ async function refreshRejectPage() {
     els.rejectHistory.innerHTML = appLoadingStateHtmlV529("Loading internal reject history", `Checking ${rejectFilterDescription()}.`, "reject-loading-state");
   }
 
+  const catalogIsWarm = (state.rejectCatalog.reasons || []).length > 0 && (state.rejectCatalog.locations || []).length > 0;
   const [historyResult, catalogResult] = await Promise.allSettled([
     fetchJson(`/api/rejects?${params.toString()}`),
-    fetchJson("/api/rejects/catalog"),
+    catalogIsWarm ? Promise.resolve(null) : fetchJson("/api/rejects/catalog"),
   ]);
   if (requestId !== state.rejectHistoryRequestId) return;
 
@@ -45318,7 +47216,7 @@ async function refreshRejectPage() {
     const history = historyResult.value || {};
     state.rejectHistory = Array.isArray(history.rejects) ? history.rejects : [];
     state.rejectHistoryPage = Math.max(1, Number(history.page || 1));
-    state.rejectHistoryPageSize = Math.max(10, Number(history.pageSize || state.rejectHistoryPageSize || 50));
+    state.rejectHistoryPageSize = Math.max(10, Number(history.pageSize || state.rejectHistoryPageSize || 25));
     state.rejectHistoryTotalCount = Math.max(0, Number(history.totalCount || 0));
     state.rejectHistoryTotalPages = Math.max(1, Number(history.totalPages || 1));
     state.rejectHistorySummary = history.summary && typeof history.summary === "object" ? history.summary : null;
@@ -45328,7 +47226,7 @@ async function refreshRejectPage() {
     updateRejectFilterOptionsFromServer(state.rejectHistoryFilterOptions);
     renderRejectPage();
 
-    if (catalogResult.status === "fulfilled") {
+    if (catalogResult.status === "fulfilled" && catalogResult.value) {
       const catalog = catalogResult.value || {};
       state.rejectCatalog = {
         reasons: Array.isArray(catalog.reasons) ? catalog.reasons : [],
@@ -45341,7 +47239,7 @@ async function refreshRejectPage() {
 
     if (status) {
       const catalogWarning = catalogResult.status === "rejected"
-        ? "Reject reasons and locations could not be refreshed; existing choices were kept."
+        ? "Complaint Reasons and Causes could not be refreshed; existing choices were kept."
         : "";
       status.hidden = !catalogWarning;
       status.className = `reject-page-status${catalogWarning ? " is-warning" : ""}`;
@@ -45376,12 +47274,12 @@ function updateRejectCatalogControls() {
   const locations = state.rejectCatalog.locations || [];
   if (reason) {
     const previous = reason.value;
-    reason.innerHTML = `<option value="">Choose reason...</option>${rejectCatalogOptions(reasons, previous)}`;
+    reason.innerHTML = `<option value="">Choose reason...</option>${rejectCatalogOptions(reasons, previous, "A+W Complaint Reasons")}`;
     reason.disabled = false;
   }
   if (location) {
     const previous = location.value;
-    location.innerHTML = `<option value="">Choose location...</option>${rejectCatalogOptions(locations, previous)}`;
+    location.innerHTML = `<option value="">Choose cause / machine...</option>${rejectCatalogOptions(locations, previous, "A+W Complaint Causes")}`;
     location.disabled = false;
   }
   const ready = reasons.length > 0 && locations.length > 0;
@@ -45390,7 +47288,7 @@ function updateRejectCatalogControls() {
     status.className = ready ? "" : "is-warning";
     status.textContent = ready
       ? "Enter an order and item, then verify the piece before recording the reject."
-      : "An Admin must add at least one reject reason and break location before a reject can be recorded.";
+      : "A+W Complaint Reasons and Causes are not available. Refresh the page or contact an Admin.";
   }
 }
 
@@ -45420,6 +47318,8 @@ async function openRejectLogModal() {
         historyReasons: Array.isArray(payload.historyReasons) ? payload.historyReasons : [],
         historyLocations: Array.isArray(payload.historyLocations) ? payload.historyLocations : [],
         awMappings: Array.isArray(payload.awMappings) ? payload.awMappings : [],
+        awStandardReasons: Array.isArray(payload.awStandardReasons) ? payload.awStandardReasons : [],
+        awStandardLocations: Array.isArray(payload.awStandardLocations) ? payload.awStandardLocations : [],
       };
       if (state.operationsModalKind === "reject-log") updateRejectCatalogControls();
     }
@@ -45559,67 +47459,61 @@ function rejectSettingsIconV347(kind) {
 }
 
 function rejectSettingsModalHtml() {
-  const reasons = state.rejectCatalog.reasons || [];
-  const locations = state.rejectCatalog.locations || [];
-  const historyReasons = state.rejectCatalog.historyReasons || [];
-  const historyLocations = state.rejectCatalog.historyLocations || [];
+  const activeKind = state.rejectSettingsActiveTabV551 === "location" ? "location" : "reason";
+  const kind = activeKind;
+  const rows = activeKind === "location" ? (state.rejectCatalog.locations || []) : (state.rejectCatalog.reasons || []);
+  const historyRows = activeKind === "location" ? (state.rejectCatalog.historyLocations || []) : (state.rejectCatalog.historyReasons || []);
   const awMappings = state.rejectCatalog.awMappings || [];
-  const section = (kind, title, description, rows) => `
-    <section class="reject-settings-library-v347 is-${escapeHtml(kind)}">
+  const mappings = awMappings.filter((row) => String(row.kind || "").toLowerCase() === activeKind);
+  const title = activeKind === "location" ? "Complaint Causes" : "Complaint Reasons";
+  const noun = activeKind === "location" ? "complaint cause / machine" : "complaint reason";
+  const description = activeKind === "location" ? "A+W standard machines/causes plus any scanner-only custom choices." : "A+W standard complaint reasons plus any scanner-only custom choices.";
+  const placeholder = activeKind === "location" ? "Example: Custom inspection station" : "Example: Scanner-only quality reason";
+
+  return `<div class="reject-settings-shell-v347 reject-settings-shell-v551 is-${escapeHtml(activeKind)}">
+    <section class="reject-settings-library-v347 is-${escapeHtml(activeKind)} reject-settings-primary-v551">
       <header class="reject-settings-library-header-v347">
-        <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347(kind)}</span>
-        <div><small>${kind === "reason" ? "Reason library" : "Location library"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div>
+        <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347(activeKind)}</span>
+        <div><small>${activeKind === "location" ? "Cause / machine library" : "Reason library"}</small><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div>
         <b>${escapeHtml(rows.length)}</b>
       </header>
-      <form class="reject-catalog-add reject-catalog-add-v347" data-reject-catalog-form="${escapeHtml(kind)}">
-        <label><span>Add ${escapeHtml(kind === "reason" ? "reject reason" : "break location")}</span><input name="label" required autocomplete="off" placeholder="${escapeHtml(kind === "reason" ? "Example: Scratch / surface defect" : "Example: Tempering Line 2")}"></label>
+      <form class="reject-catalog-add reject-catalog-add-v347" data-reject-catalog-form="${escapeHtml(activeKind)}">
+        <label><span>Add ${escapeHtml(noun)}</span><input name="label" required autocomplete="off" placeholder="${escapeHtml(placeholder)}"></label>
         <button type="submit" class="app-primary-button reject-catalog-add-button-v347"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
       </form>
       <div class="reject-catalog-list reject-catalog-list-v347">
-        ${rows.map((row, index) => `
-          <article>
-            <span class="reject-catalog-row-number-v347">${escapeHtml(index + 1)}</span>
-            <div><strong>${escapeHtml(row.label)}</strong><small>Available immediately in Add Internal Reject</small></div>
-            <div class="reject-catalog-row-actions-v349">
-              <button class="icon-only icon-pencil" type="button" data-reject-catalog-edit="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" data-reject-catalog-label="${escapeHtml(row.label)}" aria-label="Edit ${escapeHtml(row.label)}" title="Edit ${escapeHtml(row.label)}"></button>
-              <button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Delete ${escapeHtml(row.label)}" title="Delete ${escapeHtml(row.label)}"></button>
-            </div>
-          </article>`).join("") || `<div class="admin-empty reject-settings-empty-v347">No active ${escapeHtml(kind)} values.</div>`}
+        ${rows.map((row, index) => `<article class="${row.awStandard ? "is-aw-standard-v586" : ""}">
+          <span class="reject-catalog-row-number-v347">${escapeHtml(index + 1)}</span>
+          <div><strong>${escapeHtml(row.label)}</strong>${row.awStandard ? '<small class="reject-aw-standard-badge-v586">A+W standard</small>' : '<small class="reject-custom-badge-v586">Scanner custom</small>'}</div>
+          <div class="reject-catalog-row-actions-v349">
+            ${row.awStandard ? '<span class="reject-aw-standard-lock-v586" title="A+W standard values stay available for reject logging">Standard</span>' : `<button class="icon-only icon-pencil" type="button" data-reject-catalog-edit="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" data-reject-catalog-label="${escapeHtml(row.label)}" aria-label="Edit ${escapeHtml(row.label)}" title="Edit ${escapeHtml(row.label)}"></button><button class="icon-only icon-trash danger" type="button" data-reject-catalog-remove="${escapeHtml(kind)}" data-reject-catalog-id="${escapeHtml(row.id)}" aria-label="Delete ${escapeHtml(row.label)}" title="Delete ${escapeHtml(row.label)}"></button>`}
+          </div>
+        </article>`).join("") || `<div class="admin-empty reject-settings-empty-v347">No active ${escapeHtml(noun)} values.</div>`}
       </div>
-    </section>`;
+    </section>
 
-  return `
-    <div class="reject-settings-shell-v347">
-      <section class="reject-settings-overview-v347">
-        <span class="reject-settings-overview-icon-v347" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6z"/><path d="M9 12h6M12 9v6"/></svg></span>
-        <div><small>Reject Tracking Setup</small><strong>Reasons &amp; Break Locations</strong><span>Maintain the two floor-facing libraries used when an internal reject is recorded.</span></div>
-        <div class="reject-settings-stats-v347"><span><b>${escapeHtml(reasons.length)}</b><small>Reasons</small></span><span><b>${escapeHtml(locations.length)}</b><small>Locations</small></span></div>
-      </section>
-      <div class="reject-settings-grid-v347">
-        ${section("reason", "Reject Reasons", "Why the piece was rejected.", reasons)}
-        ${section("location", "Break Locations", "Where the defect or break occurred.", locations)}
-      </div>
-      <section class="reject-settings-library-v347 reject-history-maintenance-v485">
-        <header class="reject-settings-library-header-v347">
-          <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347("reason")}</span>
-          <div><small>A+W code mappings</small><strong>Past &amp; Future A+W Labels</strong><span>Numeric A+W codes stay authoritative. Set a Scanner display label to rename every matching historical and future A+W Internal Reject.</span></div>
-          <b>${escapeHtml(awMappings.length)}</b>
-        </header>
-        <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Type</th><th>Code</th><th>A+W label</th><th>Scanner display</th><th>Events</th><th></th></tr></thead><tbody>
-          ${awMappings.map((row) => `<tr><td>${escapeHtml(row.kind)}</td><td><b>${escapeHtml(row.sourceCode)}</b></td><td>${escapeHtml(row.sourceLabel || "Unknown")}</td><td><input data-reject-aw-mapping-input="${escapeHtml(row.id)}" value="${escapeHtml(row.mappedLabel || "")}" placeholder="Use A+W label"></td><td>${escapeHtml(row.eventCount || 0)}</td><td><button type="button" class="automation-secondary-button" data-reject-aw-mapping-save="${escapeHtml(row.id)}" data-kind="${escapeHtml(row.kind)}" data-code="${escapeHtml(row.sourceCode)}">Save</button></td></tr>`).join("") || `<tr><td colspan="6">No A+W reason/location codes have been synchronized yet.</td></tr>`}
-        </tbody></table></div>
-      </section>
-      <section class="reject-settings-library-v347 reject-history-maintenance-v485">
-        <header class="reject-settings-library-header-v347">
-          <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347("location")}</span>
-          <div><small>Historical cleanup</small><strong>Bulk Replace Reject Data</strong><span>Replace one stored reason or location across the entire Reject history. Matching A+W codes are also mapped so future syncs keep the replacement.</span></div>
-          <b>${escapeHtml(historyReasons.length + historyLocations.length)}</b>
-        </header>
-        <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Type</th><th>Current label</th><th>Events</th><th>A+W events</th><th>Replace with</th><th></th></tr></thead><tbody>
-          ${[["reason", historyReasons], ["location", historyLocations]].flatMap(([kind, rows]) => rows.map((row, index) => `<tr><td>${escapeHtml(kind)}</td><td><strong>${escapeHtml(row.label)}</strong></td><td>${escapeHtml(row.event_count || row.eventCount || 0)}</td><td>${escapeHtml(row.aw_event_count || row.awEventCount || 0)}</td><td><input data-reject-history-replacement="${escapeHtml(kind)}-${escapeHtml(index)}" placeholder="New label"></td><td><button type="button" class="automation-secondary-button" data-reject-history-relabel="${escapeHtml(kind)}-${escapeHtml(index)}" data-kind="${escapeHtml(kind)}" data-from-label="${escapeHtml(row.label)}">Replace All</button></td></tr>`)).join("") || `<tr><td colspan="6">No reject history exists yet.</td></tr>`}
-        </tbody></table></div>
-      </section>
-    </div>`;
+    <section class="reject-settings-library-v347 reject-history-maintenance-v485 reject-settings-maintenance-v551">
+      <header class="reject-settings-library-header-v347">
+        <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347(activeKind)}</span>
+        <div><small>A+W mappings</small><strong>A+W ${escapeHtml(title)}</strong><span>Rename synchronized A+W codes without changing the source code.</span></div>
+        <b>${escapeHtml(mappings.length)}</b>
+      </header>
+      <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Code</th><th>A+W label</th><th>Scanner display</th><th>Events</th><th></th></tr></thead><tbody>
+        ${mappings.map((row) => `<tr><td><b>${escapeHtml(row.sourceCode)}</b></td><td>${escapeHtml(row.sourceLabel || "Unknown")}</td><td><input data-reject-aw-mapping-input="${escapeHtml(row.id)}" value="${escapeHtml(row.mappedLabel || "")}" placeholder="Use A+W label"></td><td>${escapeHtml(row.eventCount || 0)}</td><td><button type="button" class="automation-secondary-button" data-reject-aw-mapping-save="${escapeHtml(row.id)}" data-kind="${escapeHtml(row.kind)}" data-code="${escapeHtml(row.sourceCode)}">Save</button></td></tr>`).join("") || `<tr><td colspan="5">No synchronized A+W ${escapeHtml(noun)} codes yet.</td></tr>`}
+      </tbody></table></div>
+    </section>
+
+    <section class="reject-settings-library-v347 reject-history-maintenance-v485 reject-settings-maintenance-v551">
+      <header class="reject-settings-library-header-v347">
+        <span class="reject-settings-library-icon-v347" aria-hidden="true">${rejectSettingsIconV347(activeKind)}</span>
+        <div><small>Historical cleanup</small><strong>Bulk Replace ${escapeHtml(title)}</strong><span>Replace a stored label across Reject history.</span></div>
+        <b>${escapeHtml(historyRows.length)}</b>
+      </header>
+      <div class="reject-history-table-wrap-v485"><table class="reject-history-table-v485"><thead><tr><th>Current label</th><th>Events</th><th>A+W events</th><th>Replace with</th><th></th></tr></thead><tbody>
+        ${historyRows.map((row, index) => `<tr><td><strong>${escapeHtml(row.label)}</strong></td><td>${escapeHtml(row.event_count || row.eventCount || 0)}</td><td>${escapeHtml(row.aw_event_count || row.awEventCount || 0)}</td><td><input data-reject-history-replacement="${escapeHtml(activeKind)}-${escapeHtml(index)}" placeholder="New label"></td><td><button type="button" class="automation-secondary-button" data-reject-history-relabel="${escapeHtml(activeKind)}-${escapeHtml(index)}" data-kind="${escapeHtml(activeKind)}" data-from-label="${escapeHtml(row.label)}">Replace All</button></td></tr>`).join("") || `<tr><td colspan="5">No ${escapeHtml(noun)} history exists yet.</td></tr>`}
+      </tbody></table></div>
+    </section>
+  </div>`;
 }
 
 async function loadRejectSettingsModal() {
@@ -45630,6 +47524,8 @@ async function loadRejectSettingsModal() {
     historyReasons: payload.historyReasons || [],
     historyLocations: payload.historyLocations || [],
     awMappings: payload.awMappings || [],
+    awStandardReasons: payload.awStandardReasons || [],
+    awStandardLocations: payload.awStandardLocations || [],
   };
   if (els.adminModal?.dataset.kind === "rejectSettings" && els.adminModalBody) {
     els.adminModalBody.innerHTML = rejectSettingsModalHtml();
@@ -46525,6 +48421,11 @@ function wireV135OperationsEvents() {
   els.rejectPageNext?.addEventListener("click", () => {
     if (state.rejectHistoryPage >= state.rejectHistoryTotalPages) return;
     state.rejectHistoryPage += 1;
+    refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
+  });
+  els.rejectPageSize?.addEventListener("change", () => {
+    state.rejectHistoryPageSize = Math.max(10, Number(els.rejectPageSize.value || 25));
+    state.rejectHistoryPage = 1;
     refreshRejectPage().catch((error) => showInlineError(error?.message || "Reject results could not be refreshed.", true));
   });
 
@@ -47432,13 +49333,23 @@ function wireEvents() {
     syncSidebarState();
     document.querySelectorAll(".user-menu[open]").forEach((menu) => menu.removeAttribute("open"));
     if (els.headerGlobalSearchResults) els.headerGlobalSearchResults.hidden = true;
-    if (document.getElementById("dailyProductionEmailPreviewV505") && !document.getElementById("dailyProductionEmailPreviewV505").hidden) closeDailyProductionEmailPreviewV505();
+    if (document.getElementById("dailyProductionEmailPreviewV506") && !document.getElementById("dailyProductionEmailPreviewV506").hidden) closeDailyProductionEmailPreviewV506();
     if (document.getElementById("actionFeedbackShell")) closeActionFeedback();
   });
 
   els.homeStatsPdfBtn?.addEventListener("click", () => openHomeStatisticsReport());
   els.statisticsDailyProductionEmailBtn?.addEventListener("click", () => {
     draftDailyProductionEmailV506().catch((error) => showFloatingNotice(error?.message || "Could not build the daily production email.", "error"));
+  });
+  els.statisticsDailyProductionDateV574?.addEventListener("change", () => {
+    const productionDate = statisticsDailyProductionDateKeyV574(els.statisticsDailyProductionDateV574.value);
+    state.statisticsDailyProductionDateV574 = productionDate;
+    state.statisticsTodayProductionLoadedAtV542 = 0;
+    state.dailyProductionEmailDraftV506 = null;
+    syncStatisticsDailyProductionDateV574();
+    renderStatisticsProductionActivityV506();
+    ensureTodayProductionReportV514({ force: true })
+      .catch((error) => showFloatingNotice(error?.message || "Could not load production activity for that day.", "error"));
   });
   els.statisticsProductionActivity?.addEventListener("click", (event) => {
     const target = event.target.closest?.("[data-production-glass-detail-v536]");
@@ -47741,6 +49652,9 @@ function wireEvents() {
     state.search = els.searchInput.value;
     state.pageIndex = 1;
     scheduleScanRender();
+  });
+  els.scanRefreshFabBtnV565?.addEventListener("click", () => {
+    void refreshScanFabricationDateV565();
   });
   els.scanInput?.addEventListener("focus", () => clearSelectedLineItem());
   document.addEventListener("click", (event) => {
@@ -48502,17 +50416,7 @@ function wireEvents() {
     if (modalSearchInput) {
       window.clearTimeout(state.manualEditSearchTimer);
       state.manualEditSearchTimer = window.setTimeout(async () => {
-        if (state.manualEditDirty) {
-          const confirmed = await confirmWebAppAction({
-            title: "Search without saving?",
-            message: "Searching will replace the currently displayed rows and discard unsaved delivery-list edits.",
-            confirmLabel: "Discard and search",
-            cancelLabel: "Keep editing",
-            danger: false,
-          });
-          if (!confirmed) return;
-          state.manualEditDirty = false;
-        }
+        if (!(await confirmManualEditRefreshV553("Search"))) return;
         runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
       }, 180);
       return;
@@ -48529,9 +50433,8 @@ function wireEvents() {
 
     if (!editField) return;
 
-    state.manualEditDirty = true;
-
     const row = editField.closest("[data-edit-row]");
+    markManualEditRowDirtyV553(row);
 
     if (editField.type !== "hidden") {
       manualEditSyncChoiceSelect(editField);
@@ -48598,16 +50501,15 @@ function wireEvents() {
 
     if (choiceSelect) {
       manualEditApplyChoiceSelect(choiceSelect);
-      state.manualEditDirty = true;
+      markManualEditRowDirtyV553(choiceSelect.closest("[data-edit-row]"));
       return;
     }
 
     const editField = event.target.closest("#manualEditModalResults [data-edit-field]");
 
     if (editField) {
-      state.manualEditDirty = true;
-
       const row = editField.closest("[data-edit-row]");
+      markManualEditRowDirtyV553(row);
 
       if (editField.type !== "hidden") {
         manualEditSyncChoiceSelect(editField);
@@ -48643,14 +50545,15 @@ function wireEvents() {
         }
       }
 
-      state.manualEditDirty = false;
+      clearManualEditDirtyStateV553();
       runManualEditModalSearch(true).catch((error) => showInlineError(error.message, true));
     }
   });
-  document.addEventListener("keydown", (event) => {
+  document.addEventListener("keydown", async (event) => {
     if (event.target.closest("#manualEditModalSearch") && event.key === "Enter") {
       event.preventDefault();
       window.clearTimeout(state.manualEditSearchTimer);
+      if (!(await confirmManualEditRefreshV553("Search"))) return;
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
     }
   });
@@ -49529,7 +51432,7 @@ function wireEvents() {
         if (!confirmed) return;
       }
 
-      state.manualEditDirty = false;
+      clearManualEditDirtyStateV553();
       showPage(pageButton.dataset.pageTarget);
       if (!isMobileSidebarLayout() && els.appSidebar?.contains(pageButton)) pageButton.blur();
       return;
@@ -49553,6 +51456,39 @@ function wireEvents() {
       decideSupersededOrderReview(
         supersededDecisionButton.dataset.reviewId,
         supersededDecisionButton.dataset.supersededDecision,
+      ).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const progressSettingEditV549 = event.target.closest("[data-progress-setting-edit-v549]");
+    if (progressSettingEditV549) {
+      event.preventDefault();
+      editProgressSettingV549(progressSettingEditV549.dataset.progressSettingEditV549 || "");
+      return;
+    }
+    const progressSettingRemoveV549 = event.target.closest("[data-progress-setting-remove-v549]");
+    if (progressSettingRemoveV549) {
+      event.preventDefault();
+      const key = progressSettingRemoveV549.dataset.progressSettingRemoveV549 || "";
+      confirmWebAppAction({ title: "Remove this progress checkpoint?", message: "The checkpoint will stop appearing on active workflows. Historical completion records are retained.", confirmLabel: "Remove checkpoint", cancelLabel: "Keep checkpoint", danger: true })
+        .then(async (approved) => {
+          if (!approved) return;
+          const payload = await fetchJson("/api/admin/progress-settings/remove", { method: "POST", body: JSON.stringify({ stageKey: key }) });
+          state.progressStageSettingsV549 = payload.stages || [];
+          state.progressSettingsEditorKeyV550 = "";
+          state.progressSettingsDraftPlacementV550 = null;
+          if (els.adminModal?.dataset.kind === "progressSettings") renderProgressSettingsV550();
+          showFloatingNotice("Progress checkpoint removed.", "success");
+        }).catch((error) => showInlineError(error.message, true));
+      return;
+    }
+
+    const optimizationReviewButtonV549 = event.target.closest("[data-optimization-review-status-v549][data-alert-id]");
+    if (optimizationReviewButtonV549) {
+      event.preventDefault();
+      updateOptimizationReviewV549(
+        optimizationReviewButtonV549.dataset.alertId,
+        optimizationReviewButtonV549.dataset.optimizationReviewStatusV549,
       ).catch((error) => showInlineError(error.message, true));
       return;
     }
@@ -49582,6 +51518,11 @@ function wireEvents() {
       } else if (modalKind === "supersededOrders") {
         openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
         loadSupersededOrderReviews()
+          .then(() => finishDeferredAdminModalOpenV507(modalKind))
+          .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
+      } else if (modalKind === "progressSettings") {
+        openAdminModal(modalKind, { body: adminModalLoadingHtmlV507(modalKind) });
+        loadProgressSettingsV549()
           .then(() => finishDeferredAdminModalOpenV507(modalKind))
           .catch((error) => failDeferredAdminModalOpenV507(modalKind, error));
       } else if (modalKind === "productionFiles") {
@@ -49797,6 +51738,19 @@ function wireEvents() {
       return;
     }
 
+    const manualSelectV553 = event.target.closest("[data-manual-edit-select-v553]");
+    if (manualSelectV553) {
+      event.stopPropagation();
+      const id = String(manualSelectV553.dataset.manualEditSelectV553 || "");
+      if (manualSelectV553.checked) state.manualEditSelectedIdsV553.add(id);
+      else state.manualEditSelectedIdsV553.delete(id);
+      syncManualEditSelectionToolbarV553();
+      return;
+    }
+    if (event.target.closest("[data-manual-edit-clear-selected-v553]")) { state.manualEditSelectedIdsV553.clear(); syncManualEditSelectionToolbarV553(); return; }
+    if (event.target.closest("[data-manual-edit-save-selected-v553]")) { await saveManualSelectedRowsV553(); return; }
+    if (event.target.closest("[data-manual-edit-delete-selected-v553]")) { await deleteManualSelectedRowsV553(); return; }
+
     const manualCustomClearButton = event.target.closest("[data-manual-custom-clear]");
     if (manualCustomClearButton) {
       event.preventDefault();
@@ -49807,19 +51761,8 @@ function wireEvents() {
     if (manualEditBackButton) {
       event.preventDefault();
 
-      if (state.manualEditDirty) {
-        const confirmed = await confirmWebAppAction({
-          title: "Go back without saving?",
-          message: "You have unsaved manual delivery-list edits. Going back will discard those changes.",
-          confirmLabel: "Go back",
-          cancelLabel: "Keep editing",
-          danger: false,
-        });
-
-        if (!confirmed) return;
-      }
-
-      state.manualEditDirty = false;
+      if (state.manualEditDirty && !(await resolveManualEditUnsavedV553())) return;
+      clearManualEditDirtyStateV553();
       openAdminModal("deliveryLists");
 
       return;
@@ -49849,6 +51792,7 @@ function wireEvents() {
     }
     if (event.target.closest("[data-manual-edit-filter-clear]")) {
       event.preventDefault();
+      if (!(await confirmManualEditRefreshV553("Clear filters"))) return;
       state.manualEditFilters = { progress: "all", route: "all", location: "all", attention: [], glassTypes: [] };
       refreshManualEditFilterDrawer(false);
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
@@ -49856,6 +51800,7 @@ function wireEvents() {
     }
     if (event.target.closest("[data-manual-edit-filter-apply]")) {
       event.preventDefault();
+      if (!(await confirmManualEditRefreshV553("Apply filters"))) return;
       document.querySelector(".manual-edit-filter-drawer")?.removeAttribute("open");
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
       return;
@@ -49868,12 +51813,14 @@ function wireEvents() {
     const manualModalSearchButton = event.target.closest("#manualEditModalSearchBtn");
     if (manualModalSearchButton) {
       window.clearTimeout(state.manualEditSearchTimer);
+      if (!(await confirmManualEditRefreshV553("Search"))) return;
       runManualEditModalSearch(false).catch((error) => showInlineError(error.message, true));
       return;
     }
     const manualModalReloadButton = event.target.closest("#manualEditModalReloadBtn");
     if (manualModalReloadButton) {
       window.clearTimeout(state.manualEditSearchTimer);
+      if (!(await confirmManualEditRefreshV553("Load all"))) return;
       runManualEditModalSearch(true).catch((error) => showInlineError(error.message, true));
       return;
     }
@@ -49890,7 +51837,7 @@ function wireEvents() {
           danger: false,
         });
         if (!confirmed) return;
-        state.manualEditDirty = false;
+        clearManualEditDirtyStateV553();
       }
       goToManualEditPage(Number(manualEditPageButton.dataset.manualEditPage || 1))
         .catch((error) => showInlineError(error.message, true));
@@ -49916,6 +51863,19 @@ function wireEvents() {
       renderAdminDeliveryListModalResults(state.lists, "");
       return;
     }
+    const adminDeliverySelectV553 = event.target.closest("[data-admin-delivery-select-v553]");
+    if (adminDeliverySelectV553) {
+      event.stopPropagation();
+      const date = String(adminDeliverySelectV553.dataset.adminDeliverySelectV553 || "");
+      if (adminDeliverySelectV553.checked) state.adminSelectedDeliveryDatesV553.add(date);
+      else state.adminSelectedDeliveryDatesV553.delete(date);
+      syncAdminDeliverySelectionToolbarV553();
+      return;
+    }
+    if (event.target.closest("[data-admin-delivery-bulk-clear-v553]")) { state.adminSelectedDeliveryDatesV553.clear(); syncAdminDeliverySelectionToolbarV553(); return; }
+    if (event.target.closest("[data-admin-delivery-bulk-complete-v553]")) { await completeAdminSelectedDeliveryDatesV553(); return; }
+    if (event.target.closest("[data-admin-delivery-bulk-delete-v553]")) { await deleteAdminSelectedDeliveryDatesV553(); return; }
+
     const adminListEditButton = event.target.closest("[data-admin-list-edit]");
     if (adminListEditButton) {
       const listId = adminListEditButton.dataset.adminListEdit || "";
@@ -50021,7 +51981,7 @@ function wireEvents() {
       const filter = filterButton.dataset.filter || "all";
       toggleScanFilter(filter);
       state.pageIndex = 1;
-      if (["machine", "production"].includes(scanFilterGroup(filter))) {
+      if (["progress-waterjet", "progress-denver"].includes(filter) && state.activeFilters.has(filter)) {
         hydrateFabricationFilterCatalogV512().catch(() => {});
       }
       scheduleScanRender();
@@ -50402,12 +52362,6 @@ function wireEvents() {
     if (progressOrderButtonV527) {
       event.preventDefault(); event.stopPropagation();
       advanceManualDeliveryProgressV527(progressOrderButtonV527, "order").catch((error) => showInlineError(error.message, true));
-      return;
-    }
-    const progressListButtonV527 = event.target.closest("[data-manual-progress-list-v527]");
-    if (progressListButtonV527) {
-      event.preventDefault(); event.stopPropagation();
-      advanceManualDeliveryProgressV527(progressListButtonV527, "list").catch((error) => showInlineError(error.message, true));
       return;
     }
     const deleteLineItemButton = event.target.closest("[data-delete-line-item]");
@@ -52661,6 +54615,46 @@ init().catch((error) => {
     };
   }
 
+  function optimisticFlagsAfterReviewV584(flags = {}, { updateKinds = [], clearRejects = false } = {}) {
+    const kinds = new Set((updateKinds || []).map((value) => String(value || "").trim().toLowerCase()).filter(Boolean));
+    const items = (flags?.items || []).map((item) => {
+      const next = { ...item };
+      const reviewKind = String(next.updateReviewKind || "order").trim().toLowerCase() || "order";
+      if (next.hasUnseenUpdate && kinds.has(reviewKind)) {
+        next.hasUnseenUpdate = false;
+        next.userUpdateNoticeIds = [];
+      }
+      if (clearRejects && next.hasUnseenReject) {
+        next.hasUnseenReject = false;
+        next.unseenRejectIds = [];
+      }
+      return next;
+    });
+    return normalizeFlags({
+      items,
+      listRevision: flags?.listRevision || 1,
+      isNewStage: kinds.has("order") ? false : Boolean(flags?.isNewStage),
+      newLineCount: items.filter((item) => item.hasUnseenUpdate && item.userUpdateState === "new").length,
+      updatedLineCount: items.filter((item) => item.hasUnseenUpdate && item.userUpdateState === "updated").length,
+      totalLineCount: Number(flags?.totalLineCount || items.length),
+    }, String(flags?.listId || ""));
+  }
+
+  function applyOptimisticReviewFlagsV584(flags, options = {}) {
+    const refreshed = optimisticFlagsAfterReviewV584(flags, options);
+    if (refreshed.listId) flagsByList.set(refreshed.listId, refreshed);
+    applyFlagsToCurrentList(refreshed, { render: false });
+    return refreshed;
+  }
+
+  function scheduleAuthoritativeReviewRefreshV584(listId = "") {
+    const cleanListId = String(listId || "").trim();
+    if (!cleanListId) return;
+    window.setTimeout(() => {
+      loadFlags(cleanListId, { force: true, prompt: false }).catch(() => {});
+    }, 220);
+  }
+
   function applyFlagsToCurrentList(flags, options = {}) {
     if (typeof state !== "object" || String(state.activeListId || "") !== String(flags?.listId || "")) return;
     const byId = new Map((flags.items || []).map((item) => [String(item.lineItemId || item.id || ""), item]));
@@ -52822,6 +54816,7 @@ init().catch((error) => {
     }
     elements.control.classList.toggle("is-reviewing", reviewModeActiveV531);
     elements.control.hidden = false;
+    if (!reviewModeActiveV531) prewarmDeliveryListUpdatePreviewV581(flags.listId);
   }
 
   function reviewPendingCountV531(flags = currentFlags) {
@@ -52864,14 +54859,14 @@ init().catch((error) => {
         if (!Array.isArray(noticeIds) || !noticeIds.length) continue;
         const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
           method: "POST",
-          body: JSON.stringify({ listId: flags.listId, noticeIds, reviewKind }),
+          body: JSON.stringify({ listId: flags.listId, noticeIds, reviewKind, returnFlags: false }),
         });
         for (const listId of acknowledgement?.acknowledgedListIds || []) affectedListIds.add(String(listId || ""));
       }
       if (Array.isArray(flags.rejectIds) && flags.rejectIds.length) {
         await jsonFetch(REJECT_ACK_ENDPOINT_V529, {
           method: "POST",
-          body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds }),
+          body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds, returnFlags: false }),
         });
       }
       for (const listId of affectedListIds) {
@@ -52891,14 +54886,13 @@ init().catch((error) => {
       state.priorityReviewKindV530 = "";
       state.pageIndex = 1;
       invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
-      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      await refreshPendingUpdateDates({ force: true });
-      if (reviewPendingCountV531(refreshed) > 0) throw new Error("New A+W review items arrived while the review queue was being cleared.");
+      const refreshed = applyOptimisticReviewFlagsV584(flags, { updateKinds: ["order", "remake", "rush"], clearRejects: true });
       syncScanFilterButtons();
       if (typeof renderScanPage === "function") renderScanPage();
       renderReviewAllControlV531(refreshed);
       if (typeof showSaveConfirmation === "function") showSaveConfirmation("All new review items are marked reviewed for your account.");
       document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId, acknowledgedListIds: [...affectedListIds] } }));
+      scheduleAuthoritativeReviewRefreshV584(flags.listId);
     } catch (error) {
       if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
       if (buttonElement) buttonElement.disabled = false;
@@ -52970,7 +54964,7 @@ init().catch((error) => {
     try {
       const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
         method: "POST",
-        body: JSON.stringify({ listId: flags.listId, noticeIds: flags[config.noticeKey], reviewKind: kind }),
+        body: JSON.stringify({ listId: flags.listId, noticeIds: flags[config.noticeKey], reviewKind: kind, returnFlags: false }),
       });
       const affectedListIds = Array.isArray(acknowledgement?.acknowledgedListIds)
         ? acknowledgement.acknowledgedListIds.map((value) => String(value || "")).filter(Boolean)
@@ -52985,12 +54979,12 @@ init().catch((error) => {
       if (state.priorityReviewKindV530 === kind) state.priorityReviewKindV530 = "";
       state.pageIndex = 1;
       invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
-      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      await refreshPendingUpdateDates({ force: true });
-      if (Number(refreshed?.[config.countKey] || 0) > 0) throw new Error(`New ${config.plural} arrived while you were reviewing.`);
+      const refreshed = applyOptimisticReviewFlagsV584(flags, { updateKinds: [kind] });
       if (typeof renderScanPage === "function") renderScanPage();
       renderPriorityReviewControlsV530(refreshed);
       if (typeof showSaveConfirmation === "function") showSaveConfirmation(`${config.plural} are marked reviewed for your account.`);
+      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId, acknowledgedListIds: affectedListIds } }));
+      scheduleAuthoritativeReviewRefreshV584(flags.listId);
     } catch (error) {
       if (buttonElement) buttonElement.disabled = false;
       if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
@@ -53044,6 +55038,10 @@ init().catch((error) => {
   }
 
   async function acknowledgeRejectsV529(flags = currentFlags) {
+    if (!state?.activeFilters?.has?.("internal-rejects")) {
+      if (typeof showFloatingNotice === "function") showFloatingNotice("Keep the Internal Rejects filter active while marking rejects reviewed.", "notice");
+      return;
+    }
     if (!flags?.listId || !flags?.rejectSignatureV529 || reviewedRejectSignatureByListV529.get(flags.listId) !== flags.rejectSignatureV529) {
       if (typeof showFloatingNotice === "function") showFloatingNotice("Review the Internal Rejects before marking them reviewed.", "notice");
       return;
@@ -53053,7 +55051,7 @@ init().catch((error) => {
     try {
       await jsonFetch(REJECT_ACK_ENDPOINT_V529, {
         method: "POST",
-        body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds }),
+        body: JSON.stringify({ listId: flags.listId, rejectIds: flags.rejectIds, returnFlags: false }),
       });
       flagsByList.delete(flags.listId);
       reviewedRejectSignatureByListV529.delete(flags.listId);
@@ -53061,11 +55059,12 @@ init().catch((error) => {
       state?.activeFilters?.delete?.("internal-rejects");
       state.excludedFiltersV531.clear();
       invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
-      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      await refreshPendingUpdateDates({ force: true });
+      const refreshed = applyOptimisticReviewFlagsV584(flags, { clearRejects: true });
       if (typeof renderScanPage === "function") renderScanPage();
       renderRejectReviewControlV529(refreshed);
       if (typeof showSaveConfirmation === "function") showSaveConfirmation("Internal Rejects are marked reviewed for your account.");
+      document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", { detail: { listId: flags.listId, acknowledgedListIds: [flags.listId] } }));
+      scheduleAuthoritativeReviewRefreshV584(flags.listId);
     } catch (error) {
       if (buttonElement) buttonElement.disabled = false;
       if (typeof showFloatingNotice === "function") showFloatingNotice(error.message, "error");
@@ -53156,7 +55155,7 @@ init().catch((error) => {
     try {
       const acknowledgement = await jsonFetch(UPDATE_ACK_ENDPOINT, {
         method: "POST",
-        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.orderNoticeIds, reviewKind: "order" }),
+        body: JSON.stringify({ listId: flags.listId, noticeIds: flags.orderNoticeIds, reviewKind: "order", returnFlags: false }),
       });
       const affectedListIds = Array.isArray(acknowledgement?.acknowledgedListIds)
         ? acknowledgement.acknowledgedListIds.map((value) => String(value || "")).filter(Boolean)
@@ -53171,10 +55170,7 @@ init().catch((error) => {
       if (typeof renderDeliveryListSelect === "function") renderDeliveryListSelect();
       if (typeof syncAllCustomSelects === "function") syncAllCustomSelects();
       invalidateScanDateBundleV526(String(state.meta?.deliveryDate || ""));
-      const refreshed = await loadFlags(flags.listId, { force: true, prompt: false });
-      if (refreshed.pendingOrderCount > 0) {
-        throw new Error("New delivery-list changes arrived while you were reviewing. Review the latest changes before clearing them.");
-      }
+      const refreshed = applyOptimisticReviewFlagsV584(flags, { updateKinds: ["order"] });
       if (typeof state === "object") {
         state.activeFilters?.delete?.("updated");
         state.excludedFiltersV531.clear();
@@ -53193,6 +55189,7 @@ init().catch((error) => {
       document.dispatchEvent(new CustomEvent("dls:user-line-updates-reviewed", {
         detail: { listId: flags.listId, acknowledgedListIds: affectedListIds },
       }));
+      scheduleAuthoritativeReviewRefreshV584(flags.listId);
     } catch (error) {
       if (buttonElement) {
         buttonElement.disabled = false;

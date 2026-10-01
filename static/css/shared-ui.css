@@ -1443,10 +1443,13 @@ body button.app-primary-button.production-detail-action-v476.is-secondary { back
   height:519px;
   min-height:519px;
   padding:0;
-  border:3px solid #171b1e;
+  /* v0.566: the black rectangle belonged to the on-screen reconstruction,
+     not the physical 4x6 A+W stock. Keep the surrounding preview frame for
+     orientation, but do not print or preview a fake label edge. */
+  border:0;
   border-radius:0;
   background:#fff;
-  box-shadow:3px 3px 0 rgba(16,22,27,.30);
+  box-shadow:none;
   color:#0b0d0f;
   font-family:Arial,Helvetica,sans-serif;
   overflow:hidden;
@@ -3327,10 +3330,10 @@ body button.app-primary-button.production-detail-action-v480:hover {
   height:519px;
   min-height:519px;
   padding:0;
-  border:3px solid #171b1e;
+  border:0;
   border-radius:0;
   background:#fff;
-  box-shadow:3px 3px 0 rgba(16,22,27,.30);
+  box-shadow:none;
   color:#0b0d0f;
   font-family:Arial,Helvetica,sans-serif;
   overflow:hidden;
@@ -5404,4 +5407,474 @@ body :is(.notification-center, .notification-center-panel, .line-update-review-p
 @keyframes production-progress-refresh-spin-v543 { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) {
   .production-progress-refresh-v543.is-loading svg { animation:none; }
+}
+
+/* v0.549 shared destructive confirmation action */
+.app-destructive-confirm-v549,
+.action-confirm-dialog.is-danger .action-confirm-confirm {
+  border:1px solid #a91f2f !important;
+  border-radius:9px !important;
+  background:linear-gradient(180deg,#d94352,#bd2637) !important;
+  color:#fff !important;
+  min-height:42px;
+  padding:0 16px;
+  font-weight:900;
+  box-shadow:0 4px 12px rgba(153,25,43,.18);
+}
+.app-destructive-confirm-v549:hover:not(:disabled),
+.action-confirm-dialog.is-danger .action-confirm-confirm:hover:not(:disabled) {
+  background:linear-gradient(180deg,#c93647,#a91f31) !important;
+  transform:translateY(-1px);
+}
+.app-destructive-confirm-v549:focus-visible,
+.action-confirm-dialog.is-danger .action-confirm-confirm:focus-visible {
+  outline:3px solid rgba(204,45,63,.22);
+  outline-offset:2px;
+}
+
+
+/* ========================================================================== */
+/* v0.553 Order Details item identity row                                      */
+/* ========================================================================== */
+.production-item-card-header-v521 {
+  grid-template-columns: minmax(168px,.92fr) minmax(105px,.65fr) minmax(205px,1.25fr) minmax(175px,1.08fr) minmax(145px,.9fr) 62px 108px !important;
+}
+.production-item-header-field-v521.is-job b {
+  color: #315b79;
+  font-weight: 900;
+}
+@media (max-width: 1450px) and (min-width: 1181px) {
+  .production-item-card-header-v521 {
+    grid-template-columns: minmax(148px,.88fr) minmax(92px,.58fr) minmax(175px,1.18fr) minmax(155px,1fr) minmax(125px,.85fr) 58px 98px !important;
+    gap: 7px !important;
+  }
+}
+@media (max-width: 1180px) {
+  .production-item-card-header-v521 { grid-template-columns: repeat(4,minmax(0,1fr)) !important; }
+}
+@media (max-width: 760px) {
+  .production-item-card-header-v521 { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+}
+
+/* v0.560: compact per-item sketch page selector. Multi-page A+W shop PDFs can
+   number physical panels independently from the scanner Item Nr.; keep every
+   safely associated page reachable without expanding the Order Details card. */
+.production-sketch-pages-v560 {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 96px);
+  padding: 4px;
+  overflow-x: auto;
+  transform: translateX(-50%);
+  border: 1px solid rgb(144 174 198 / 78%);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 3px 10px rgb(20 67 103 / 16%);
+  scrollbar-width: none;
+}
+.production-sketch-pages-v560::-webkit-scrollbar { display: none; }
+.production-sketch-page-button-v560 {
+  flex: 0 0 auto;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #b5c8d8;
+  border-radius: 7px;
+  background: #fff;
+  color: #173d5e;
+  font: 700 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+.production-sketch-page-button-v560:hover,
+.production-sketch-page-button-v560:focus-visible {
+  border-color: #2f78ad;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(47 120 173 / 16%);
+}
+.production-sketch-page-button-v560.is-active {
+  border-color: #0e568a;
+  background: #0e568a;
+  color: #fff;
+}
+@media (max-width: 640px) {
+  .production-sketch-page-button-v560 { min-width: 34px; height: 34px; }
+  .production-sketch-pages-v560 { bottom: 6px; }
+}
+
+/* ========================================================================== */
+/* v0.568 Brother TJ-4021TN 4x6 Cutting Label print-safe geometry             */
+/* ========================================================================== */
+/*
+ * The physical BFS stock is preprinted at the bottom.  The browser print
+ * document remains a true 4x6 page, but the reconstructed A+W content is kept
+ * inside a 3.1/4-ish x 5.3/4 safe region.  This mirrors the supplied good
+ * label: smaller type/barcode, clear right margin, and no content pushed into
+ * the trailing gap/next stock on the Brother TJ-4021TN (203 dpi).
+ */
+.cutting-label-print-root-v568 {
+  position:absolute !important;
+  inset:0 !important;
+  width:4in !important;
+  height:6in !important;
+  margin:0 !important;
+  padding:0 !important;
+  overflow:hidden !important;
+  background:#fff !important;
+}
+.cutting-label-print-root-v568 > .production-cutting-label-v502 {
+  position:absolute !important;
+  top:12px !important;
+  left:12px !important;
+  display:block !important;
+  box-sizing:border-box !important;
+  width:436px !important;
+  height:650px !important;
+  min-height:650px !important;
+  margin:0 !important;
+  padding:0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  transform:scale(.82) !important;
+  transform-origin:top left !important;
+  overflow:hidden !important;
+  break-inside:avoid !important;
+  page-break-inside:avoid !important;
+  page-break-before:avoid !important;
+  page-break-after:avoid !important;
+}
+
+/* ========================================================================== */
+/* v0.577 A+W physical Cutting Label 8% content reduction                    */
+/* ========================================================================== */
+/*
+ * Preserve the confirmed 4.5 x 5.5 inch media contract and the v0.576
+ * reference-matched positions, but reduce the visible label content by about
+ * 8%. Values are reduced directly instead of transform-scaling the print page,
+ * which keeps the one-label-per-page printer contract stable.
+ */
+.cutting-label-print-root-v577 {
+  position:absolute !important;
+  inset:0 !important;
+  width:4.5in !important;
+  height:5.5in !important;
+  margin:0 !important;
+  padding:0 !important;
+  overflow:hidden !important;
+  background:#fff !important;
+}
+.cutting-label-print-root-v577 > .production-cutting-label-v502 {
+  position:absolute !important;
+  top:0 !important;
+  left:0 !important;
+  display:block !important;
+  box-sizing:border-box !important;
+  width:400px !important;
+  height:490px !important;
+  min-height:490px !important;
+  margin:0 !important;
+  padding:0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  transform:none !important;
+  overflow:hidden !important;
+  break-inside:avoid !important;
+  page-break-inside:avoid !important;
+  page-break-before:avoid !important;
+  page-break-after:avoid !important;
+  color:#0b0d0f !important;
+  font-weight:400 !important;
+}
+/* v0.577: retain the v0.576 anchors while proportionally reducing visible
+   widths, heights, typography, line heights, and internal gaps to about 92%
+   of their previous size. The far-right printer-safe margin remains intact. */
+.cutting-label-print-root-v577 .production-cutting-label-title-v500 {
+  top:28px !important;
+  left:12px !important;
+  right:20px !important;
+  height:23.92px !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-title-v500 > strong {
+  width:230px !important;
+  right:auto !important;
+  text-align:left !important;
+  font-size:18.4px !important;
+  line-height:22.08px !important;
+  font-weight:500 !important;
+  overflow:hidden !important;
+  text-overflow:clip !important;
+  white-space:nowrap !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-title-v500 > time {
+  top:0 !important;
+  right:0 !important;
+  font-size:15.64px !important;
+  line-height:21.16px !important;
+  font-weight:500 !important;
+  white-space:nowrap !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-route-v500 {
+  top:52px !important;
+  left:12px !important;
+  right:32px !important;
+  height:18.4px !important;
+  padding:0 !important;
+  justify-content:flex-start !important;
+  text-align:left !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-route-v500 > b {
+  font-size:13.8px !important;
+  line-height:18.4px !important;
+  font-weight:500 !important;
+  text-align:left !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-barcode-v500 {
+  top:74px !important;
+  left:12px !important;
+  width:285.2px !important;
+  height:42.32px !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-code39-v500,
+.cutting-label-print-root-v577 .production-cutting-label-barcode-v500 > .is-unavailable {
+  width:100% !important;
+  height:41.4px !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-identifiers-v500 {
+  top:132px !important;
+  left:12px !important;
+  right:auto !important;
+  width:230px !important;
+  height:46px !important;
+  font-size:14.72px !important;
+  line-height:22.08px !important;
+  text-align:left !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-identifiers-v500 > span {
+  grid-template-columns:36.8px minmax(0,1fr) !important;
+  gap:3.68px !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-identifiers-v500 small {
+  font-size:12.88px !important;
+  line-height:20.24px !important;
+  font-weight:400 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-identifiers-v500 b {
+  overflow:visible !important;
+  text-overflow:clip !important;
+  white-space:nowrap !important;
+  font-size:16.56px !important;
+  line-height:20.24px !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-production-meta-v504 {
+  top:154px !important;
+  left:236px !important;
+  right:auto !important;
+  width:138px !important;
+  gap:2.76px !important;
+  color:#111 !important;
+  font-size:14.72px !important;
+  line-height:19.32px !important;
+  font-weight:400 !important;
+  text-align:right !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-production-meta-v504 > span {
+  grid-template-columns:minmax(0,1fr) 46px !important;
+  gap:5.52px !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-production-meta-v504 strong {
+  min-width:40.48px !important;
+  font-size:16.56px !important;
+  font-weight:650 !important;
+  text-align:right !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-glass-v500 {
+  top:198px !important;
+  left:12px !important;
+  right:32px !important;
+  text-align:left !important;
+  font-size:20.24px !important;
+  line-height:23.92px !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-size-v500 {
+  top:230px !important;
+  left:12px !important;
+  right:32px !important;
+  text-align:left !important;
+  font-size:20.24px !important;
+  line-height:23.92px !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-shape-v505 {
+  top:230px !important;
+  right:46px !important;
+  font-size:11.04px !important;
+  line-height:23px !important;
+  font-weight:500 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-process-v500 {
+  top:270px !important;
+  left:14px !important;
+  right:150px !important;
+  text-align:left !important;
+  max-height:136.16px !important;
+  min-height:0 !important;
+  gap:2.76px !important;
+  overflow:hidden !important;
+  font-size:10.58px !important;
+  line-height:15.64px !important;
+  font-weight:400 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-process-v500 > span {
+  min-height:15.64px !important;
+  padding-right:0 !important;
+  white-space:nowrap !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-process-marker-v505 {
+  right:2px !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-remake-v504 {
+  top:225px !important;
+  right:46px !important;
+  font-size:16.56px !important;
+  line-height:18.4px !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-edge-dims-v507 {
+  top:270px !important;
+  left:auto !important;
+  right:45px !important;
+  width:99.36px !important;
+  display:grid !important;
+  gap:0.92px !important;
+  font-size:11.96px !important;
+  line-height:16.56px !important;
+  font-weight:400 !important;
+  text-align:left !important;
+  white-space:nowrap !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-metrics-v500 {
+  top:365px !important;
+  left:auto !important;
+  right:45px !important;
+  bottom:auto !important;
+  width:115px !important;
+  gap:1.84px !important;
+  font-weight:600 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-metrics-v500 > span {
+  grid-template-columns:64.4px 42.32px !important;
+  gap:6.44px !important;
+  justify-content:start !important;
+  font-size:16.56px !important;
+  line-height:20.24px !important;
+  font-weight:600 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-metrics-v500 > span b {
+  font-size:17.48px !important;
+  text-align:right !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-metrics-v500 > span strong {
+  font-size:16.56px !important;
+  text-align:right !important;
+  font-weight:650 !important;
+}
+.cutting-label-print-root-v577 .production-cutting-label-piece-counter-v501 {
+  margin-top:0 !important;
+}
+
+
+/* ========================================================================== */
+/* v0.587 Order Details focus, overview paging, and header readability        */
+/* ========================================================================== */
+.production-order-item-v518[data-order-detail-item-v477] {
+  scroll-margin-top: 12px;
+}
+.production-progress-tools-v587 {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+.production-progress-tools-v587 .production-fab-memory-v522 {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: #5e788e;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.15;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.production-progress-tools-v587 .production-fab-memory-v522.is-missing-v587 {
+  color: #8a6a36;
+}
+.production-overview-sketch-pages-v587 {
+  max-width: calc(100% - 84px);
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-meta-row-v526 {
+  margin-left: -7px;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526 {
+  padding: 6px 12px;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526 small {
+  font-size: 10px !important;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526 strong {
+  font-size: 17px;
+  line-height: 1.12;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526.is-job {
+  flex: 1 1 210px;
+  min-width: 150px;
+  max-width: 360px;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526.is-job strong {
+  font-size: 19px;
+  letter-spacing: .005em;
+}
+.production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526.is-customer {
+  flex: 1 1 250px;
+  max-width: 470px;
+}
+@media (max-width: 760px) {
+  .production-progress-section-v519 > .production-progress-heading-v543 {
+    align-items: flex-start;
+  }
+  .production-progress-tools-v587 {
+    max-width: 72%;
+    gap: 6px;
+  }
+  .production-progress-tools-v587 .production-fab-memory-v522 {
+    font-size: 8px;
+    white-space: normal;
+  }
+  .production-explorer-panel-v470[data-mode="order"] .production-explorer-header-meta-row-v526 {
+    margin-left: -3px;
+  }
+  .production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526 strong {
+    font-size: 15px;
+  }
+  .production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526.is-job {
+    flex-basis: 170px;
+    min-width: 130px;
+  }
+  .production-explorer-panel-v470[data-mode="order"] .production-explorer-header-fact-v526.is-job strong {
+    font-size: 16px;
+  }
 }
